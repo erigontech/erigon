@@ -259,9 +259,7 @@ func ExecV3(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			defer func() { // closure - to avid defer in loop
-				tx.Rollback()
-			}()
+			defer tx.Rollback()
 
 			agg.SetTx(tx)
 			if dbg.DiscardHistory() {
@@ -271,9 +269,7 @@ func ExecV3(ctx context.Context,
 			}
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
-			defer func() { // closure - to avid defer in loop
-				cancelApplyCtx()
-			}()
+			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
 			go applyLoop(applyCtx, errCh)
 
@@ -367,7 +363,6 @@ func ExecV3(ctx context.Context,
 						}
 
 						tx.CollectMetrics()
-						//TODO: can't commit - because we are in the middle of the block. Need make sure that we are always processed whole block.
 						tt = time.Now()
 						if err = tx.Commit(); err != nil {
 							return err
@@ -377,19 +372,20 @@ func ExecV3(ctx context.Context,
 							execWorkers[i].ResetTx(nil)
 						}
 
-						if tx, err = chainDb.BeginRw(ctx); err != nil {
-							return err
-						}
-						agg.SetTx(tx)
-
-						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-						applyLoopWg.Add(1)
-						go applyLoop(applyCtx, errCh)
-
 						return nil
 					}(); err != nil {
 						return err
 					}
+					if tx, err = chainDb.BeginRw(ctx); err != nil {
+						return err
+					}
+					defer tx.Rollback()
+					agg.SetTx(tx)
+
+					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+					defer cancelApplyCtx()
+					applyLoopWg.Add(1)
+					go applyLoop(applyCtx, errCh)
 
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
@@ -406,7 +402,6 @@ func ExecV3(ctx context.Context,
 			//if err = execStage.Update(tx, stageProgress); err != nil {
 			//	panic(err)
 			//}
-			//  TODO: why here is no flush?
 			if err = tx.Commit(); err != nil {
 				return err
 			}
