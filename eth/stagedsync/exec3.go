@@ -376,16 +376,16 @@ func ExecV3(ctx context.Context,
 							execWorkers[i].ResetTx(nil)
 						}
 
+						if tx, err = chainDb.BeginRw(ctx); err != nil {
+							return err
+						}
+						agg.SetTx(tx)
+
 						return nil
 					}(); err != nil {
 						return err
 					}
-					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 
-					if tx, err = chainDb.BeginRw(ctx); err != nil {
-						return err
-					}
-					agg.SetTx(tx)
 					defer tx.Rollback()
 
 					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
@@ -393,6 +393,7 @@ func ExecV3(ctx context.Context,
 					applyLoopWg.Add(1)
 					go applyLoop(applyCtx, errCh)
 
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
 			if err = rs.Flush(tx); err != nil {
