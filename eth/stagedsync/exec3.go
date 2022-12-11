@@ -427,7 +427,7 @@ func ExecV3(ctx context.Context,
 		execWorkers[0].ResetTx(applyTx)
 	}
 
-	if block < blockReader.(WithSnapshots).Snapshots().BlocksAvailable() {
+	if block < blockSnapshots.BlocksAvailable() {
 		agg.KeepInDB(0)
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 	}
