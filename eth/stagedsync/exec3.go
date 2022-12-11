@@ -434,6 +434,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+		var err error
 		if parallel {
 			if err = chainDb.View(ctx, func(tx kv.Tx) error {
 				h, err = blockReader.Header(ctx, tx, hash, number)
