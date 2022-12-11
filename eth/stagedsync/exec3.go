@@ -261,7 +261,9 @@ func ExecV3(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			defer tx.Rollback()
+			defer func() { // closure - to avid defer in loop
+				tx.Rollback()
+			}()
 
 			agg.SetTx(tx)
 			if dbg.DiscardHistory() {
@@ -271,7 +273,9 @@ func ExecV3(ctx context.Context,
 			}
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
-			defer cancelApplyCtx()
+			defer func() { // closure - to avid defer in loop
+				cancelApplyCtx()
+			}()
 			applyLoopWg.Add(1)
 			go applyLoop(applyCtx, errCh)
 
@@ -381,17 +385,14 @@ func ExecV3(ctx context.Context,
 						}
 						agg.SetTx(tx)
 
+						applyCtx, cancelApplyCtx = context.WithCancel(ctx)
+						applyLoopWg.Add(1)
+						go applyLoop(applyCtx, errCh)
+
 						return nil
 					}(); err != nil {
 						return err
 					}
-
-					defer tx.Rollback()
-
-					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
-					defer cancelApplyCtx()
-					applyLoopWg.Add(1)
-					go applyLoop(applyCtx, errCh)
 
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
