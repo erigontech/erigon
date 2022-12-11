@@ -306,7 +306,6 @@ func ExecV3(ctx context.Context,
 
 					var t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
-					fmt.Printf("here 111\n")
 					log.Info("Committing...")
 					if err := func() error {
 						rwsLock.Lock()
@@ -323,11 +322,9 @@ func ExecV3(ctx context.Context,
 									drained = true
 								}
 							}
-							fmt.Printf("here 222\n")
 							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}); err != nil {
 								return err
 							}
-							fmt.Printf("here 333\n")
 							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 							if rws.Len() == 0 {
 								break
@@ -355,9 +352,6 @@ func ExecV3(ctx context.Context,
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
-						if tx == nil {
-							panic(1)
-						}
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
@@ -655,7 +649,7 @@ Loop:
 
 	if parallel {
 		if err := <-errCh; err != nil {
-			return fmt.Errorf("abc: %w", err)
+			return err
 		}
 	}
 
