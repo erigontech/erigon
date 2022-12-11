@@ -456,7 +456,7 @@ func (hd *HeaderDownload) UpdateStats(req *HeaderRequest, skeleton bool) {
 			hd.stats.SkeletonReqMinBlock = req.Number
 		}
 		if req.Number+req.Length*req.Skip > hd.stats.SkeletonReqMaxBlock {
-			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*req.Skip
+			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*(req.Skip+1)
 		}
 	} else {
 		hd.stats.Requests++
