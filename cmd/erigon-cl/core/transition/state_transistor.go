@@ -2,17 +2,17 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // StateTransistor takes care of state transition
 type StateTransistor struct {
-	state         *cltypes.BeaconStateBellatrix
+	state         *state.BeaconState
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
 }
 
-func New(state *cltypes.BeaconStateBellatrix, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *StateTransistor {
+func New(state *state.BeaconState, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *StateTransistor {
 	return &StateTransistor{
 		state:         state,
 		beaconConfig:  beaconConfig,

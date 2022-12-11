@@ -527,7 +527,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
 			return nil, err
 		}
 

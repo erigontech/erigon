@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
@@ -23,32 +24,32 @@ func EncodeNumber(n uint64) []byte {
 }
 
 // WriteBeaconState writes beacon state for specific block to database.
-func WriteBeaconState(tx kv.Putter, state *cltypes.BeaconStateBellatrix) error {
+func WriteBeaconState(tx kv.Putter, state *state.BeaconState) error {
 	data, err := utils.EncodeSSZSnappy(state)
 	if err != nil {
 		return err
 	}
 
-	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot), data)
+	return tx.Put(kv.BeaconState, EncodeNumber(state.Slot()), data)
 }
 
 // ReadBeaconState reads beacon state for specific block from database.
-func ReadBeaconState(tx kv.Getter, slot uint64) (*cltypes.BeaconStateBellatrix, error) {
+func ReadBeaconState(tx kv.Getter, slot uint64) (*state.BeaconState, error) {
 	data, err := tx.GetOne(kv.BeaconState, EncodeNumber(slot))
 	if err != nil {
 		return nil, err
 	}
-	state := &cltypes.BeaconStateBellatrix{}
+	bellatrixState := &cltypes.BeaconStateBellatrix{}
 
 	if len(data) == 0 {
 		return nil, nil
 	}
 
-	if err := utils.DecodeSSZSnappy(state, data); err != nil {
+	if err := utils.DecodeSSZSnappy(bellatrixState, data); err != nil {
 		return nil, err
 	}
 
-	return state, nil
+	return state.FromBellatrixState(bellatrixState), nil
 }
 
 func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error {
