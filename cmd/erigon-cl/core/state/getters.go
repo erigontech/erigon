@@ -55,6 +55,10 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
+func (b *BeaconState) ValidatorAt(index int) *cltypes.Validator {
+	return b.validators[index]
+}
+
 func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
