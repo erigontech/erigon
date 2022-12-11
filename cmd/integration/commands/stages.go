@@ -117,7 +117,6 @@ var cmdStageExec = &cobra.Command{
 			log.Error("Error", "err", err)
 			return
 		}
-		return
 	},
 }
 
@@ -133,7 +132,6 @@ var cmdStageTrie = &cobra.Command{
 			log.Error("Error", "err", err)
 			return
 		}
-		return
 	},
 }
 

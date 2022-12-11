@@ -743,7 +743,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 
 func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
-	agg *libstate.Aggregator22, as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
+	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
@@ -1247,7 +1247,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	for step, as := range aggSteps {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
 		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
-			txNum, dirs, agg, as, chainDb, blockReader, chainConfig, logger, genesis,
+			txNum, dirs, as, chainDb, blockReader, chainConfig, logger, genesis,
 			engine, batchSize, s, blockNum, txNum,
 		); err != nil {
 			return err
