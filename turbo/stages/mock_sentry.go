@@ -657,7 +657,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		return r
 	}
 
-	return state.NewPlainState(tx, blockNum)
+	return state.NewPlainState(tx, blockNum, nil)
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {

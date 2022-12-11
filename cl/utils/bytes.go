@@ -16,8 +16,8 @@ package utils
 import (
 	"encoding/binary"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/golang/snappy"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {

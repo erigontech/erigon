@@ -314,11 +314,9 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 	return
 }
 
-func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, tmpDir string) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
-	simulationTx := memdb.NewMemoryBatch(tx, tmpDir)
-	defer simulationTx.Rollback()
 	gasBailout := config.Consensus == params.ParliaConsensus
 
 	missedTxs := 0

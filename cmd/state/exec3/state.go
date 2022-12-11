@@ -24,7 +24,6 @@ import (
 
 type Worker struct {
 	lock        sync.Locker
-	wg          *sync.WaitGroup
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
 	background  bool
@@ -51,12 +50,10 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
-	ctx := context.Background()
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
-		wg:          wg,
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
@@ -96,7 +93,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() {
-	defer rw.wg.Done()
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
@@ -308,14 +304,16 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
+	var wg sync.WaitGroup
 	queueSize := workerCount * 4
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
+		wg.Wait()
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
@@ -323,7 +321,10 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 	if background {
 		wg.Add(workerCount)
 		for i := 0; i < workerCount; i++ {
-			go reconWorkers[i].Run()
+			go func(i int) {
+				defer wg.Done()
+				reconWorkers[i].Run()
+			}(i)
 		}
 	}
 	return reconWorkers, resultCh, clear

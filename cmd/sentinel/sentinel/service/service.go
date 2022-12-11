@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -11,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type SentinelServer struct {

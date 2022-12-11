@@ -16,10 +16,10 @@ package ssz_snappy
 import (
 	"context"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type GossipCodec struct {

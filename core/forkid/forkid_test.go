@@ -71,31 +71,6 @@ func TestCreation(t *testing.T) {
 				{20000000, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // Future Gray Glacier block
 			},
 		},
-		// Ropsten test cases
-		{
-			params.RopstenChainConfig,
-			params.RopstenGenesisHash,
-			[]testcase{
-				{0, ID{Hash: checksumToBytes(0x30c7ddbc), Next: 10}},              // Unsynced, last Frontier, Homestead and first Tangerine block
-				{9, ID{Hash: checksumToBytes(0x30c7ddbc), Next: 10}},              // Last Tangerine block
-				{10, ID{Hash: checksumToBytes(0x63760190), Next: 1700000}},        // First Spurious block
-				{1699999, ID{Hash: checksumToBytes(0x63760190), Next: 1700000}},   // Last Spurious block
-				{1700000, ID{Hash: checksumToBytes(0x3ea159c7), Next: 4230000}},   // First Byzantium block
-				{4229999, ID{Hash: checksumToBytes(0x3ea159c7), Next: 4230000}},   // Last Byzantium block
-				{4230000, ID{Hash: checksumToBytes(0x97b544f3), Next: 4939394}},   // First Constantinople block
-				{4939393, ID{Hash: checksumToBytes(0x97b544f3), Next: 4939394}},   // Last Constantinople block
-				{4939394, ID{Hash: checksumToBytes(0xd6e2149b), Next: 6485846}},   // First Petersburg block
-				{6485845, ID{Hash: checksumToBytes(0xd6e2149b), Next: 6485846}},   // Last Petersburg block
-				{6485846, ID{Hash: checksumToBytes(0x4bc66396), Next: 7117117}},   // First Istanbul block
-				{7117116, ID{Hash: checksumToBytes(0x4bc66396), Next: 7117117}},   // Last Istanbul block
-				{7117117, ID{Hash: checksumToBytes(0x6727ef90), Next: 9812189}},   // First Muir Glacier block
-				{9812188, ID{Hash: checksumToBytes(0x6727ef90), Next: 9812189}},   // Last Muir Glacier block
-				{9812189, ID{Hash: checksumToBytes(0xa157d377), Next: 10499401}},  // First Berlin block
-				{10499400, ID{Hash: checksumToBytes(0xa157d377), Next: 10499401}}, // Last Berlin block
-				{10499401, ID{Hash: checksumToBytes(0x7119b6b3), Next: 0}},        // First London block
-				{11000000, ID{Hash: checksumToBytes(0x7119b6b3), Next: 0}},        // Future London block
-			},
-		},
 		// Rinkeby test cases
 		{
 			params.RinkebyChainConfig,

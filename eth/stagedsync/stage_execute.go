@@ -278,23 +278,27 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
-		return err
+		return fmt.Errorf("ExecV3: %w", err)
 	}
-
 	return nil
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
 func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	sendersProgress, err := senderStageProgress(tx, db)
+	if err != nil {
+		return 0, false, err
+	}
+	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumMinimax())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 			return err
 		}); err != nil {
 			return
 		}
 	} else {
-		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 	}
 	return
 }
@@ -731,8 +735,14 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err = cfg.agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-			return err
+		if initialCycle {
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+				return err
+			}
+		} else {
+			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+				return err
+			}
 		}
 	} else {
 		if cfg.prune.History.Enabled() {

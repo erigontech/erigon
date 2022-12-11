@@ -504,6 +504,9 @@ func runPeer(
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case 11:
+			// Ignore
+			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
 			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
@@ -770,6 +773,28 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	return foundPeers
 }
 
+func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
+	// Choose a peer that we can send this request to, with maximum number of permits
+	var foundPeerInfo *PeerInfo
+	var maxPermits int
+	now := time.Now()
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if peerInfo.Height() >= minBlock {
+			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+			if deadlines < maxPermitsPerPeer {
+				permits := maxPermitsPerPeer - deadlines
+				if permits > maxPermits {
+					maxPermits = permits
+					foundPeerInfo = peerInfo
+				}
+			}
+		}
+		return true
+	})
+	return foundPeerInfo, maxPermits > 0
+}
+
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
@@ -777,6 +802,14 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
+	}
+	if !ss.GetStatus().PassivePeers {
+		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
+		if found {
+			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+			return reply, nil
+		}
 	}
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*proto_types.H512, len(peerInfos))
