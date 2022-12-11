@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -120,6 +119,16 @@ func getTestBeaconState() *state.BeaconState {
 	return state.FromBellatrixState(bellatrixState)
 }
 
+func assertStateEq(t *testing.T, got *state.BeaconState, expected *state.BeaconState) {
+	if !cmp.Equal(
+		got.GetStateSSZObject().(*cltypes.BeaconStateBellatrix),
+		expected.GetStateSSZObject().(*cltypes.BeaconStateBellatrix)) {
+		t.Errorf("unexpected result state: %v", cmp.Diff(
+			got.GetStateSSZObject().(*cltypes.BeaconStateBellatrix),
+			expected.GetStateSSZObject().(*cltypes.BeaconStateBellatrix)))
+	}
+}
+
 func getTestBeaconStateWithValidator() *state.BeaconState {
 	res := getTestBeaconState()
 	res.SetValidators([]*cltypes.Validator{testValidator})
@@ -209,14 +218,7 @@ func TestTransitionSlot(t *testing.T) {
 			}
 			// Manually increase the slot by one.
 			tc.prevState.SetSlot(tc.prevState.Slot() + 1)
-			gotRoot, err := tc.prevState.HashTreeRoot()
-			require.NoError(t, err)
-
-			expectedRoot, err := tc.expectedState.HashTreeRoot()
-			require.NoError(t, err)
-			if !cmp.Equal(gotRoot, tc.expectedState) {
-				t.Errorf("unexpected result state: %v", cmp.Diff(gotRoot, expectedRoot))
-			}
+			assertStateEq(t, tc.prevState, tc.expectedState)
 		})
 	}
 }
@@ -293,9 +295,7 @@ func TestProcessSlots(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			if got := tc.prevState; !cmp.Equal(got, tc.expectedState) {
-				t.Errorf("unexpected result state: %v", cmp.Diff(got, tc.expectedState))
-			}
+			assertStateEq(t, tc.prevState, tc.expectedState)
 		})
 	}
 }
@@ -417,9 +417,7 @@ func TestTransitionState(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			if got := tc.prevState; !cmp.Equal(got, tc.expectedState) {
-				t.Errorf("unexpected result state: %v", cmp.Diff(got, tc.expectedState))
-			}
+			assertStateEq(t, tc.prevState, tc.expectedState)
 		})
 	}
 }
