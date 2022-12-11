@@ -262,6 +262,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			defer func() { // closure - to avid defer in loop
+				fmt.Printf("rollback!!!")
 				tx.Rollback()
 			}()
 
@@ -354,6 +355,9 @@ func ExecV3(ctx context.Context,
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
+						if tx == nil {
+							panic(1)
+						}
 						if err := rs.Flush(tx); err != nil {
 							return err
 						}
