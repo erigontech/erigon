@@ -1,0 +1,13 @@
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: erigon
+spec:
+  endpoints:
+    - interval: 30s
+      path: /debug/metrics/prometheus
+      port: metrics
+  selector:
+    matchLabels:
+      app: erigon

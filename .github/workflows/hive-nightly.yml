@@ -1,0 +1,45 @@
+name: Hive (Nightly)
+
+on:
+  schedule:
+    - cron: "0 01 * * *" # run at 1 am UTC every day
+  workflow_dispatch:
+  
+jobs:
+  hive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: AutoModality/action-clean@v1
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # fetch git tags for "git describe"
+
+      - name: build erigon image
+        run: DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      # check with root permissions, should be cached from previous build
+      - name: build erigon image (root permissions)
+        run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
+
+      - name: run hive and parse output
+        run: |
+          sudo mkdir -p /results-${{ github.run_id }}
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work thorax/hive:latest --sim ethereum/engine --results-root=/work/results-${{ github.run_id }} --client erigon_ci-$GITHUB_SHA --exit.fail=false
+          docker run --rm --pull always -v /var/run/docker.sock:/var/run/docker.sock -v ${{ github.workspace }}:/work --entrypoint /app/hivecioutput thorax/hive:latest --resultsdir=/work/results-${{ github.run_id }} --outdir=/work/results-${{ github.run_id }} --exclusionsfile=/work/hive/exclusions.json
+
+      - name: clean up containers
+        if: always()
+        run: |
+          ids=$(docker ps -a -q)
+          for id in $ids
+          do
+            echo "stopping/removing container: $id"
+            docker stop $id && docker rm $id
+          done
+
+      - name: parse hive results
+        uses: phoenix-actions/test-reporting@v10
+        with:
+          name: Tests
+          path: results-${{ github.run_id }}/*.xml
+          reporter: java-junit

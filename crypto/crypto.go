@@ -66,7 +66,7 @@ type KeccakState interface {
 
 // NewKeccakState creates a new KeccakState
 func NewKeccakState() KeccakState {
-	return sha3.NewLegacyKeccak256().(KeccakState)
+	return NewLegacyKeccak256().(KeccakState)
 }
 
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
@@ -87,6 +87,7 @@ func Keccak256(data ...[]byte) []byte {
 		d.Write(b)
 	}
 	d.Read(b) //nolint:errcheck
+	ReturnToPoolKeccak256(d)
 	return b
 }
 
@@ -98,6 +99,7 @@ func Keccak256Hash(data ...[]byte) (h common.Hash) {
 		d.Write(b)
 	}
 	d.Read(h[:]) //nolint:errcheck
+	ReturnToPoolKeccak256(d)
 	return h
 }
 

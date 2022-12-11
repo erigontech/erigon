@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
@@ -25,7 +26,7 @@ func NewCallTracer() *CallTracer {
 	}
 }
 
-func (ct *CallTracer) CaptureStart(evm *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (ct *CallTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]

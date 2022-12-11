@@ -12,6 +12,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -25,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	datadir2 "github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -59,7 +59,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 		<-sigs
 		interruptCh <- true
 	}()
-	dirs := datadir2.New(datadirCli)
+	dirs := datadir.New(datadirCli)
 	historyDb, err := kv2.NewMDBX(logger).Path(dirs.Chaindata).Open()
 	if err != nil {
 		return fmt.Errorf("opening chaindata as read only: %v", err)

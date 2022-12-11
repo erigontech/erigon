@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -68,8 +69,8 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 
 	for v, err = c.SeekBothRange(seekBytes, seekVal); v != nil && len(keys) != quantity && err == nil; _, v, err = c.NextDup() {
-		if len(v) > common.HashLength {
-			keys = append(keys, v[:common.HashLength])
+		if len(v) > length.Hash {
+			keys = append(keys, v[:length.Hash])
 		} else {
 			keys = append(keys, v)
 		}

@@ -1,8 +1,3 @@
+---
 resources:
-- eth66-peering-tcp.yaml
-- eth66-peering-udp.yaml
-- http.yaml
-- metrics.yaml
-- snap-sync-tcp.yaml
-- snap-sync-udp.yaml
-- statefulset.yaml
+  - statefulset.yaml

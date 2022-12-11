@@ -19,6 +19,8 @@ func (r estimatedRamPerWorker) Workers() int {
 	maxWorkersForGivenCPU := runtime.NumCPU() - 1 // reserve 1 cpu for "work-producer thread", also IO software on machine in cloud-providers using 1 CPU
 	return cmp.InRange(1, maxWorkersForGivenCPU, int(maxWorkersForGivenMemory))
 }
+func (r estimatedRamPerWorker) WorkersHalf() int    { return cmp.Max(1, r.Workers()/2) }
+func (r estimatedRamPerWorker) WorkersQuarter() int { return cmp.Max(1, r.Workers()/4) }
 
 const (
 	IndexSnapshot     = estimatedRamPerWorker(2 * datasize.GB)   //elias-fano index building is single-threaded

@@ -769,18 +769,20 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callMsg) From() common.Address         { return m.CallMsg.From }
-func (m callMsg) Nonce() uint64                { return 0 }
-func (m callMsg) CheckNonce() bool             { return false }
-func (m callMsg) To() *common.Address          { return m.CallMsg.To }
-func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *uint256.Int         { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *uint256.Int            { return m.CallMsg.Tip }
-func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
-func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
-func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
-func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
-func (m callMsg) IsFree() bool                 { return false }
+func (m callMsg) From() common.Address           { return m.CallMsg.From }
+func (m callMsg) Nonce() uint64                  { return 0 }
+func (m callMsg) CheckNonce() bool               { return false }
+func (m callMsg) To() *common.Address            { return m.CallMsg.To }
+func (m callMsg) GasPrice() *uint256.Int         { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int           { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int              { return m.CallMsg.Tip }
+func (m callMsg) Gas() uint64                    { return m.CallMsg.Gas }
+func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
+func (m callMsg) Value() *uint256.Int            { return m.CallMsg.Value }
+func (m callMsg) Data() []byte                   { return m.CallMsg.Data }
+func (m callMsg) AccessList() types.AccessList   { return m.CallMsg.AccessList }
+func (m callMsg) IsFree() bool                   { return false }
+func (m callMsg) DataHashes() []common.Hash      { return m.CallMsg.DataHashes }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.

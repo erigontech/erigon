@@ -7,16 +7,16 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
-
+	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"golang.org/x/crypto/sha3"
 )
 
-const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
+const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
 
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
@@ -74,11 +74,11 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
 	}
-	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
+	s.ref.len = hb.hashStack[len(hb.hashStack)-length2.Hash-1] - 0x80
 	if s.ref.len > 32 {
-		s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0xc0 + 1
-		copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength-1:])
+		s.ref.len = hb.hashStack[len(hb.hashStack)-length2.Hash-1] - 0xc0 + 1
+		copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash-1:])
 	}
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
@@ -137,7 +137,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	var writer io.Writer
 	var reader io.Reader
 
-	if totalLen+pt < common.HashLength {
+	if totalLen+pt < length2.Hash {
 		// Embedded node
 		hb.byteArrayWriter.Setup(hb.hashBuf[:], 0)
 		writer = hb.byteArrayWriter
@@ -170,7 +170,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	}
 
 	if reader != nil {
-		hb.hashBuf[0] = 0x80 + common.HashLength
+		hb.hashBuf[0] = 0x80 + length2.Hash
 		if _, err := reader.Read(hb.hashBuf[1:]); err != nil {
 			return err
 		}
@@ -205,7 +205,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	popped := 0
 	var root node
 	if fieldSet&uint32(4) != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		if hb.acc.Root != EmptyRoot {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
@@ -217,7 +217,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	}
 	var accountCode codeNode
 	if fieldSet&uint32(8) != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		ok := false
 		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
 			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
@@ -245,7 +245,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
-	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
 	s.ref.len = 32
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
@@ -267,14 +267,14 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 
 	popped := 0
 	if fieldSet&AccountFieldStorageOnly != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
 		copy(hb.acc.Root[:], EmptyRoot[:])
 	}
 
 	if fieldSet&AccountFieldCodeOnly != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-length2.Hash:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	} else {
 		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
@@ -341,7 +341,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 	var s *shortNode
 	switch n := nd.(type) {
 	case nil:
-		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-common.HashLength:])
+		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-length2.Hash:])
 		s = &shortNode{Key: common.CopyBytes(key), Val: hashNode{hash: branchHash}}
 	case *fullNode:
 		s = &shortNode{Key: common.CopyBytes(key), Val: n}
@@ -352,7 +352,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 	if err := hb.extensionHash(key); err != nil {
 		return err
 	}
-	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
 	s.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
@@ -414,15 +414,15 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 		ni += 2
 	}
-	//capture := common.CopyBytes(branchHash[:common.HashLength+1])
-	if _, err := hb.sha.Write(branchHash[:common.HashLength+1]); err != nil {
+	//capture := common.CopyBytes(branchHash[:length2.Hash+1])
+	if _, err := hb.sha.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
 	}
 	// Replace previous hash with the new one
-	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
-	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
 	//fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
@@ -460,7 +460,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	if err := hb.branchHash(set); err != nil {
 		return err
 	}
-	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
 	f.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
@@ -483,8 +483,8 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
 		if ((1 << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == 0x80+common.HashLength {
-				totalSize += common.HashLength
+			if hashes[hashStackStride*i] == 0x80+length2.Hash {
+				totalSize += length2.Hash
 			} else {
 				// Embedded node
 				totalSize += int(hashes[hashStackStride*i] - rlp.EmptyListCode)
@@ -503,7 +503,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((1 << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
+			if hashes[hashStackStride*i] == byte(0x80+length2.Hash) {
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
 				}
@@ -525,8 +525,8 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
-	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
-	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
 	//fmt.Printf("} [%x]\n", hb.hashStack[len(hb.hashStack)-hashStackStride:])
@@ -548,7 +548,7 @@ func (hb *HashBuilder) hash(hash []byte) error {
 	if hb.trace {
 		fmt.Printf("HASH\n")
 	}
-	hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
+	hb.hashStack = append(hb.hashStack, 0x80+length2.Hash)
 	hb.hashStack = append(hb.hashStack, hash...)
 	hb.nodeStack = append(hb.nodeStack, nil)
 	if hb.trace {
@@ -570,7 +570,7 @@ func (hb *HashBuilder) code(code []byte) error {
 		return err
 	}
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = 0x80 + common.HashLength
+	hash[0] = 0x80 + length2.Hash
 	if _, err := hb.sha.Read(hash[1:]); err != nil {
 		return err
 	}
@@ -584,7 +584,7 @@ func (hb *HashBuilder) emptyRoot() {
 	}
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = 0x80 + common.HashLength
+	hash[0] = 0x80 + length2.Hash
 	copy(hash[1:], EmptyRoot[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }

@@ -111,7 +111,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.GpoPercentileFlag,
 	&utils.InsecureUnlockAllowedFlag,
 	&utils.MetricsEnabledFlag,
-	&utils.MetricsEnabledExpensiveFlag,
 	&utils.MetricsHTTPFlag,
 	&utils.MetricsPortFlag,
 	&utils.HistoryV3Flag,
