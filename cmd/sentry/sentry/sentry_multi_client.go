@@ -262,6 +262,7 @@ type MultiClient struct {
 	Engine        consensus.Engine
 	blockReader   services.HeaderAndCanonicalReader
 	logPeerInfo   bool
+	passivePeers  bool
 
 	historyV3 bool
 }
@@ -307,6 +308,7 @@ func NewMultiClient(
 		logPeerInfo:   logPeerInfo,
 		forkValidator: forkValidator,
 		historyV3:     historyV3,
+		passivePeers:  chainConfig.TerminalTotalDifficultyPassed,
 	}
 	cs.ChainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.ChainConfig)
@@ -758,6 +760,7 @@ func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
 			Genesis: gointerfaces.ConvertHashToH256(s.genesisHash),
 			Forks:   s.forks,
 		},
+		PassivePeers: cs.passivePeers,
 	}
 }
 
