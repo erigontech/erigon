@@ -48,7 +48,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		if err != nil {
 			return false, err
 		}
-		if !isValidMerkleBranch(
+		if !utils.IsValidMerkleBranch(
 			finalizedRoot,
 			update.FinalityBranch,
 			6,  // floorlog2(FINALIZED_ROOT_INDEX)
@@ -67,7 +67,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		if err != nil {
 			return false, err
 		}
-		if !isValidMerkleBranch(
+		if !utils.IsValidMerkleBranch(
 			syncRoot,
 			update.NextSyncCommitteeBranch,
 			5,  // floorlog2(NEXT_SYNC_COMMITTEE_INDEX)

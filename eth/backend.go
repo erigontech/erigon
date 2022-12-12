@@ -527,7 +527,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			// If we have a beacon state, we can start the light client,
 			// and we expect/demand that if the beacon state IS available (err == nil),
 			// that the beacon checkpoint is ALSO available.
-			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+			if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
 				return nil, err
 			}
 		} else if err != nil {

@@ -56,8 +56,6 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	switch chain {
 	case networkname.SepoliaChainName:
 		log.Info("Starting Erigon on Sepolia testnet...")
-	case networkname.RopstenChainName:
-		log.Info("Starting Erigon on Ropsten testnet...")
 	case networkname.ShandongChainName:
 		log.Info("Starting Erigon on Shandong testnet...")
 	case networkname.RinkebyChainName:
