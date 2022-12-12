@@ -10,17 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var subscriptionChan = make(chan interface{})
-
 // SearchBlockForTransactionHash looks for the given hash in the latest black using the eth_newHeads method
 func SearchBlockForTransactionHash(hash common.Hash) (uint64, error) {
-	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "")
-	if err != nil {
-		return 0, fmt.Errorf("failed to dial websocket: %v", err)
-	}
-
 	fmt.Printf("Searching for tx %q in new block...\n", hash)
-	blockN, err := subscribeToNewHeads(client, hash)
+	blockN, err := searchBlock(hash)
 	if err != nil {
 		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
 	}
@@ -29,28 +22,47 @@ func SearchBlockForTransactionHash(hash common.Hash) (uint64, error) {
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func subscribe(client *rpc.Client, method string, args ...interface{}) (*rpc.ClientSubscription, error) {
-	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(method)
+func subscribe(client *rpc.Client, method models.SubMethod, args ...interface{}) (*models.MethodSubscription, error) {
+	methodSub := models.NewMethodSubscription(method)
+
+	namespace, subMethod, err := devnetutils.NamespaceAndSubMethodFromMethod(string(method))
 	if err != nil {
 		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
 	}
 
 	arr := append([]interface{}{subMethod}, args...)
 
-	sub, err := client.Subscribe(context.Background(), namespace, subscriptionChan, arr...)
+	sub, err := client.Subscribe(context.Background(), namespace, methodSub.SubChan, arr...)
 	if err != nil {
 		return nil, fmt.Errorf("client failed to subscribe: %v", err)
 	}
 
+	methodSub.ClientSub = sub
+
+	return methodSub, nil
+}
+
+func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, error) {
+	client, err := rpc.DialWebsocket(context.Background(), fmt.Sprintf("ws://%s", models.Localhost), "")
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial websocket: %v", err)
+	}
+
+	sub, err := subscribe(client, method)
+	if err != nil {
+		return nil, fmt.Errorf("error subscribing to method: %v", err)
+	}
+
+	sub.Client = client
+
 	return sub, nil
 }
 
-func subscribeToNewHeads(client *rpc.Client, hash common.Hash) (uint64, error) {
-	sub, err := subscribe(client, string(models.ETHNewHeads))
-	if err != nil {
-		return uint64(0), fmt.Errorf("error subscribing to newHeads: %v", err)
+func searchBlock(hash common.Hash) (uint64, error) {
+	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
+	if methodSub == nil {
+		return uint64(0), fmt.Errorf("client subscription should not be nil")
 	}
-	defer unsubscribe(sub)
 
 	var (
 		blockCount int
@@ -60,10 +72,10 @@ func subscribeToNewHeads(client *rpc.Client, hash common.Hash) (uint64, error) {
 mark:
 	for {
 		select {
-		case v := <-subscriptionChan:
+		case v := <-methodSub.SubChan:
 			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
 			blockNumber := v.(map[string]interface{})["number"]
-			num, foundTx, err := txHashInBlock(client, hash, blockNumber.(string)) // check if the block has the transaction to look for inside of it
+			num, foundTx, err := txHashInBlock(methodSub.Client, hash, blockNumber.(string)) // check if the block has the transaction to look for inside of it
 			if err != nil {
 				return uint64(0), fmt.Errorf("could not verify if current block contains the tx hash: %v", err)
 			}
@@ -72,7 +84,7 @@ mark:
 				blockN = num
 				break mark
 			}
-		case err := <-sub.Err():
+		case err := <-methodSub.ClientSub.Err():
 			return uint64(0), fmt.Errorf("subscription error from client: %v", err)
 		}
 	}
@@ -80,10 +92,30 @@ mark:
 	return blockN, nil
 }
 
-// unsubscribe closes the client subscription and empties the global subscription channel
-func unsubscribe(sub *rpc.ClientSubscription) {
-	sub.Unsubscribe()
-	for len(subscriptionChan) > 0 {
-		<-subscriptionChan
+// UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
+func UnsubscribeAll() {
+	for _, methodSub := range *models.MethodSubscriptionMap {
+		if methodSub != nil {
+			methodSub.ClientSub.Unsubscribe()
+			for len(methodSub.SubChan) > 0 {
+				<-methodSub.SubChan
+			}
+			methodSub.SubChan = nil // avoid memory leak
+		}
 	}
+}
+
+// SubscribeAll subscribes to the range of methods provided
+func SubscribeAll(methods []models.SubMethod) error {
+	m := make(map[models.SubMethod]*models.MethodSubscription)
+	models.MethodSubscriptionMap = &m
+	for _, method := range methods {
+		sub, err := subscribeToMethod(method)
+		if err != nil {
+			return err
+		}
+		(*models.MethodSubscriptionMap)[method] = sub
+	}
+
+	return nil
 }

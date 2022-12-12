@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/rpc"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
@@ -122,6 +123,9 @@ var (
 	gspec = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(DevAddress))
 	// ContractBackend is a simulated backend created using a simulated blockchain
 	ContractBackend = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
+
+	// MethodSubscriptionMap is a container for all the subscription methods
+	MethodSubscriptionMap *map[SubMethod]*MethodSubscription
 )
 
 // Responses for the rpc calls
@@ -132,6 +136,22 @@ type (
 		Result p2p.NodeInfo `json:"result"`
 	}
 )
+
+// MethodSubscription houses the client subscription, name and channel for its delivery
+type MethodSubscription struct {
+	Client    *rpc.Client
+	ClientSub *rpc.ClientSubscription
+	Name      SubMethod
+	SubChan   chan interface{}
+}
+
+// NewMethodSubscription returns a new MethodSubscription instance
+func NewMethodSubscription(name SubMethod) *MethodSubscription {
+	return &MethodSubscription{
+		Name:    name,
+		SubChan: make(chan interface{}),
+	}
+}
 
 // Block represents a simple block for queries
 type Block struct {

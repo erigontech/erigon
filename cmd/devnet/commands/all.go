@@ -2,18 +2,29 @@ package commands
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
 
 // ExecuteAllMethods runs all the simulation tests for erigon devnet
 func ExecuteAllMethods() {
+	// unsubscribe from all the subscriptions made
+	defer services.UnsubscribeAll()
+
 	// test connection to JSON RPC
 	fmt.Printf("\nPINGING JSON RPC...\n")
 	if err := pingErigonRpc(); err != nil {
 		return
 	}
 	fmt.Println()
+
+	fmt.Printf("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...\n")
+	methods := []models.SubMethod{models.ETHNewHeads}
+	if err := services.SubscribeAll(methods); err != nil {
+		fmt.Printf("failed to subscribe to all methods: %v\n", err)
+		return
+	}
 
 	// get balance of the receiver's account
 	callGetBalance(addr, models.Latest, 0)
