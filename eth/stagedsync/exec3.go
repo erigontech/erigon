@@ -243,9 +243,9 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	var errCh chan error
+	var rwLoopErrCh chan error
 
-	var wg sync.WaitGroup
+	var rwLoopWg sync.WaitGroup
 	if parallel {
 		// Go-routine gathering results from the workers
 		rwLoop := func(ctx context.Context) error {
@@ -265,7 +265,7 @@ func ExecV3(ctx context.Context,
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
-			go applyLoop(applyCtx, errCh)
+			go applyLoop(applyCtx, rwLoopErrCh)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -379,7 +379,7 @@ func ExecV3(ctx context.Context,
 					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 					defer cancelApplyCtx()
 					applyLoopWg.Add(1)
-					go applyLoop(applyCtx, errCh)
+					go applyLoop(applyCtx, rwLoopErrCh)
 
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
@@ -402,18 +402,20 @@ func ExecV3(ctx context.Context,
 			return nil
 		}
 
-		errCh = make(chan error, 1)
+		rwLoopErrCh = make(chan error, 1)
 
-		wg.Add(1)
-		defer wg.Wait()
+		rwLoopWg.Add(1)
+		defer rwLoopWg.Wait()
 		go func() {
-			defer wg.Done()
+			defer close(rwLoopErrCh)
+			defer rwLoopWg.Done()
+
+			defer applyLoopWg.Wait()
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
-			defer close(errCh)
 
 			if err := rwLoop(ctx); err != nil {
-				errCh <- err
+				rwLoopErrCh <- err
 			}
 		}()
 	}
@@ -480,7 +482,7 @@ Loop:
 
 		if parallel {
 			select {
-			case err := <-errCh:
+			case err := <-rwLoopErrCh:
 				if err != nil {
 					return err
 				}
@@ -643,19 +645,10 @@ Loop:
 
 	if parallel {
 		stopWorkers()
-		wg.Wait()
-	ErrLoop:
-		for {
-			select {
-			case err := <-errCh:
-				if err != nil {
-					return err
-				}
-			default:
-				break ErrLoop
-			}
+		rwLoopWg.Wait()
+		if err, ok := <-rwLoopErrCh; ok && err != nil {
+			return err
 		}
-
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
 			return err
