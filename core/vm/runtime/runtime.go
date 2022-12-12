@@ -43,7 +43,7 @@ type Config struct {
 	BlockNumber *big.Int
 	Time        *big.Int
 	GasLimit    uint64
-	GasPrice    *big.Int
+	GasPrice    *uint256.Int
 	Value       *uint256.Int
 	Debug       bool
 	EVMConfig   vm.Config
@@ -76,8 +76,8 @@ func setDefaults(cfg *Config) {
 			LondonBlock:           new(big.Int),
 			ArrowGlacierBlock:     new(big.Int),
 			GrayGlacierBlock:      new(big.Int),
-			ShanghaiBlock:         new(big.Int),
-			CancunBlock:           new(big.Int),
+			ShanghaiTime:          new(big.Int),
+			CancunTime:            new(big.Int),
 		}
 	}
 
@@ -91,7 +91,7 @@ func setDefaults(cfg *Config) {
 		cfg.GasLimit = math.MaxUint64
 	}
 	if cfg.GasPrice == nil {
-		cfg.GasPrice = new(big.Int)
+		cfg.GasPrice = new(uint256.Int)
 	}
 	if cfg.Value == nil {
 		cfg.Value = new(uint256.Int)
@@ -130,7 +130,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 	cfg.State.CreateAccount(address, true)
@@ -168,7 +168,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
 	)
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		cfg.State.PrepareAccessList(cfg.Origin, nil, vm.ActivePrecompiles(rules), nil)
 	}
 
@@ -194,7 +194,7 @@ func Call(address common.Address, input []byte, cfg *Config) ([]byte, uint64, er
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
-	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber); rules.IsBerlin {
+	if rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time); rules.IsBerlin {
 		statedb.PrepareAccessList(cfg.Origin, &address, vm.ActivePrecompiles(rules), nil)
 	}
 

@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -119,7 +120,8 @@ func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Comp
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
 	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
 }
-func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
+func (b *SimulatedBackend) HistoryV3() bool          { return b.m.HistoryV3 }
+func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
@@ -169,9 +171,9 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1))
+		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
 	}
-	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1))
+	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.

@@ -60,7 +60,7 @@ type vmContext struct {
 func testCtx() *vmContext {
 	return &vmContext{blockCtx: evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
+	}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 }
 
 func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
@@ -86,7 +86,7 @@ func TestTracer(t *testing.T) {
 		t.Helper()
 		ctx := &vmContext{blockCtx: evmtypes.BlockContext{
 			BlockNumber: 1,
-		}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
+		}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
@@ -184,7 +184,7 @@ func TestNoStepExec(t *testing.T) {
 	}
 	execTracer := func(code string) []byte {
 		t.Helper()
-		ctx := &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: big.NewInt(100000)}}
+		ctx := &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)

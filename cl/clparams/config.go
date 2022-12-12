@@ -34,11 +34,11 @@ const (
 )
 
 const (
-	MaxDialTimeout               = 10 * time.Second
+	MaxDialTimeout               = 2 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 5 * time.Second
-	RespTimeout    time.Duration = 15 * time.Second
+	ReqTimeout     time.Duration = 1 * time.Second
+	RespTimeout    time.Duration = 3 * time.Second
 )
 
 var (
@@ -430,7 +430,7 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	return fvn
 }
 
-var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
+var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Constants (Non-configurable)
 	FarFutureEpoch:           math.MaxUint64,
 	FarFutureSlot:            math.MaxUint64,
@@ -622,13 +622,13 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 }
 
 func mainnetConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	return cfg
 }
 
 func sepoliaConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1655647200
 	cfg.GenesisDelay = 86400
 	cfg.MinGenesisActiveValidatorCount = 1300
@@ -648,7 +648,7 @@ func sepoliaConfig() BeaconChainConfig {
 }
 
 func goerliConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1614588812
 	cfg.GenesisDelay = 1919188
 	cfg.ConfigName = "prater"

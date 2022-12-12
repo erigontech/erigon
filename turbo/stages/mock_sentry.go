@@ -411,7 +411,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil),
 			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
@@ -657,7 +657,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		return r
 	}
 
-	return state.NewPlainState(tx, blockNum)
+	return state.NewPlainState(tx, blockNum, nil)
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {

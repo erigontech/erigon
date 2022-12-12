@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"runtime"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -136,7 +138,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
+			dbg.ReadMemStats(&m)
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
@@ -184,7 +186,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 		default:
 		case <-logEvery.C:
 			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
+			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] Pruning call trace table", logPrefix), "number", blockNum,
 				"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		}
@@ -333,7 +335,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
-			libcommon.ReadMemStats(&m)
+			dbg.ReadMemStats(&m)
 			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
 			prev = blockNum
 
@@ -432,7 +434,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			select {
 			case <-logEvery.C:
 				var m runtime.MemStats
-				libcommon.ReadMemStats(&m)
+				dbg.ReadMemStats(&m)
 				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
@@ -463,7 +465,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", fmt.Sprintf("%x", from))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallFromIndex, "key", hex.EncodeToString(from))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:
@@ -495,7 +497,7 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			}
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", fmt.Sprintf("%x", to))
+				log.Info(fmt.Sprintf("[%s]", logPrefix), "table", kv.CallToIndex, "key", hex.EncodeToString(to))
 			case <-ctx.Done():
 				return libcommon.ErrStopped
 			default:

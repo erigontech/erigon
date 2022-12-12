@@ -7,45 +7,77 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-// transitionSlot is called each time there is a new slot to process
-func (s *StateTransistor) transitionSlot(state *cltypes.BeaconState) error {
-	previousStateRoot, err := state.HashTreeRoot()
-	if err != nil {
-		return err
+func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlockBellatrix, validate bool) error {
+	currentBlock := block.Block
+	s.processSlots(currentBlock.Slot)
+	if validate {
+		valid, err := s.verifyBlockSignature(block)
+		if err != nil {
+			return fmt.Errorf("error validating block signature: %v", err)
+		}
+		if !valid {
+			return fmt.Errorf("block not valid")
+		}
 	}
-	state.StateRoots[state.Slot%s.beaconConfig.SlotsPerHistoricalRoot] = previousStateRoot
-	if state.LatestBlockHeader.Root == [32]byte{} {
-		state.LatestBlockHeader.Root = previousStateRoot
+	// TODO add logic to process block and update state.
+	if validate {
+		expectedStateRoot, err := s.state.HashTreeRoot()
+		if err != nil {
+			return fmt.Errorf("unable to generate state root: %v", err)
+		}
+		if expectedStateRoot != currentBlock.StateRoot {
+			return fmt.Errorf("expected state root differs from received state root")
+		}
 	}
-	previousBlockRoot, err := state.LatestBlockHeader.HashTreeRoot()
-	if err != nil {
-		return err
-	}
-	state.BlockRoots[state.Slot%s.beaconConfig.SlotsPerHistoricalRoot] = previousBlockRoot
 	return nil
 }
 
-func (s *StateTransistor) processSlots(state *cltypes.BeaconState, slot uint64) error {
-	if slot <= state.Slot {
-		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, state.Slot)
+// transitionSlot is called each time there is a new slot to process
+func (s *StateTransistor) transitionSlot() error {
+	slot := s.state.Slot()
+	previousStateRoot, err := s.state.HashTreeRoot()
+	if err != nil {
+		return err
 	}
-	// Process each slot
-	for i := state.Slot; i < slot; i++ {
-		err := s.transitionSlot(state)
+	s.state.SetStateRootAt(int(slot%s.beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
+
+	latestBlockHeader := s.state.LatestBlockHeader()
+	if latestBlockHeader.Root == [32]byte{} {
+		latestBlockHeader.Root = previousStateRoot
+		s.state.SetLatestBlockHeader(latestBlockHeader)
+	}
+
+	previousBlockRoot, err := s.state.LatestBlockHeader().HashTreeRoot()
+	if err != nil {
+		return err
+	}
+	s.state.SetBlockRootAt(int(slot%s.beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+	return nil
+}
+
+func (s *StateTransistor) processSlots(slot uint64) error {
+	stateSlot := s.state.Slot()
+	if slot <= stateSlot {
+		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
+	}
+	// Process each slot.
+	for i := stateSlot; i < slot; i++ {
+		err := s.transitionSlot()
 		if err != nil {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
 		// TODO: add logic to process epoch updates.
-		state.Slot += 1
+		stateSlot += 1
+		s.state.SetSlot(stateSlot)
 	}
 	return nil
 }
 
-func (s *StateTransistor) verifyBlockSignature(state *cltypes.BeaconState, block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
-	proposer := state.Validators[block.Block.ProposerIndex]
-	signing_root, err := block.Block.Body.HashTreeRoot()
+func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
+	proposer := s.state.ValidatorAt(int(block.Block.ProposerIndex))
+	sigRoot, err := block.Block.Body.HashTreeRoot()
 	if err != nil {
 		return false, err
 	}
-	return bls.Verify(block.Signature[:], signing_root[:], proposer.PublicKey[:])
+	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
 }

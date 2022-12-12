@@ -2,7 +2,9 @@ package rawdbreset
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -149,6 +151,12 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 				kv.LogTopicsKeys, kv.LogTopicsIdx,
 				kv.TracesFromKeys, kv.TracesFromIdx,
 				kv.TracesToKeys, kv.TracesToIdx,
+
+				kv.AccountChangeSet,
+				kv.StorageChangeSet,
+				kv.Receipts,
+				kv.Log,
+				kv.CallTraceSet,
 			}
 			if err := clearTables(ctx, db, tx, buckets...); err != nil {
 				return nil
@@ -238,11 +246,14 @@ func ResetIH(ctx context.Context, db kv.RwDB) error {
 	})
 }
 
-func warmup(ctx context.Context, db kv.RoDB, bucket string) {
+func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
+	wg := sync.WaitGroup{}
 	for i := 0; i < 256; i++ {
 		prefix := []byte{byte(i)}
+		wg.Add(1)
 		go func(perfix []byte) {
-			_ = db.View(ctx, func(tx kv.Tx) error {
+			defer wg.Done()
+			if err := db.View(ctx, func(tx kv.Tx) error {
 				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
 					select {
 					case <-ctx.Done():
@@ -251,9 +262,14 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) {
 					}
 					return nil
 				})
-			})
+			}); err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Warn("warmup", "err", err)
+				}
+			}
 		}(prefix)
 	}
+	return func() { wg.Wait() }
 }
 
 func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) error {
@@ -266,9 +282,10 @@ func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 }
 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
-	warmup(ctx, db, table)
+	clean := warmup(ctx, db, table)
+	defer clean()
 	log.Info("Clear", "table", table)
-	return tx.ClearBucket(kv.HashedAccounts)
+	return tx.ClearBucket(table)
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

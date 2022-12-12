@@ -87,6 +87,7 @@ func (lq *LinkQueue) Pop() interface{} {
 	old := *lq
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	x.idx = -1
 	x.queueId = NoQueue
 	*lq = old[0 : n-1]
@@ -152,6 +153,7 @@ func (aq *AnchorQueue) Pop() interface{} {
 	old := *aq
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*aq = old[0 : n-1]
 	x.idx = -1
 	return x
@@ -243,6 +245,7 @@ func (iq *InsertQueue) Pop() interface{} {
 	old := *iq
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*iq = old[0 : n-1]
 	x.idx = -1
 	x.queueId = NoQueue

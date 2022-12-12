@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -23,7 +24,8 @@ func TestPendingBlock(t *testing.T) {
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout), nil, nil, nil, mining, 5000000)
+	engine := ethash.NewFaker()
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout, engine), nil, nil, nil, mining, 5000000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

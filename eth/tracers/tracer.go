@@ -592,7 +592,7 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.ctx["to"] = to
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
-	jst.ctx["gasPrice"] = env.TxContext().GasPrice
+	jst.ctx["gasPrice"] = env.TxContext().GasPrice.ToBig()
 	jst.ctx["value"] = value
 
 	// Initialize the context
@@ -670,7 +670,7 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64,
 	}
 }
 
-func (jst *Tracer) CaptureSelfDestruct(from, to common.Address, value *big.Int) {
+func (jst *Tracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (jst *Tracer) CaptureAccountRead(account common.Address) error {

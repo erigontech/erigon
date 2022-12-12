@@ -47,11 +47,6 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
-	block, _, err = DefaultRopstenGenesisBlock().ToBlock()
-	require.NoError(err)
-	if block.Hash() != params.RopstenGenesisHash {
-		t.Errorf("wrong Ropsten genesis hash, got %v, want %v", block.Hash(), params.RopstenGenesisHash)
-	}
 
 	block, _, err = DefaultSokolGenesisBlock().ToBlock()
 	require.NoError(err)
@@ -60,15 +55,6 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 	}
 	if block.Hash() != params.SokolGenesisHash {
 		t.Errorf("wrong Sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
-	}
-
-	block, _, err = DefaultFermionGenesisBlock().ToBlock()
-	require.NoError(err)
-	if block.Root() != params.FermionGenesisStateRoot {
-		t.Errorf("wrong Fermion genesis state root, got %v, want %v", block.Root(), params.FermionGenesisStateRoot)
-	}
-	if block.Hash() != params.FermionGenesisHash {
-		t.Errorf("wrong Fermion genesis hash, got %v, want %v", block.Hash(), params.FermionGenesisHash)
 	}
 
 	block, _, err = DefaultGnosisGenesisBlock().ToBlock()
@@ -180,7 +166,7 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	state := state.New(state.NewPlainState(tx, 1))
+	state := state.New(state.NewPlainState(tx, 1, nil))
 	balance := state.GetBalance(address)
 	assert.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)

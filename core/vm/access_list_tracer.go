@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -175,7 +174,7 @@ func (a *AccessListTracer) CaptureStart(env *EVM, depth int, from common.Address
 	panic("implement me")
 }
 
-func (a *AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (a *AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (a *AccessListTracer) CaptureAccountRead(account common.Address) error {

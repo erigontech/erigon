@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
@@ -173,8 +174,8 @@ func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (
 
 // SealHash returns the hash of a block prior to it being sealed.
 func SealHash(header *types.Header, chainId *big.Int) (hash common.Hash) {
-	hasher := crypto.NewLegacyKeccak256()
-	defer crypto.ReturnToPoolKeccak256(hasher)
+	hasher := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(hasher)
 
 	encodeSigHeader(hasher, header, chainId)
 	hasher.Sum(hash[:0])
@@ -303,6 +304,7 @@ func (p *Parlia) Type() params.ConsensusType {
 // Author retrieves the Ethereum address of the account that minted the given
 // block, which may be different from the header's coinbase if a consensus
 // engine is based on signatures.
+// This is thread-safe (only access the header.Coinbase)
 func (p *Parlia) Author(header *types.Header) (common.Address, error) {
 	return header.Coinbase, nil
 }
@@ -376,6 +378,11 @@ func (p *Parlia) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 			return errInvalidDifficulty
 		}
 	}
+
+	if header.WithdrawalsHash != nil {
+		return consensus.ErrUnexpectedWithdrawals
+	}
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
 		return err
@@ -663,6 +670,8 @@ func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 }
 
 func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs types.Transactions, systemTxs types.Transactions, err error) {
+	userTxs = types.Transactions{}
+	systemTxs = types.Transactions{}
 	for _, tx := range txs {
 		isSystemTx, err2 := p.IsSystemTransaction(tx, header)
 		if err2 != nil {
@@ -675,12 +684,6 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 			userTxs = append(userTxs, tx)
 		}
 	}
-	if userTxs == nil {
-		userTxs = types.Transactions{}
-	}
-	if systemTxs == nil {
-		systemTxs = types.Transactions{}
-	}
 	return
 }
 
@@ -690,8 +693,8 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) Finalize(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	txs types.Transactions, _ []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	return p.finalize(header, state, txs, receipts, chain, false)
 }
@@ -760,7 +763,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			var receipt *types.Receipt
 			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
-				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal, "error", err)
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
@@ -769,6 +772,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+		//log.Error("distributeIncoming", "block hash", header.Hash(), "error", err, "systemTxs", len(systemTxs))
 		return nil, nil, err
 	}
 	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
@@ -786,14 +790,14 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 // Note: The block header and state database might be updated to reflect any
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) FinalizeAndAssemble(_ *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, _ []*types.Header, receipts types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	txs types.Transactions, _ []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	outTxs, outReceipts, err := p.finalize(header, state, txs, receipts, chain, true)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return types.NewBlock(header, outTxs, nil, outReceipts), outTxs, outReceipts, nil
+	return types.NewBlock(header, outTxs, nil, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
 // Authorize injects a private key into the consensus engine to mint new blocks
@@ -1190,8 +1194,11 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if len(systemTxs) == 0 || systemTxs[0] == nil {
+		if len(systemTxs) == 0 {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
+		}
+		if systemTxs[0] == nil {
+			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get nil")
 		}
 		actualTx := systemTxs[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)
@@ -1226,7 +1233,7 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 	receipt := types.NewReceipt(false, *usedGas)
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
-	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64()), state.NewNoopWriter()); err != nil {
+	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64(), header.Time), state.NewNoopWriter()); err != nil {
 		return nil, nil, nil, err
 	}
 	// Set the receipt logs and create a bloom for filtering

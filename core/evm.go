@@ -33,7 +33,7 @@ import (
 //
 // excessDataGas must be set to the excessDataGas value from the *parent* block header, and can be
 // nil if the parent block is not of EIP-4844 type. It is read only.
-func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader, author *common.Address) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -86,7 +86,7 @@ func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashF
 func NewEVMTxContext(msg Message) evmtypes.TxContext {
 	return evmtypes.TxContext{
 		Origin:   msg.From(),
-		GasPrice: msg.GasPrice().ToBig(),
+		GasPrice: msg.GasPrice(),
 	}
 }
 
