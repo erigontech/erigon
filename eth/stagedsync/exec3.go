@@ -728,6 +728,47 @@ func reconstituteStep(last bool,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
+	var err error
+	var startOk, endOk bool
+	startTxNum, endTxNum := as.TxNumRange()
+	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
+		if err != nil {
+			return err
+		}
+		if startBlockNum > 0 {
+			startBlockNum--
+			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
+			if err != nil {
+				return err
+			}
+		}
+		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !startOk {
+		return fmt.Errorf("step startTxNum not found in snapshot blocks: %d", startTxNum)
+	}
+	if !endOk {
+		return fmt.Errorf("step endTxNum not found in snapshot blocks: %d", endTxNum)
+	}
+	if last {
+		endBlockNum = blockNum
+	}
+
+	if s.BlockNumber > endTxNum { // if stage progress is higher, skip this step
+		return nil
+	}
+
+	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
+	var maxTxNum uint64 = startTxNum
+
 	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
 	scanWorker := exec3.NewScanWorker(txNum, as)
@@ -770,7 +811,6 @@ func reconstituteStep(last bool,
 			}
 		}
 	}()
-	var err error
 	for i := 0; i < workerCount; i++ {
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
@@ -791,40 +831,7 @@ func reconstituteStep(last bool,
 		reconWorkers[i].SetChainTx(chainTxs[i])
 	}
 	wg.Add(workerCount)
-	var startOk, endOk bool
-	startTxNum, endTxNum := as.TxNumRange()
-	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
-		if err != nil {
-			return err
-		}
-		if startBlockNum > 0 {
-			startBlockNum--
-			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
-			if err != nil {
-				return err
-			}
-		}
-		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !startOk {
-		return fmt.Errorf("step startTxNum not found in snapshot blocks: %d", startTxNum)
-	}
-	if !endOk {
-		return fmt.Errorf("step endTxNum not found in snapshot blocks: %d", endTxNum)
-	}
-	if last {
-		endBlockNum = blockNum
-	}
-	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
-	var maxTxNum uint64 = startTxNum
+
 	rollbackCount := uint64(0)
 	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
@@ -973,7 +980,6 @@ func reconstituteStep(last bool,
 			}
 			inputTxNum++
 		}
-		b, txs = nil, nil //nolint
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 	}
@@ -1159,6 +1165,11 @@ func reconstituteStep(last bool,
 				}
 			}
 		}
+
+		if err := s.Update(tx, endBlockNum); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		return err
