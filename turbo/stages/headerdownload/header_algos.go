@@ -489,7 +489,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
-	stride := uint64(8 * 192) // Fix for BSC, for some reason most peers cannot response to the skeleton requests with non-zero strides anymore, so we are getting stuck very frequently
+	stride := uint64(8 * 192)
 	var length uint64 = 192
 	strideHeight := hd.highestInDb + 1
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
