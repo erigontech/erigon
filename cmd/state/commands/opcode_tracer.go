@@ -553,7 +553,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate := state.NewPlainState(historyTx, block.NumberU64())
+		dbstate := state.NewPlainState(historyTx, block.NumberU64(), systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		intraBlockState := state.New(dbstate)
 		intraBlockState.SetTracer(ot)
 
@@ -679,7 +679,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 		misc.ApplyDAOHardFork(ibs)
 	}
 	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)

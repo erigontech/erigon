@@ -62,11 +62,9 @@ const (
 var (
 	MainnetGenesisHash    = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
 	SepoliaGenesisHash    = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	RopstenGenesisHash    = common.HexToHash("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d")
 	RinkebyGenesisHash    = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash     = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	SokolGenesisHash      = common.HexToHash("0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f")
-	FermionGenesisHash    = common.HexToHash("0x0658360d8680ead416900a552b67b84e6d575c7f0ecab3dbe42406f9f8c34c35")
 	BSCGenesisHash        = common.HexToHash("0x0d21840abff46b96c84b2ac9e10e4f5cdaeb5693cb665db62a2f3b02d2d57b5b")
 	ChapelGenesisHash     = common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34")
 	RialtoGenesisHash     = common.HexToHash("0xee835a629f9cf5510b48b6ba41d69e0ff7d6ef10f977166ef939db41f59f5501")
@@ -82,10 +80,9 @@ var (
 )
 
 var (
-	SokolGenesisStateRoot   = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
-	FermionGenesisStateRoot = common.HexToHash("0x08982dc16236c51b6d9aff8b76cd0faa7067eb55eba62395d5a82649d8fb73c4")
-	GnosisGenesisStateRoot  = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
-	ChiadoGenesisStateRoot  = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
+	SokolGenesisStateRoot  = common.HexToHash("0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3")
+	GnosisGenesisStateRoot = common.HexToHash("0x40cf4430ecaa733787d1a65154a3b9efb560c95d9e324a23b97f0609b539133b")
+	ChiadoGenesisStateRoot = common.HexToHash("0x9ec3eaf4e6188dfbdd6ade76eaa88289b57c63c9a2cde8d35291d5a29e143d31")
 )
 
 var (
@@ -94,9 +91,6 @@ var (
 
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = readChainSpec("chainspecs/sepolia.json")
-
-	// RopstenChainConfig contains the chain parameters to run a node on the Ropsten test network.
-	RopstenChainConfig = readChainSpec("chainspecs/ropsten.json")
 
 	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
 	RinkebyChainConfig = readChainSpec("chainspecs/rinkeby.json")
@@ -111,8 +105,6 @@ var (
 	RialtoChainConfig = readChainSpec("chainspecs/rialto.json")
 
 	SokolChainConfig = readChainSpec("chainspecs/sokol.json")
-
-	FermionChainConfig = readChainSpec("chainspecs/fermion.json")
 
 	// AllProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the main net protocol.
@@ -134,7 +126,7 @@ var (
 		GrayGlacierBlock:              big.NewInt(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		ShanghaiBlock:                 big.NewInt(0),
+		ShanghaiTime:                  big.NewInt(0),
 		Ethash:                        new(EthashConfig),
 	}
 
@@ -201,7 +193,7 @@ var (
 		Aura:                  &AuRaConfig{},
 	}
 
-	TestRules = TestChainConfig.Rules(0)
+	TestRules = TestChainConfig.Rules(0, 0)
 )
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -241,8 +233,8 @@ type ChainConfig struct {
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
-	ShanghaiBlock *big.Int `json:"shanghaiBlock,omitempty"` // Shanghai switch block (nil = no fork, 0 = already activated)
-	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch block (nil = no fork, 0 = already activated)
+	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already activated)
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already activated)
 
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
@@ -412,7 +404,7 @@ func (c *ChainConfig) String() string {
 
 	// TODO Covalent: Refactor to more generic approach and potentially introduce tag for "ecosystem" field (Ethereum, BSC, etc.)
 	if c.Consensus == ParliaConsensus {
-		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Engine: %v}",
+		return fmt.Sprintf("{ChainID: %v Ramanujan: %v, Niels: %v, MirrorSync: %v, Bruno: %v, Euler: %v, Gibbs: %v, Nano: %v, Moran: %v, Gibbs: %v, Engine: %v}",
 			c.ChainID,
 			c.RamanujanBlock,
 			c.NielsBlock,
@@ -422,6 +414,7 @@ func (c *ChainConfig) String() string {
 			c.GibbsBlock,
 			c.NanoBlock,
 			c.MoranBlock,
+			c.GibbsBlock,
 			engine,
 		)
 	}
@@ -444,8 +437,8 @@ func (c *ChainConfig) String() string {
 		c.GrayGlacierBlock,
 		c.TerminalTotalDifficulty,
 		c.MergeNetsplitBlock,
-		c.ShanghaiBlock,
-		c.CancunBlock,
+		c.ShanghaiTime,
+		c.CancunTime,
 		engine,
 	)
 }
@@ -620,14 +613,14 @@ func (c *ChainConfig) IsGrayGlacier(num uint64) bool {
 	return isForked(c.GrayGlacierBlock, num)
 }
 
-// IsShanghai returns whether num is either equal to the Shanghai fork block or greater.
-func (c *ChainConfig) IsShanghai(num uint64) bool {
-	return isForked(c.ShanghaiBlock, num)
+// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
+func (c *ChainConfig) IsShanghai(time uint64) bool {
+	return isForked(c.ShanghaiTime, time)
 }
 
-// IsCancun returns whether num is either equal to the Cancun fork block or greater.
-func (c *ChainConfig) IsCancun(num uint64) bool {
-	return isForked(c.CancunBlock, num)
+// IsCancun returns whether time is either equal to the Cancun fork time or greater.
+func (c *ChainConfig) IsCancun(time uint64) bool {
+	return isForked(c.CancunTime, time)
 }
 
 func (c *ChainConfig) IsEip1559FeeCollector(num uint64) bool {
@@ -681,8 +674,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
-		{name: "shanghaiBlock", block: c.ShanghaiBlock},
-		{name: "cancunBlock", block: c.CancunBlock},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -758,12 +749,6 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	}
 	if isForkIncompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
-	}
-	if isForkIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, head) {
-		return newCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
-	}
-	if isForkIncompatible(c.CancunBlock, newcfg.CancunBlock, head) {
-		return newCompatError("Cancun fork block", c.CancunBlock, newcfg.CancunBlock)
 	}
 
 	// Parlia forks
@@ -859,13 +844,13 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
-	IsNano, IsMoran                                         bool
+	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsStarknet, IsAura                            bool
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num uint64) *Rules {
+func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -881,8 +866,8 @@ func (c *ChainConfig) Rules(num uint64) *Rules {
 		IsIstanbul:            c.IsIstanbul(num),
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
-		IsShanghai:            c.IsShanghai(num),
-		IsCancun:              c.IsCancun(num),
+		IsShanghai:            c.IsShanghai(time),
+		IsCancun:              c.IsCancun(time),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
@@ -897,16 +882,12 @@ func ChainConfigByChainName(chain string) *ChainConfig {
 		return MainnetChainConfig
 	case networkname.SepoliaChainName:
 		return SepoliaChainConfig
-	case networkname.RopstenChainName:
-		return RopstenChainConfig
 	case networkname.RinkebyChainName:
 		return RinkebyChainConfig
 	case networkname.GoerliChainName:
 		return GoerliChainConfig
 	case networkname.SokolChainName:
 		return SokolChainConfig
-	case networkname.FermionChainName:
-		return FermionChainConfig
 	case networkname.BSCChainName:
 		return BSCChainConfig
 	case networkname.ChapelChainName:
@@ -934,16 +915,12 @@ func GenesisHashByChainName(chain string) *common.Hash {
 		return &MainnetGenesisHash
 	case networkname.SepoliaChainName:
 		return &SepoliaGenesisHash
-	case networkname.RopstenChainName:
-		return &RopstenGenesisHash
 	case networkname.RinkebyChainName:
 		return &RinkebyGenesisHash
 	case networkname.GoerliChainName:
 		return &GoerliGenesisHash
 	case networkname.SokolChainName:
 		return &SokolGenesisHash
-	case networkname.FermionChainName:
-		return &FermionGenesisHash
 	case networkname.BSCChainName:
 		return &BSCGenesisHash
 	case networkname.ChapelChainName:
@@ -971,16 +948,12 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return MainnetChainConfig
 	case genesisHash == SepoliaGenesisHash:
 		return SepoliaChainConfig
-	case genesisHash == RopstenGenesisHash:
-		return RopstenChainConfig
 	case genesisHash == RinkebyGenesisHash:
 		return RinkebyChainConfig
 	case genesisHash == GoerliGenesisHash:
 		return GoerliChainConfig
 	case genesisHash == SokolGenesisHash:
 		return SokolChainConfig
-	case genesisHash == FermionGenesisHash:
-		return FermionChainConfig
 	case genesisHash == BSCGenesisHash:
 		return BSCChainConfig
 	case genesisHash == ChapelGenesisHash:
@@ -991,6 +964,8 @@ func ChainConfigByGenesisHash(genesisHash common.Hash) *ChainConfig {
 		return MumbaiChainConfig
 	case genesisHash == BorMainnetGenesisHash:
 		return BorMainnetChainConfig
+	case genesisHash == BorDevnetGenesisHash:
+		return BorDevnetChainConfig
 	case genesisHash == GnosisGenesisHash:
 		return GnosisChainConfig
 	case genesisHash == ChiadoGenesisHash:

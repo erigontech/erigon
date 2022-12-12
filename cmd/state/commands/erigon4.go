@@ -336,7 +336,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
 	ww.w.SetBlockNum(block.NumberU64())

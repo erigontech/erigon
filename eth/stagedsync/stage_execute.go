@@ -278,9 +278,8 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
-		return err
+		return fmt.Errorf("ExecV3: %w", err)
 	}
-
 	return nil
 }
 
@@ -736,8 +735,14 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err = cfg.agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-			return err
+		if initialCycle {
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+				return err
+			}
+		} else {
+			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+				return err
+			}
 		}
 	} else {
 		if cfg.prune.History.Enabled() {
