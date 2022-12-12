@@ -706,7 +706,7 @@ func goerliConfig() BeaconChainConfig {
 }
 
 func shandongConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	f, err := beaconConfigFiles.Open("beacon_configs/shandong.yml")
 	if err != nil {
 		panic(err)
