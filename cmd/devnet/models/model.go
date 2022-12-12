@@ -77,7 +77,7 @@ const (
 	// ReqId is the request id for each request
 	ReqId = 0
 	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
-	MaxNumberOfBlockChecks = 1
+	MaxNumberOfBlockChecks = 3
 
 	// Latest is the parameter for the latest block
 	Latest BlockNumber = "latest"

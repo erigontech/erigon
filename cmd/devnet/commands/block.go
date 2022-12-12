@@ -67,11 +67,15 @@ func callContractTx() (*common.Hash, error) {
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 	fmt.Println()
 
+	checkTxPoolContent(1, 0)
+
 	_, err = services.SearchBlockForTransactionHash(*hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find tx in block: %v", err)
 	}
 	fmt.Println()
+
+	checkTxPoolContent(1, 0)
 
 	if err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address); err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)
