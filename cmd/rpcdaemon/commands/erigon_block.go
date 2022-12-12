@@ -262,7 +262,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	}
 
 	if !isCanonicalHash {
-		return nil, fmt.Errorf("[GetBlockByHash] the hash %s is not cannonical", cannonicalBlockHash)
+		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
 	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
