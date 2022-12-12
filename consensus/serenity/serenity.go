@@ -129,6 +129,13 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	for _, w := range withdrawals {
 		state.AddBalance(w.Address, &w.Amount)
 	}
+	if config.IsSharding(header.Number.Uint64()) {
+		parent := chain.GetHeaderByHash(header.ParentHash)
+		if parent == nil {
+			return nil, nil, fmt.Errorf("Could not find the parent of block %v to get excess data gas", header.Number.Uint64())
+		}
+		header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
+	}
 	return txs, r, nil
 }
 
@@ -210,6 +217,15 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 	if !shanghai && header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
+	}
+
+	if !chain.Config().IsSharding(header.Number.Uint64()) {
+		if header.ExcessDataGas != nil {
+			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
+		}
+	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
+		// Verify the header's EIP-4844 attributes.
+		return err
 	}
 	return nil
 }

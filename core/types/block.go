@@ -516,6 +516,7 @@ func (h *Header) SetExcessDataGas(v *big.Int) {
 		h.ExcessDataGas.Set(v)
 	}
 	if h.WithdrawalsHash == nil {
+		fmt.Println("Setting withdrawals hash to empty root hash")
 		// leaving this nil would result in a buggy encoding
 		h.WithdrawalsHash = &EmptyRootHash
 	}
@@ -785,6 +786,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
+	rb.Withdrawals = []*Withdrawal{} // withdrawals should never be nil post-Capella
 	for err == nil {
 		var withdrawal Withdrawal
 		if err = withdrawal.DecodeRLP(s); err != nil {
@@ -1148,6 +1150,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
+	bb.withdrawals = []*Withdrawal{} // withdrawals should never be nil post-Capella
 	for err == nil {
 		var withdrawal Withdrawal
 		if err = withdrawal.DecodeRLP(s); err != nil {
