@@ -207,7 +207,8 @@ func enable3540(jt *JumpTable) {
 }
 
 func enable3670(jt *JumpTable) {
-	// Do nothing.
+	jt[CALLCODE].legacyOnly = true
+	jt[SELFDESTRUCT].legacyOnly = true
 }
 
 // enable4200 applies EIP-4200 (RJUMP and RJUMPI opcodes)
