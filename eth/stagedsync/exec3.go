@@ -1249,11 +1249,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}
 	db.Close()
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
