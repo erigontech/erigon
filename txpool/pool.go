@@ -675,6 +675,15 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	return success, err
 }
 
+func (p *TxPool) ResetYieldedStatus() {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+	best := p.pending.best
+	for i := 0; i < len(best.ms); i++ {
+		best.ms[i].alreadyYielded = false
+	}
+}
+
 func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
 	return p.best(n, txs, tx, onTopOf, availableGas, true)
 }
