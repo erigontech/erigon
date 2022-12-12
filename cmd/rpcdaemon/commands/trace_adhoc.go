@@ -235,7 +235,7 @@ type OeTracer struct {
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
@@ -266,7 +266,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && value.Sign() <= 0 {
+	if precompile && depth > 0 && value == nil {
 		ot.precompile = true
 		return
 	}
@@ -289,16 +289,16 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if calltype == vm.DELEGATECALLT {
+		if callType == vm.DELEGATECALLT {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
-				value = action.Value.ToInt()
+				value, _ = uint256.FromBig(action.Value.ToInt())
 			case *CallTraceAction:
-				value = action.Value.ToInt()
+				value, _ = uint256.FromBig(action.Value.ToInt())
 			}
 		}
-		if calltype == vm.STATICCALLT {
-			value = big.NewInt(0)
+		if callType == vm.STATICCALLT {
+			value = uint256.NewInt(0)
 		}
 	}
 	trace.TraceAddress = make([]int, len(ot.traceAddr))
@@ -308,11 +308,11 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		action.From = from
 		action.Gas.ToInt().SetUint64(gas)
 		action.Init = common.CopyBytes(input)
-		action.Value.ToInt().Set(value)
+		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else {
 		action := CallTraceAction{}
-		switch calltype {
+		switch callType {
 		case vm.CALLT:
 			action.CallType = CALL
 		case vm.CALLCODET:
@@ -326,7 +326,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		action.To = to
 		action.Gas.ToInt().SetUint64(gas)
 		action.Input = common.CopyBytes(input)
-		action.Value.ToInt().Set(value)
+		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	}
 	ot.r.Trace = append(ot.r.Trace, trace)

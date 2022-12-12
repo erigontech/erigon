@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	"github.com/ledgerwatch/log/v3"
@@ -114,7 +114,7 @@ var resetBlocks4 = Migration{
 			return err
 		}
 
-		if err := rawdbreset.ResetSenders(tx); err != nil {
+		if err := rawdbreset.ResetSenders(context.Background(), db, tx); err != nil {
 			return err
 		}
 

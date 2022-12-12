@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -201,7 +200,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
-		compositeKey := make([]byte, common.HashLength+common.HashLength)
+		compositeKey := make([]byte, length.Hash+length.Hash)
 		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
 		defer it.Close()
 		for it.HasNext() {
@@ -215,7 +214,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 				return err
 			}
 			copy(compositeKey, addrHash[:])
-			copy(compositeKey[common.HashLength:], secKey[:])
+			copy(compositeKey[length.Hash:], secKey[:])
 			if len(v) != 0 {
 				v = nonEmptyMarker
 			}
@@ -677,42 +676,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 	if err := stTrieCollector.Load(db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ResetHashState(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ResetIH(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
 	return nil

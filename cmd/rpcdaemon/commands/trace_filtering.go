@@ -759,6 +759,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 			stream.WriteObjectEnd()
 			continue
 		}
+		if txn == nil {
+			continue //guess block doesn't have transactions
+		}
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*lastSigner, lastHeader.BaseFee, lastRules)
 		if err != nil {

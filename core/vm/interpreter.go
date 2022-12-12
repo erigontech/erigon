@@ -20,10 +20,12 @@ import (
 	"hash"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // Config are the configuration options for the Interpreter
@@ -40,6 +42,15 @@ type Config struct {
 	RestoreState  bool   // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+}
+
+func (vmConfig *Config) HasEip3860(rules *params.Rules) bool {
+	for _, eip := range vmConfig.ExtraEips {
+		if eip == 3860 {
+			return true
+		}
+	}
+	return rules.IsShanghai
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the
