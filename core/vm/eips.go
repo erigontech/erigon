@@ -253,7 +253,7 @@ func opRjump(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 // opRjumpi implements the RJUMPI opcode
 func opRjumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	condition := scope.Stack.Pop()
-	if condition.BitLen() == 0 {
+	if condition.IsZero() {
 		// Not branching, just skip over immediate argument.
 		*pc += 2
 		return nil, nil
