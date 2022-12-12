@@ -153,7 +153,7 @@ Returns the current network id.
    * - Type
      - Description
    * - ``STRING``
-     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``3``: Ropsten Testnet |br|  ``4``: Rinkeby Testnet |br|  ``42``: Kovan Testnet |br|
+     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``4``: Rinkeby Testnet |br|  ``5``: Görli Testnet |br|
 
 --------------
 

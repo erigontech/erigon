@@ -178,7 +178,9 @@ func (s *GossipManager) Close() {
 }
 
 func (s *GossipManager) String() string {
-	sb := new(strings.Builder)
+	sb := strings.Builder{}
+	sb.Grow(len(s.subscriptions) * 4)
+
 	s.mu.RLock()
 	for _, v := range s.subscriptions {
 		sb.Write([]byte(v.topic.String()))

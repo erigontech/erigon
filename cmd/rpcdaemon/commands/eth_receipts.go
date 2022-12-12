@@ -13,10 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -29,15 +30,15 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
 	}
+	engine := api.engine()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, api._blockReader, tx, 0, api._agg, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api._agg, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +46,6 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 	usedGas := new(uint64)
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 
-	ethashFaker := ethash.NewFaker()
 	noopWriter := state.NewNoopWriter()
 
 	receipts := make(types.Receipts, len(block.Transactions()))
@@ -61,7 +61,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), ethashFaker, nil, gp, ibs, noopWriter, header, excessDataGas, txn, usedGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, excessDataGas, txn, usedGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}
@@ -336,6 +336,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var skipAnalysis bool
 	stateReader := state.NewHistoryReader22(ac)
 	stateReader.SetTx(tx)
+	ibs := state.New(stateReader)
+
 	//stateReader.SetTrace(true)
 	iter := txNumbers.Iterator()
 
@@ -343,6 +345,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
+
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
@@ -350,6 +354,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
 	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
+	var blockCtx evmtypes.BlockContext
 
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
@@ -378,7 +383,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			lastBlockNum = blockNum
 			blockHash = header.Hash()
 			signer = types.MakeSigner(chainConfig, blockNum)
-			rules = chainConfig.Rules(blockNum)
+			rules = chainConfig.Rules(blockNum, header.Time)
 			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 
 			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
@@ -389,6 +394,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 			if err != nil {
 				return nil, err
 			}
+			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -406,11 +412,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		if err != nil {
 			return nil, err
 		}
-		ibs := state.New(stateReader)
+
+		ibs.Reset()
 		ibs.Prepare(txHash, blockHash, txIndex)
 
-		blockCtx, txCtx := transactions.GetEvmContext(msg, header, true /* requireCanonical */, tx, api._blockReader)
-		evm.ResetBetweenBlocks(blockCtx, txCtx, ibs, vmConfig, rules)
+		evm.ResetBetweenBlocks(blockCtx, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
@@ -496,8 +502,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	// if not ok and cc.Bor != nil then we might have a bor transaction
-	if !ok {
+	// if not ok and cc.Bor != nil then we might have a bor transaction.
+	// Note that Private API returns 0 if transaction is not found.
+	if !ok || blockNum == 0 {
 		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 		if err != nil {
 			return nil, err

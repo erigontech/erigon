@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -307,7 +308,7 @@ func (s *stat23) print(aStats libstate.FilesStats, logger log.Logger) {
 
 func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat23 {
 	currentTime := time.Now()
-	libcommon.ReadMemStats(&s.mem)
+	dbg.ReadMemStats(&s.mem)
 
 	interval := currentTime.Sub(s.prevTime).Seconds()
 	s.blockNum = blockNum
@@ -335,7 +336,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
 	ww.w.SetBlockNum(block.NumberU64())
@@ -426,7 +427,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, nil, nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 

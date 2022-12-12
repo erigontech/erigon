@@ -30,7 +30,7 @@ GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
 GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
@@ -278,7 +278,13 @@ coverage:
 .PHONY: hive
 hive:
 	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker pull thorax/hive:latest
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
+
+## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+.PHONY: automated-tests
+automated-tests:
+	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

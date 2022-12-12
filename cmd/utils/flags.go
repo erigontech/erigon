@@ -478,6 +478,11 @@ var (
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
+	P2pProtocolAllowedPorts = cli.UintSliceFlag{
+		Name:  "p2p.allowed-ports",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
+		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -850,6 +855,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port,
 	protocol uint,
+	allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -876,6 +882,7 @@ func NewP2PConfig(
 		Name:            nodeName,
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -922,6 +929,26 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
+	}
+	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
+	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
+	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
+		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
+	}
+
+	if ctx.IsSet(ListenPortFlag.Name) {
+		// add non-default port to allowed port list
+		lp := ctx.Int(ListenPortFlag.Name)
+		found := false
+		for _, p := range cfg.AllowedPorts {
+			if int(p) == lp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
+		}
 	}
 }
 
@@ -979,10 +1006,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		networkname.FermionChainName: true,
-		networkname.BSCChainName:     true,
-		networkname.RialtoChainName:  true,
-		networkname.ChapelChainName:  true,
+		networkname.BSCChainName:    true,
+		networkname.RialtoChainName: true,
+		networkname.ChapelChainName: true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
@@ -1074,8 +1100,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.SokolChainName:
 		return networkDataDirCheckingLegacy(datadir, "sokol")
-	case networkname.FermionChainName:
-		return networkDataDirCheckingLegacy(datadir, "fermion")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:

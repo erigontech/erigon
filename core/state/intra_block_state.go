@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/maps"
 )
 
 type revision struct {
@@ -127,16 +128,29 @@ func (sdb *IntraBlockState) Error() error {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	sdb.stateObjects = make(map[common.Address]*stateObject)
-	sdb.stateObjectsDirty = make(map[common.Address]struct{})
+	maps.Clear(sdb.nilAccounts)
+	maps.Clear(sdb.stateObjects)
+	maps.Clear(sdb.stateObjectsDirty)
 	sdb.thash = common.Hash{}
 	sdb.bhash = common.Hash{}
 	sdb.txIndex = 0
-	sdb.logs = make(map[common.Hash][]*types.Log)
+	maps.Clear(sdb.logs)
 	sdb.logSize = 0
-	sdb.clearJournalAndRefund()
-	sdb.accessList = newAccessList()
-	sdb.balanceInc = make(map[common.Address]*BalanceIncrease)
+	//sdb.clearJournalAndRefund()
+	//sdb.accessList = newAccessList() // this reset by .Prepare() method
+	maps.Clear(sdb.balanceInc)
+
+	//sdb.nilAccounts = make(map[common.Address]struct{})
+	//sdb.stateObjects = make(map[common.Address]*stateObject)
+	//sdb.stateObjectsDirty = make(map[common.Address]struct{})
+	//sdb.thash = common.Hash{}
+	//sdb.bhash = common.Hash{}
+	//sdb.txIndex = 0
+	//sdb.logs = make(map[common.Hash][]*types.Log)
+	//sdb.logSize = 0
+	//sdb.clearJournalAndRefund()
+	//sdb.accessList = newAccessList()
+	//sdb.balanceInc = make(map[common.Address]*BalanceIncrease)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {

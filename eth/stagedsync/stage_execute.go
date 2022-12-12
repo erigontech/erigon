@@ -12,15 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -34,6 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
@@ -42,7 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -62,6 +60,10 @@ type WithSnapshots interface {
 	Snapshots() *snapshotsync.RoSnapshots
 }
 
+type headerDownloader interface {
+	ReportBadHeaderPoS(badHeader, lastValidAncestor ecom.Hash)
+}
+
 type ExecuteBlockCfg struct {
 	db            kv.RwDB
 	batchSize     datasize.ByteSize
@@ -74,7 +76,7 @@ type ExecuteBlockCfg struct {
 	stateStream   bool
 	accumulator   *shards.Accumulator
 	blockReader   services.FullBlockReader
-	hd            *headerdownload.HeaderDownload
+	hd            headerDownloader
 
 	dirs      datadir.Dirs
 	historyV3 bool
@@ -98,7 +100,7 @@ func StageExecuteBlocksCfg(
 	historyV3 bool,
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
-	hd *headerdownload.HeaderDownload,
+	hd headerDownloader,
 	genesis *core.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.Aggregator22,
@@ -276,23 +278,27 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
-		return err
+		return fmt.Errorf("ExecV3: %w", err)
 	}
-
 	return nil
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
 func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+	sendersProgress, err := senderStageProgress(tx, db)
+	if err != nil {
+		return 0, false, err
+	}
+	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumMinimax())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+			ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 			return err
 		}); err != nil {
 			return
 		}
 	} else {
-		ok, n, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
 	}
 	return
 }
@@ -518,7 +524,7 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	var logpairs = []interface{}{
 		"number", currentBlock,
 		"blk/s", fmt.Sprintf("%.1f", speed),
@@ -729,8 +735,14 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err = cfg.agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-			return err
+		if initialCycle {
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+				return err
+			}
+		} else {
+			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+				return err
+			}
 		}
 	} else {
 		if cfg.prune.History.Enabled() {

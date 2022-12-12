@@ -22,7 +22,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(
-		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout),
+		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
 		m.DB, nil, nil, nil, 5000000)
 	ctx := context.Background()
 

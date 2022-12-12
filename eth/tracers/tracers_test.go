@@ -150,7 +150,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	origin, _ := signer.Sender(txn)
 	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: big.NewInt(1),
+		GasPrice: uint256.NewInt(1),
 	}
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
@@ -242,7 +242,7 @@ func TestCallTracer(t *testing.T) {
 			origin, _ := signer.Sender(txn)
 			txContext := evmtypes.TxContext{
 				Origin:   origin,
-				GasPrice: big.NewInt(int64(txn.GetPrice().Uint64())),
+				GasPrice: txn.GetPrice(),
 			}
 			context := evmtypes.BlockContext{
 				CanTransfer: core.CanTransfer,

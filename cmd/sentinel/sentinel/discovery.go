@@ -22,14 +22,15 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) error {
+func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
 	if info.ID == s.host.ID() {
 		return nil
 	}
@@ -39,7 +40,7 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) erro
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
 	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
-		s.peers.Penalize(info.ID)
+		s.peers.DisconnectPeer(info.ID)
 		return err
 	}
 	return nil
@@ -52,7 +53,7 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
+			if err := s.connectWithPeer(s.ctx, peerInfo, true); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -90,7 +91,7 @@ func (s *Sentinel) listenForPeers() {
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
+			if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
 				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
@@ -122,4 +123,14 @@ func (s *Sentinel) setupENR(
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
 	return node, nil
+}
+
+func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
+	go func() {
+		peerId := conn.RemotePeer()
+		invalid := !s.handshaker.ValidatePeer(peerId)
+		if invalid {
+			s.peers.DisconnectPeer(peerId)
+		}
+	}()
 }

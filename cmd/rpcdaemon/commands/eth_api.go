@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -110,11 +111,12 @@ type BaseAPI struct {
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
 	_agg         *libstate.Aggregator22
+	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, singleNodeMode bool, evmCallTimeout time.Duration) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -124,12 +126,16 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		panic(err)
 	}
 
-	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout}
+	return &BaseAPI{filters: f, stateCache: stateCache, blocksLRU: blocksLRU, _blockReader: blockReader, _txnReader: blockReader, _agg: agg, evmCallTimeout: evmCallTimeout, _engine: engine}
 }
 
 func (api *BaseAPI) chainConfig(tx kv.Tx) (*params.ChainConfig, error) {
 	cfg, _, err := api.chainConfigWithGenesis(tx)
 	return cfg, err
+}
+
+func (api *BaseAPI) engine() consensus.EngineReader {
+	return api._engine
 }
 
 // nolint:unused
@@ -149,6 +155,7 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 	}
 	return api.blockWithSenders(tx, hash, number)
 }
+
 func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
@@ -162,6 +169,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 
 	return api.blockWithSenders(tx, hash, *number)
 }
+
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {

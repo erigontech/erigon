@@ -24,7 +24,6 @@ import (
 
 type Worker struct {
 	lock        sync.Locker
-	wg          *sync.WaitGroup
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
 	background  bool
@@ -33,6 +32,7 @@ type Worker struct {
 	stateWriter *state.StateWriter22
 	stateReader *state.StateReader22
 	chainConfig *params.ChainConfig
+	getHeader   func(hash common.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -46,14 +46,14 @@ type Worker struct {
 
 	starkNetEvm *vm.CVMAdapter
 	evm         *vm.EVM
+
+	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
-	ctx := context.Background()
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
-		wg:          wg,
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
@@ -70,6 +70,8 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
+
+	w.ibs = state.New(w.stateReader)
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
 
@@ -91,7 +93,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() {
-	defer rw.wg.Done()
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
@@ -115,7 +116,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
-	ibs := state.New(rw.stateReader)
+	rw.ibs.Reset()
+	ibs := rw.ibs
+
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
@@ -150,7 +153,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, txTask.ExcessDataGas, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
@@ -178,14 +181,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//var vmenv vm.VMInterface
-		//if txTask.Tx.IsStarkNet() {
-		//	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-		//	vmenv = rw.starkNetEvm
-		//} else {
-		//	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-		//	vmenv = rw.evm
-		//}
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
@@ -194,12 +189,12 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
-		resss, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
-		txTask.UsedGas = resss.UsedGas
+		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
 		} else {
+			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
@@ -309,14 +304,16 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
+	var wg sync.WaitGroup
 	queueSize := workerCount * 4
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	clear = func() {
+		wg.Wait()
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
@@ -324,7 +321,10 @@ func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync
 	if background {
 		wg.Add(workerCount)
 		for i := 0; i < workerCount; i++ {
-			go reconWorkers[i].Run()
+			go func(i int) {
+				defer wg.Done()
+				reconWorkers[i].Run()
+			}(i)
 		}
 	}
 	return reconWorkers, resultCh, clear

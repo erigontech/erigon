@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -101,15 +102,15 @@ func GetAccount(tx kv.Tx, blockNumber uint64, address common.Address) (*accounts
 	return reader.ReadAccountData(address)
 }
 
-func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, txnIndex uint64, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
+func CreateStateReader(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash, txnIndex uint64, filters *Filters, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22, chainName string) (state.StateReader, error) {
 	blockNumber, _, latest, err := _GetBlockNumber(true, blockNrOrHash, tx, filters)
 	if err != nil {
 		return nil, err
 	}
-	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, historyV3, agg)
+	return CreateStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, txnIndex, stateCache, historyV3, agg, chainName)
 }
 
-func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber uint64, latest bool, txnIndex uint64, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22) (state.StateReader, error) {
+func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber uint64, latest bool, txnIndex uint64, stateCache kvcache.Cache, historyV3 bool, agg *state2.Aggregator22, chainName string) (state.StateReader, error) {
 	if latest {
 		cacheView, err := stateCache.View(ctx, tx)
 		if err != nil {
@@ -117,12 +118,12 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 		}
 		return state.NewCachedReader2(cacheView, tx), nil
 	}
-	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, agg, historyV3)
+	return CreateHistoryStateReader(tx, blockNumber+1, txnIndex, agg, historyV3, chainName)
 }
 
-func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state2.Aggregator22, historyV3 bool) (state.StateReader, error) {
+func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state2.Aggregator22, historyV3 bool, chainName string) (state.StateReader, error) {
 	if !historyV3 {
-		return state.NewPlainState(tx, blockNumber), nil
+		return state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainName]), nil
 	}
 	aggCtx := agg.MakeContext()
 	aggCtx.SetTx(tx)
