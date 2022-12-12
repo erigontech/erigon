@@ -240,7 +240,7 @@ var Forks = map[string]*params.ChainConfig{
 		BerlinBlock:             big.NewInt(0),
 		LondonBlock:             big.NewInt(0),
 		ArrowGlacierBlock:       big.NewInt(0),
-		ShanghaiBlock:           big.NewInt(0),
+		ShanghaiTime:            big.NewInt(0),
 		TerminalTotalDifficulty: big.NewInt(0xC0000),
 	},
 }
