@@ -338,10 +338,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
 	}
-	// Check whether the init code size has been exceeded.
-	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
-		return nil, address, gas, ErrMaxInitCodeSizeExceeded
-	}
 	// Try to read code header if it claims to be EOF-formatted.
 	container, err := evm.parseContainer(codeAndHash.code)
 	if err != nil {
