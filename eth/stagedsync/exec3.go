@@ -762,10 +762,6 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	if s.BlockNumber > endTxNum { // if stage progress is higher, skip this step
-		return nil
-	}
-
 	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
 	var maxTxNum uint64 = startTxNum
 
@@ -1165,11 +1161,6 @@ func reconstituteStep(last bool,
 				}
 			}
 		}
-
-		if err := s.Update(tx, endBlockNum); err != nil {
-			return err
-		}
-
 		return nil
 	}); err != nil {
 		return err
