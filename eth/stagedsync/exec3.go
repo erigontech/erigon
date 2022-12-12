@@ -245,14 +245,8 @@ func ExecV3(ctx context.Context,
 
 	var errCh chan error
 
+	var wg sync.WaitGroup
 	if parallel {
-		errCh = make(chan error, 1)
-		defer close(errCh)
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		defer wg.Wait()
-
 		// Go-routine gathering results from the workers
 		rwLoop := func(ctx context.Context) error {
 			tx, err := chainDb.BeginRw(ctx)
@@ -407,10 +401,16 @@ func ExecV3(ctx context.Context,
 			}
 			return nil
 		}
+
+		errCh = make(chan error, 1)
+
+		wg.Add(1)
+		defer wg.Wait()
 		go func() {
 			defer wg.Done()
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
+			defer close(errCh)
 
 			if err := rwLoop(ctx); err != nil {
 				errCh <- err
@@ -642,13 +642,20 @@ Loop:
 	}
 
 	if parallel {
-		if err := <-errCh; err != nil {
-			return err
-		}
-	}
-
-	if !parallel {
 		stopWorkers()
+		wg.Wait()
+	ErrLoop:
+		for {
+			select {
+			case err := <-errCh:
+				if err != nil {
+					return err
+				}
+			default:
+				break ErrLoop
+			}
+		}
+
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
 			return err
@@ -762,7 +769,13 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
+	if s.BlockNumber > 0 && s.BlockNumber-1 > startBlockNum { // if stage progress is higher, skip this step
+		log.Info(fmt.Sprintf("[%s] skip recon step", s.LogPrefix()), "s.BlockNumber", s.BlockNumber, "startBlockNum", startBlockNum)
+		return nil
+	}
+
+	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
+
 	var maxTxNum uint64 = startTxNum
 
 	workCh := make(chan *exec22.TxTask, workerCount*4)
@@ -773,26 +786,26 @@ func reconstituteStep(last bool,
 	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	log.Info("Scan accounts history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
 
 	t = time.Now()
 	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	log.Info("Scan storage history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
 
 	t = time.Now()
 	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	log.Info("Scan code history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
 	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
+	log.Info(fmt.Sprintf("[%s] Ready to replay", s.LogPrefix()), "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
 	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
@@ -993,11 +1006,12 @@ func reconstituteStep(last bool,
 	}); err != nil {
 		return err
 	}
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
@@ -1161,6 +1175,11 @@ func reconstituteStep(last bool,
 				}
 			}
 		}
+
+		if err := s.Update(tx, endBlockNum); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		return err
