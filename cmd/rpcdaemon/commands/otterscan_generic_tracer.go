@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
@@ -29,7 +30,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return nil
 	}
 
-	reader := state.NewPlainState(dbtx, blockNum)
+	reader := state.NewPlainState(dbtx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(reader, stateCache)
 	noop := state.NewNoopWriter()

@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -146,7 +147,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		if b == nil {
 			break
 		}
-		reader := state.NewPlainState(historyTx, blockNum)
+		reader := state.NewPlainState(historyTx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		//reader.SetTrace(blockNum == uint64(block))
 		intraBlockState := state.New(reader)
 		csw := state.NewChangeSetWriterPlain(nil /* db */, blockNum)

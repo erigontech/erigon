@@ -161,7 +161,7 @@ func BenchmarkCall(b *testing.B) {
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	_, tx := memdb.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1))
+		statedb  = state.New(state.NewPlainState(tx, 1, nil))
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))
 	)
@@ -329,7 +329,7 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1))
+	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
 	cfg.GasLimit = gas
 	var (
 		destination = common.BytesToAddress([]byte("contract"))

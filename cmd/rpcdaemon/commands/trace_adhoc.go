@@ -448,7 +448,9 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
-				ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+				if st.Len() > i {
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+				}
 			}
 			// Set the "mem" of the last operation
 			var setMem bool
@@ -466,7 +468,11 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
-			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			if st.Len() > 0 {
+				ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			} else {
+				ot.lastOffStack.Ex.Push = []string{}
+			}
 			if ot.lastMemLen > 0 && memory != nil {
 				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
 				if len(cpy) == 0 {
@@ -500,26 +506,38 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		switch op {
 		case vm.MSTORE, vm.MLOAD:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = 32
+			if st.Len() > 0 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = 32
+			}
 		case vm.MSTORE8:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = 1
+			if st.Len() > 0 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = 1
+			}
 		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = st.Back(2).Uint64()
+			if st.Len() > 2 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = st.Back(2).Uint64()
+			}
 		case vm.STATICCALL, vm.DELEGATECALL:
-			ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
-			ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+			if st.Len() > 5 {
+				ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+			}
 		case vm.CALL, vm.CALLCODE:
-			ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
-			ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+			if st.Len() > 6 {
+				ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+			}
 		case vm.CREATE, vm.CREATE2:
 			// Effectively disable memory output
 			ot.memOffStack = append(ot.memOffStack, 0)
 			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
-			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+			if st.Len() > 1 {
+				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+			}
 		}
 		if ot.lastVmOp.Ex.Used < 0 {
 			ot.lastVmOp.Ex = nil
@@ -869,7 +887,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,7 +1097,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, err
 	}
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, *parentNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, *parentNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}

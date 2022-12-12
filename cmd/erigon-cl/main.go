@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
-	cldb "github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -86,7 +86,7 @@ Loop:
 	return nil
 }
 
-func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *cltypes.BeaconStateBellatrix) (sentinelrpc.SentinelClient, error) {
+func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconState *state.BeaconState) (sentinelrpc.SentinelClient, error) {
 	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
 	if err != nil {
 		return nil, err
@@ -101,10 +101,10 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *
 		NoDiscovery:   cfg.NoDiscovery,
 	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint.Root,
-		FinalizedEpoch: state.FinalizedCheckpoint.Epoch,
-		HeadSlot:       state.FinalizedCheckpoint.Epoch * 32,
-		HeadRoot:       state.FinalizedCheckpoint.Root,
+		FinalizedRoot:  beaconState.FinalizedCheckpoint().Root,
+		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch,
+		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * 32,
+		HeadRoot:       beaconState.FinalizedCheckpoint().Root,
 	}, handshake.FullClientRule)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
@@ -114,7 +114,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, state *
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context, db kv.RwDB) (*cltypes.BeaconStateBellatrix, error) {
+func getCheckpointState(ctx context.Context, db kv.RwDB) (*state.BeaconState, error) {
 
 	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
 
@@ -131,10 +131,6 @@ func getCheckpointState(ctx context.Context, db kv.RwDB) (*cltypes.BeaconStateBe
 	defer tx.Rollback()
 
 	if err := rawdb.WriteBeaconState(tx, state); err != nil {
-		log.Error("[DB] Failed", "reason", err)
-		return nil, err
-	}
-	if _, err = cldb.ReadBeaconState(tx, state.Slot); err != nil {
 		log.Error("[DB] Failed", "reason", err)
 		return nil, err
 	}
