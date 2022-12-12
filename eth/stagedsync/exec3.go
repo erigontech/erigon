@@ -1255,16 +1255,18 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer codeCollector.Close()
 	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
+
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
 	fillWorker.FillAccounts(plainStateCollector)
-	log.Info("Filled accounts", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
 	t = time.Now()
 	fillWorker.FillStorage(plainStateCollector)
-	log.Info("Filled storage", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
 	t = time.Now()
 	fillWorker.FillCode(codeCollector, plainContractCollector)
-	log.Info("Filled code", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+
 	// Load all collections into the main collector
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
 		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
