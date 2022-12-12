@@ -440,7 +440,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
 		Number:  anchor.blockHeight - 1,
-		Length:  192,
+		Length:  128,
 		Skip:    0,
 		Reverse: true,
 	}
@@ -456,7 +456,7 @@ func (hd *HeaderDownload) UpdateStats(req *HeaderRequest, skeleton bool) {
 			hd.stats.SkeletonReqMinBlock = req.Number
 		}
 		if req.Number+req.Length*req.Skip > hd.stats.SkeletonReqMaxBlock {
-			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*req.Skip
+			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*(req.Skip+1)
 		}
 	} else {
 		hd.stats.Requests++
@@ -489,7 +489,7 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
-	stride := uint64(8 * 192)
+	stride := uint64(1) // Fix for BSC, for some reason most peers cannot response to the skeleton requests with non-zero strides anymore, so we are getting stuck very frequently
 	strideHeight := hd.highestInDb + stride
 	var length uint64 = 192
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}

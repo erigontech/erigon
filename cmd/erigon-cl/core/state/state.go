@@ -103,3 +103,18 @@ func (b *BeaconState) SizeSSZ() int {
 func (b *BeaconState) UnmarshalSSZ(buf []byte) error {
 	panic("beacon state should be derived, use FromBellatrixState instead.")
 }
+
+// BlockRoot computes the block root for the state.
+func (b *BeaconState) BlockRoot() ([32]byte, error) {
+	stateRoot, err := b.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return (&cltypes.BeaconBlockHeader{
+		Slot:          b.latestBlockHeader.Slot,
+		ProposerIndex: b.latestBlockHeader.ProposerIndex,
+		BodyRoot:      b.latestBlockHeader.BodyRoot,
+		ParentRoot:    b.latestBlockHeader.ParentRoot,
+		Root:          stateRoot,
+	}).HashTreeRoot()
+}

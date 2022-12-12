@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -20,13 +21,13 @@ type StageBeaconsBlockCfg struct {
 	downloader *network.ForwardBeaconDownloader
 	genesisCfg *clparams.GenesisConfig
 	beaconCfg  *clparams.BeaconChainConfig
-	state      *cltypes.BeaconStateBellatrix
+	state      *state.BeaconState
 }
 
 const maxOptimisticDistance = 8
 
 func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconStateBellatrix) StageBeaconsBlockCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageBeaconsBlockCfg {
 	return StageBeaconsBlockCfg{
 		db:         db,
 		downloader: downloader,
@@ -49,14 +50,12 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	}
 	progress := s.BlockNumber
 	if progress == 0 {
-		//progress = cfg.state.LatestBlockHeader.Slot
-		progress = cfg.state.FinalizedCheckpoint.Epoch * 32
+		progress = cfg.state.LatestBlockHeader().Slot
 	}
-	/*lastRoot, err := cfg.state.BlockRoot()
+	lastRoot, err := cfg.state.BlockRoot()
 	if err != nil {
 		return err
-	}*/
-	lastRoot := cfg.state.FinalizedCheckpoint.Root
+	}
 	// We add one so that we wait for Gossiped blocks if we are on chain tip.
 	targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
 
