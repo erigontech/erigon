@@ -723,6 +723,12 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+
+	DisableIPV6 = cli.BoolFlag{
+		Name:  "disable.ipv6",
+		Usage: "Turns off ipv6",
+		Value: false,
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
