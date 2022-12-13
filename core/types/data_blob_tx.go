@@ -643,19 +643,10 @@ func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *
 }
 
 func (stx SignedBlobTx) SigningHash(chainID *big.Int) common.Hash {
-	return prefixedRlpHash(
+	// return prefixedRlpHash(
+	return prefixedSSZHash(
 		BlobTxType,
-		[]interface{}{
-			chainID,
-			stx.GetNonce(),
-			stx.GetTip(),
-			stx.GetFeeCap(),
-			stx.GetGas(),
-			stx.GetTo(),
-			stx.GetAmount(),
-			stx.Message.Data,
-			stx.GetAccessList(),
-		})
+		&stx.Message)
 }
 
 func (stx *SignedBlobTx) Size() common.StorageSize {

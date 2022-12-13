@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/protolambda/ztyp/tree"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -197,6 +198,19 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 		panic(err)
 	}
 	//nolint:errcheck
+	sha.Read(h[:])
+	return h
+}
+
+// prefixedSSZHash writes the prefix into the hasher before SSZ hash-tree-root-ing x.
+// It's used for typed transactions.
+func prefixedSSZHash(prefix byte, x tree.HTR) (h common.Hash) {
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
+	sha.Reset()
+	sha.Write([]byte{prefix})
+	htr := x.HashTreeRoot(tree.GetHashFn())
+	sha.Write(htr[:])
 	sha.Read(h[:])
 	return h
 }
