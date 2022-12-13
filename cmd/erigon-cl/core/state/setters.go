@@ -47,6 +47,21 @@ func (b *BeaconState) SetHistoricalRoots(historicalRoots [][32]byte) {
 	b.historicalRoots = historicalRoots
 }
 
+func (b *BeaconState) SetBlockRootAt(index int, root [32]byte) {
+	b.touchedLeaves[BlockRootsLeafIndex] = true
+	b.blockRoots[index] = root
+}
+
+func (b *BeaconState) SetStateRootAt(index int, root [32]byte) {
+	b.touchedLeaves[StateRootsLeafIndex] = true
+	b.stateRoots[index] = root
+}
+
+func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.historicalRoots[index] = root
+}
+
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataLeafIndex] = true
 	b.eth1Data = eth1Data

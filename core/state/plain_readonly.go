@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
@@ -30,6 +31,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type CodeRecord struct {
+	BlockNumber uint64
+	CodeHash    common.Hash
+}
 
 type storageItem struct {
 	key, seckey common.Hash
@@ -49,9 +55,10 @@ type PlainState struct {
 	blockNr                      uint64
 	storage                      map[common.Address]*btree.BTree
 	trace                        bool
+	systemContractLookup         map[common.Address][]CodeRecord
 }
 
-func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[common.Address][]CodeRecord) *PlainState {
 	c1, _ := tx.Cursor(kv.AccountsHistory)
 	c2, _ := tx.Cursor(kv.StorageHistory)
 	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
@@ -62,6 +69,7 @@ func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 		blockNr:     blockNr,
 		storage:     make(map[common.Address]*btree.BTree),
 		accHistoryC: c1, storageHistoryC: c2, accChangesC: c3, storageChangesC: c4,
+		systemContractLookup: systemContractLookup,
 	}
 }
 
@@ -168,7 +176,12 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		return nil, err
 	}
 	//restore codehash
-	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+	if records, ok := s.systemContractLookup[address]; ok {
+		p := sort.Search(len(records), func(i int) bool {
+			return records[i].BlockNumber > s.blockNr
+		})
+		a.CodeHash = records[p-1].CodeHash
+	} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)

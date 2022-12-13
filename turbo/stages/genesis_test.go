@@ -88,14 +88,14 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: customg.Config,
 		},
 		{
-			name: "custom block in DB, genesis == ropsten",
+			name: "custom block in DB, genesis == sepolia",
 			fn: func(db kv.RwDB) (*params.ChainConfig, *types.Block, error) {
 				customg.MustCommit(db)
-				return core.CommitGenesisBlock(db, core.DefaultRopstenGenesisBlock())
+				return core.CommitGenesisBlock(db, core.DefaultSepoliaGenesisBlock())
 			},
-			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.RopstenGenesisHash},
-			wantHash:   params.RopstenGenesisHash,
-			wantConfig: params.RopstenChainConfig,
+			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
+			wantHash:   params.SepoliaGenesisHash,
+			wantConfig: params.SepoliaChainConfig,
 		},
 		{
 			name: "compatible config in DB",

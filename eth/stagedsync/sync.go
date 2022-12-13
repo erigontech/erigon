@@ -264,6 +264,15 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 		s.NextStage()
 	}
 
+	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+		return err
+	}
+
+	s.currentStage = 0
+	return nil
+}
+func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
@@ -275,7 +284,6 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return err
 	}
-
 	s.currentStage = 0
 	return nil
 }

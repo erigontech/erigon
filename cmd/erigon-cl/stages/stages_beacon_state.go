@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -19,13 +20,13 @@ type StageBeaconStateCfg struct {
 	db               kv.RwDB
 	genesisCfg       *clparams.GenesisConfig
 	beaconCfg        *clparams.BeaconChainConfig
-	state            *cltypes.BeaconStateBellatrix
+	state            *state.BeaconState
 	clearEth1Data    bool // Whether we want to discard eth1 data.
 	triggerExecution triggerExecutionFunc
 }
 
 func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *cltypes.BeaconStateBellatrix, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:               db,
 		genesisCfg:       genesisCfg,
@@ -52,8 +53,9 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, _ *stagedsync.StageState, tx
 	if err != nil {
 		return err
 	}
+	latestBlockHeader := cfg.state.LatestBlockHeader()
 
-	fromSlot := cfg.state.LatestBlockHeader.Slot
+	fromSlot := latestBlockHeader.Slot
 	for slot := fromSlot + 1; slot <= endSlot; slot++ {
 		block, err := rawdb.ReadBeaconBlock(tx, slot)
 		if err != nil {
@@ -88,7 +90,8 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, _ *stagedsync.StageState, tx
 			return err
 		}
 	}
-	cfg.state.LatestBlockHeader.Slot = endSlot
+	latestBlockHeader.Slot = endSlot
+	cfg.state.SetLatestBlockHeader(latestBlockHeader)
 
 	log.Info("[BeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
 	if !useExternalTx {

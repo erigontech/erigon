@@ -456,7 +456,7 @@ func (hd *HeaderDownload) UpdateStats(req *HeaderRequest, skeleton bool) {
 			hd.stats.SkeletonReqMinBlock = req.Number
 		}
 		if req.Number+req.Length*req.Skip > hd.stats.SkeletonReqMaxBlock {
-			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*req.Skip
+			hd.stats.SkeletonReqMaxBlock = req.Number + req.Length*(req.Skip+1)
 		}
 	} else {
 		hd.stats.Requests++
@@ -490,8 +490,8 @@ func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	defer hd.lock.RUnlock()
 	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
-	strideHeight := hd.highestInDb + stride
 	var length uint64 = 192
+	strideHeight := hd.highestInDb + 1
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
