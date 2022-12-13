@@ -509,11 +509,14 @@ func TestTransactionCoding(t *testing.T) {
 				AccessList: accesses,
 			}
 		case 5:
+			hashVersion := []common.Hash{common.BytesToHash([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})}
 			txdata = &SignedBlobTx{
 				Message: BlobTxMessage{
-					ChainID:    Uint256View(*uint256.NewInt(1)),
-					Nonce:      Uint64View(i),
-					AccessList: AccessListView(accesses),
+					ChainID:             Uint256View(*uint256.NewInt(1)),
+					Nonce:               Uint64View(i),
+					AccessList:          AccessListView(accesses),
+					MaxFeePerDataGas:    Uint256View(*uint256.NewInt(10)),
+					BlobVersionedHashes: VersionedHashesView(hashVersion),
 				},
 			}
 		}

@@ -694,3 +694,7 @@ func (stx *SignedBlobTx) ByteLength() uint64 {
 func (stx *SignedBlobTx) FixedLength() uint64 {
 	return 0
 }
+
+func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
+	return stx.Message.BlobVersionedHashes
+}

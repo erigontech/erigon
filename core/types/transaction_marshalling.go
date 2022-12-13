@@ -33,6 +33,10 @@ type txJSON struct {
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
+	// only  used for signedBlobTx
+	MaxFeePerDataGas    *hexutil.Big         `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes *VersionedHashesView `json:"blobVersionedHashes,omitempty"`
+
 	// Only used for encoding:
 	Hash common.Hash `json:"hash"`
 }
@@ -113,6 +117,9 @@ func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	enc.V = (*hexutil.Big)(tx.Signature.GetV().ToBig())
 	enc.R = (*hexutil.Big)(tx.Signature.GetR().ToBig())
 	enc.S = (*hexutil.Big)(tx.Signature.GetS().ToBig())
+	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.GetMaxFeePerDataGas().ToBig())
+	hashVersion := tx.GetBlobHashVersion()
+	enc.BlobVersionedHashes = &hashVersion
 	return json.Marshal(&enc)
 }
 
