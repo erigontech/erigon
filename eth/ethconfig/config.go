@@ -235,8 +235,8 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
-	// ConsenSUS layer
-	CL                          bool
+	// Consensus layer
+	ExternalCL                  bool
 	LightClientDiscoveryAddr    string
 	LightClientDiscoveryPort    uint64
 	LightClientDiscoveryTCPPort uint64
