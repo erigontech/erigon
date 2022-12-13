@@ -10,64 +10,56 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/state"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
-	state2 "github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 )
 
-type FillWorker struct {
+type ScanWorker struct {
 	txNum          uint64
-	doneCount      *atomic.Uint64
-	ac             *state.Aggregator22Context
+	as             *libstate.AggregatorStep
 	fromKey, toKey []byte
 	currentKey     []byte
 	bitmap         roaring64.Bitmap
-
-	total, progress *atomic.Uint64
 }
 
-func NewFillWorker(txNum uint64, doneCount *atomic.Uint64, a *state.Aggregator22, fromKey, toKey []byte) *FillWorker {
+func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {
+	sw := &ScanWorker{
+		txNum: txNum,
+		as:    as,
+	}
+	return sw
+}
+
+type FillWorker struct {
+	txNum uint64
+	as    *libstate.AggregatorStep
+}
+
+func NewFillWorker(txNum uint64, as *libstate.AggregatorStep) *FillWorker {
 	fw := &FillWorker{
-		txNum:     txNum,
-		doneCount: doneCount,
-		ac:        a.MakeContext(),
-		fromKey:   fromKey,
-		toKey:     toKey,
-		total:     atomic.NewUint64(0),
-		progress:  atomic.NewUint64(0),
+		txNum: txNum,
+		as:    as,
 	}
 	return fw
 }
 
-func (fw *FillWorker) Total() uint64 {
-	return fw.total.Load()
-}
-func (fw *FillWorker) Bitmap() *roaring64.Bitmap { return &fw.bitmap }
-
-func (fw *FillWorker) Progress() uint64 {
-	return fw.progress.Load()
-}
-
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateAccountsHistory(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
+	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
 	for it.HasNext() {
-		key, val, progress := it.Next()
-		fw.progress.Store(progress)
-		fw.currentKey = key
+		key, val := it.Next()
 		if len(val) > 0 {
 			var a accounts.Account
 			a.Reset()
@@ -96,7 +88,7 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
 			}
 			if a.Incarnation > 0 {
-				a.Incarnation = state2.FirstContractIncarnation
+				a.Incarnation = state.FirstContractIncarnation
 			}
 			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
@@ -104,45 +96,44 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 				panic(err)
 			}
 			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+		} else {
+			if err := plainStateCollector.Collect(key, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
 
 func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateStorageHistory(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
+	it := fw.as.IterateStorageHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
+	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
-		key, val, progress := it.Next()
-		fw.progress.Store(progress)
-		fw.currentKey = key
+		key, val := it.Next()
+		copy(compositeKey[:20], key[:20])
+		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
-			copy(compositeKey[:20], key[:20])
-			binary.BigEndian.PutUint64(compositeKey[20:], state2.FirstContractIncarnation)
-			copy(compositeKey[20+8:], key[20:])
-
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
 				panic(err)
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
+		} else {
+			if err := plainStateCollector.Collect(compositeKey, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
 
 func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateCodeHistory(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
+	it := fw.as.IterateCodeHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
+	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 	for it.HasNext() {
-		key, val, progress := it.Next()
-		fw.progress.Store(progress)
-		fw.currentKey = key
+		key, val := it.Next()
+		copy(compositeKey, key)
 		if len(val) > 0 {
-			copy(compositeKey, key)
-			binary.BigEndian.PutUint64(compositeKey[length.Addr:], state2.FirstContractIncarnation)
 
 			codeHash, err := common.HashData(val)
 			if err != nil {
@@ -155,61 +146,36 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 				panic(err)
 			}
 			//fmt.Printf("Code [%x] => %d\n", compositeKey, len(val))
+		} else {
+			if err := plainContractCollector.Collect(compositeKey, nil); err != nil {
+				panic(err)
+			}
 		}
 	}
 }
 
-func (fw *FillWorker) ResetProgress() {
-	fw.total.Store(0)
-	fw.progress.Store(0)
-}
-
-func (fw *FillWorker) BitmapAccounts(accountCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateAccountsReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
-	var txKey [8]byte
+func (sw *ScanWorker) BitmapAccounts() error {
+	it := sw.as.IterateAccountsTxs()
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := accountCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
-		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
+	return nil
 }
 
-func (fw *FillWorker) BitmapStorage(storageCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateStorageReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
-	var txKey [8]byte
+func (sw *ScanWorker) BitmapStorage() error {
+	it := sw.as.IterateStorageTxs()
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := storageCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
-		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
+	return nil
 }
 
-func (fw *FillWorker) BitmapCode(codeCollectorX *etl.Collector) {
-	defer fw.doneCount.Inc()
-	it := fw.ac.IterateCodeReconTxs(fw.fromKey, fw.toKey, fw.txNum)
-	fw.total.Store(it.Total())
-	var txKey [8]byte
+func (sw *ScanWorker) BitmapCode() error {
+	it := sw.as.IterateCodeTxs()
 	for it.HasNext() {
-		key, txNum, progress := it.Next()
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		if err := codeCollectorX.Collect(key, txKey[:]); err != nil {
-			panic(err)
-		}
-		fw.progress.Store(progress)
-		fw.bitmap.Add(txNum)
+		sw.bitmap.Add(it.Next())
 	}
+	return nil
 }
 
 func bytesToUint64(buf []byte) (x uint64) {
@@ -222,14 +188,15 @@ func bytesToUint64(buf []byte) (x uint64) {
 	return
 }
 
+func (sw *ScanWorker) Bitmap() *roaring64.Bitmap { return &sw.bitmap }
+
 type ReconWorker struct {
 	lock        sync.Locker
 	wg          *sync.WaitGroup
-	rs          *state2.ReconState
+	rs          *state.ReconState
 	blockReader services.FullBlockReader
-	stateWriter *state2.StateReconWriter
-	stateReader *state2.HistoryReaderNoState
-	getHeader   func(hash common.Hash, number uint64) *types.Header
+	stateWriter *state.StateReconWriterInc
+	stateReader *state.HistoryReaderInc
 	ctx         context.Context
 	engine      consensus.Engine
 	chainConfig *params.ChainConfig
@@ -239,29 +206,35 @@ type ReconWorker struct {
 	chain       ChainReader
 	isPoSA      bool
 	posa        consensus.PoSA
+
+	starkNetEvm *vm.CVMAdapter
+	evm         *vm.EVM
+	ibs         *state.IntraBlockState
 }
 
-func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state2.ReconState,
-	a *state.Aggregator22, blockReader services.FullBlockReader,
+func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
+	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
-	ac := a.MakeContext()
 	rw := &ReconWorker{
 		lock:        lock,
 		wg:          wg,
 		rs:          rs,
 		blockReader: blockReader,
 		ctx:         context.Background(),
-		stateWriter: state2.NewStateReconWriter(ac, rs),
-		stateReader: state2.NewHistoryReaderNoState(ac, rs),
+		stateWriter: state.NewStateReconWriterInc(as, rs),
+		stateReader: state.NewHistoryReaderInc(as, rs),
 		chainConfig: chainConfig,
 		logger:      logger,
 		genesis:     genesis,
 		engine:      engine,
+		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
 	rw.epoch = NewEpochReader(chainTx)
 	rw.chain = NewChainReader(chainConfig, chainTx, blockReader)
+	rw.ibs = state.New(rw.stateReader)
 	rw.posa, rw.isPoSA = engine.(consensus.PoSA)
 	return rw
 }
@@ -271,30 +244,29 @@ func (rw *ReconWorker) SetTx(tx kv.Tx) {
 	rw.stateWriter.SetTx(tx)
 }
 
+func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
+	rw.stateReader.SetChainTx(chainTx)
+	rw.stateWriter.SetChainTx(chainTx)
+}
+
 func (rw *ReconWorker) Run() {
 	defer rw.wg.Done()
-	rw.getHeader = func(hash common.Hash, number uint64) *types.Header {
-		h, err := rw.blockReader.Header(rw.ctx, nil, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(txTask)
 	}
 }
 
-var noop = state2.NewNoopWriter()
+var noop = state.NewNoopWriter()
 
-func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
+func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	rw.stateReader.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetError()
 	rw.stateWriter.SetTxNum(txTask.TxNum)
+	rw.ibs.Reset()
+	ibs := rw.ibs
 	rules := txTask.Rules
-	ibs := state2.New(rw.stateReader)
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
@@ -312,13 +284,15 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 		ibs.SoftFinalise()
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txNum, blockNum)
+			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, txTask.ExcessDataGas, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, rw.epoch, rw.chain, syscall); err != nil {
-				panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
+				if _, readError := rw.stateReader.ReadError(); !readError {
+					panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
+				}
 			}
 		}
 	} else if txTask.TxIndex == -1 {
@@ -334,35 +308,40 @@ func (rw *ReconWorker) runTxTask(txTask *state2.TxTask) {
 	} else {
 		if rw.isPoSA {
 			if isSystemTx, err := rw.posa.IsSystemTransaction(txTask.Tx, txTask.Header); err != nil {
-				panic(err)
+				if _, readError := rw.stateReader.ReadError(); !readError {
+					panic(err)
+				}
 			} else if isSystemTx {
 				return
 			}
 		}
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
-		getHashFn := core.GetHashFn(txTask.Header, rw.getHeader)
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		var vmenv vm.VMInterface
 		if txTask.Tx.IsStarkNet() {
-			vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
+			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+			vmenv = rw.starkNetEvm
 		} else {
-			blockContext := core.NewEVMBlockContext(txTask.Header, txTask.ExcessDataGas, getHashFn, rw.engine, nil /* author */)
-			txContext := core.NewEVMTxContext(msg)
-			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
+			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			vmenv = rw.evm
 		}
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, evm=%p\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex, vmenv)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.Tx.Hash(), err))
+			if _, readError := rw.stateReader.ReadError(); !readError {
+				panic(fmt.Errorf("could not apply blockNum=%d, txIdx=%d txNum=%d [%x] failed: %w", txTask.BlockNum, txTask.TxIndex, txTask.TxNum, txTask.Tx.Hash(), err))
+			}
 		}
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
-			panic(err)
+			if _, readError := rw.stateReader.ReadError(); !readError {
+				panic(err)
+			}
 		}
 	}
-	if dependency, ok := rw.stateReader.ReadError(); ok {
+	if dependency, ok := rw.stateReader.ReadError(); ok || err != nil {
 		//fmt.Printf("rollback %d\n", txNum)
 		rw.rs.RollbackTx(txTask, dependency)
 	} else {

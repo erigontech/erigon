@@ -71,31 +71,6 @@ func TestCreation(t *testing.T) {
 				{20000000, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // Future Gray Glacier block
 			},
 		},
-		// Ropsten test cases
-		{
-			params.RopstenChainConfig,
-			params.RopstenGenesisHash,
-			[]testcase{
-				{0, ID{Hash: checksumToBytes(0x30c7ddbc), Next: 10}},              // Unsynced, last Frontier, Homestead and first Tangerine block
-				{9, ID{Hash: checksumToBytes(0x30c7ddbc), Next: 10}},              // Last Tangerine block
-				{10, ID{Hash: checksumToBytes(0x63760190), Next: 1700000}},        // First Spurious block
-				{1699999, ID{Hash: checksumToBytes(0x63760190), Next: 1700000}},   // Last Spurious block
-				{1700000, ID{Hash: checksumToBytes(0x3ea159c7), Next: 4230000}},   // First Byzantium block
-				{4229999, ID{Hash: checksumToBytes(0x3ea159c7), Next: 4230000}},   // Last Byzantium block
-				{4230000, ID{Hash: checksumToBytes(0x97b544f3), Next: 4939394}},   // First Constantinople block
-				{4939393, ID{Hash: checksumToBytes(0x97b544f3), Next: 4939394}},   // Last Constantinople block
-				{4939394, ID{Hash: checksumToBytes(0xd6e2149b), Next: 6485846}},   // First Petersburg block
-				{6485845, ID{Hash: checksumToBytes(0xd6e2149b), Next: 6485846}},   // Last Petersburg block
-				{6485846, ID{Hash: checksumToBytes(0x4bc66396), Next: 7117117}},   // First Istanbul block
-				{7117116, ID{Hash: checksumToBytes(0x4bc66396), Next: 7117117}},   // Last Istanbul block
-				{7117117, ID{Hash: checksumToBytes(0x6727ef90), Next: 9812189}},   // First Muir Glacier block
-				{9812188, ID{Hash: checksumToBytes(0x6727ef90), Next: 9812189}},   // Last Muir Glacier block
-				{9812189, ID{Hash: checksumToBytes(0xa157d377), Next: 10499401}},  // First Berlin block
-				{10499400, ID{Hash: checksumToBytes(0xa157d377), Next: 10499401}}, // Last Berlin block
-				{10499401, ID{Hash: checksumToBytes(0x7119b6b3), Next: 0}},        // First London block
-				{11000000, ID{Hash: checksumToBytes(0x7119b6b3), Next: 0}},        // Future London block
-			},
-		},
 		// Rinkeby test cases
 		{
 			params.RinkebyChainConfig,
@@ -150,7 +125,28 @@ func TestCreation(t *testing.T) {
 			params.GnosisChainConfig,
 			params.GnosisGenesisHash,
 			[]testcase{
-				{24000000, ID{Hash: checksumToBytes(0x018479D3), Next: 0}},
+				{0, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},         // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium
+				{1604399, ID{Hash: checksumToBytes(0xf64909b1), Next: 1604400}},   // Last Byzantium block
+				{1604400, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // First Constantinople block
+				{2508799, ID{Hash: checksumToBytes(0xfde2d083), Next: 2508800}},   // Last Constantinople block
+				{2508800, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // First Petersburg block
+				{7298029, ID{Hash: checksumToBytes(0xfc1d8f2f), Next: 7298030}},   // Last Petersburg block
+				{7298030, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // First Istanbul block
+				{9186424, ID{Hash: checksumToBytes(0x54d05e6c), Next: 9186425}},   // Last Istanbul block
+				{9186425, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}},  // First POSDAO Activation block
+				{16101499, ID{Hash: checksumToBytes(0xb6e6cd81), Next: 16101500}}, // Last POSDAO Activation block
+				{16101500, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // First Berlin block
+				{19039999, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}}, // Last Berlin block
+				{19040000, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First London block
+				{21735000, ID{Hash: checksumToBytes(0x018479d3), Next: 0}},        // First GIP-31 block
+			},
+		},
+		// Chiado test cases
+		{
+			params.ChiadoChainConfig,
+			params.ChiadoGenesisHash,
+			[]testcase{
+				{0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 0}}, // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
 			},
 		},
 	}

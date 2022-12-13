@@ -87,7 +87,7 @@ func (s *GossipSubscription) run(ctx context.Context) {
 func (s *GossipSubscription) do(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("[Gossip] Message Handler Crashed", "err", r)
+			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
 		}
 	}()
 	select {
@@ -100,7 +100,7 @@ func (s *GossipSubscription) do(ctx context.Context) {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			log.Warn("fail to decode gossip packet", "err", err, "topic", pctx.Topic, "pkt", reflect.TypeOf(val))
+			log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", pctx.Topic, "pkt", reflect.TypeOf(val))
 			return
 		}
 		if pctx.Msg.GetFrom() == s.host {

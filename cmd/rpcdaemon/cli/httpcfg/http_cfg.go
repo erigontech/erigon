@@ -3,9 +3,9 @@ package httpcfg
 import (
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
@@ -40,17 +40,25 @@ type HttpCfg struct {
 	StateCache               kvcache.CoherentConfig
 	Snap                     ethconfig.Snapshot
 	Sync                     ethconfig.Sync
-	GRPCServerEnabled        bool
-	GRPCListenAddress        string
-	GRPCPort                 int
-	GRPCHealthCheckEnabled   bool
-	StarknetGRPCAddress      string
-	JWTSecretPath            string // Engine API Authentication
-	TraceRequests            bool   // Always trace requests in INFO level
-	HTTPTimeouts             rpccfg.HTTPTimeouts
-	AuthRpcTimeouts          rpccfg.HTTPTimeouts
-	EvmCallTimeout           time.Duration
-	InternalCL               bool
-	LogDirVerbosity          string
-	LogDirPath               string
+
+	// GRPC server
+	GRPCServerEnabled      bool
+	GRPCListenAddress      string
+	GRPCPort               int
+	GRPCHealthCheckEnabled bool
+
+	// Raw TCP Server
+	TCPServerEnabled bool
+	TCPListenAddress string
+	TCPPort          int
+
+	StarknetGRPCAddress string
+	JWTSecretPath       string // Engine API Authentication
+	TraceRequests       bool   // Always trace requests in INFO level
+	HTTPTimeouts        rpccfg.HTTPTimeouts
+	AuthRpcTimeouts     rpccfg.HTTPTimeouts
+	EvmCallTimeout      time.Duration
+	InternalCL          bool
+	LogDirVerbosity     string
+	LogDirPath          string
 }

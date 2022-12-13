@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,8 +33,12 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
+	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -55,14 +60,12 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadergrpc"
-	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/cl-core"
+	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/common"
@@ -88,7 +91,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -152,7 +154,7 @@ type Ethereum struct {
 	txPool2GrpcServer       txpool_proto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engineapi.ForkValidator
-	downloader              *downloader.Downloader
+	downloader              *downloader3.Downloader
 
 	agg *libstate.Aggregator22
 }
@@ -315,11 +317,31 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
+
+		var pi int // points to next port to be picked from refCfg.AllowedPorts
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+
+			// pick port from allowed list
+			var picked bool
+			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
+				pc := int(refCfg.AllowedPorts[pi])
+				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
+					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
+					continue
+				}
+				if listenPort != pc {
+					listenPort = pc
+				}
+				pi++
+				picked = true
+			}
+			if !picked {
+				return nil, fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
+			}
+
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-			listenPort++
 
 			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
 			backend.sentryServers = append(backend.sentryServers, server)
@@ -439,7 +461,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
@@ -457,7 +479,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
@@ -510,7 +532,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
-		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds)
+		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, nil, handshake.LightClientRule)
 		if err != nil {
 			return nil, err
 		}
@@ -526,7 +548,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
 			return nil, err
 		}
 
@@ -573,6 +595,17 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		for {
 			select {
 			case b := <-backend.minedBlocks:
+				// Add mined header and block body before broadcast. This is because the broadcast call
+				// will trigger the staged sync which will require headers and blocks to be available
+				// in their respective cache in the download stage. If not found, it would cause a
+				// liveness issue for the chain.
+				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+					log.Error("add mined block to header downloader", "err", err)
+				}
+				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
+					log.Error("add mined block to body downloader", "err", err)
+				}
+
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
@@ -586,12 +619,6 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 						Hash:   b.Hash(),
 					},
 				})
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					log.Error("add mined block to header downloader", "err", err)
-				}
-				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
-					log.Error("add mined block to body downloader", "err", err)
-				}
 
 			case b := <-backend.pendingBlocks:
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
@@ -655,8 +682,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg)
-	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
+	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {
 			log.Error(err.Error())
@@ -798,19 +825,29 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
 
-		mineEvery := time.NewTicker(3 * time.Second)
+		mineEvery := time.NewTicker(cfg.Recommit)
 		defer mineEvery.Stop()
+
+		// Listen on a new head subscription. This allows us to maintain the block time by
+		// triggering mining after the block is passed through all stages.
+		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
+		defer closeNewHeadCh()
 
 		var works bool
 		var hasWork bool
 		errc := make(chan error, 1)
 
 		for {
-			mineEvery.Reset(3 * time.Second)
+			mineEvery.Reset(cfg.Recommit)
 			select {
 			case <-s.notifyMiningAboutNewTxs:
+				log.Debug("Start mining new block based on txpool notif")
+				hasWork = true
+			case <-newHeadCh:
+				log.Debug("Start mining new block based on new head channel")
 				hasWork = true
 			case <-mineEvery.C:
+				log.Debug("Start mining new block based on miner.recommit")
 				hasWork = true
 			case err := <-errc:
 				works = false
@@ -899,12 +936,12 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader.New(downloaderCfg)
+			s.downloader, err = downloader3.New(downloaderCfg)
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			go downloader.MainLoop(ctx, s.downloader, true)
-			bittorrentServer, err := downloader.NewGrpcServer(s.downloader)
+			go downloader3.MainLoop(ctx, s.downloader, true)
+			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("new server: %w", err)
 			}
@@ -1049,4 +1086,13 @@ func RemoveContents(dir string) error {
 		}
 	}
 	return nil
+}
+
+func checkPortIsFree(addr string) (free bool) {
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	c.Close()
+	return false
 }

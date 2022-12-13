@@ -19,63 +19,13 @@ package vm
 import (
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 )
-
-// IntraBlockState is an EVM database for full state querying.
-type IntraBlockState interface {
-	CreateAccount(common.Address, bool)
-
-	SubBalance(common.Address, *uint256.Int)
-	AddBalance(common.Address, *uint256.Int)
-	GetBalance(common.Address) *uint256.Int
-
-	GetNonce(common.Address) uint64
-	SetNonce(common.Address, uint64)
-
-	GetCodeHash(common.Address) common.Hash
-	GetCode(common.Address) []byte
-	SetCode(common.Address, []byte)
-	GetCodeSize(common.Address) int
-
-	AddRefund(uint64)
-	SubRefund(uint64)
-	GetRefund() uint64
-
-	GetCommittedState(common.Address, *common.Hash, *uint256.Int)
-	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
-	SetState(common.Address, *common.Hash, uint256.Int)
-
-	Suicide(common.Address) bool
-	HasSuicided(common.Address) bool
-
-	// Exist reports whether the given account exists in state.
-	// Notably this should also return true for suicided accounts.
-	Exist(common.Address) bool
-	// Empty returns whether the given account is empty. Empty
-	// is defined according to EIP161 (balance = nonce = code = 0).
-	Empty(common.Address) bool
-
-	PrepareAccessList(sender common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList)
-	AddressInAccessList(addr common.Address) bool
-	SlotInAccessList(addr common.Address, slot common.Hash) (addressOk bool, slotOk bool)
-	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
-	// even if the feature/fork is not active yet
-	AddAddressToAccessList(addr common.Address)
-	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
-	// even if the feature/fork is not active yet
-	AddSlotToAccessList(addr common.Address, slot common.Hash)
-
-	RevertToSnapshot(int)
-	Snapshot() int
-
-	AddLog(*types.Log)
-}
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM
 // depends on this context being implemented for doing subcalls and initialising new EVM contracts.
@@ -91,13 +41,13 @@ type CallContext interface {
 }
 
 type VMInterface interface {
-	Reset(txCtx TxContext, ibs IntraBlockState)
+	Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState)
 	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error)
 	Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
 	Config() Config
 	ChainConfig() *params.ChainConfig
 	ChainRules() *params.Rules
-	Context() BlockContext
-	IntraBlockState() IntraBlockState
-	TxContext() TxContext
+	Context() evmtypes.BlockContext
+	IntraBlockState() evmtypes.IntraBlockState
+	TxContext() evmtypes.TxContext
 }

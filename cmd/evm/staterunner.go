@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -45,11 +44,12 @@ var stateTestCommand = cli.Command{
 // StatetestResult contains the execution status after running a state test, any
 // error that might have occurred and a dump of the final state if requested.
 type StatetestResult struct {
-	Name  string      `json:"name"`
-	Pass  bool        `json:"pass"`
-	Fork  string      `json:"fork"`
-	Error string      `json:"error,omitempty"`
-	State *state.Dump `json:"state,omitempty"`
+	Name  string       `json:"name"`
+	Pass  bool         `json:"pass"`
+	Root  *common.Hash `json:"stateRoot,omitempty"`
+	Fork  string       `json:"fork"`
+	Error string       `json:"error,omitempty"`
+	State *state.Dump  `json:"state,omitempty"`
 }
 
 func stateTestCmd(ctx *cli.Context) error {
@@ -131,7 +131,7 @@ func aggregateResultsFromStateTests(
 			var root common.Hash
 			var calcRootErr error
 
-			statedb, err := test.Run(&params.Rules{}, tx, st, cfg)
+			statedb, err := test.Run(tx, st, cfg)
 			// print state root for evmlab tracing
 			root, calcRootErr = trie.CalcRoot("", tx)
 			if err == nil && calcRootErr != nil {
@@ -157,13 +157,15 @@ func aggregateResultsFromStateTests(
 			*/
 
 			// print state root for evmlab tracing
-			if ctx.Bool(MachineFlag.Name) && statedb != nil {
-				_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root.Bytes())
-				if printErr != nil {
-					log.Warn("Failed to write to stderr", "err", printErr)
+			if statedb != nil {
+				result.Root = &root
+				if ctx.Bool(MachineFlag.Name) {
+					_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", root.Bytes())
+					if printErr != nil {
+						log.Warn("Failed to write to stderr", "err", printErr)
+					}
 				}
 			}
-
 			results = append(results, *result)
 
 			// Print any structured logs collected

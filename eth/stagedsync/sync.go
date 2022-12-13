@@ -6,9 +6,9 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -240,7 +240,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 
 		stage := s.stages[s.currentStage]
 
-		if string(stage.ID) == debug.StopBeforeStage() { // stop process for debugging reasons
+		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			log.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
 			return libcommon.ErrStopped
 		}
@@ -256,7 +256,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 			return err
 		}
 
-		if string(stage.ID) == debug.StopAfterStage() { // stop process for debugging reasons
+		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			log.Warn("STOP_AFTER_STAGE env flag forced to stop app")
 			return libcommon.ErrStopped
 		}
@@ -264,6 +264,15 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 		s.NextStage()
 	}
 
+	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
+		return err
+	}
+
+	s.currentStage = 0
+	return nil
+}
+func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
@@ -275,7 +284,6 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return err
 	}
-
 	s.currentStage = 0
 	return nil
 }

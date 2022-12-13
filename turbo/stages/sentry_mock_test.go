@@ -641,7 +641,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	invalidTip.ParentHash = invalidParent.Hash()
 
 	// Send a payload with the parent missing
-	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil)
+	payloadMessage := types.NewBlockFromStorage(invalidTip.Hash(), invalidTip, chain.TopBlock.Transactions(), nil, nil)
 	m.SendPayloadRequest(payloadMessage)
 
 	initialCycle := false

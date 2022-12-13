@@ -61,7 +61,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	var (
 		parentGasTarget          = parent.GasLimit / params.ElasticityMultiplier
 		parentGasTargetBig       = new(big.Int).SetUint64(parentGasTarget)
-		baseFeeChangeDenominator = new(big.Int).SetUint64(params.BaseFeeChangeDenominator)
+		baseFeeChangeDenominator = new(big.Int).SetUint64(getBaseFeeChangeDenominator(config.Bor, parent.Number.Uint64()))
 	)
 	// If the parent gasUsed is the same as the target, the baseFee remains unchanged.
 	if parent.GasUsed == parentGasTarget {
@@ -90,4 +90,14 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 			common.Big0,
 		)
 	}
+}
+
+func getBaseFeeChangeDenominator(borConfig *params.BorConfig, number uint64) uint64 {
+	// If we're running bor based chain post delhi hardfork, return the new value
+	if borConfig != nil && borConfig.IsDelhi(number) {
+		return params.BaseFeeChangeDenominatorPostDelhi
+	}
+
+	// Return the original once for other chains and pre-fork cases
+	return params.BaseFeeChangeDenominator
 }

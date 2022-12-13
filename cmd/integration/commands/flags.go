@@ -22,13 +22,13 @@ var (
 	integrityFast, integritySlow   bool
 	file                           string
 	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
+	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
-	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
@@ -128,7 +128,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, sepolia, etc.)")
 	must(cmd.MarkFlagRequired("chain"))
 }
 

@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -52,14 +53,14 @@ func (*dummyStatedb) GetRefund() uint64                           { return 1337 
 func (*dummyStatedb) GetBalance(addr common.Address) *uint256.Int { return uint256.NewInt(0) }
 
 type vmContext struct {
-	blockCtx vm.BlockContext
-	txCtx    vm.TxContext
+	blockCtx evmtypes.BlockContext
+	txCtx    evmtypes.TxContext
 }
 
 func testCtx() *vmContext {
-	return &vmContext{blockCtx: vm.BlockContext{
+	return &vmContext{blockCtx: evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+	}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 }
 
 func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
@@ -71,7 +72,7 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, big.NewInt(int64(value.Uint64())), contract.Code)
+	tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, uint256.NewInt(value.Uint64()), contract.Code)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
 	tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err)
 	if err != nil {
@@ -83,9 +84,9 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 func TestTracer(t *testing.T) {
 	execTracer := func(code string) ([]byte, string) {
 		t.Helper()
-		ctx := &vmContext{blockCtx: vm.BlockContext{
+		ctx := &vmContext{blockCtx: evmtypes.BlockContext{
 			BlockNumber: 1,
-		}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)
@@ -155,9 +156,9 @@ func TestHaltBetweenSteps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := vm.NewEVM(vm.BlockContext{
+	env := vm.NewEVM(evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, vm.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false)
 
 	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
@@ -177,13 +178,13 @@ func TestNoStepExec(t *testing.T) {
 		env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 		startGas := uint64(10000)
 		contract := vm.NewContract(account{}, account{}, uint256.NewInt(1), startGas, true)
-		tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CALLT, nil, 0, big.NewInt(0), nil)
+		tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CALLT, nil, 0, uint256.NewInt(0), nil)
 		tracer.CaptureEnd(0, nil, startGas-contract.Gas, 1, 0, nil)
 		return tracer.GetResult()
 	}
 	execTracer := func(code string) []byte {
 		t.Helper()
-		ctx := &vmContext{blockCtx: vm.BlockContext{BlockNumber: 1}, txCtx: vm.TxContext{GasPrice: big.NewInt(100000)}}
+		ctx := &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 		tracer, err := New(code, new(Context))
 		if err != nil {
 			t.Fatal(err)

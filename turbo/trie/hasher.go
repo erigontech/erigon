@@ -18,9 +18,10 @@ package trie
 
 import (
 	"errors"
-	"fmt"
 	"hash"
+	"sync"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -48,30 +49,23 @@ type keccakState interface {
 	Read([]byte) (int, error)
 }
 
-// hashers live in a global db.
-var hasherPool = make(chan *hasher, 128)
-
-func newHasher(valueNodesRlpEncoded bool) *hasher {
-	var h *hasher
-	select {
-	case h = <-hasherPool:
-	default:
-		h = &hasher{
+var hashersPool = sync.Pool{
+	New: func() any {
+		return &hasher{
 			sha: sha3.NewLegacyKeccak256().(crypto.KeccakState),
 			bw:  &ByteArrayWriter{},
 		}
-	}
+	},
+}
+
+func newHasher(valueNodesRlpEncoded bool) *hasher {
+	h := hashersPool.Get().(*hasher)
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
 }
-
 func returnHasherToPool(h *hasher) {
 	h.callback = nil
-	select {
-	case hasherPool <- h:
-	default:
-		fmt.Printf("Allowing hasher to be garbage collected, pool is full\n")
-	}
+	hashersPool.Put(h)
 }
 
 // hash calculates node's RLP for hashing
@@ -89,7 +83,7 @@ func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
 		copy(storeTo, hn.hash)
-		return common.HashLength, nil
+		return length.Hash, nil
 	}
 	if len(n.reference()) > 0 {
 		copy(storeTo, n.reference())
@@ -120,7 +114,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		n.ref.len = byte(refLen)
 	}
 
-	if h.callback != nil && len(n.reference()) == common.HashLength {
+	if h.callback != nil && len(n.reference()) == length.Hash {
 		var hash common.Hash
 		copy(hash[:], storeTo)
 		h.callback(hash, n)
@@ -349,9 +343,9 @@ func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (i
 		return 0, err
 	}
 
-	if hashLen == common.HashLength {
-		buffer[pos] = byte(0x80 + common.HashLength)
-		return common.HashLength + 1, nil
+	if hashLen == length.Hash {
+		buffer[pos] = byte(0x80 + length.Hash)
+		return length.Hash + 1, nil
 	}
 
 	// Shift one byte backwards, because it is not treated as a byte array but embedded RLP

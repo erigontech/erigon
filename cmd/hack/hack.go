@@ -20,6 +20,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -207,9 +208,9 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
 	var found bool
-	var incarnationBytes [common.IncarnationLength]byte
-	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
-	var fixedbits = 8 * common.HashLength
+	var incarnationBytes [length.Incarnation]byte
+	startkey := make([]byte, length.Hash+length.Incarnation+length.Hash)
+	var fixedbits = 8 * length.Hash
 	copy(startkey, addrHash[:])
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		c, err := tx.Cursor(kv.HashedStorage)
@@ -219,7 +220,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 		defer c.Close()
 		return ethdb.Walk(c, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			fmt.Printf("Incarnation(z): %d\n", 0)
-			copy(incarnationBytes[:], k[common.HashLength:])
+			copy(incarnationBytes[:], k[length.Hash:])
 			found = true
 			return false, nil
 		})
@@ -1074,8 +1075,6 @@ func chainConfig(name string) error {
 	switch name {
 	case "mainnet":
 		chainConfig = params.MainnetChainConfig
-	case "ropsten":
-		chainConfig = params.RopstenChainConfig
 	case "sepolia":
 		chainConfig = params.SepoliaChainConfig
 	case "rinkeby":
@@ -1090,14 +1089,14 @@ func chainConfig(name string) error {
 		chainConfig = params.ChapelChainConfig
 	case "rialto":
 		chainConfig = params.RialtoChainConfig
-	case "fermion":
-		chainConfig = params.FermionChainConfig
 	case "mumbai":
 		chainConfig = params.MumbaiChainConfig
 	case "bor-mainnet":
 		chainConfig = params.BorMainnetChainConfig
 	case "gnosis":
 		chainConfig = params.GnosisChainConfig
+	case "chiado":
+		chainConfig = params.ChiadoChainConfig
 	default:
 		return fmt.Errorf("unknown name: %s", name)
 	}
@@ -1282,6 +1281,7 @@ func iterate(filename string, prefix string) error {
 			ef, _ := eliasfano32.ReadEliasFano(val)
 			efIt := ef.Iterator()
 			fmt.Printf("[%x] =>", key)
+			cnt := 0
 			for efIt.HasNext() {
 				txNum := efIt.Next()
 				var txKey [8]byte
@@ -1292,6 +1292,11 @@ func iterate(filename string, prefix string) error {
 				fmt.Printf(" %d", txNum)
 				if len(v) == 0 {
 					fmt.Printf("*")
+				}
+				cnt++
+				if cnt == 16 {
+					fmt.Printf("\n")
+					cnt = 0
 				}
 			}
 			fmt.Printf("\n")
@@ -1316,6 +1321,22 @@ func readSeg(chaindata string) error {
 		count++
 	}
 	fmt.Printf("count=%d\n", count)
+	return nil
+}
+
+func dumpState(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			fmt.Printf("%x %x\n", k, v)
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1448,6 +1469,8 @@ func main() {
 		err = rmSnKey(*chaindata)
 	case "readSeg":
 		err = readSeg(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 	}
 
 	if err != nil {

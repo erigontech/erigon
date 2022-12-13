@@ -29,14 +29,12 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
-
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -45,15 +43,17 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
 )
 
 // These are all the command line flags we support.
@@ -478,6 +478,11 @@ var (
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
+	P2pProtocolAllowedPorts = cli.UintSliceFlag{
+		Name:  "p2p.allowed-ports",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
+		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -572,10 +577,6 @@ var (
 	MetricsEnabledFlag = cli.BoolFlag{
 		Name:  "metrics",
 		Usage: "Enable metrics collection and reporting",
-	}
-	MetricsEnabledExpensiveFlag = cli.BoolFlag{
-		Name:  "metrics.expensive",
-		Usage: "Enable expensive metrics collection and reporting",
 	}
 
 	// MetricsHTTPFlag defines the endpoint for a stand-alone metrics HTTP endpoint.
@@ -724,7 +725,7 @@ var (
 	}
 )
 
-var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsEnabledExpensiveFlag, &MetricsHTTPFlag, &MetricsPortFlag}
+var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
 
 // setNodeKey loads a node key from command line flags if provided,
 // otherwise it tries to load it from datadir,
@@ -854,6 +855,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port,
 	protocol uint,
+	allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -880,6 +882,7 @@ func NewP2PConfig(
 		Name:            nodeName,
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -926,6 +929,26 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
+	}
+	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
+	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
+	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
+		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
+	}
+
+	if ctx.IsSet(ListenPortFlag.Name) {
+		// add non-default port to allowed port list
+		lp := ctx.Int(ListenPortFlag.Name)
+		found := false
+		for _, p := range cfg.AllowedPorts {
+			if int(p) == lp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
+		}
 	}
 }
 
@@ -983,10 +1006,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		networkname.FermionChainName: true,
-		networkname.BSCChainName:     true,
-		networkname.RialtoChainName:  true,
-		networkname.ChapelChainName:  true,
+		networkname.BSCChainName:    true,
+		networkname.RialtoChainName: true,
+		networkname.ChapelChainName: true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
@@ -1078,8 +1100,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.SokolChainName:
 		return networkDataDirCheckingLegacy(datadir, "sokol")
-	case networkname.FermionChainName:
-		return networkDataDirCheckingLegacy(datadir, "fermion")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
@@ -1090,6 +1110,8 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "sepolia")
 	case networkname.GnosisChainName:
 		return networkDataDirCheckingLegacy(datadir, "gnosis")
+	case networkname.ChiadoChainName:
+		return networkDataDirCheckingLegacy(datadir, "chiado")
 
 	default:
 		return datadir
@@ -1447,16 +1469,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, _, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
-		cfg.Downloader, err = downloadercfg.New(cfg.Dirs.Snap, version, lvl, nodeConfig.P2P.NAT, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
+		downloadernat.DoNat(nodeConfig.P2P.NAT, cfg.Downloader)
 	}
 
 	nodeConfig.Http.Snap = cfg.Snapshot

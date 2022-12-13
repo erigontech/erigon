@@ -20,15 +20,22 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
+
+type CodeRecord struct {
+	BlockNumber uint64
+	CodeHash    common.Hash
+}
 
 type storageItem struct {
 	key, seckey common.Hash
@@ -48,9 +55,10 @@ type PlainState struct {
 	blockNr                      uint64
 	storage                      map[common.Address]*btree.BTree
 	trace                        bool
+	systemContractLookup         map[common.Address][]CodeRecord
 }
 
-func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[common.Address][]CodeRecord) *PlainState {
 	c1, _ := tx.Cursor(kv.AccountsHistory)
 	c2, _ := tx.Cursor(kv.StorageHistory)
 	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
@@ -61,6 +69,7 @@ func NewPlainState(tx kv.Tx, blockNr uint64) *PlainState {
 		blockNr:     blockNr,
 		storage:     make(map[common.Address]*btree.BTree),
 		accHistoryC: c1, storageHistoryC: c2, accChangesC: c3, storageChangesC: c4,
+		systemContractLookup: systemContractLookup,
 	}
 }
 
@@ -78,7 +87,7 @@ func (s *PlainState) GetBlockNr() uint64 {
 
 func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
 	st := btree.New(16)
-	var k [common.AddressLength + common.IncarnationLength + common.HashLength]byte
+	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
 	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
 	if err != nil {
@@ -89,8 +98,8 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 		log.Error("Error decoding account", "err", err)
 		return err
 	}
-	binary.BigEndian.PutUint64(k[common.AddressLength:], acc.Incarnation)
-	copy(k[common.AddressLength+common.IncarnationLength:], startLocation[:])
+	binary.BigEndian.PutUint64(k[length.Addr:], acc.Incarnation)
+	copy(k[length.Addr+length.Incarnation:], startLocation[:])
 	var lastKey common.Hash
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}
@@ -167,7 +176,12 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		return nil, err
 	}
 	//restore codehash
-	if a.Incarnation > 0 && a.IsEmptyCodeHash() {
+	if records, ok := s.systemContractLookup[address]; ok {
+		p := sort.Search(len(records), func(i int) bool {
+			return records[i].BlockNumber > s.blockNr
+		})
+		a.CodeHash = records[p-1].CodeHash
+	} else if a.Incarnation > 0 && a.IsEmptyCodeHash() {
 		if codeHash, err1 := s.tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], a.Incarnation)); err1 == nil {
 			if len(codeHash) > 0 {
 				a.CodeHash = common.BytesToHash(codeHash)
@@ -254,7 +268,6 @@ func (s *PlainState) WriteAccountStorage(address common.Address, incarnation uin
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
-	h.Sha.Reset()
 	_, err := h.Sha.Write(key[:])
 	if err != nil {
 		return err

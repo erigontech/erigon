@@ -262,6 +262,7 @@ type MultiClient struct {
 	Engine        consensus.Engine
 	blockReader   services.HeaderAndCanonicalReader
 	logPeerInfo   bool
+	passivePeers  bool
 
 	historyV3 bool
 }
@@ -307,6 +308,7 @@ func NewMultiClient(
 		logPeerInfo:   logPeerInfo,
 		forkValidator: forkValidator,
 		historyV3:     historyV3,
+		passivePeers:  chainConfig.TerminalTotalDifficultyPassed,
 	}
 	cs.ChainConfig = chainConfig
 	cs.forks = forkid.GatherForks(cs.ChainConfig)
@@ -388,6 +390,16 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+	if len(pkt) == 0 {
+		outreq := proto_sentry.PeerUselessRequest{
+			PeerId: peerID,
+		}
+		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			return fmt.Errorf("sending peer useless request: %v", err)
+		}
+		// No point processing empty response
+		return nil
+	}
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
@@ -723,7 +735,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	peerIDStr := hex.EncodeToString(peerID[:])
 
 	if !cs.logPeerInfo {
-		log.Debug(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr)
+		log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr)
 		return nil
 	}
 
@@ -742,7 +754,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		}
 	}
 
-	log.Debug(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr,
+	log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr,
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }
@@ -758,6 +770,7 @@ func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
 			Genesis: gointerfaces.ConvertHashToH256(s.genesisHash),
 			Forks:   s.forks,
 		},
+		PassivePeers: cs.passivePeers,
 	}
 }
 

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -328,11 +329,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64()), plainStateWriter); err != nil {
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 
@@ -359,23 +360,23 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 					return nil, nil, fmt.Errorf("interate over plain state: %w", err)
 				}
 				var newK []byte
-				if len(k) == common.AddressLength {
-					newK = make([]byte, common.HashLength)
+				if len(k) == length.Addr {
+					newK = make([]byte, length.Hash)
 				} else {
-					newK = make([]byte, common.HashLength*2+common.IncarnationLength)
+					newK = make([]byte, length.Hash*2+length.Incarnation)
 				}
 				h.Sha.Reset()
 				//nolint:errcheck
-				h.Sha.Write(k[:common.AddressLength])
+				h.Sha.Write(k[:length.Addr])
 				//nolint:errcheck
-				h.Sha.Read(newK[:common.HashLength])
-				if len(k) > common.AddressLength {
-					copy(newK[common.HashLength:], k[common.AddressLength:common.AddressLength+common.IncarnationLength])
+				h.Sha.Read(newK[:length.Hash])
+				if len(k) > length.Addr {
+					copy(newK[length.Hash:], k[length.Addr:length.Addr+length.Incarnation])
 					h.Sha.Reset()
 					//nolint:errcheck
-					h.Sha.Write(k[common.AddressLength+common.IncarnationLength:])
+					h.Sha.Write(k[length.Addr+length.Incarnation:])
 					//nolint:errcheck
-					h.Sha.Read(newK[common.HashLength+common.IncarnationLength:])
+					h.Sha.Read(newK[length.Hash+length.Incarnation:])
 					if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
 						return nil, nil, fmt.Errorf("insert hashed key: %w", err)
 					}
@@ -411,7 +412,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 
 			// Recreating block to make sure Root makes it into the header
-			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
+			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts, nil /* withdrawals */)
 			return block, b.receipts, nil
 		}
 		return nil, nil, fmt.Errorf("no engine to generate blocks")

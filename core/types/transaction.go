@@ -27,7 +27,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -327,6 +330,7 @@ func (s *TxByPriceAndTime) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*s = old[0 : n-1]
 	return x
 }
@@ -383,6 +387,9 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs TransactionsGroupedBySend
 }
 
 func (t *TransactionsByPriceAndNonce) Empty() bool {
+	if t == nil {
+		return true
+	}
 	return len(t.idx) == 0
 }
 
@@ -435,6 +442,9 @@ func NewTransactionsFixedOrder(txs Transactions) *TransactionsFixedOrder {
 }
 
 func (t *TransactionsFixedOrder) Empty() bool {
+	if t == nil {
+		return true
+	}
 	return len(t.Transactions) == 0
 }
 
@@ -521,6 +531,7 @@ func (m Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
+
 func (m Message) DataHashes() []common.Hash { return m.dataHashes }
 
 type TxWrapData interface {
@@ -549,4 +560,20 @@ func copyAddressPtr(a *common.Address) *common.Address {
 	}
 	cpy := *a
 	return &cpy
+}
+
+func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {
+	gas := globalGasCap
+	if gas == 0 {
+		gas = uint64(math.MaxUint64 / 2)
+	}
+	if desiredGas > 0 {
+		gas = desiredGas
+	}
+	if globalGasCap != 0 && globalGasCap < gas {
+		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
+		gas = globalGasCap
+	}
+
+	m.gasLimit = gas
 }

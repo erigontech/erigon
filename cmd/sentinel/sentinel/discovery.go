@@ -22,14 +22,15 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p-core/peer"
+	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
-func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) error {
+func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skipHandshake bool) error {
 	if info.ID == s.host.ID() {
 		return nil
 	}
@@ -39,7 +40,7 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo) erro
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
 	if err := s.host.Connect(ctxWithTimeout, info); err != nil {
-		s.peers.Penalize(info.ID)
+		s.peers.DisconnectPeer(info.ID)
 		return err
 	}
 	return nil
@@ -52,8 +53,8 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 	}
 	for _, peerInfo := range addrInfos {
 		go func(peerInfo peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, peerInfo); err != nil {
-				log.Debug("Could not connect with peer", "err", err)
+			if err := s.connectWithPeer(s.ctx, peerInfo, true); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
@@ -69,7 +70,7 @@ func (s *Sentinel) listenForPeers() {
 			break
 		}
 		if s.HasTooManyPeers() {
-			log.Trace("Not looking for peers, at peer limit")
+			log.Trace("[Sentinel] Not looking for peers, at peer limit")
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
@@ -80,13 +81,18 @@ func (s *Sentinel) listenForPeers() {
 		node := iterator.Node()
 		peerInfo, _, err := convertToAddrInfo(node)
 		if err != nil {
-			log.Error("Could not convert to peer info", "err", err)
+			log.Error("[Sentinel] Could not convert to peer info", "err", err)
+			continue
+		}
+
+		// Skip Peer if IP was private.
+		if node.IP().IsPrivate() {
 			continue
 		}
 
 		go func(peerInfo *peer.AddrInfo) {
-			if err := s.connectWithPeer(s.ctx, *peerInfo); err != nil {
-				log.Debug("Could not connect with peer", "err", err)
+			if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
+				log.Trace("[Sentinel] Could not connect with peer", "err", err)
 			}
 		}(peerInfo)
 	}
@@ -96,7 +102,7 @@ func (s *Sentinel) connectToBootnodes() error {
 	for i := range s.discoverConfig.Bootnodes {
 		if err := s.discoverConfig.Bootnodes[i].Record().Load(enr.WithEntry("tcp", new(enr.TCP))); err != nil {
 			if !enr.IsNotFound(err) {
-				log.Error("Could not retrieve tcp port")
+				log.Error("[Sentinel] Could not retrieve tcp port")
 			}
 			continue
 		}
@@ -117,4 +123,14 @@ func (s *Sentinel) setupENR(
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, bitfield.NewBitvector64().Bytes()))
 	node.Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, bitfield.Bitvector4{byte(0x00)}.Bytes()))
 	return node, nil
+}
+
+func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
+	go func() {
+		peerId := conn.RemotePeer()
+		invalid := !s.handshaker.ValidatePeer(peerId)
+		if invalid {
+			s.peers.DisconnectPeer(peerId)
+		}
+	}()
 }

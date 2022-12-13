@@ -14,11 +14,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -35,30 +36,29 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.Aggregator22, historyV3 bool) (core.Message, vm.BlockContext, vm.TxContext, *state.IntraBlockState, state.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.Aggregator22, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	header := block.HeaderNoCopy()
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3, cfg.ChainName)
 	if err != nil {
-		return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, err
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
 	if historyV3 {
-		//engine := ethash.NewFaker()
 		ibs := state.New(reader)
 		if txIndex == 0 && len(block.Transactions()) == 0 {
-			return nil, vm.BlockContext{}, vm.TxContext{}, ibs, reader, nil
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
 		}
 		if int(txIndex) > block.Transactions().Len() {
-			return nil, vm.BlockContext{}, vm.TxContext{}, ibs, reader, nil
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
 		}
 		txn := block.Transactions()[txIndex]
 		signer := types.MakeSigner(cfg, block.NumberU64())
-		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64()))
-		blockCtx, txCtx := GetEvmContext(msg, header, true /* requireCanonical */, dbtx, headerReader)
+		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.Time()))
+		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
+		txCtx := core.NewEVMTxContext(msg)
 		return msg, blockCtx, txCtx, ibs, reader, nil
 
 	}
 
-	engine := ethash.NewFaker()
 	getHeader := func(hash common.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
@@ -68,7 +68,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 	statedb := state.New(reader)
 
 	if txIndex == 0 && len(block.Transactions()) == 0 {
-		return nil, vm.BlockContext{}, vm.TxContext{}, statedb, reader, nil
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
@@ -83,13 +83,13 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		excessDataGas = parentHeader.ExcessDataGas
 	}
 	BlockContext := core.NewEVMBlockContext(header, excessDataGas, core.GetHashFn(header, getHeader), engine, nil)
-	vmenv := vm.NewEVM(BlockContext, vm.TxContext{}, statedb, cfg, vm.Config{})
+	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
 		case <-ctx.Done():
-			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, ctx.Err()
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
 		statedb.Prepare(tx.Hash(), block.Hash(), idx)
 
@@ -102,7 +102,7 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
-			return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", tx.Hash(), err)
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP161 (part of Spurious Dragon) is in effect
@@ -110,10 +110,10 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 
 		if idx+1 == len(block.Transactions()) {
 			// Return the state from evaluating all txs in the block, note no msg or TxContext in this case
-			return nil, BlockContext, vm.TxContext{}, statedb, reader, nil
+			return nil, BlockContext, evmtypes.TxContext{}, statedb, reader, nil
 		}
 	}
-	return nil, vm.BlockContext{}, vm.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
+	return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, block.Hash())
 }
 
 // TraceTx configures a new tracer according to the provided configuration, and
@@ -122,9 +122,9 @@ func ComputeTxEnv(ctx context.Context, block *types.Block, cfg *params.ChainConf
 func TraceTx(
 	ctx context.Context,
 	message core.Message,
-	blockCtx vm.BlockContext,
-	txCtx vm.TxContext,
-	ibs vm.IntraBlockState,
+	blockCtx evmtypes.BlockContext,
+	txCtx evmtypes.TxContext,
+	ibs evmtypes.IntraBlockState,
 	config *tracers.TraceConfig,
 	chainConfig *params.ChainConfig,
 	stream *jsoniter.Stream,
@@ -200,9 +200,9 @@ func TraceTx(
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := fmt.Sprintf("%x", result.Return())
+		returnVal := hex.EncodeToString(result.Return())
 		if len(result.Revert()) > 0 {
-			returnVal = fmt.Sprintf("%x", result.Revert())
+			returnVal = hex.EncodeToString(result.Revert())
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
@@ -251,7 +251,7 @@ func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsonite
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -390,7 +390,7 @@ func (l *JsonStreamLogger) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, ga
 func (l *JsonStreamLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *big.Int) {
+func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (l *JsonStreamLogger) CaptureAccountRead(account common.Address) error {

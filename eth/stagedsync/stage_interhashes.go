@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -95,8 +94,17 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Generating intermediate hashes", logPrefix), "from", s.BlockNumber, "to", to)
 	}
+
 	var root common.Hash
 	tooBigJump := to > s.BlockNumber && to-s.BlockNumber > 100_000 // RetainList is in-memory structure and it will OOM if jump is too big, such big jump anyway invalidate most of existing Intermediate hashes
+	if !tooBigJump && cfg.historyV3 && to-s.BlockNumber > 10 {
+		//incremental can work only on DB data, not on snapshots
+		_, n, err := rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		tooBigJump = s.BlockNumber < n
+	}
 	if s.BlockNumber == 0 || tooBigJump {
 		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
 			return trie.EmptyRoot, err
@@ -192,7 +200,6 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
-	var k, v []byte
 
 	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
 	if err != nil {
@@ -201,11 +208,8 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 	txnTo := uint64(math.MaxUint64)
 
 	if storage {
-		compositeKey := make([]byte, common.HashLength+common.HashLength)
-		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
-		defer it.Close()
-		for it.HasNext() {
-			k, v = it.Next(k[:0], v[:0])
+		compositeKey := make([]byte, length.Hash+length.Hash)
+		if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
@@ -215,21 +219,21 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 				return err
 			}
 			copy(compositeKey, addrHash[:])
-			copy(compositeKey[common.HashLength:], secKey[:])
+			copy(compositeKey[length.Hash:], secKey[:])
 			if len(v) != 0 {
 				v = nonEmptyMarker
 			}
 			if err := load(compositeKey, v); err != nil {
 				return err
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		return nil
 	}
 
-	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
-	defer it.Close()
-	for it.HasNext() {
-		k, v = it.Next(k[:0], v[:0])
+	if err := agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -240,6 +244,9 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 		if err := load(newK, v); err != nil {
 			return err
 		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	return nil
 }
@@ -341,13 +348,9 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 	}
 	txnTo := uint64(math.MaxUint64)
 	var deletedAccounts [][]byte
-	var k, v []byte
 
 	if storage {
-		it := agg.Storage().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
-		defer it.Close()
-		for it.HasNext() {
-			k, v = it.Next(k[:0], v[:0])
+		if err = agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
@@ -368,15 +371,13 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 				return err
 			}
 			load(newK, value)
+			return nil
+		}); err != nil {
+			return err
 		}
 		return nil
 	}
-
-	it := agg.Accounts().MakeContext().IterateChanged(txnFrom, txnTo, p.tx)
-	defer it.Close()
-
-	for it.HasNext() {
-		k, v = it.Next(k[:0], v[:0])
+	if err = agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -405,6 +406,9 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		}
 
 		load(newK, value)
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// delete Intermediate hashes of deleted accounts
@@ -677,42 +681,6 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 		return err
 	}
 	if err := stTrieCollector.Load(db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ResetHashState(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.HashedStorage); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.ContractCode); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.HashState, 0); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ResetIH(tx kv.RwTx) error {
-	if err := tx.ClearBucket(kv.TrieOfAccounts); err != nil {
-		return err
-	}
-	if err := tx.ClearBucket(kv.TrieOfStorage); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, 0); err != nil {
-		return err
-	}
-	if err := stages.SaveStagePruneProgress(tx, stages.IntermediateHashes, 0); err != nil {
 		return err
 	}
 	return nil

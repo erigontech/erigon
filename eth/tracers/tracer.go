@@ -26,6 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/holiman/uint256"
 
@@ -191,7 +192,7 @@ func (sw *stackWrapper) pushObject(vm *JSVM) {
 
 // dbWrapper provides a JavaScript wrapper around vm.Database.
 type dbWrapper struct {
-	db vm.IntraBlockState
+	db evmtypes.IntraBlockState
 }
 
 // pushObject assembles a JSVM object wrapping a swappable database and pushes it
@@ -579,7 +580,7 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
+func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if depth != 0 {
 		return
 	}
@@ -591,7 +592,7 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.ctx["to"] = to
 	jst.ctx["input"] = input
 	jst.ctx["gas"] = gas
-	jst.ctx["gasPrice"] = env.TxContext().GasPrice
+	jst.ctx["gasPrice"] = env.TxContext().GasPrice.ToBig()
 	jst.ctx["value"] = value
 
 	// Initialize the context
@@ -599,9 +600,10 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.dbWrapper.db = env.IntraBlockState()
 	// Compute intrinsic gas
 	isHomestead := env.ChainConfig().IsHomestead(env.Context().BlockNumber)
-	isIstanbul := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
-	isShanghai := env.ChainConfig().IsShanghai(env.Context().BlockNumber)
-	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isIstanbul, isShanghai)
+	isEIP2028 := env.ChainConfig().IsIstanbul(env.Context().BlockNumber)
+	vmConfig := env.Config()
+	isEIP3860 := vmConfig.HasEip3860(env.ChainRules())
+	intrinsicGas, err := core.IntrinsicGas(input, nil, jst.ctx["type"] == "CREATE", isHomestead, isEIP2028, isEIP3860)
 	if err != nil {
 		return
 	}
@@ -668,7 +670,7 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64,
 	}
 }
 
-func (jst *Tracer) CaptureSelfDestruct(from, to common.Address, value *big.Int) {
+func (jst *Tracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
 
 func (jst *Tracer) CaptureAccountRead(account common.Address) error {
@@ -702,6 +704,9 @@ func (jst *Tracer) GetResult() (json.RawMessage, error) {
 
 		case *big.Int:
 			pushBigInt(val, jst.vm)
+
+		case *uint256.Int:
+			pushBigInt(val.ToBig(), jst.vm)
 
 		case int:
 			jst.vm.PushInt(val)

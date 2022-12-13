@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -147,11 +148,11 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
 	origin, _ := signer.Sender(txn)
-	txContext := vm.TxContext{
+	txContext := evmtypes.TxContext{
 		Origin:   origin,
-		GasPrice: big.NewInt(1),
+		GasPrice: uint256.NewInt(1),
 	}
-	context := vm.BlockContext{
+	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Coinbase:    common.Address{},
@@ -239,11 +240,11 @@ func TestCallTracer(t *testing.T) {
 			}
 			signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
 			origin, _ := signer.Sender(txn)
-			txContext := vm.TxContext{
+			txContext := evmtypes.TxContext{
 				Origin:   origin,
-				GasPrice: big.NewInt(int64(txn.GetPrice().Uint64())),
+				GasPrice: txn.GetPrice(),
 			}
-			context := vm.BlockContext{
+			context := evmtypes.BlockContext{
 				CanTransfer: core.CanTransfer,
 				Transfer:    core.Transfer,
 				Coinbase:    test.Context.Miner,

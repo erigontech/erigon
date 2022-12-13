@@ -6,9 +6,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -26,7 +26,7 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 	for store.Load() == nil {
 		select {
 		case <-logInterval.C:
-			peers, err := l.sentinel.GetPeers(ctx, &consensusrpc.EmptyRequest{})
+			peers, err := l.sentinel.GetPeers(ctx, &sentinel.EmptyMessage{})
 			if err != nil {
 				return err
 			}

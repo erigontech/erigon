@@ -196,7 +196,7 @@ func (n ID) Bytes() []byte {
 
 // ID prints as a long hexadecimal number.
 func (n ID) String() string {
-	return fmt.Sprintf("%x", n[:])
+	return hex.EncodeToString(n[:])
 }
 
 // The Go syntax representation of a ID is a call to HexID.

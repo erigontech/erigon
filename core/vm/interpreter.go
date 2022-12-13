@@ -20,10 +20,12 @@ import (
 	"hash"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 // Config are the configuration options for the Interpreter
@@ -40,6 +42,15 @@ type Config struct {
 	RestoreState  bool   // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+}
+
+func (vmConfig *Config) HasEip3860(rules *params.Rules) bool {
+	for _, eip := range vmConfig.ExtraEips {
+		if eip == 3860 {
+			return true
+		}
+	}
+	return rules.IsShanghai
 }
 
 // Interpreter is used to run Ethereum based contracts and will utilise the
@@ -227,7 +238,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// For optimisation reason we're using uint64 as the program counter.
 		// It's theoretically possible to go above 2^64. The YP defines the PC
 		// to be uint256. Practically much less so feasible.
-		pc   = uint64(0) // program counter
+		_pc  = uint64(0) // program counter
+		pc   = &_pc      // program counter
 		cost uint64
 		// copies used by tracer
 		pcCopy  uint64 // needed for the deferred Tracer
@@ -266,12 +278,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		if in.cfg.Debug {
 			// Capture pre-execution values for tracing.
-			logged, pcCopy, gasCopy = false, pc, contract.Gas
+			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
 
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
-		op = contract.GetOp(pc)
+		op = contract.GetOp(_pc)
 		operation := in.jt[op]
 
 		if operation == nil {
@@ -332,12 +344,12 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(in.evm, _pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
 
 		// execute the operation
-		res, err = operation.execute(&pc, in, callContext)
+		res, err = operation.execute(pc, in, callContext)
 		// if the operation clears the return data (e.g. it has returning data)
 		// set the last return to the result of the operation.
 		if operation.returns {
@@ -352,7 +364,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		case operation.halts:
 			return res, nil
 		case !operation.jumps:
-			pc++
+			_pc++
 		}
 	}
 	return nil, nil

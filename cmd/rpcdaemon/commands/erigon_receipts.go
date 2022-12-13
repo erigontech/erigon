@@ -211,10 +211,22 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 }
 
 // GetLatestLogs implements erigon_getLatestLogs.
-// Return specific number of logs matching a give filter objects by descend.
-func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logCount uint64) (types.ErigonLogs, error) {
-	if logCount == 0 {
-		logCount = 1
+// Return specific number of logs or block matching a give filter objects by descend.
+// IgnoreTopicsOrder option provide a way to match the logs with addresses and topics without caring the topics's orders
+// When IgnoreTopicsOrde option is true, once the logs have a topic that matched, it will be returned no matter what topic position it is in.
+
+// blockCount parameter is for better pagination.
+// `crit` filter is the same filter.
+//
+// Examples:
+// {} or nil          matches any topics list
+// {{A}}              matches topic A in any positions. Logs with {{B}, {A}} will be matched
+func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions filters.LogFilterOptions) (types.ErigonLogs, error) {
+	if logOptions.LogCount != 0 && logOptions.BlockCount != 0 {
+		return nil, fmt.Errorf("logs count & block count are ambigious")
+	}
+	if logOptions.LogCount == 0 && logOptions.BlockCount == 0 {
+		logOptions = filters.DefaultLogFilterOptions()
 	}
 	erigonLogs := types.ErigonLogs{}
 	tx, beginErr := api.db.BeginRo(ctx)
@@ -222,14 +234,26 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return erigonLogs, beginErr
 	}
 	defer tx.Rollback()
-	latest, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, err
+	var latest uint64
+	var err error
+	if crit.ToBlock != nil {
+		if crit.ToBlock.Sign() >= 0 {
+			latest = crit.ToBlock.Uint64()
+		} else if !crit.ToBlock.IsInt64() || crit.ToBlock.Int64() != int64(rpc.LatestBlockNumber) {
+			return nil, fmt.Errorf("negative value for ToBlock: %v", crit.ToBlock)
+		}
+	} else {
+		latest, err = rpchelper.GetLatestBlockNumber(tx)
+		//to fetch latest
+		latest += 1
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(0, latest+1)
+	blockNumbers.AddRange(0, latest)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
 	if err != nil {
 		return nil, err
@@ -260,10 +284,16 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
+	topicsMap := make(map[common.Hash]struct{})
+	for i := range crit.Topics {
+		for j := range crit.Topics {
+			topicsMap[crit.Topics[i][j]] = struct{}{}
+		}
+	}
 
 	// latest logs that match the filter crit
 	iter := blockNumbers.ReverseIterator()
-	var count uint64
+	var logCount, blockCount uint64
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -282,7 +312,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				log.Index = logIndex
 				logIndex++
 			}
-			filtered := logs.Filter(addrMap, crit.Topics)
+			var filtered types.Logs
+			if logOptions.IgnoreTopicsOrder {
+				filtered = logs.CointainTopics(addrMap, topicsMap)
+			} else {
+				filtered = logs.Filter(addrMap, crit.Topics)
+			}
 			if len(filtered) == 0 {
 				return nil
 			}
@@ -292,10 +327,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			}
 			for i := len(filtered) - 1; i >= 0; i-- {
 				blockLogs = append(blockLogs, filtered[i])
-				count++
-				if count == logCount {
-					return nil
-				}
+				logCount++
+			}
+			blockCount++
+			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+				return nil
 			}
 			return nil
 		})
@@ -342,7 +378,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLogs = append(erigonLogs, erigonLog)
 		}
 
-		if count == logCount {
+		if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+			return erigonLogs, nil
+		}
+		if logOptions.BlockCount != 0 && logOptions.BlockCount == blockCount {
 			return erigonLogs, nil
 		}
 	}

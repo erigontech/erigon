@@ -211,6 +211,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -254,7 +255,8 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
 
-	for txs.Len() > 0 {
+	count := 0
+	for count < limit && txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
 		tip := tx.GetEffectiveGasTip(baseFee)
 		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
@@ -263,9 +265,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
 			heap.Push(s, tip)
-			if s.Len() >= limit {
-				break
-			}
+			count = count + 1
 		}
 	}
 	return nil
@@ -290,6 +290,7 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*s = old[0 : n-1]
 	return x
 }

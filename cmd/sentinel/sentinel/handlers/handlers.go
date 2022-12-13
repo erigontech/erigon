@@ -14,8 +14,12 @@
 package handlers
 
 import (
+	"context"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -23,34 +27,43 @@ import (
 )
 
 type ConsensusHandlers struct {
-	handlers map[protocol.ID]network.StreamHandler
-	host     host.Host
-	peers    *peers.Peers
-	metadata *cltypes.MetadataV2
+	handlers      map[protocol.ID]network.StreamHandler
+	host          host.Host
+	peers         *peers.Peers
+	metadata      *cltypes.MetadataV2
+	beaconConfig  *clparams.BeaconChainConfig
+	genesisConfig *clparams.GenesisConfig
+	ctx           context.Context
+
+	db kv.RoDB // Read stuff from database to answer
 }
 
-const SuccessfulResponsePrefix = 0x00
+const (
+	SuccessfulResponsePrefix = 0x00
+	ResourceUnavaiablePrefix = 0x03
+)
 
-var NoRequestHandlers = map[string]bool{
-	MetadataProtocolV1:          true,
-	MetadataProtocolV2:          true,
-	LightClientFinalityUpdateV1: true,
-}
-
-func NewConsensusHandlers(host host.Host, peers *peers.Peers, metadata *cltypes.MetadataV2) *ConsensusHandlers {
+func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
+	peers *peers.Peers, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.MetadataV2) *ConsensusHandlers {
 	c := &ConsensusHandlers{
-		peers:    peers,
-		host:     host,
-		metadata: metadata,
+		peers:         peers,
+		host:          host,
+		metadata:      metadata,
+		db:            db,
+		genesisConfig: genesisConfig,
+		beaconConfig:  beaconConfig,
+		ctx:           ctx,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(PingProtocolV1):                curryStreamHandler(ssz_snappy.NewStreamCodec, c.pingHandler),
-		protocol.ID(GoodbyeProtocolV1):             curryStreamHandler(ssz_snappy.NewStreamCodec, c.goodbyeHandler),
-		protocol.ID(StatusProtocolV1):              curryStreamHandler(ssz_snappy.NewStreamCodec, c.statusHandler),
-		protocol.ID(MetadataProtocolV1):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV1Handler),
-		protocol.ID(MetadataProtocolV2):            curryStreamHandler(ssz_snappy.NewStreamCodec, c.metadataV2Handler),
-		protocol.ID(BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
-		protocol.ID(BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
+		protocol.ID(communication.PingProtocolV1):                c.pingHandler,
+		protocol.ID(communication.GoodbyeProtocolV1):             c.goodbyeHandler,
+		protocol.ID(communication.StatusProtocolV1):              c.statusHandler,
+		protocol.ID(communication.MetadataProtocolV1):            c.metadataV1Handler,
+		protocol.ID(communication.MetadataProtocolV2):            c.metadataV2Handler,
+		protocol.ID(communication.BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
+		protocol.ID(communication.BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
+		protocol.ID(communication.LightClientFinalityUpdateV1):   c.lightClientFinalityUpdateHandler,
+		protocol.ID(communication.LightClientOptimisticUpdateV1): c.lightClientOptimisticUpdateHandler,
 	}
 	return c
 }
