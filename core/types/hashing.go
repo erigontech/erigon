@@ -194,8 +194,8 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 // prefixedSSZHash writes the prefix into the hasher before SSZ hash-tree-root-ing x.
 // It's used for typed transactions.
 func prefixedSSZHash(prefix byte, x tree.HTR) (h common.Hash) {
-	sha := hasherPool.Get().(crypto.KeccakState)
-	defer hasherPool.Put(sha)
+	sha := cryptopool.NewLegacyKeccak256().(crypto.KeccakState)
+	defer cryptopool.ReturnToPoolKeccak256(sha)
 	sha.Reset()
 	sha.Write([]byte{prefix})
 	htr := x.HashTreeRoot(tree.GetHashFn())
