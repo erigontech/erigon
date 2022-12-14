@@ -243,16 +243,10 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	var errCh chan error
+	var rwLoopErrCh chan error
 
+	var rwLoopWg sync.WaitGroup
 	if parallel {
-		errCh = make(chan error, 1)
-		defer close(errCh)
-
-		var wg sync.WaitGroup
-		wg.Add(1)
-		defer wg.Wait()
-
 		// Go-routine gathering results from the workers
 		rwLoop := func(ctx context.Context) error {
 			tx, err := chainDb.BeginRw(ctx)
@@ -271,7 +265,7 @@ func ExecV3(ctx context.Context,
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
-			go applyLoop(applyCtx, errCh)
+			go applyLoop(applyCtx, rwLoopErrCh)
 
 			for outputTxNum.Load() < maxTxNum.Load() {
 				select {
@@ -385,7 +379,7 @@ func ExecV3(ctx context.Context,
 					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 					defer cancelApplyCtx()
 					applyLoopWg.Add(1)
-					go applyLoop(applyCtx, errCh)
+					go applyLoop(applyCtx, rwLoopErrCh)
 
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
@@ -407,13 +401,21 @@ func ExecV3(ctx context.Context,
 			}
 			return nil
 		}
+
+		rwLoopErrCh = make(chan error, 1)
+
+		rwLoopWg.Add(1)
+		defer rwLoopWg.Wait()
 		go func() {
-			defer wg.Done()
+			defer close(rwLoopErrCh)
+			defer rwLoopWg.Done()
+
+			defer applyLoopWg.Wait()
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
 
 			if err := rwLoop(ctx); err != nil {
-				errCh <- err
+				rwLoopErrCh <- err
 			}
 		}()
 	}
@@ -480,7 +482,7 @@ Loop:
 
 		if parallel {
 			select {
-			case err := <-errCh:
+			case err := <-rwLoopErrCh:
 				if err != nil {
 					return err
 				}
@@ -642,13 +644,11 @@ Loop:
 	}
 
 	if parallel {
-		if err := <-errCh; err != nil {
+		stopWorkers()
+		rwLoopWg.Wait()
+		if err, ok := <-rwLoopErrCh; ok && err != nil {
 			return err
 		}
-	}
-
-	if !parallel {
-		stopWorkers()
 	} else {
 		if err = rs.Flush(applyTx); err != nil {
 			return err
@@ -762,7 +762,8 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
+	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
+
 	var maxTxNum uint64 = startTxNum
 
 	workCh := make(chan *exec22.TxTask, workerCount*4)
@@ -773,26 +774,26 @@ func reconstituteStep(last bool,
 	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	log.Info("Scan accounts history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
 
 	t = time.Now()
 	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	log.Info("Scan storage history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
 
 	t = time.Now()
 	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	log.Info("Scan code history", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
 	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	log.Info("Ready to replay", "transactions", bitmap.GetCardinality(), "out of", txNum)
+	log.Info(fmt.Sprintf("[%s] Ready to replay", s.LogPrefix()), "transactions", bitmap.GetCardinality(), "out of", txNum)
 	var lock sync.RWMutex
 	reconWorkers := make([]*exec3.ReconWorker, workerCount)
 	roTxs := make([]kv.Tx, workerCount)
@@ -993,11 +994,12 @@ func reconstituteStep(last bool,
 	}); err != nil {
 		return err
 	}
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
@@ -1161,6 +1163,7 @@ func reconstituteStep(last bool,
 				}
 			}
 		}
+
 		return nil
 	}); err != nil {
 		return err
@@ -1237,22 +1240,24 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}
 	db.Close()
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
+
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
 	fillWorker.FillAccounts(plainStateCollector)
-	log.Info("Filled accounts", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
 	t = time.Now()
 	fillWorker.FillStorage(plainStateCollector)
-	log.Info("Filled storage", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
 	t = time.Now()
 	fillWorker.FillCode(codeCollector, plainContractCollector)
-	log.Info("Filled code", "took", time.Since(t))
+	log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+
 	// Load all collections into the main collector
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
 		if err = plainStateCollector.Load(tx, kv.PlainState, etl.IdentityLoadFunc, etl.TransformArgs{}); err != nil {
@@ -1275,7 +1280,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}); err != nil {
 		return err
 	}
-	log.Info("Reconstitution done", "in", time.Since(startTime))
+	log.Info(fmt.Sprintf("[%s] Reconstitution done", s.LogPrefix()), "in", time.Since(startTime))
 	return nil
 }
 
