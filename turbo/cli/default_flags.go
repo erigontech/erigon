@@ -132,6 +132,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
+	&utils.DisableIPV4,
+	&utils.DisableIPV6,
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
 	&HealthCheckFlag,
@@ -154,5 +156,4 @@ var DefaultFlags = []cli.Flag{
 	&utils.LightClientDiscoveryTCPPortFlag,
 	&utils.SentinelAddrFlag,
 	&utils.SentinelPortFlag,
-	&utils.DisableIPV6,
 }
