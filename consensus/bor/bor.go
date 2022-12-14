@@ -11,18 +11,16 @@ import (
 	"math/big"
 	"sort"
 	"strconv"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
@@ -226,31 +224,33 @@ type Bor struct {
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 
-	signer common.Address // Ethereum address of the signing key
-	signFn SignerFn       // Signer function to authorize hashes with
-	lock   *sync.RWMutex  // Protects the signer fields
+	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
 	execCtx context.Context // context of caller execution stage
 
-	GenesisContractsClient *contract.GenesisContractsClient
-	validatorSetABI        abi.ABI
-	stateReceiverABI       abi.ABI
+	GenesisContractsClient GenesisContract
 	spanner                Spanner
 	HeimdallClient         IHeimdallClient
-	WithoutHeimdall        bool
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
 	fakeDiff  bool // Skip difficulty verifications
 	spanCache *btree.BTree
+	closeOnce sync.Once
+}
+
+type signer struct {
+	signer common.Address // Ethereum address of the signing key
+	signFn SignerFn       // Signer function to authorize hashes with
 }
 
 // New creates a Matic Bor consensus engine.
 func New(
 	chainConfig *params.ChainConfig,
 	db kv.RwDB,
-	heimdallClient IHeimdallClient,
 	spanner Spanner,
+	heimdallClient IHeimdallClient,
+	genesisContracts GenesisContract,
 ) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor
@@ -263,24 +263,26 @@ func New(
 	// Allocate the snapshot caches and create the engine
 	recents, _ := lru.NewARC(inmemorySnapshots)
 	signatures, _ := lru.NewARC(inmemorySignatures)
-	vABI, _ := abi.JSON(strings.NewReader(contract.ValidatorsetABI))
-	sABI, _ := abi.JSON(strings.NewReader(contract.StateReceiverABI))
-	genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, borConfig.ValidatorContract, borConfig.StateReceiverContract)
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
 		DB:                     db,
 		recents:                recents,
 		signatures:             signatures,
-		validatorSetABI:        vABI,
-		stateReceiverABI:       sABI,
 		spanner:                spanner,
-		GenesisContractsClient: genesisContractsClient,
+		GenesisContractsClient: genesisContracts,
 		HeimdallClient:         heimdallClient,
 		spanCache:              btree.New(32),
 		execCtx:                context.Background(),
-		lock:                   &sync.RWMutex{},
 	}
+
+	c.authorizedSigner.Store(&signer{
+		common.Address{},
+		func(_ common.Address, _ string, i []byte) ([]byte, error) {
+			// return an error to prevent panics
+			return nil, &UnauthorizedSignerError{0, common.Address{}.Bytes()}
+		},
+	})
 
 	// make sure we can decode all the GenesisAlloc in the BorConfig.
 	for key, genesisAlloc := range c.config.BlockAlloc {
@@ -531,7 +533,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash co
 					h := checkpoint.Hash()
 
 					// get validators and current span
-					validators, err := c.spanner.GetCurrentValidators(n+1, c.signer, c.getSpanForBlock)
+					validators, err := c.spanner.GetCurrentValidators(n+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 					if err != nil {
 						return nil, err
 					}
@@ -717,7 +719,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	// Set the correct difficulty
-	header.Difficulty = new(big.Int).SetUint64(snap.Difficulty(c.signer))
+	header.Difficulty = new(big.Int).SetUint64(snap.Difficulty(c.authorizedSigner.Load().signer))
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < extraVanity {
@@ -728,7 +730,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	// get validator set if number
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.signer, c.getSpanForBlock)
+		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 		if err != nil {
 			return errors.New("unknown validators")
 		}
@@ -755,8 +757,8 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 
 	var succession int
 	// if signer is not empty
-	if !bytes.Equal(c.signer.Bytes(), common.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(c.signer)
+	if !bytes.Equal(c.authorizedSigner.Load().signer.Bytes(), common.Address{}.Bytes()) {
+		succession, err = snap.GetSignerSuccessionNumber(c.authorizedSigner.Load().signer)
 		if err != nil {
 			return err
 		}
@@ -788,7 +790,7 @@ func (c *Bor) Finalize(config *params.ChainConfig, header *types.Header, state *
 			return nil, types.Receipts{}, err
 		}
 
-		if !c.WithoutHeimdall {
+		if c.HeimdallClient != nil {
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
@@ -863,7 +865,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types
 			return nil, nil, types.Receipts{}, err
 		}
 
-		if !c.WithoutHeimdall {
+		if c.HeimdallClient != nil {
 			// commit states
 			_, err = c.CommitStates(state, header, cx, syscall)
 			if err != nil {
@@ -903,12 +905,11 @@ func (c *Bor) Initialize(config *params.ChainConfig, chain consensus.ChainHeader
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Bor) Authorize(signer common.Address, signFn SignerFn) {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	c.signer = signer
-	c.signFn = signFn
+func (c *Bor) Authorize(currentSigner common.Address, signFn SignerFn) {
+	c.authorizedSigner.Store(&signer{
+		signer: currentSigner,
+		signFn: signFn,
+	})
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
@@ -929,9 +930,8 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	}
 
 	// Don't hold the signer fields for the entire sealing procedure
-	c.lock.RLock()
-	signer, signFn := c.signer, c.signFn
-	c.lock.RUnlock()
+	currentSigner := c.authorizedSigner.Load()
+	signer, signFn := currentSigner.signer, currentSigner.signFn
 
 	snap, err := c.snapshot(chain, number-1, header.ParentHash, nil)
 	if err != nil {
@@ -1010,7 +1010,7 @@ func (c *Bor) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *
 		return nil
 	}
 
-	return new(big.Int).SetUint64(snap.Difficulty(c.signer))
+	return new(big.Int).SetUint64(snap.Difficulty(c.authorizedSigner.Load().signer))
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -1091,14 +1091,12 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 			spanID = c.spanCache.Max().(*span.HeimdallSpan).ID + 1
 		}
 		for borSpan == nil || borSpan.EndBlock < blockNum {
-			var heimdallSpan span.HeimdallSpan
 			log.Info("Span with high enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
 			}
-			heimdallSpan = *response
-			borSpan = &heimdallSpan
+			borSpan = response
 			c.spanCache.ReplaceOrInsert(borSpan)
 			spanID++
 		}
@@ -1106,14 +1104,12 @@ func (c *Bor) getSpanForBlock(blockNum uint64) (*span.HeimdallSpan, error) {
 		for borSpan.StartBlock > blockNum {
 			// Span wit low enough block number is not loaded
 			var spanID = borSpan.ID - 1
-			var heimdallSpan span.HeimdallSpan
 			log.Info("Span with low enough block number is not loaded", "fetching span", spanID)
 			response, err := c.HeimdallClient.Span(c.execCtx, spanID)
 			if err != nil {
 				return nil, err
 			}
-			heimdallSpan = *response
-			borSpan = &heimdallSpan
+			borSpan = response
 			c.spanCache.ReplaceOrInsert(borSpan)
 		}
 	}
@@ -1134,7 +1130,7 @@ func (c *Bor) fetchAndCommitSpan(
 ) error {
 	var heimdallSpan span.HeimdallSpan
 
-	if c.WithoutHeimdall {
+	if c.HeimdallClient == nil {
 		s, err := c.getNextHeimdallSpanForTest(newSpanID, state, header, chain, syscall)
 		if err != nil {
 			return err
@@ -1213,7 +1209,7 @@ func (c *Bor) CommitStates(
 		}
 		stateSyncs = append(stateSyncs, &stateData)
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, syscall); err != nil {
+		if err := c.GenesisContractsClient.CommitStates(eventRecord, state, header, chain, syscall); err != nil {
 			return nil, err
 		}
 		lastStateID++

@@ -64,16 +64,13 @@ func (gc *GenesisContractsClient) CommitState(
 	syscall consensus.SystemCall,
 ) error {
 	eventRecord := event.BuildEventRecord()
-
 	recordBytes, err := rlp.EncodeToBytes(eventRecord)
 	if err != nil {
 		return err
 	}
 
 	const method = "commitState"
-
 	t := event.Time.Unix()
-
 	data, err := gc.stateReceiverABI.Pack(method, big.NewInt(0).SetInt64(t), recordBytes)
 	if err != nil {
 		log.Error("Unable to pack tx for commitState", "err", err)
