@@ -1167,7 +1167,7 @@ func (c *Bor) CommitStates(
 	stateSyncs := make([]*types.StateSyncData, 0)
 	number := header.Number.Uint64()
 
-	_lastStateID, err := c.GenesisContractsClient.LastStateId(header, state, chain, syscall)
+	_lastStateID, err := c.GenesisContractsClient.LastStateId(syscall)
 	if err != nil {
 		return nil, err
 	}
@@ -1209,7 +1209,7 @@ func (c *Bor) CommitStates(
 		}
 		stateSyncs = append(stateSyncs, &stateData)
 
-		if err := c.GenesisContractsClient.CommitState(eventRecord, state, header, chain, syscall); err != nil {
+		if err := c.GenesisContractsClient.CommitState(eventRecord, syscall); err != nil {
 			return nil, err
 		}
 		lastStateID++

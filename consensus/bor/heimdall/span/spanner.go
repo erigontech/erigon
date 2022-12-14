@@ -15,16 +15,14 @@ import (
 )
 
 type ChainSpanner struct {
-	validatorSet             abi.ABI
-	chainConfig              *params.ChainConfig
-	validatorContractAddress common.Address
+	validatorSet abi.ABI
+	chainConfig  *params.ChainConfig
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig, validatorContractAddress common.Address) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig) *ChainSpanner {
 	return &ChainSpanner{
-		validatorSet:             validatorSet,
-		chainConfig:              chainConfig,
-		validatorContractAddress: validatorContractAddress,
+		validatorSet: validatorSet,
+		chainConfig:  chainConfig,
 	}
 }
 

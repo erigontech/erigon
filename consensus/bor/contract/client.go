@@ -8,9 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
-	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -58,9 +55,6 @@ func NewGenesisContractsClient(
 
 func (gc *GenesisContractsClient) CommitState(
 	event *clerk.EventRecordWithTime,
-	state *state.IntraBlockState,
-	header *types.Header,
-	chCtx statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
 	eventRecord := event.BuildEventRecord()
@@ -89,10 +83,7 @@ func (gc *GenesisContractsClient) CommitState(
 	return nil
 }
 
-func (gc *GenesisContractsClient) LastStateId(header *types.Header,
-	state *state.IntraBlockState,
-	chain statefull.ChainContext,
-	syscall consensus.SystemCall,
+func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall,
 ) (*big.Int, error) {
 	const method = "lastStateId"
 

@@ -66,6 +66,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *params.BorConfig:
+		genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract)
 		spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
 		borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
 		db := db.OpenDatabase(borDbPath, logger, false, readonly)
@@ -74,14 +75,14 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 
 			var heimdallClient bor.IHeimdallClient
 			if WithoutHeimdall {
-				return bor.New(chainConfig, db, nil, spanner)
+				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient)
 			} else {
 				if HeimdallgRPCAddress != "" {
 					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(HeimdallgRPCAddress)
 				} else {
 					heimdallClient = heimdall.NewHeimdallClient(HeimdallURL)
 				}
-				eng = bor.New(chainConfig, db, heimdallClient, spanner)
+				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient)
 			}
 		}
 	}
