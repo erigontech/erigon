@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -74,6 +75,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
+
+	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
+
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)
+
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -84,6 +90,13 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
+		if msg.FeeCap().IsZero() && engine != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+			}
+			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		}
+
 		TxContext := core.NewEVMTxContext(msg)
 		if idx == int(txIndex) {
 			return msg, BlockContext, TxContext, statedb, reader, nil
