@@ -501,8 +501,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	// if not ok and cc.Bor != nil then we might have a bor transaction
-	if !ok {
+	// if not ok and cc.Bor != nil then we might have a bor transaction.
+	// Note that Private API returns 0 if transaction is not found.
+	if !ok || blockNum == 0 {
 		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 		if err != nil {
 			return nil, err
