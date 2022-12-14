@@ -177,6 +177,14 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 }
 
 func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
+	txType := data[0]
+	if txType == BlobTxType {
+		var blobTx SignedBlobTx
+		if err := DecodeSSZ(data[1:], &blobTx); err != nil {
+			return nil, err
+		}
+		return &blobTx, nil
+	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
 	return DecodeTransaction(s)
 }
@@ -537,7 +545,8 @@ type TxWrapData interface {
 }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
-	return dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
+	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
+	return err
 }
 
 func EncodeSSZ(w io.Writer, obj codec.Serializable) error {

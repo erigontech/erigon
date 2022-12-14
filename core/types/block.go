@@ -1189,6 +1189,8 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 			txLen = t.EncodingSize()
 		case *StarknetTransaction:
 			txLen = t.EncodingSize()
+		case *SignedBlobTx:
+			txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
@@ -1271,6 +1273,10 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 				return err
 			}
 		case *StarknetTransaction:
+			if err := t.EncodeRLP(w); err != nil {
+				return err
+			}
+		case *SignedBlobTx:
 			if err := t.EncodeRLP(w); err != nil {
 				return err
 			}

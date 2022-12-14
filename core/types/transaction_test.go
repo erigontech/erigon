@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	. "github.com/protolambda/ztyp/view"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -443,7 +444,7 @@ func TestTransactionCoding(t *testing.T) {
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
-		switch i % 5 {
+		switch i % 6 {
 		case 0:
 			// Legacy tx.
 			txdata = &LegacyTx{
@@ -507,12 +508,23 @@ func TestTransactionCoding(t *testing.T) {
 				},
 				AccessList: accesses,
 			}
+		case 5:
+			hashVersion := []common.Hash{common.BytesToHash([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})}
+			txdata = &SignedBlobTx{
+				Message: BlobTxMessage{
+					ChainID:             Uint256View(*uint256.NewInt(1)),
+					Nonce:               Uint64View(i),
+					AccessList:          AccessListView(accesses),
+					MaxFeePerDataGas:    Uint256View(*uint256.NewInt(10)),
+					BlobVersionedHashes: VersionedHashesView(hashVersion),
+				},
+			}
 		}
 		tx, err := SignNewTx(key, *signer, txdata)
 		if err != nil {
 			t.Fatalf("could not sign transaction: %v", err)
 		}
-		// RLP
+		// RLP or SSZ
 		parsedTx, err := encodeDecodeBinary(tx)
 		if err != nil {
 			t.Fatal(err)

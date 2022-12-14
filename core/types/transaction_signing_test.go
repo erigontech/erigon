@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	. "github.com/protolambda/ztyp/view"
 )
 
 func TestEIP1559Signing(t *testing.T) {
@@ -139,22 +140,77 @@ func TestEIP155SigningVitalik(t *testing.T) {
 
 func TestChainId(t *testing.T) {
 	key, _ := defaultTestKey()
+	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
 
-	var tx Transaction = NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+	var signedBlobTx Transaction = &SignedBlobTx{
+		Message: BlobTxMessage{
+			ChainID:    Uint256View(*uint256.NewInt(1)),
+			Nonce:      Uint64View(0),
+			AccessList: AccessListView(accesses),
+		},
+	}
 
-	var err error
-	tx, err = SignTx(tx, *LatestSignerForChainID(big.NewInt(1)), key)
+	testCases := []struct {
+		name string
+		tx   Transaction
+	}{
+		{"legacy_tx", NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)},
+		{"signed_blob_tx", signedBlobTx},
+	}
+
+	for _, testCase := range testCases {
+		tc := testCase
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := tc.tx
+
+			var err error
+			tx, err = SignTx(tx, *LatestSignerForChainID(big.NewInt(1)), key)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(2)))
+			if err != ErrInvalidChainId {
+				t.Error("expected error:", ErrInvalidChainId)
+			}
+
+			_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(1)))
+			if err != nil {
+				t.Error("expected no error")
+			}
+		})
+	}
+}
+
+func TestSigning_SignedBlobDataTx(t *testing.T) {
+	t.Parallel()
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+
+	chainId := uint256.NewInt(18)
+	var signedBlobTx Transaction = &SignedBlobTx{
+		Message: BlobTxMessage{
+			ChainID:    Uint256View(*chainId),
+			Nonce:      Uint64View(0),
+			AccessList: AccessListView(accesses),
+		},
+	}
+
+	signer := LatestSignerForChainID(chainId.ToBig())
+	tx, err := SignTx(signedBlobTx, *signer, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(2)))
-	if err != ErrInvalidChainId {
-		t.Error("expected error:", ErrInvalidChainId)
-	}
-
-	_, err = tx.Sender(*LatestSignerForChainID(big.NewInt(1)))
+	from, err := tx.Sender(*signer)
 	if err != nil {
-		t.Error("expected no error")
+		t.Fatal(err)
+	}
+	if from != addr {
+		t.Errorf("exected from and address to be equal. Got %x want %x", from, addr)
 	}
 }
