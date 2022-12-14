@@ -713,6 +713,6 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 1 is Ethereum Mainnet
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
-func Supported(id uint64) bool {
+func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
 }

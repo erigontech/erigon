@@ -388,6 +388,63 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	return erigonLogs, nil
 }
 
+func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isCanonicalHash {
+		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+	}
+
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %w", err)
+	}
+	result := make([]map[string]interface{}, 0, len(receipts))
+	for _, receipt := range receipts {
+		txn := block.Transactions()[receipt.TransactionIndex]
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+	}
+
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx != nil {
+			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), block.NumberU64(), receipts)
+			if err != nil {
+				return nil, err
+			}
+			if borReceipt != nil {
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
 // func (api *ErigonImpl) GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error) {
 // 	tx, err := api.db.Begin(ctx, false)
