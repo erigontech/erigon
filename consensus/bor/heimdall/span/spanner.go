@@ -7,10 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -32,7 +29,7 @@ func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig, vali
 }
 
 // GetCurrentSpan get current span from contract
-func (c *ChainSpanner) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain statefull.ChainContext, syscall consensus.SystemCall) (*Span, error) {
+func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, error) {
 
 	// method
 	const method = "getCurrentSpan"
@@ -94,7 +91,7 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer common.Ad
 
 const method = "commitSpan"
 
-func (c *ChainSpanner) CommitSpan(newSpanID uint64, state *state.IntraBlockState, header *types.Header, chain statefull.ChainContext, heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {
+func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {
 	// get validators bytes
 	validators := make([]valset.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {

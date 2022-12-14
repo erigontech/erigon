@@ -1046,7 +1046,7 @@ func (c *Bor) checkAndCommitSpan(
 	syscall consensus.SystemCall,
 ) error {
 	headerNumber := header.Number.Uint64()
-	span, err := c.spanner.GetCurrentSpan(header, state, chain, syscall)
+	span, err := c.spanner.GetCurrentSpan(syscall)
 	if err != nil {
 		return err
 	}
@@ -1154,7 +1154,7 @@ func (c *Bor) fetchAndCommitSpan(
 		)
 	}
 
-	return c.spanner.CommitSpan(newSpanID, state, header, chain, heimdallSpan, syscall)
+	return c.spanner.CommitSpan(heimdallSpan, syscall)
 }
 
 // CommitStates commit states
@@ -1244,7 +1244,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 ) (*span.HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
 
-	spanBor, err := c.spanner.GetCurrentSpan(header, state, chain, syscall)
+	spanBor, err := c.spanner.GetCurrentSpan(syscall)
 	if err != nil {
 		return nil, err
 	}

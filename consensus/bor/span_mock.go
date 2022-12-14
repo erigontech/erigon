@@ -11,10 +11,7 @@ import (
 	common "github.com/ledgerwatch/erigon/common"
 	consensus "github.com/ledgerwatch/erigon/consensus"
 	span "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	statefull "github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	valset "github.com/ledgerwatch/erigon/consensus/bor/valset"
-	state "github.com/ledgerwatch/erigon/core/state"
-	types "github.com/ledgerwatch/erigon/core/types"
 )
 
 // MockSpanner is a mock of Spanner interface.
@@ -41,32 +38,32 @@ func (m *MockSpanner) EXPECT() *MockSpannerMockRecorder {
 }
 
 // CommitSpan mocks base method.
-func (m *MockSpanner) CommitSpan(arg0 uint64, arg1 *state.IntraBlockState, arg2 *types.Header, arg3 statefull.ChainContext, arg4 span.HeimdallSpan, arg5 consensus.SystemCall) error {
+func (m *MockSpanner) CommitSpan(arg0 span.HeimdallSpan, arg1 consensus.SystemCall) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitSpan", arg0, arg1, arg2, arg3, arg4, arg5)
+	ret := m.ctrl.Call(m, "CommitSpan", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // CommitSpan indicates an expected call of CommitSpan.
-func (mr *MockSpannerMockRecorder) CommitSpan(arg0, arg1, arg2, arg3, arg4, arg5 interface{}) *gomock.Call {
+func (mr *MockSpannerMockRecorder) CommitSpan(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), arg0, arg1, arg2, arg3, arg4, arg5)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitSpan", reflect.TypeOf((*MockSpanner)(nil).CommitSpan), arg0, arg1)
 }
 
 // GetCurrentSpan mocks base method.
-func (m *MockSpanner) GetCurrentSpan(arg0 *types.Header, arg1 *state.IntraBlockState, arg2 statefull.ChainContext, arg3 consensus.SystemCall) (*span.Span, error) {
+func (m *MockSpanner) GetCurrentSpan(arg0 consensus.SystemCall) (*span.Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCurrentSpan", arg0, arg1, arg2, arg3)
+	ret := m.ctrl.Call(m, "GetCurrentSpan", arg0)
 	ret0, _ := ret[0].(*span.Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetCurrentSpan indicates an expected call of GetCurrentSpan.
-func (mr *MockSpannerMockRecorder) GetCurrentSpan(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+func (mr *MockSpannerMockRecorder) GetCurrentSpan(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentSpan", reflect.TypeOf((*MockSpanner)(nil).GetCurrentSpan), arg0, arg1, arg2, arg3)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentSpan", reflect.TypeOf((*MockSpanner)(nil).GetCurrentSpan), arg0)
 }
 
 // GetCurrentValidators mocks base method.
