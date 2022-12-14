@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -277,10 +278,20 @@ func ExecV3(ctx context.Context,
 					rwsLen := rws.Len()
 					rwsLock.RUnlock()
 
-					stepsInDB := idxStepsInDB(tx)
+					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
+						// too much steps in db will slow-down everything: flush and prune
+						// it means better spend time for pruning, before flushing more data to db
+						// also better do it now - instead of before Commit() - because Commit does block execution
+						stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
+						if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+								panic(err)
+							}
+						}
+
 						if err = agg.Flush(tx); err != nil {
 							return err
 						}
@@ -599,7 +610,7 @@ Loop:
 
 			select {
 			case <-logEvery.C:
-				stepsInDB := idxStepsInDB(applyTx)
+				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
@@ -1282,16 +1293,4 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	}
 	log.Info(fmt.Sprintf("[%s] Reconstitution done", s.LogPrefix()), "in", time.Since(startTime))
 	return nil
-}
-
-func idxStepsInDB(tx kv.Tx) float64 {
-	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
-	lst, _ := kv.LastKey(tx, kv.TracesToKeys)
-	if len(fst) > 0 && len(lst) > 0 {
-		fstTxNum := binary.BigEndian.Uint64(fst)
-		lstTxNum := binary.BigEndian.Uint64(lst)
-
-		return float64(lstTxNum-fstTxNum) / float64(ethconfig.HistoryV3AggregationStep)
-	}
-	return 0
 }
