@@ -79,6 +79,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
 	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)
+
 	for idx, tx := range block.Transactions() {
 		select {
 		default:
@@ -92,6 +93,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
