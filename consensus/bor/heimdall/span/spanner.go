@@ -18,14 +18,16 @@ import (
 )
 
 type ChainSpanner struct {
-	validatorSet abi.ABI
-	chainConfig  *params.ChainConfig
+	validatorSet             abi.ABI
+	chainConfig              *params.ChainConfig
+	validatorContractAddress common.Address
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig, validatorContractAddress common.Address) *ChainSpanner {
 	return &ChainSpanner{
-		validatorSet: validatorSet,
-		chainConfig:  chainConfig,
+		validatorSet:             validatorSet,
+		chainConfig:              chainConfig,
+		validatorContractAddress: validatorContractAddress,
 	}
 }
 
@@ -33,7 +35,8 @@ func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig) *Cha
 func (c *ChainSpanner) GetCurrentSpan(header *types.Header, state *state.IntraBlockState, chain statefull.ChainContext, syscall consensus.SystemCall) (*Span, error) {
 
 	// method
-	method := "getCurrentSpan"
+	const method = "getCurrentSpan"
+
 	data, err := c.validatorSet.Pack(method)
 	if err != nil {
 		log.Error("Unable to pack tx for getCurrentSpan", "err", err)
@@ -51,6 +54,7 @@ func (c *ChainSpanner) GetCurrentSpan(header *types.Header, state *state.IntraBl
 		StartBlock *big.Int
 		EndBlock   *big.Int
 	})
+
 	if err := c.validatorSet.UnpackIntoInterface(ret, method, result); err != nil {
 		return nil, err
 	}
@@ -84,6 +88,7 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer common.Ad
 	if err != nil {
 		return nil, err
 	}
+
 	return span.ValidatorSet.Validators, nil
 }
 
