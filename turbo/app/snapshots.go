@@ -421,7 +421,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	log.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		agg.SetTx(tx)
-		if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*10); err != nil {
+		if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*1024); err != nil {
 			return err
 		}
 		return err
