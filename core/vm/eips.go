@@ -197,3 +197,27 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE].dynamicGas = gasCreateEip3860
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
+
+// EIP-4844 related
+// enable3198 applies mini-danksharding (DATAHASH Opcode)
+// - Adds an opcode that returns the versioned data hash of the tx at a index.
+func enableSharding(jt *JumpTable) {
+	jt[DATAHASH] = &operation{
+		execute:     opDataHash,
+		constantGas: 0,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+	}
+}
+
+// opDataHash implements DATAHASH opcode
+func opDataHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	idx := scope.Stack.Pop()
+	if uint64(len(interpreter.evm.txContext.DataHashes)) < idx.Uint64() {
+		scope.Stack.Push(uint256.NewInt(0))
+	} else {
+		hash := interpreter.evm.txContext.DataHashes[idx.Uint64()]
+		scope.Stack.Push(new(uint256.Int).SetBytes(hash.Bytes()))
+	}
+	return nil, nil
+}
