@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -87,17 +86,19 @@ func NewInvertedIndex(
 	if err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
-	ii.scanStateFiles(files)
+	uselessFiles := ii.scanStateFiles(files)
+	for _, f := range uselessFiles {
+		_ = os.Remove(filepath.Join(ii.dir, f))
+	}
 	if err = ii.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
+func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
-	var uselessFiles []string
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -179,9 +180,7 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) {
 		}
 		ii.files.ReplaceOrInsert(item)
 	}
-	if len(uselessFiles) > 0 {
-		log.Info("[snapshots] history can delete", "files", strings.Join(uselessFiles, ","))
-	}
+	return uselessFiles
 }
 
 func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {

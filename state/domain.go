@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -126,7 +125,10 @@ func NewDomain(
 	if err != nil {
 		return nil, err
 	}
-	d.scanStateFiles(files)
+	uselessFiles := d.scanStateFiles(files)
+	for _, f := range uselessFiles {
+		_ = os.Remove(filepath.Join(d.dir, f))
+	}
 	if err = d.openFiles(); err != nil {
 		return nil, err
 	}
@@ -142,10 +144,9 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) scanStateFiles(files []fs.DirEntry) {
+func (d *Domain) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
-	var uselessFiles []string
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -226,10 +227,7 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) {
 		}
 		d.files.ReplaceOrInsert(item)
 	}
-	if len(uselessFiles) > 0 {
-		log.Info("[snapshots] history can delete", "files", strings.Join(uselessFiles, ","))
-	}
-
+	return uselessFiles
 }
 
 func (d *Domain) openFiles() error {

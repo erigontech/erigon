@@ -28,7 +28,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,17 +91,19 @@ func NewHistory(
 	if err != nil {
 		return nil, err
 	}
-	h.scanStateFiles(files)
+	uselessFiles := h.scanStateFiles(files)
+	for _, f := range uselessFiles {
+		_ = os.Remove(filepath.Join(h.dir, f))
+	}
 	if err = h.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewHistory.openFiles: %s, %w", filenameBase, err)
 	}
 	return &h, nil
 }
 
-func (h *History) scanStateFiles(files []fs.DirEntry) {
+func (h *History) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
-	var uselessFiles []string
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -184,9 +185,7 @@ func (h *History) scanStateFiles(files []fs.DirEntry) {
 		}
 		h.files.ReplaceOrInsert(item)
 	}
-	if len(uselessFiles) > 0 {
-		log.Info("[snapshots] history can delete", "files", strings.Join(uselessFiles, ","))
-	}
+	return uselessFiles
 }
 
 func (h *History) openFiles() error {
