@@ -1229,7 +1229,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
 		WriteMergeThreshold(2 * 8192).
-		PageSize(uint64(64 * datasize.KB)).
+		PageSize(uint64(4 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {
