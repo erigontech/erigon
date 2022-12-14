@@ -762,11 +762,6 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	if s.BlockNumber > 0 && s.BlockNumber-1 > startBlockNum { // if stage progress is higher, skip this step
-		log.Info(fmt.Sprintf("[%s] skip recon step", s.LogPrefix()), "s.BlockNumber", s.BlockNumber, "startBlockNum", startBlockNum)
-		return nil
-	}
-
 	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
 
 	var maxTxNum uint64 = startTxNum
@@ -1167,10 +1162,6 @@ func reconstituteStep(last bool,
 					return e
 				}
 			}
-		}
-
-		if err := s.Update(tx, endBlockNum); err != nil {
-			return err
 		}
 
 		return nil
