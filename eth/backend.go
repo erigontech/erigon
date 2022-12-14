@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io/fs"
 	"math/big"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -316,11 +317,31 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
+
+		var pi int // points to next port to be picked from refCfg.AllowedPorts
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+
+			// pick port from allowed list
+			var picked bool
+			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
+				pc := int(refCfg.AllowedPorts[pi])
+				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
+					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
+					continue
+				}
+				if listenPort != pc {
+					listenPort = pc
+				}
+				pi++
+				picked = true
+			}
+			if !picked {
+				return nil, fmt.Errorf("run out of allowed ports for p2p eth protocols %v. Extend allowed port list via --p2p.allowed-ports", cfg.AllowedPorts)
+			}
+
 			cfg.ListenAddr = fmt.Sprintf("%s:%d", listenHost, listenPort)
-			listenPort++
 
 			server := sentry.NewGrpcServer(backend.sentryCtx, discovery, readNodeInfo, &cfg, protocol)
 			backend.sentryServers = append(backend.sentryServers, server)
@@ -499,7 +520,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// If we choose not to run a consensus layer, run our embedded.
-	if !config.CL && clparams.Supported(config.NetworkID) {
+	if !config.ExternalCL && clparams.EmbeddedSupported(config.NetworkID) {
 		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 		if err != nil {
 			return nil, err
@@ -1065,4 +1086,13 @@ func RemoveContents(dir string) error {
 		}
 	}
 	return nil
+}
+
+func checkPortIsFree(addr string) (free bool) {
+	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	if err != nil {
+		return true
+	}
+	c.Close()
+	return false
 }

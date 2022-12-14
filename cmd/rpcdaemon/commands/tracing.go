@@ -137,6 +137,11 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	defer tx.Rollback()
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
@@ -146,6 +151,19 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if !ok {
 		stream.WriteNil()
 		return nil
+	}
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		if blockNumPtr == nil {
+			stream.WriteNil()
+			return nil
+		}
+		blockNum = *blockNumPtr
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
@@ -179,11 +197,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 		stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
-	}
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		stream.WriteNil()
-		return err
 	}
 	engine := api.engine()
 

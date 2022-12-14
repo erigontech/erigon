@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/net/context"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -127,8 +128,14 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			cumLogs = append(cumLogs, logs...)
 		} else {
 			// keep looping until we're out of gas for the block or the txpool has nothing left
+
 			simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
 			defer simulationTx.Rollback()
+
+			// a state update could have happened between requests to mine so we need to reset the txpool yielded
+			// state to ensure we're always working with the complete set of TXs from the pool
+			cfg.txPool2.ResetYieldedStatus()
+
 			for {
 				nextBatch, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx)
 				if err != nil {
