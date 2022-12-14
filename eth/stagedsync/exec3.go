@@ -736,6 +736,43 @@ func reconstituteStep(last bool,
 	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
+	var err error
+	var startOk, endOk bool
+	startTxNum, endTxNum := as.TxNumRange()
+	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
+	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
+		if err != nil {
+			return err
+		}
+		if startBlockNum > 0 {
+			startBlockNum--
+			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
+			if err != nil {
+				return err
+			}
+		}
+		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	if !startOk {
+		return fmt.Errorf("step startTxNum not found in snapshot blocks: %d", startTxNum)
+	}
+	if !endOk {
+		return fmt.Errorf("step endTxNum not found in snapshot blocks: %d", endTxNum)
+	}
+	if last {
+		endBlockNum = blockNum
+	}
+
+	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
+	var maxTxNum uint64 = startTxNum
+
 	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
 	scanWorker := exec3.NewScanWorker(txNum, as)
@@ -778,7 +815,6 @@ func reconstituteStep(last bool,
 			}
 		}
 	}()
-	var err error
 	for i := 0; i < workerCount; i++ {
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
@@ -799,40 +835,7 @@ func reconstituteStep(last bool,
 		reconWorkers[i].SetChainTx(chainTxs[i])
 	}
 	wg.Add(workerCount)
-	var startOk, endOk bool
-	startTxNum, endTxNum := as.TxNumRange()
-	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
-		if err != nil {
-			return err
-		}
-		if startBlockNum > 0 {
-			startBlockNum--
-			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
-			if err != nil {
-				return err
-			}
-		}
-		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !startOk {
-		return fmt.Errorf("step startTxNum not found in snapshot blocks: %d", startTxNum)
-	}
-	if !endOk {
-		return fmt.Errorf("step endTxNum not found in snapshot blocks: %d", endTxNum)
-	}
-	if last {
-		endBlockNum = blockNum
-	}
-	fmt.Printf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum)
-	var maxTxNum uint64 = startTxNum
+
 	rollbackCount := uint64(0)
 	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
@@ -981,7 +984,6 @@ func reconstituteStep(last bool,
 			}
 			inputTxNum++
 		}
-		b, txs = nil, nil //nolint
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 	}
@@ -999,11 +1001,11 @@ func reconstituteStep(last bool,
 	}); err != nil {
 		return err
 	}
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2))
+	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
@@ -1221,7 +1223,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
 		WriteMergeThreshold(2 * 8192).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(uint64(64 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {
@@ -1243,11 +1245,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}
 	db.Close()
-	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+	plainStateCollector := etl.NewCollector("recon plainState", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2))
+	codeCollector := etl.NewCollector("recon code", dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/2))
+	plainContractCollector := etl.NewCollector("recon plainContract", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()

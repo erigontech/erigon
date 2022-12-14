@@ -371,7 +371,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,
-		InternalCL: !ctx.Bool(utils.ExternalConsensusFlag.Name),
 	}
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)

@@ -541,12 +541,22 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	return nil
 }
 
-func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
+func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
+	if len(txs) == 0 && len(uncles) == 0 {
+		outreq := proto_sentry.PeerUselessRequest{
+			PeerId: inreq.PeerId,
+		}
+		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			return fmt.Errorf("sending peer useless request: %v", err)
+		}
+		// No point processing empty response
+		return nil
+	}
 	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
@@ -715,7 +725,7 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	case proto_sentry.MessageId_NEW_BLOCK_66:
 		return cs.newBlock66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_BLOCK_BODIES_66:
-		return cs.blockBodies66(inreq, sentry)
+		return cs.blockBodies66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
 		return cs.getBlockHeaders66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_BODIES_66:

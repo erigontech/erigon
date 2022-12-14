@@ -34,6 +34,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -478,6 +479,11 @@ var (
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
+	P2pProtocolAllowedPorts = cli.UintSliceFlag{
+		Name:  "p2p.allowed-ports",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
+		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -850,6 +856,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port,
 	protocol uint,
+	allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -876,6 +883,7 @@ func NewP2PConfig(
 		Name:            nodeName,
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -922,6 +930,26 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
+	}
+	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
+	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
+	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
+		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
+	}
+
+	if ctx.IsSet(ListenPortFlag.Name) {
+		// add non-default port to allowed port list
+		lp := ctx.Int(ListenPortFlag.Name)
+		found := false
+		for _, p := range cfg.AllowedPorts {
+			if int(p) == lp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
+		}
 	}
 }
 
@@ -1418,7 +1446,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.CL = ctx.Bool(ExternalConsensusFlag.Name)
 	cfg.LightClientDiscoveryAddr = ctx.String(LightClientDiscoveryAddrFlag.Name)
 	cfg.LightClientDiscoveryPort = ctx.Uint64(LightClientDiscoveryPortFlag.Name)
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
@@ -1551,6 +1578,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverrideMergeNetsplitBlock.Name) {
 		cfg.OverrideMergeNetsplitBlock = BigFlagValue(ctx, OverrideMergeNetsplitBlock.Name)
 	}
+
+	if ctx.IsSet(ExternalConsensusFlag.Name) {
+		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
+	} else {
+		cfg.ExternalCL = !clparams.EmbeddedSupported(cfg.NetworkID)
+	}
+	nodeConfig.Http.InternalCL = !cfg.ExternalCL
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

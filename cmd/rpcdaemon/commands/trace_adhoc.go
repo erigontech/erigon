@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -728,6 +729,17 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 	if !ok {
 		return nil, nil
+	}
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumPtr == nil {
+			return nil, nil
+		}
+		blockNum = *blockNumPtr
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
