@@ -248,7 +248,7 @@ func ExecV3(ctx context.Context,
 
 	var rwLoopWg sync.WaitGroup
 	if parallel {
-		// Go-routine gathering results from the workers
+		// `rwLoop` lives longer than `applyLoop`
 		rwLoop := func(ctx context.Context) error {
 			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
@@ -262,6 +262,8 @@ func ExecV3(ctx context.Context,
 			} else {
 				defer agg.StartWrites().FinishWrites()
 			}
+
+			defer applyLoopWg.Wait()
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
