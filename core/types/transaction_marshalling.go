@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/protolambda/ztyp/view"
 	"github.com/valyala/fastjson"
 )
 
@@ -31,6 +33,8 @@ type txJSON struct {
 	// Access list transaction fields:
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
+
+	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
 
 	// Only used for encoding:
 	Hash common.Hash `json:"hash"`
@@ -94,34 +98,20 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 
 func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	var enc txJSON
-	// enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
-	// enc.AccessList = (*AccessList)(&tx.Message.AccessList)
-	// enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)
-	// enc.Gas = (*hexutil.Uint64)(&tx.Message.Gas)
-	// enc.MaxFeePerGas = (*hexutil.Big)(u256ToBig(&tx.Message.GasFeeCap))
-	// enc.MaxPriorityFeePerGas = (*hexutil.Big)(u256ToBig(&tx.Message.GasTipCap))
-	// enc.Value = (*hexutil.Big)(u256ToBig(&tx.Message.Value))
-	// enc.Data = (*hexutil.Bytes)(&tx.Message.Data)
-	// enc.To = t.To()
-	// v, r, s := tx.rawSignatureValues()
-	// enc.V = (*hexutil.Big)(v)
-	// enc.R = (*hexutil.Big)(r)
-	// enc.S = (*hexutil.Big)(s)
-	// enc.BlobVersionedHashes = tx.Message.BlobVersionedHashes
-
-	enc.Hash = tx.Hash()
-	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
 	enc.AccessList = (*AccessList)(&tx.Message.AccessList)
 	enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.Message.Gas)
+	enc.FeeCap = (*hexutil.Big)(u256ToBig(&tx.Message.GasFeeCap)) // MaxFeePerGas
+	enc.Tip = (*hexutil.Big)(u256ToBig(&tx.Message.GasTipCap))    // MaxPriorityFeePerGas
 	enc.Value = (*hexutil.Big)(u256ToBig(&tx.Message.Value))
 	enc.Data = (*hexutil.Bytes)(&tx.Message.Data)
-	enc.To = (*common.Address)(tx.Message.To.Address)
-	// enc.V = (*hexutil.Big)(tx.V.ToBig())
-	// enc.R = (*hexutil.Big)(tx.R.ToBig())
-	// enc.S = (*hexutil.Big)(tx.S.ToBig())
-
+	enc.To = tx.GetTo()
+	v, r, s := tx.RawSignatureValues()
+	enc.V = (*hexutil.Big)(v.ToBig())
+	enc.R = (*hexutil.Big)(r.ToBig())
+	enc.S = (*hexutil.Big)(s.ToBig())
+	enc.BlobVersionedHashes = tx.Message.BlobVersionedHashes
 	return json.Marshal(&enc)
 }
 
@@ -387,5 +377,86 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (tx *SignedBlobTx) UnmarshalJSON(input []byte) error {
+	var dec txJSON
+	var overflow bool
+	if err := json.Unmarshal(input, &dec); err != nil {
+		return err
+	}
+
+	if dec.AccessList != nil {
+		tx.Message.AccessList = AccessListView(*dec.AccessList)
+	}
+
+	if dec.ChainID == nil {
+		return errors.New("missing required field 'chainId' in transaction")
+	}
+	tx.Message.ChainID.SetFromBig((*big.Int)(dec.ChainID))
+
+	if dec.Nonce == nil {
+		return errors.New("missing required field 'nonce' in transaction")
+	}
+	tx.Message.Nonce = view.Uint64View(*dec.Nonce)
+
+	if dec.Tip == nil {
+		return errors.New("missing required field 'maxPriorityFeePerGas' for txdata")
+	}
+	overflow = tx.Message.GasTipCap.SetFromBig((*big.Int)(dec.Tip))
+	if overflow {
+		return errors.New("'tip' in transaction does not fit in 256 bits")
+	}
+
+	if dec.FeeCap == nil {
+		return errors.New("missing required field 'maxFeePerGas' for txdata")
+	}
+	overflow = tx.Message.GasFeeCap.SetFromBig((*big.Int)(dec.FeeCap))
+	if overflow {
+		return errors.New("'feeCap' in transaction does not fit in 256 bits")
+	}
+
+	if dec.Gas == nil {
+		return errors.New("missing required field 'gas' for txdata")
+	}
+	tx.Message.Gas = view.Uint64View(*dec.Gas)
+
+	if dec.Value == nil {
+		return errors.New("missing required field 'value' in transaction")
+	}
+	overflow = tx.Message.Value.SetFromBig((*big.Int)(dec.Value))
+	if overflow {
+		return errors.New("'value' in transaction does not fit in 256 bits")
+	}
+
+	if dec.Data == nil {
+		return errors.New("missing required field 'input' in transaction")
+	}
+	tx.Message.Data = TxDataView(*dec.Data)
+
+	if dec.V == nil {
+		return errors.New("missing required field 'v' in transaction")
+	}
+	tx.Signature.V = view.Uint8View((*big.Int)(dec.V).Uint64())
+
+	if dec.R == nil {
+		return errors.New("missing required field 'r' in transaction")
+	}
+	tx.Signature.R.SetFromBig((*big.Int)(dec.R))
+
+	if dec.S == nil {
+		return errors.New("missing required field 's' in transaction")
+	}
+	tx.Signature.S.SetFromBig((*big.Int)(dec.S))
+
+	withSignature := (*big.Int)(dec.V).Sign() != 0 || (*big.Int)(dec.R).Sign() != 0 || (*big.Int)(dec.S).Sign() != 0
+	if withSignature {
+		if err := sanityCheckSignature(uint256.NewInt(uint64(tx.Signature.V)), (*uint256.Int)(&tx.Signature.R), (*uint256.Int)(&tx.Signature.S), false); err != nil {
+			return err
+		}
+	}
+	tx.Message.BlobVersionedHashes = dec.BlobVersionedHashes
+
 	return nil
 }

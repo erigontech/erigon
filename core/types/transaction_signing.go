@@ -293,6 +293,22 @@ func (sg Signer) SignatureValues(tx Transaction, sig []byte) (R, S, V *uint256.I
 			return nil, nil, nil, ErrInvalidChainId
 		}
 		R, S, V = decodeSignature(sig)
+
+	case *SignedBlobTx:
+		if !sg.dynamicfee {
+			return nil, nil, nil, fmt.Errorf("dynamicfee tx is not supported by signer %s", sg)
+		}
+		if t.GetChainID() == nil {
+			if !sg.chainID.IsZero() {
+				return nil, nil, nil, ErrInvalidChainId
+			}
+		} else if !t.GetChainID().Eq(&sg.chainID) {
+			return nil, nil, nil, ErrInvalidChainId
+		}
+		// ACL and DynamicFee txs are defined to use 0 and 1 as their recovery
+		// id, add 27 to become equivalent to unprotected Homestead signatures.
+		V.Add(t.Signature.GetV(), u256.Num27)
+		R, S = t.Signature.GetR(), t.Signature.GetS()
 	default:
 		return nil, nil, nil, ErrTxTypeNotSupported
 	}
