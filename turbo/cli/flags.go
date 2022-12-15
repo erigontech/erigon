@@ -257,7 +257,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 
 	if ctx.Bool(utils.DisableIPV4.Name) {
 		log.Info("Downloader Disabled IPV4")
-		cfg.Downloader.ClientConfig.DisableIPv4 = false
+		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
 }
 
