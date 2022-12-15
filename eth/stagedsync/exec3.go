@@ -731,6 +731,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			if txTask.Error != nil {
 				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
 				rs.AddWork(txTask)
+				continue
 			}
 		}
 
