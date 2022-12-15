@@ -221,7 +221,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 		}
 		log.Info("database commitment", "block", blockNum, "txNum", txn)
-		if err := agg.Flush(); err != nil {
+		if err := agg.Flush(ctx); err != nil {
 			return err
 		}
 		if err = rwTx.Commit(); err != nil {
