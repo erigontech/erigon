@@ -90,16 +90,16 @@ func NewAggregator(
 	}
 	a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect)
 
-	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, nil); err != nil {
 		return nil, err
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, nil); err != nil {
 		return nil, err
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, nil); err != nil {
 		return nil, err
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, nil); err != nil {
 		return nil, err
 	}
 	closeAgg = false
@@ -387,7 +387,7 @@ func (a *Aggregator) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges {
 	r.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum = a.logTopics.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum = a.tracesFrom.findMergeRange(maxEndTxNum, maxSpan)
 	r.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum = a.tracesTo.findMergeRange(maxEndTxNum, maxSpan)
-	log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
+	//log.Info(fmt.Sprintf("findMergeRange(%d, %d)=%+v\n", maxEndTxNum, maxSpan, r))
 	return r
 }
 
@@ -846,7 +846,7 @@ func (a *Aggregator) FinishTx() error {
 		return nil
 	}
 	step-- // Leave one step worth in the DB
-	if err := a.Flush(); err != nil {
+	if err := a.Flush(context.TODO()); err != nil {
 		return err
 	}
 
@@ -972,7 +972,7 @@ func (a *Aggregator) FinishWrites() {
 }
 
 // Flush - must be called before Collate, if you did some writes
-func (a *Aggregator) Flush() error {
+func (a *Aggregator) Flush(ctx context.Context) error {
 	// TODO: Add support of commitment!
 	flushers := []flusher{
 		a.accounts.Rotate(),
@@ -986,7 +986,7 @@ func (a *Aggregator) Flush() error {
 	}
 	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
-		if err := f.Flush(a.rwTx); err != nil {
+		if err := f.Flush(ctx, a.rwTx); err != nil {
 			return err
 		}
 	}

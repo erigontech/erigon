@@ -311,7 +311,8 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	return ef, 16 + 8*len(ef.data)
 }
 
-func Max(r []byte) uint64 { return binary.BigEndian.Uint64(r[8:16]) - 1 }
+func Max(r []byte) uint64   { return binary.BigEndian.Uint64(r[8:16]) - 1 }
+func Count(r []byte) uint64 { return binary.BigEndian.Uint64(r[:8]) + 1 }
 
 const uint64Size = 8
 

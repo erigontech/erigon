@@ -118,7 +118,7 @@ func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
 }
 
 func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) {
-	if progress.Load() {
+	if db == nil || progress.Load() {
 		return
 	}
 	progress.Store(true)

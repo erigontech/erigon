@@ -50,7 +50,7 @@ func testDbAndInvertedIndex(t *testing.T, aggStep uint64) (string, kv.RwDB, *Inv
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	ii, err := NewInvertedIndex(path, path, aggStep, "inv" /* filenameBase */, keysTable, indexTable)
+	ii, err := NewInvertedIndex(path, path, aggStep, "inv" /* filenameBase */, keysTable, indexTable, nil)
 	require.NoError(t, err)
 	t.Cleanup(ii.Close)
 	return path, db, ii
@@ -82,7 +82,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(tx)
+	err = ii.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	err = ii.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ii.Rotate().Flush(tx)
+	err = ii.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -229,11 +229,11 @@ func filledInvIndexOfSize(t *testing.T, txs, aggStep, module uint64) (string, kv
 			}
 		}
 		if txNum%10 == 0 {
-			err = ii.Rotate().Flush(tx)
+			err = ii.Rotate().Flush(ctx, tx)
 			require.NoError(t, err)
 		}
 	}
-	err = ii.Rotate().Flush(tx)
+	err = ii.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -358,7 +358,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	ii.Close()
 	// Recreate InvertedIndex to scan the files
 	var err error
-	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable)
+	ii, err = NewInvertedIndex(path, path, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, nil)
 	require.NoError(t, err)
 	defer ii.Close()
 
@@ -440,7 +440,7 @@ func TestScanStaticFiles(t *testing.T) {
 	}
 	files, err := ffs.ReadDir(".")
 	require.NoError(t, err)
-	ii.scanStateFiles(files)
+	ii.scanStateFiles(files, nil)
 	var found []string
 	ii.files.Ascend(func(i *filesItem) bool {
 		found = append(found, fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
@@ -449,4 +449,16 @@ func TestScanStaticFiles(t *testing.T) {
 	require.Equal(t, 2, len(found))
 	require.Equal(t, "0-4", found[0])
 	require.Equal(t, "4-5", found[1])
+
+	ii.files.Clear(false)
+	ii.files.Ascend(func(i *filesItem) bool {
+		fmt.Printf("%s\n", fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
+		return true
+	})
+	ii.scanStateFiles(files, []string{"v"})
+	ii.files.Ascend(func(i *filesItem) bool {
+		fmt.Printf("%s\n", fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
+		return true
+	})
+	require.Equal(t, 0, ii.files.Len())
 }

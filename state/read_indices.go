@@ -50,13 +50,13 @@ func NewReadIndices(
 		}
 	}()
 	var err error
-	if ri.accounts, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "raccounts", kv.RAccountKeys, kv.RAccountIdx); err != nil {
+	if ri.accounts, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "raccounts", kv.RAccountKeys, kv.RAccountIdx, nil); err != nil {
 		return nil, err
 	}
-	if ri.storage, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rstorage", kv.RStorageKeys, kv.RStorageIdx); err != nil {
+	if ri.storage, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rstorage", kv.RStorageKeys, kv.RStorageIdx, nil); err != nil {
 		return nil, err
 	}
-	if ri.code, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rcode", kv.RCodeKeys, kv.RCodeIdx); err != nil {
+	if ri.code, err = NewInvertedIndex(dir, tmpdir, aggregationStep, "rcode", kv.RCodeKeys, kv.RCodeIdx, nil); err != nil {
 		return nil, err
 	}
 	closeIndices = false

@@ -51,7 +51,7 @@ func testDbAndHistory(tb testing.TB) (string, kv.RwDB, *History) {
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	ii, err := NewHistory(path, path, 16 /* aggregationStep */, "hist" /* filenameBase */, keysTable, indexTable, valsTable, settingsTable, false /* compressVals */)
+	ii, err := NewHistory(path, path, 16 /* aggregationStep */, "hist" /* filenameBase */, keysTable, indexTable, valsTable, settingsTable, false /* compressVals */, nil)
 	require.NoError(tb, err)
 	tb.Cleanup(db.Close)
 	tb.Cleanup(ii.Close)
@@ -91,7 +91,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 	err = h.AddPrevValue([]byte("key3"), nil, nil)
 	require.NoError(err)
 
-	err = h.Rotate().Flush(tx)
+	err = h.Rotate().Flush(ctx, tx)
 	require.NoError(err)
 
 	c, err := h.collate(0, 0, 8, tx, logEvery)
@@ -189,7 +189,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 	err = h.AddPrevValue([]byte("key3"), nil, nil)
 	require.NoError(t, err)
 
-	err = h.Rotate().Flush(tx)
+	err = h.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
 	c, err := h.collate(0, 0, 16, tx, logEvery)
@@ -249,11 +249,11 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
-			err = h.Rotate().Flush(tx)
+			err = h.Rotate().Flush(ctx, tx)
 			require.NoError(tb, err)
 		}
 	}
-	err = h.Rotate().Flush(tx)
+	err = h.Rotate().Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)
@@ -364,7 +364,7 @@ func TestHistoryScanFiles(t *testing.T) {
 	// Recreate domain and re-scan the files
 	txNum := h.txNum
 	h.Close()
-	h, err = NewHistory(path, path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals)
+	h, err = NewHistory(path, path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals, nil)
 	require.NoError(t, err)
 	defer h.Close()
 	h.SetTxNum(txNum)
@@ -578,7 +578,7 @@ func TestIterateChanged2(t *testing.T) {
 }
 
 func TestScanStaticFilesH(t *testing.T) {
-	ii := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1},
+	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1},
 		files: btree.NewG[*filesItem](32, filesItemLess),
 	}
 	ffs := fstest.MapFS{
@@ -591,13 +591,18 @@ func TestScanStaticFilesH(t *testing.T) {
 	}
 	files, err := ffs.ReadDir(".")
 	require.NoError(t, err)
-	ii.scanStateFiles(files)
+	h.scanStateFiles(files, nil)
 	var found []string
-	ii.files.Ascend(func(i *filesItem) bool {
+	h.files.Ascend(func(i *filesItem) bool {
 		found = append(found, fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
 		return true
 	})
 	require.Equal(t, 2, len(found))
 	require.Equal(t, "0-4", found[0])
 	require.Equal(t, "4-5", found[1])
+
+	h.files.Clear(false)
+	h.scanStateFiles(files, []string{"kv"})
+	require.Equal(t, 0, h.files.Len())
+
 }

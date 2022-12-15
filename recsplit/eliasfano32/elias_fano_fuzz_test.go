@@ -68,6 +68,9 @@ func FuzzSingleEliasFano(f *testing.F) {
 		if ef.Min() != Min(buf.Bytes()) {
 			t.Fatalf("min: got %d, expected %d", ef.Min(), Min(buf.Bytes()))
 		}
+		if ef.Count() != Count(buf.Bytes()) {
+			t.Fatalf("max: got %d, expected %d", ef.Count(), Count(buf.Bytes()))
+		}
 	})
 }
 

@@ -393,7 +393,8 @@ type Getter struct {
 	trace       bool
 }
 
-func (g *Getter) Trace(t bool) { g.trace = t }
+func (g *Getter) Trace(t bool)     { g.trace = t }
+func (g *Getter) FileName() string { return g.fName }
 
 func (g *Getter) nextPos(clean bool) uint64 {
 	if clean {

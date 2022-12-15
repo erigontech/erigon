@@ -33,6 +33,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
@@ -74,6 +75,7 @@ func NewHistory(
 	historyValsTable string,
 	settingsTable string,
 	compressVals bool,
+	integrityFileExtensions []string,
 ) (*History, error) {
 	h := History{
 		files:            btree.NewG[*filesItem](32, filesItemLess),
@@ -83,7 +85,7 @@ func NewHistory(
 		workers:          1,
 	}
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable)
+	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, append(integrityFileExtensions, "v"))
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -91,19 +93,18 @@ func NewHistory(
 	if err != nil {
 		return nil, err
 	}
-	uselessFiles := h.scanStateFiles(files)
-	for _, f := range uselessFiles {
-		_ = os.Remove(filepath.Join(h.dir, f))
-	}
+	_ = h.scanStateFiles(files, integrityFileExtensions)
+
 	if err = h.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewHistory.openFiles: %s, %w", filenameBase, err)
 	}
 	return &h, nil
 }
 
-func (h *History) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
+func (h *History) scanStateFiles(files []fs.DirEntry, integrityFileExtensions []string) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
+Loop:
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -132,43 +133,28 @@ func (h *History) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 		}
 
 		startTxNum, endTxNum := startStep*h.aggregationStep, endStep*h.aggregationStep
+
+		for _, ext := range integrityFileExtensions {
+			requiredFile := fmt.Sprintf("%s.%d-%d.%s", h.filenameBase, startStep, endStep, ext)
+			if !dir.FileExist(filepath.Join(h.dir, requiredFile)) {
+				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists. %s", name, requiredFile, dbg.Stack()))
+				continue Loop
+			}
+		}
+
 		var item = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 		{
-			var subSet, superSet *filesItem
-			h.files.DescendLessOrEqual(item, func(it *filesItem) bool {
+			var subSets []*filesItem
+			var superSet *filesItem
+			h.files.Ascend(func(it *filesItem) bool {
 				if it.isSubsetOf(item) {
-					subSet = it
+					subSets = append(subSets, it)
 				} else if item.isSubsetOf(it) {
 					superSet = it
 				}
 				return true
 			})
-			if subSet != nil {
-				h.files.Delete(subSet)
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.v", h.filenameBase, subSet.startTxNum/h.aggregationStep, subSet.endTxNum/h.aggregationStep),
-					fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, subSet.startTxNum/h.aggregationStep, subSet.endTxNum/h.aggregationStep),
-				)
-			}
-			if superSet != nil {
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.v", h.filenameBase, startStep, endStep),
-					fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, startStep, endStep),
-				)
-				continue
-			}
-		}
-		{
-			var subSet, superSet *filesItem
-			h.files.AscendGreaterOrEqual(item, func(it *filesItem) bool {
-				if it.isSubsetOf(item) {
-					subSet = it
-				} else if item.isSubsetOf(it) {
-					superSet = it
-				}
-				return false
-			})
-			if subSet != nil {
+			for _, subSet := range subSets {
 				h.files.Delete(subSet)
 				uselessFiles = append(uselessFiles,
 					fmt.Sprintf("%s.%d-%d.v", h.filenameBase, subSet.startTxNum/h.aggregationStep, subSet.endTxNum/h.aggregationStep),
@@ -354,8 +340,8 @@ func iterateForVi(historyItem, iiItem *filesItem, compressVals bool, f func(v []
 		//var mergeOnce bool
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := cp[0]
-			ef, _ := eliasfano32.ReadEliasFano(ci1.val)
-			for i := uint64(0); i < ef.Count(); i++ {
+			keysCount := eliasfano32.Count(ci1.val)
+			for i := uint64(0); i < keysCount; i++ {
 				if compressVals {
 					valBuf, _ = ci1.dg2.Next(valBuf[:0])
 				} else {
@@ -365,7 +351,7 @@ func iterateForVi(historyItem, iiItem *filesItem, compressVals bool, f func(v []
 					return count, err
 				}
 			}
-			count += int(ef.Count())
+			count += int(keysCount)
 			if ci1.dg.HasNext() {
 				ci1.key, _ = ci1.dg.NextUncompressed()
 				ci1.val, _ = ci1.dg.NextUncompressed()
@@ -482,11 +468,11 @@ type historyFlusher struct {
 	i *invertedIndexWAL
 }
 
-func (f historyFlusher) Flush(tx kv.RwTx) error {
-	if err := f.i.Flush(tx); err != nil {
+func (f historyFlusher) Flush(ctx context.Context, tx kv.RwTx) error {
+	if err := f.i.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := f.h.flush(tx); err != nil {
+	if err := f.h.flush(ctx, tx); err != nil {
 		return err
 	}
 	return nil
@@ -539,7 +525,7 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	return w
 }
 
-func (h *historyWAL) flush(tx kv.RwTx) error {
+func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard {
 		return nil
 	}
@@ -547,7 +533,7 @@ func (h *historyWAL) flush(tx kv.RwTx) error {
 	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
 		return err
 	}
-	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{}); err != nil {
+	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	h.close()

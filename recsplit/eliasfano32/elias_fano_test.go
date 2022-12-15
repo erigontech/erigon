@@ -62,6 +62,7 @@ func TestEliasFano(t *testing.T) {
 	assert.Equal(t, ef.Max(), ef2.Max())
 	assert.Equal(t, ef2.Max(), Max(buf.Bytes()))
 	assert.Equal(t, ef2.Min(), Min(buf.Bytes()))
+	assert.Equal(t, ef2.Count(), Count(buf.Bytes()))
 }
 
 func TestIterator(t *testing.T) {

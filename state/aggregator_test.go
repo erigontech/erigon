@@ -67,7 +67,7 @@ func TestAggregator_Merge(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, agg.FinishTx())
 	}
-	err = agg.Flush()
+	err = agg.Flush(context.Background())
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -114,7 +114,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 
 	var latestCommitTxNum uint64
 	commit := func(txn uint64) error {
-		err = agg.Flush()
+		err = agg.Flush(context.Background())
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 
 		require.NoError(t, agg.FinishTx())
 	}
-	err = agg.Flush()
+	err = agg.Flush(context.Background())
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)

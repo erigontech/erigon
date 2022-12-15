@@ -34,6 +34,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/semaphore"
@@ -71,6 +72,7 @@ func NewInvertedIndex(
 	filenameBase string,
 	indexKeysTable string,
 	indexTable string,
+	integrityFileExtensions []string,
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
 		dir:             dir,
@@ -86,19 +88,17 @@ func NewInvertedIndex(
 	if err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
-	uselessFiles := ii.scanStateFiles(files)
-	for _, f := range uselessFiles {
-		_ = os.Remove(filepath.Join(ii.dir, f))
-	}
-	if err = ii.openFiles(); err != nil {
+	_ = ii.scanStateFiles(files, integrityFileExtensions)
+	if err := ii.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	return &ii, nil
 }
 
-func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
+func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry, integrityFileExtensions []string) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + ii.filenameBase + ".([0-9]+)-([0-9]+).ef$")
 	var err error
+Loop:
 	for _, f := range files {
 		if !f.Type().IsRegular() {
 			continue
@@ -127,43 +127,29 @@ func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []str
 		}
 
 		startTxNum, endTxNum := startStep*ii.aggregationStep, endStep*ii.aggregationStep
+
+		for _, ext := range integrityFileExtensions {
+			requiredFile := fmt.Sprintf("%s.%d-%d.%s", ii.filenameBase, startStep, endStep, ext)
+			if !dir.FileExist(filepath.Join(ii.dir, requiredFile)) {
+				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists. %s", name, requiredFile, dbg.Stack()))
+				continue Loop
+			}
+		}
+
 		var item = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
 		{
-			var subSet, superSet *filesItem
-			ii.files.DescendLessOrEqual(item, func(it *filesItem) bool {
+			var subSets []*filesItem
+			var superSet *filesItem
+			ii.files.Ascend(func(it *filesItem) bool {
 				if it.isSubsetOf(item) {
-					subSet = it
+					subSets = append(subSets, it)
 				} else if item.isSubsetOf(it) {
 					superSet = it
 				}
 				return true
 			})
-			if subSet != nil {
-				ii.files.Delete(subSet)
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, subSet.startTxNum/ii.aggregationStep, subSet.endTxNum/ii.aggregationStep),
-					fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, subSet.startTxNum/ii.aggregationStep, subSet.endTxNum/ii.aggregationStep),
-				)
-			}
-			if superSet != nil {
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, startStep, endStep),
-					fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, startStep, endStep),
-				)
-				continue
-			}
-		}
-		{
-			var subSet, superSet *filesItem
-			ii.files.AscendGreaterOrEqual(item, func(it *filesItem) bool {
-				if it.isSubsetOf(item) {
-					subSet = it
-				} else if item.isSubsetOf(it) {
-					superSet = it
-				}
-				return false
-			})
-			if subSet != nil {
+
+			for _, subSet := range subSets {
 				ii.files.Delete(subSet)
 				uselessFiles = append(uselessFiles,
 					fmt.Sprintf("%s.%d-%d.ef", ii.filenameBase, subSet.startTxNum/ii.aggregationStep, subSet.endTxNum/ii.aggregationStep),
@@ -362,14 +348,14 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (ii *invertedIndexWAL) Flush(tx kv.RwTx) error {
+func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if ii.discard {
 		return nil
 	}
-	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{}); err != nil {
+	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := ii.indexKeys.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{}); err != nil {
+	if err := ii.indexKeys.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	ii.close()

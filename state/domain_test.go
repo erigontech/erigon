@@ -89,7 +89,7 @@ func TestCollationBuild(t *testing.T) {
 	err = d.Put([]byte("key1"), nil, []byte("value1.2"))
 	require.NoError(t, err)
 
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
 	c, err := d.collate(ctx, 0, 0, 7, tx, logEvery)
@@ -195,7 +195,7 @@ func TestAfterPrune(t *testing.T) {
 	err = d.Put([]byte("key2"), nil, []byte("value2.2"))
 	require.NoError(t, err)
 
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
 	c, err := d.collate(ctx, 0, 0, 16, tx, logEvery)
@@ -265,11 +265,11 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 			}
 		}
 		if txNum%10 == 0 {
-			err = d.Rotate().Flush(tx)
+			err = d.Rotate().Flush(ctx, tx)
 			require.NoError(t, err)
 		}
 	}
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -384,7 +384,7 @@ func TestIterationMultistep(t *testing.T) {
 	err = d.Delete([]byte("addr2"), []byte("loc1"))
 	require.NoError(t, err)
 
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
 	for step := uint64(0); step <= 2; step++ {
@@ -495,23 +495,17 @@ func TestMergeFiles(t *testing.T) {
 func TestScanFiles(t *testing.T) {
 	path, db, d, txs := filledDomain(t)
 	defer db.Close()
-	defer func() {
-		d.Close()
-	}()
-	var err error
-	var tx kv.RwTx
-	defer func() {
-		if tx != nil {
-			tx.Rollback()
-		}
-	}()
+	defer d.Close()
 
 	collateAndMerge(t, db, nil, d, txs)
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
 	d.Close()
+
+	var err error
 	d, err = NewDomain(path, path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
 	require.NoError(t, err)
+	defer d.Close()
 	d.SetTxNum(txNum)
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -537,7 +531,7 @@ func TestDelete(t *testing.T) {
 		}
 		require.NoError(t, err)
 	}
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 	collateAndMerge(t, db, tx, d, 1000)
 	// Check the history
@@ -591,7 +585,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 			dat[fmt.Sprintf("%d", keyNum)][txNum] = true
 		}
 		if txNum%d.aggregationStep == 0 {
-			err = d.Rotate().Flush(tx)
+			err = d.Rotate().Flush(ctx, tx)
 			require.NoError(t, err)
 		}
 	}
@@ -699,13 +693,13 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 				continue
 			}
 			step--
-			err = d.Rotate().Flush(tx)
+			err = d.Rotate().Flush(ctx, tx)
 			require.NoError(t, err)
 
 			collateAndMergeOnce(t, d, step)
 		}
 	}
-	err = d.Rotate().Flush(tx)
+	err = d.Rotate().Flush(ctx, tx)
 	require.NoError(t, err)
 
 	// Check the history
