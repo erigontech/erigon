@@ -248,12 +248,6 @@ func ExecV3(ctx context.Context,
 
 	var rwLoopWg sync.WaitGroup
 	if parallel {
-		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				return err
-			}
-		}
-
 		// Go-routine gathering results from the workers
 		rwLoop := func(ctx context.Context) error {
 			tx, err := chainDb.BeginRw(ctx)
