@@ -120,9 +120,6 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	evm.txContext = txCtx
 	evm.intraBlockState = ibs
-
-	// ensure the evm is reset to be used again
-	atomic.StoreInt32(&evm.abort, 0)
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *params.Rules) {

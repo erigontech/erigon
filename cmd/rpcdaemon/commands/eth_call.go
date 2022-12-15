@@ -65,8 +65,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	if err != nil {
 		return nil, err
 	}
-	header := block.HeaderNoCopy()
-	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
+	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, block, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -237,16 +236,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	if err != nil {
 		return 0, err
 	}
-	header := block.HeaderNoCopy()
-
-	caller, err := transactions.NewReusableCaller(engine, stateReader, nil, header, args, api.GasCap, latestNumOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
-	if err != nil {
-		return 0, err
-	}
 
 	// Create a helper to check if a gas allowance results in an executable transaction
 	executable := func(gas uint64) (bool, *core.ExecutionResult, error) {
-		result, err := caller.DoCallWithNewGas(ctx, gas)
+		args.Gas = (*hexutil.Uint64)(&gas)
+
+		result, err := transactions.DoCall(ctx, engine, args, dbtx, latestNumOrHash, block, nil, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 		if err != nil {
 			if errors.Is(err, core.ErrIntrinsicGas) {
 				// Special case, raise gas limit
