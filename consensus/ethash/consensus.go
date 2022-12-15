@@ -642,7 +642,7 @@ func AccumulateRewards(config *params.ChainConfig, header *types.Header, uncles 
 	return *reward, uncleRewards
 }
 
-// accumulateRewards retreives rewards for a block and applies them to the coinbase accounts for miner and uncle miners
+// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
 func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
