@@ -3,22 +3,47 @@ package services
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-// SearchBlockForTransactionHash looks for the given hash in the latest black using the eth_newHeads method
-func SearchBlockForTransactionHash(hash common.Hash) (uint64, error) {
-	fmt.Printf("Searching for tx %q in new block...\n", hash)
-	blockN, err := searchBlock(hash)
-	if err != nil {
-		return 0, fmt.Errorf("failed to subscribe to ws: %v", err)
+func InitSubscriptions(methods []models.SubMethod) {
+	fmt.Printf("CONNECTING TO WEBSOCKETS AND SUBSCRIBING TO METHODS...\n")
+	if err := subscribeAll(methods); err != nil {
+		fmt.Printf("failed to subscribe to all methods: %v\n", err)
+		return
 	}
 
-	return blockN, nil
+	// Initializing subscription methods
+	fmt.Printf("INITIATE LISTENS ON SUBSCRIPTION CHANNELS")
+	models.NewHeadsChan = make(chan interface{})
+
+	go func() {
+		methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
+		if methodSub == nil {
+			fmt.Printf("method subscription should not be nil")
+			return
+		}
+
+		for {
+			select {
+			case block := <-methodSub.SubChan:
+				models.NewHeadsChan <- block
+			}
+		}
+	}()
+}
+
+func SearchReservesForTransactionHash(hashes map[common.Hash]bool) error {
+	fmt.Printf("Searching for txes in reserved blocks...\n")
+	err := searchBlockForHashes(hashes)
+	if err != nil {
+		return fmt.Errorf("failed to search reserves for hashes: %v", err)
+	}
+
+	return nil
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
@@ -58,38 +83,102 @@ func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, err
 	return sub, nil
 }
 
-func searchBlock(hash common.Hash) (uint64, error) {
+//func searchBlockForHash(hash common.Hash) (uint64, error) {
+//	// create a one entry hashmap to hold the hash
+//	hashmap := map[common.Hash]bool{hash: true}
+//
+//	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
+//	if methodSub == nil {
+//		return uint64(0), fmt.Errorf("client subscription should not be nil")
+//	}
+//
+//	var (
+//		wg     sync.WaitGroup
+//		err    error
+//		blockN uint64
+//	)
+//
+//	// add the current process to the waitGroup
+//	wg.Add(1)
+//
+//	go func() {
+//		var blockCount int
+//	mark:
+//		for {
+//			select {
+//			case v := <-models.NewHeadsChan:
+//				blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
+//				blockNumber := v.(map[string]interface{})["number"].(string)
+//				// add the block to the old heads
+//				models.OldHeads = append(models.OldHeads, blockNumber)
+//				num, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNumber) // check if the block has the transaction to look for inside of it
+//				// return if error is found and end the goroutine
+//				if foundErr != nil {
+//					err = foundErr
+//					wg.Done()
+//					CheckTxPoolContent(1, 0)
+//					return
+//				}
+//				// if the max number of blocks to check is reached, look for tx old heads and break the tag
+//				if blockCount == models.MaxNumberOfBlockChecks {
+//					num, numFound, foundErr = checkOldHeads(methodSub.Client, hashmap)
+//					if foundErr != nil {
+//						err = foundErr
+//						wg.Done()
+//						CheckTxPoolContent(1, 0)
+//						return
+//					}
+//					if numFound == 0 {
+//						err = fmt.Errorf("timeout when searching for tx")
+//						wg.Done()
+//						break mark
+//					}
+//				}
+//				// if the tx is found, through new heads or old heads, break the tag
+//				if numFound == 1 {
+//					blockN = num
+//					wg.Done()
+//					CheckTxPoolContent(0, 0)
+//					break mark
+//				}
+//			case subErr := <-methodSub.ClientSub.Err():
+//				fmt.Printf("subscription error from client: %v", subErr)
+//				return
+//			}
+//		}
+//	}()
+//
+//	return blockN, err
+//}
+
+func searchBlockForHashes(hashmap map[common.Hash]bool) error {
+	toFind := len(hashmap)
 	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
 	if methodSub == nil {
-		return uint64(0), fmt.Errorf("client subscription should not be nil")
+		return fmt.Errorf("client subscription should not be nil")
 	}
 
-	var (
-		blockCount int
-		blockN     uint64
-	)
-
-mark:
+	var blockCount int
 	for {
 		select {
-		case v := <-methodSub.SubChan:
+		// get a block from the new heads channel
+		case block := <-models.NewHeadsChan:
 			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
-			blockNumber := v.(map[string]interface{})["number"]
-			num, foundTx, err := txHashInBlock(methodSub.Client, hash, blockNumber.(string)) // check if the block has the transaction to look for inside of it
-			if err != nil {
-				return uint64(0), fmt.Errorf("could not verify if current block contains the tx hash: %v", err)
+			blockNum := block.(map[string]interface{})["number"].(string)
+			_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum)
+			if foundErr != nil {
+				return fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
 			}
-			// if the tx is found or the max number of blocks to check is reached, break the tag
-			if foundTx || blockCount == models.MaxNumberOfBlockChecks {
-				blockN = num
-				break mark
+			toFind -= numFound // remove the amount of found txs from the amount we're looking for
+			if toFind == 0 {   // this means we have found all the txs we're looking for
+				fmt.Printf("All the transactions created have been mined\n")
+				return nil
 			}
-		case err := <-methodSub.ClientSub.Err():
-			return uint64(0), fmt.Errorf("subscription error from client: %v", err)
+			if blockCount == models.MaxNumberOfBlockChecks {
+				return fmt.Errorf("timeout when searching for tx")
+			}
 		}
 	}
-
-	return blockN, nil
 }
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
@@ -105,8 +194,8 @@ func UnsubscribeAll() {
 	}
 }
 
-// SubscribeAll subscribes to the range of methods provided
-func SubscribeAll(methods []models.SubMethod) error {
+// subscribeAll subscribes to the range of methods provided
+func subscribeAll(methods []models.SubMethod) error {
 	m := make(map[models.SubMethod]*models.MethodSubscription)
 	models.MethodSubscriptionMap = &m
 	for _, method := range methods {

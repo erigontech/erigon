@@ -2,7 +2,6 @@ package models
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon/rpc"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
@@ -11,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type (
@@ -126,9 +126,13 @@ var (
 
 	// MethodSubscriptionMap is a container for all the subscription methods
 	MethodSubscriptionMap *map[SubMethod]*MethodSubscription
+
+	// NewHeadsChan is the block cache the eth_NewHeads
+	NewHeadsChan chan interface{}
+	// OldHeads holds a list of visited blocks to recheck transactions
+	//OldHeads []string
 )
 
-// Responses for the rpc calls
 type (
 	// AdminNodeInfoResponse is the response for calls made to admin_nodeInfo
 	AdminNodeInfoResponse struct {

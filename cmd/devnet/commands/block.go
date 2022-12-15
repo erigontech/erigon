@@ -40,10 +40,18 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
 
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
+	hashes := map[common.Hash]bool{*hash: true}
+	if err := services.SearchReservesForTransactionHash(hashes); err != nil {
+		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	}
+
 	return hash, nil
 }
 
 func callContractTx() (*common.Hash, error) {
+	// hashset to hold hashes for search after mining
+	hashes := make(map[common.Hash]bool)
+
 	// get the latest nonce for the next transaction
 	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(models.DevAddress))
 	if err != nil {
@@ -64,19 +72,24 @@ func callContractTx() (*common.Hash, error) {
 		fmt.Printf("failed to send transaction: %v\n", err)
 		return nil, err
 	}
+	hashes[*hash] = true
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 	fmt.Println()
 
-	_, err = services.SearchBlockForTransactionHash(*hash)
+	eventHash, err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find tx in block: %v", err)
-	}
-	fmt.Println()
-
-	if err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address); err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)
 		return nil, err
 	}
+	hashes[*eventHash] = true
+
+	if err := services.SearchReservesForTransactionHash(hashes); err != nil {
+		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	}
+
+	//if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
+	//	return nil, fmt.Errorf("failed to get logs: %v", err)
+	//}
 
 	return hash, nil
 }

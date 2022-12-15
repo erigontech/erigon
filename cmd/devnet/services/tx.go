@@ -1,4 +1,4 @@
-package commands
+package services
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 )
 
-func checkTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
+func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
 	pendingSize, queuedSize, err := requests.TxpoolContent(models.ReqId)
 	if err != nil {
 		fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
