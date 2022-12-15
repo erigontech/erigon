@@ -266,7 +266,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && value == nil {
+	if precompile && depth > 0 && (value == nil || value.IsZero()) {
 		ot.precompile = true
 		return
 	}
