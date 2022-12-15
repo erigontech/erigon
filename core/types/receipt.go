@@ -94,7 +94,7 @@ type storedReceiptRLP struct {
 	Logs              []*LogForStorage
 }
 
-// v4StoredReceiptRLP is the storage encoding of a receipt used in database version 4.
+// v4StoredReceiptRLP is the storage encoding of a receipt used in database version 4 .
 type v4StoredReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
@@ -249,6 +249,8 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			if err := r.decodePayload(s); err != nil {
 				return err
 			}
+		case BlobTxType:
+			// TODO
 		default:
 			return ErrTxTypeNotSupported
 		}
@@ -438,6 +440,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		}
 	case DynamicFeeTxType:
 		w.WriteByte(DynamicFeeTxType)
+		if err := rlp.Encode(w, data); err != nil {
+			panic(err)
+		}
+	case BlobTxType:
+		w.WriteByte(BlobTxType)
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}

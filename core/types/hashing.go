@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/protolambda/ztyp/tree"
 )
 
 type DerivableList interface {
@@ -187,5 +188,18 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	//nolint:errcheck
 	sha.Read(h[:])
 	cryptopool.ReturnToPoolKeccak256(sha)
+	return h
+}
+
+// prefixedSSZHash writes the prefix into the hasher before SSZ hash-tree-root-ing x.
+// It's used for typed transactions.
+func prefixedSSZHash(prefix byte, x tree.HTR) (h common.Hash) {
+	sha := cryptopool.NewLegacyKeccak256().(crypto.KeccakState)
+	defer cryptopool.ReturnToPoolKeccak256(sha)
+	sha.Reset()
+	sha.Write([]byte{prefix})
+	htr := x.HashTreeRoot(tree.GetHashFn())
+	sha.Write(htr[:])
+	sha.Read(h[:])
 	return h
 }

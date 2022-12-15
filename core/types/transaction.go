@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/protolambda/ztyp/codec"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -49,6 +50,7 @@ const (
 	AccessListTxType
 	DynamicFeeTxType
 	StarknetType
+	BlobTxType = 5
 )
 
 // Transaction is an Ethereum transaction.
@@ -161,6 +163,13 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
+		tx = t
+	case BlobTxType:
+		// TODO
+		t := &SignedBlobTx{}
+		// if err = t.DecoreRLP(s); err != nil  {
+		// 	return nil, err
+		// }
 		tx = t
 	default:
 		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])
@@ -453,18 +462,19 @@ func (t *TransactionsFixedOrder) Pop() {
 
 // Message is a fully derived transaction and implements core.Message
 type Message struct {
-	to         *common.Address
-	from       common.Address
-	nonce      uint64
-	amount     uint256.Int
-	gasLimit   uint64
-	gasPrice   uint256.Int
-	feeCap     uint256.Int
-	tip        uint256.Int
-	data       []byte
-	accessList AccessList
-	checkNonce bool
-	isFree     bool
+	to               *common.Address
+	from             common.Address
+	nonce            uint64
+	amount           uint256.Int
+	gasLimit         uint64
+	gasPrice         uint256.Int
+	feeCap           uint256.Int
+	tip              uint256.Int
+	maxFeePerDataGas uint256.Int
+	data             []byte
+	accessList       AccessList
+	checkNonce       bool
+	isFree           bool
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
@@ -508,6 +518,33 @@ func (m *Message) SetCheckNonce(checkNonce bool) {
 func (m Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
+}
+
+type TxWrapData interface {
+	copy() TxWrapData
+	kzgs() BlobKzgs
+	blobs() Blobs
+	aggregatedProof() KZGProof
+	encodeTyped(w io.Writer, txdata Transaction) error
+	sizeWrapData() common.StorageSize
+	validateBlobTransactionWrapper(inner Transaction) error
+}
+
+func DecodeSSZ(data []byte, dest codec.Deserializable) error {
+	return dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
+}
+
+func EncodeSSZ(w io.Writer, obj codec.Serializable) error {
+	return obj.Serialize(codec.NewEncodingWriter(w))
+}
+
+// copyAddressPtr copies an address.
+func copyAddressPtr(a *common.Address) *common.Address {
+	if a == nil {
+		return nil
+	}
+	cpy := *a
+	return &cpy
 }
 
 func (m *Message) ChangeGas(globalGasCap, desiredGas uint64) {

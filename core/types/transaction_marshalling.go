@@ -92,6 +92,39 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
+func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
+	var enc txJSON
+	// enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
+	// enc.AccessList = (*AccessList)(&tx.Message.AccessList)
+	// enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)
+	// enc.Gas = (*hexutil.Uint64)(&tx.Message.Gas)
+	// enc.MaxFeePerGas = (*hexutil.Big)(u256ToBig(&tx.Message.GasFeeCap))
+	// enc.MaxPriorityFeePerGas = (*hexutil.Big)(u256ToBig(&tx.Message.GasTipCap))
+	// enc.Value = (*hexutil.Big)(u256ToBig(&tx.Message.Value))
+	// enc.Data = (*hexutil.Bytes)(&tx.Message.Data)
+	// enc.To = t.To()
+	// v, r, s := tx.rawSignatureValues()
+	// enc.V = (*hexutil.Big)(v)
+	// enc.R = (*hexutil.Big)(r)
+	// enc.S = (*hexutil.Big)(s)
+	// enc.BlobVersionedHashes = tx.Message.BlobVersionedHashes
+
+	enc.Hash = tx.Hash()
+	enc.Type = hexutil.Uint64(tx.Type())
+	enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
+	enc.AccessList = (*AccessList)(&tx.Message.AccessList)
+	enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)
+	enc.Gas = (*hexutil.Uint64)(&tx.Message.Gas)
+	enc.Value = (*hexutil.Big)(u256ToBig(&tx.Message.Value))
+	enc.Data = (*hexutil.Bytes)(&tx.Message.Data)
+	enc.To = (*common.Address)(tx.Message.To.Address)
+	// enc.V = (*hexutil.Big)(tx.V.ToBig())
+	// enc.R = (*hexutil.Big)(tx.R.ToBig())
+	// enc.S = (*hexutil.Big)(tx.S.ToBig())
+
+	return json.Marshal(&enc)
+}
+
 func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 	var p fastjson.Parser
 	v, err := p.ParseBytes(input)
