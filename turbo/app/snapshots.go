@@ -338,6 +338,8 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
+	defer log.Info("Retire Done")
+
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
@@ -390,6 +392,19 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	if !fromdb.HistoryV3(db) {
 		return nil
+	}
+
+	log.Info("Prune state history")
+	for i := 0; i < 1024; i++ {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			agg.SetTx(tx)
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+				return err
+			}
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 
 	log.Info("Work on state history snapshots")

@@ -203,6 +203,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			erigonLog.Data = log.Data
 			erigonLog.Index = log.Index
 			erigonLog.Removed = log.Removed
+			erigonLog.TxIndex = log.TxIndex
 			erigonLogs = append(erigonLogs, erigonLog)
 		}
 	}

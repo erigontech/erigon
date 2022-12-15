@@ -799,6 +799,12 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 	//}
 
 	// check_and_lock_block -> check_epoch_end_signal
+
+	if e == nil {
+		// for tracing, we pass e that is `nil`
+		return
+	}
+
 	epoch, err := e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
 		log.Warn("[aura] initialize block: on epoch begin", "err", err)
