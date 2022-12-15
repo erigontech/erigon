@@ -1,8 +1,6 @@
 package valset
 
-import (
-	"fmt"
-)
+import "fmt"
 
 // TotalVotingPowerExceededError is returned when the maximum allowed total voting power is exceeded
 type TotalVotingPowerExceededError struct {
