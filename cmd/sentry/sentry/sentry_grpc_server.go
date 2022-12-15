@@ -738,7 +738,11 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 
 func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUselessRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
-	ss.removePeer(peerID)
+	peerInfo := ss.getPeer(peerID)
+	if peerInfo != nil {
+		ss.removePeer(peerID)
+		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID), "name", peerInfo.peer.Name())
+	}
 	return &emptypb.Empty{}, nil
 }
 
