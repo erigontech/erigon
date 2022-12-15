@@ -656,6 +656,17 @@ var (
 		Name:  "downloader.verify",
 		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
 	}
+	DisableIPV6 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv6",
+		Usage: "Turns off ipv6 for the downlaoder",
+		Value: false,
+	}
+
+	DisableIPV4 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv4",
+		Usage: "Turn off ipv4 for the downloader",
+		Value: false,
+	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
