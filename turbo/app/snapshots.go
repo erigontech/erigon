@@ -338,6 +338,8 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
+	defer log.Info("Retire Done")
+
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
