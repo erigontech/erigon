@@ -425,4 +425,16 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
 	assert.Equal(t, block, &decoded)
+
+	// Now test with empty withdrawals
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	_ = block2.Size()
+
+	encoded2, err := rlp.EncodeToBytes(block2)
+	require.NoError(t, err)
+
+	var decoded2 Block
+	require.NoError(t, rlp.DecodeBytes(encoded2, &decoded2))
+
+	assert.Equal(t, block2, &decoded2)
 }

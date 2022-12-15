@@ -45,7 +45,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 		blockNum = *blockNumPtr
 	}
-	if ok {
+	if ok || (chainConfig.Bor != nil && blockNum != 0) {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -79,7 +79,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if borTx == nil {
 				return nil, nil
 			}
-			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -195,7 +195,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 			return nil, nil // not error
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -259,7 +259,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 			return nil, nil
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
