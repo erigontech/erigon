@@ -250,13 +250,17 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
+	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
+	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
+	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
+	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
+
+	log.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
 	if ctx.Bool(utils.DisableIPV6.Name) {
-		log.Info("Downloader Disabled IPV6")
 		cfg.Downloader.ClientConfig.DisableIPv6 = true
 	}
 
 	if ctx.Bool(utils.DisableIPV4.Name) {
-		log.Info("Downloader Disabled IPV4")
 		cfg.Downloader.ClientConfig.DisableIPv4 = true
 	}
 }
