@@ -717,7 +717,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
 		newValidators, err := c.spanner.GetCurrentValidators(number+1, c.authorizedSigner.Load().signer, c.getSpanForBlock)
 		if err != nil {
-			return errors.New("unknown validators")
+			return errUnknownValidators
 		}
 
 		// sort validator by address
