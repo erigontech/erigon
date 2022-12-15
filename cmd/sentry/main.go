@@ -28,6 +28,7 @@ var (
 	discoveryDNS []string
 	nodiscover   bool // disable sentry's discovery mechanism
 	protocol     uint
+	allowedPorts []uint
 	netRestrict  string // CIDR to restrict peering to
 	maxPeers     int
 	maxPendPeers int
@@ -46,6 +47,7 @@ func init() {
 	rootCmd.Flags().StringSliceVar(&discoveryDNS, utils.DNSDiscoveryFlag.Name, []string{}, utils.DNSDiscoveryFlag.Usage)
 	rootCmd.Flags().BoolVar(&nodiscover, utils.NoDiscoverFlag.Name, false, utils.NoDiscoverFlag.Usage)
 	rootCmd.Flags().UintVar(&protocol, utils.P2pProtocolVersionFlag.Name, utils.P2pProtocolVersionFlag.Value.Value()[0], utils.P2pProtocolVersionFlag.Usage)
+	rootCmd.Flags().UintSliceVar(&allowedPorts, utils.P2pProtocolAllowedPorts.Name, utils.P2pProtocolAllowedPorts.Value.Value(), utils.P2pProtocolAllowedPorts.Usage)
 	rootCmd.Flags().StringVar(&netRestrict, utils.NetrestrictFlag.Name, utils.NetrestrictFlag.Value, utils.NetrestrictFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
@@ -82,6 +84,7 @@ var rootCmd = &cobra.Command{
 			trustedPeers,
 			uint(port),
 			protocol,
+			allowedPorts,
 		)
 		if err != nil {
 			return err

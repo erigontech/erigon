@@ -5,8 +5,10 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -19,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
 )
@@ -123,7 +126,7 @@ func (rs *State22) get(table string, key []byte) []byte {
 	return nil
 }
 
-func (rs *State22) Flush(rwTx kv.RwTx) error {
+func (rs *State22) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
@@ -131,6 +134,7 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 		if err != nil {
 			return err
 		}
+		var lastKey []byte
 		t.Walk(func(items []statePair) bool {
 			for _, item := range items {
 				if len(item.val) == 0 {
@@ -144,6 +148,16 @@ func (rs *State22) Flush(rwTx kv.RwTx) error {
 					}
 					//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
 				}
+				lastKey = item.key
+			}
+
+			select {
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_key", hex.EncodeToString(lastKey))
+			case <-ctx.Done():
+				err = ctx.Err()
+				return false
+			default:
 			}
 			return true
 		})

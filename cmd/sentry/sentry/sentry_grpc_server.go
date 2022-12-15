@@ -55,7 +55,6 @@ type PeerInfo struct {
 	peer          *p2p.Peer
 	lock          sync.RWMutex
 	deadlines     []time.Time // Request deadlines
-	uselessTill   time.Time
 	latestDealine time.Time
 	height        uint64
 	rw            p2p.MsgReadWriter
@@ -152,12 +151,6 @@ func (pi *PeerInfo) AddDeadline(deadline time.Time) {
 	pi.latestDealine = deadline
 }
 
-func (pi *PeerInfo) UselessTill(deadline time.Time) {
-	pi.lock.Lock()
-	defer pi.lock.Unlock()
-	pi.uselessTill = deadline
-}
-
 func (pi *PeerInfo) Height() uint64 {
 	return atomic.LoadUint64(&pi.height)
 }
@@ -189,12 +182,6 @@ func (pi *PeerInfo) ClearDeadlines(now time.Time, givePermit bool) int {
 	}
 	pi.deadlines = pi.deadlines[cutOff:]
 	return len(pi.deadlines)
-}
-
-func (pi *PeerInfo) IsUseless(now time.Time) bool {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return now.Before(pi.uselessTill)
 }
 
 func (pi *PeerInfo) LatestDeadline() time.Time {
@@ -753,7 +740,8 @@ func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUsele
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
 	if peerInfo != nil {
-		peerInfo.UselessTill(time.Now().Add(10 * time.Minute))
+		ss.removePeer(peerID)
+		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID), "name", peerInfo.peer.Name())
 	}
 	return &emptypb.Empty{}, nil
 }
@@ -768,7 +756,7 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 		deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 		height := peerInfo.Height()
 		//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-		if deadlines < maxPermitsPerPeer && !peerInfo.IsUseless(now) {
+		if deadlines < maxPermitsPerPeer {
 			heap.Push(&byMinBlock, PeerRef{pi: peerInfo, height: height})
 			if byMinBlock.Len() > peerCount {
 				// Remove the worst peer
@@ -804,7 +792,7 @@ func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
 		if peerInfo.Height() >= minBlock {
 			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
 			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
-			if deadlines < maxPermitsPerPeer && !peerInfo.IsUseless(now) {
+			if deadlines < maxPermitsPerPeer {
 				permits := maxPermitsPerPeer - deadlines
 				if permits > maxPermits {
 					maxPermits = permits

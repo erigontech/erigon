@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -335,6 +336,8 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
+	defer log.Info("Retire Done")
+
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
@@ -385,13 +388,60 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	log.Info("Work on history snapshots")
+	if !fromdb.HistoryV3(db) {
+		return nil
+	}
+
+	log.Info("Prune state history")
+	for i := 0; i < 1024; i++ {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			agg.SetTx(tx)
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+				return err
+			}
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+
+	log.Info("Work on state history snapshots")
 	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
 	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
 		return err
 	}
+
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
+		lastTxNum, err := rawdb.TxNums.Max(tx, execProgress)
+		if err != nil {
+			return err
+		}
+		agg.SetTxNum(lastTxNum)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	log.Info("Build state history snapshots")
+	if err = agg.BuildFiles(ctx, db); err != nil {
+		return err
+	}
 	if err = agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
 		return err
+	}
+
+	log.Info("Prune state history")
+	for i := 0; i < 1024; i++ {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			agg.SetTx(tx)
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+				return err
+			}
+			return err
+		}); err != nil {
+			return err
+		}
 	}
 
 	return nil
