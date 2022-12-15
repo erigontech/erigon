@@ -108,33 +108,19 @@ func NextForkHashFromForks(forks []uint64, genesis common.Hash, head uint64) [4]
 	}
 }
 
-// NewFilter creates a filter that returns if a fork ID should be rejected or notI
-// based on the local chain's status.
-func NewFilter(config *params.ChainConfig, genesis common.Hash, head func() uint64) Filter {
-	forks, _ := GatherForks(config)
-	return newFilter(
-		forks,
-		genesis,
-		head,
-	)
-}
-
+// NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
+// based on the provided current head.
 func NewFilterFromForks(forks []uint64, genesis common.Hash, headNumber uint64) Filter {
-	head := func() uint64 { return headNumber }
-	return newFilter(forks, genesis, head)
+	return newFilter(forks, genesis, headNumber)
 }
 
 // NewStaticFilter creates a filter at block zero.
 func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
-	head := func() uint64 { return 0 }
 	forks, _ := GatherForks(config)
-	return newFilter(forks, genesis, head)
+	return newFilter(forks, genesis, 0)
 }
 
-// newFilter is the internal version of NewFilter, taking closures as its arguments
-// instead of a chain. The reason is to allow testing it without having to simulate
-// an entire blockchain.
-func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter {
+func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
 	// Calculate the all the valid fork hash and fork next combos
 	var (
 		sums = make([][4]byte, len(forks)+1) // 0th is the genesis
@@ -173,11 +159,10 @@ func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter
 		//        the remote, but at this current point in time we don't have enough
 		//        information.
 		//   4. Reject in all other cases.
-		head := headfn()
 		for i, fork := range forks {
 			// If our head is beyond this fork, continue to the next (we have a dummy
 			// fork of maxuint64 as the last item to always fail this check eventually).
-			if head > fork {
+			if headHeight > fork {
 				continue
 			}
 			// Found the first unpassed fork block, check if our current state matches
@@ -185,7 +170,7 @@ func newFilter(forks []uint64, genesis common.Hash, headfn func() uint64) Filter
 			if sums[i] == id.Hash {
 				// Fork checksum matched, check if a remote future fork block already passed
 				// locally without the local node being aware of it (rule #1a).
-				if id.Next > 0 && head >= id.Next {
+				if id.Next > 0 && headHeight >= id.Next {
 					return ErrLocalIncompatibleOrStale
 				}
 				// Haven't passed locally a remote-only fork, accept the connection (rule #1b).

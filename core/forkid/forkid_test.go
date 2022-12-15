@@ -330,8 +330,7 @@ func TestValidation(t *testing.T) {
 	}
 	forks, _ := GatherForks(params.MainnetChainConfig)
 	for i, tt := range tests {
-		h := tt.head
-		filter := newFilter(forks, params.MainnetGenesisHash, func() uint64 { return h })
+		filter := newFilter(forks, params.MainnetGenesisHash, tt.head)
 		if err := filter(tt.id); err != tt.err {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
