@@ -652,7 +652,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
+			if err := agg.BuildFilesInBackground(ctx, chainDb); err != nil {
 				return err
 			}
 		}
@@ -677,7 +677,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
+		if err := agg.BuildFilesInBackground(ctx, chainDb); err != nil {
 			return err
 		}
 	}
