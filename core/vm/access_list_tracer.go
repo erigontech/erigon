@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -117,6 +118,15 @@ type AccessListTracer struct {
 func (a *AccessListTracer) CaptureAccountWrite(account common.Address) error {
 	panic("implement me")
 }
+
+func (*AccessListTracer) CaptureEnter(typ OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+}
+
+func (*AccessListTracer) CaptureExit(output []byte, gasUsed uint64, err error) {}
+
+func (*AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (*AccessListTracer) CaptureTxEnd(restGas uint64) {}
 
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
