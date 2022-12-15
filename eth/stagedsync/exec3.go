@@ -721,18 +721,18 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			repeatCount.Inc()
 
 			i++
-			if i > 1 {
-				rs.AddWork(txTask)
-				continue
+			if i == 1 {
+				// immediately retry once
+				applyWorker.RunTxTask(txTask)
+				if txTask.Error != nil {
+					//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
+					rs.AddWork(txTask)
+					continue
+				}
 			}
 
-			// immediately retry once
-			applyWorker.RunTxTask(txTask)
-			if txTask.Error != nil {
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				rs.AddWork(txTask)
-				continue
-			}
+			rs.AddWork(txTask)
+			continue
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
