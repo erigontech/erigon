@@ -85,26 +85,13 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, height
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
-// TODO(yperbasis): add timeForks
-func NextForkHashFromForks(forks []uint64, genesis common.Hash, head uint64) [4]byte {
-	// Calculate the starting checksum from the genesis hash
-	hash := crc32.ChecksumIEEE(genesis[:])
-
-	// Calculate the current fork checksum and the next fork block
-	var next uint64
-	for _, fork := range forks {
-		if fork <= head {
-			// Fork already passed, checksum the previous hash and the fork number
-			hash = checksumUpdate(hash, fork)
-			continue
-		}
-		next = fork
-		break
-	}
-	if next == 0 {
-		return checksumToBytes(hash)
+func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) [4]byte {
+	id := NewIDFromForks(heightForks, timeForks, genesis, height, time)
+	if id.Next == 0 {
+		return id.Hash
 	} else {
-		return checksumToBytes(checksumUpdate(hash, next))
+		hash := binary.BigEndian.Uint32(id.Hash[:])
+		return checksumToBytes(checksumUpdate(hash, id.Next))
 	}
 }
 
@@ -137,9 +124,6 @@ func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
 
 	// Create a validator that will filter out incompatible chains
 	return func(id ID) error {
-		if genesis == params.SokolGenesisHash {
-			return nil
-		}
 		// Run the fork checksum validation ruleset:
 		//   1. If local and remote FORK_CSUM matches, compare local head to FORK_NEXT.
 		//        The two nodes are in the same fork state currently. They might know
