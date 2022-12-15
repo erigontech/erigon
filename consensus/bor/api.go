@@ -8,13 +8,14 @@ import (
 	"strconv"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
+
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
 )
@@ -185,10 +186,13 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	snap, err := api.bor.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+
 	if err != nil {
 		return nil, err
 	}
+
 	return snap.signers(), nil
 }
 
@@ -243,8 +247,10 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	for i := start; i <= end; i++ {
 		wg.Add(1)
 		concurrent <- true
+
 		go func(number uint64) {
 			blockHeaders[number-start] = api.chain.GetHeaderByNumber(number)
+
 			<-concurrent
 			wg.Done()
 		}(i)
@@ -264,6 +270,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 		))
 
 		var arr [32]byte
+
 		copy(arr[:], header)
 		headers[i] = arr
 	}
