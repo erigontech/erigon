@@ -71,13 +71,6 @@ func checkPeerStatusCompatibility(
 		return fmt.Errorf("genesis hash does not match: theirs %x, ours %x", reply.Genesis, genesisHash)
 	}
 
-	forks := make([]uint64, len(status.ForkData.Forks))
-	// copy because forkid.NewFilterFromForks will write into this slice
-	copy(forks, status.ForkData.Forks)
-	forkFilter := forkid.NewFilterFromForks(forks, genesisHash, status.MaxBlock)
-	if err := forkFilter(reply.ForkID); err != nil {
-		return err
-	}
-
-	return nil
+	forkFilter := forkid.NewFilterFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime)
+	return forkFilter(reply.ForkID)
 }

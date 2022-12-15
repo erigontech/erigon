@@ -97,8 +97,8 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
-func NewFilterFromForks(forks []uint64, genesis common.Hash, headNumber uint64) Filter {
-	return newFilter(forks, genesis, headNumber)
+func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) Filter {
+	return newFilter(heightForks, genesis, height)
 }
 
 // NewStaticFilter creates a filter at block zero.
@@ -107,6 +107,9 @@ func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
 	return newFilter(forks, genesis, 0)
 }
 
+// TODO(yperbasis):
+// 1) add time forks
+// 2) don't modify inputs
 func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
 	// Calculate the all the valid fork hash and fork next combos
 	var (
