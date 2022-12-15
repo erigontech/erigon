@@ -535,10 +535,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var borTx types.Transaction
 	if txn == nil {
-		borTx, _, _, _, err = rawdb.ReadBorTransactionForBlockNumber(tx, blockNum)
-		if err != nil {
-			return nil, err
-		}
+		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx == nil {
 			return nil, nil
 		}
