@@ -1014,7 +1014,7 @@ func (a *Aggregator22) deleteFiles(outs SelectedStaticFiles22) error {
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *Aggregator22) KeepInDB(v uint64) { a.keepInDB = v }
 
-func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
+func (a *Aggregator22) BuildFilesInBackground(ctx context.Context, db kv.RoDB) error {
 	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
@@ -1043,7 +1043,7 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 		// - to remove old data from db as early as possible
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep {
-			if err := a.buildFilesInBackground(context.Background(), step, db); err != nil {
+			if err := a.buildFilesInBackground(ctx, step, db); err != nil {
 				log.Warn("buildFilesInBackground", "err", err)
 				break
 			}
@@ -1056,7 +1056,7 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 		defer a.workingMerge.Store(true)
 		go func() {
 			defer a.workingMerge.Store(false)
-			if err := a.MergeLoop(context.Background(), 1); err != nil {
+			if err := a.MergeLoop(ctx, 1); err != nil {
 				log.Warn("merge", "err", err)
 			}
 		}()
