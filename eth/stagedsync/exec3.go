@@ -250,7 +250,7 @@ func ExecV3(ctx context.Context,
 
 	var rwLoopWg sync.WaitGroup
 	if parallel {
-		// Go-routine gathering results from the workers
+		// `rwLoop` lives longer than `applyLoop`
 		rwLoop := func(ctx context.Context) error {
 			tx, err := chainDb.BeginRw(ctx)
 			if err != nil {
@@ -264,6 +264,8 @@ func ExecV3(ctx context.Context,
 			} else {
 				defer agg.StartWrites().FinishWrites()
 			}
+
+			defer applyLoopWg.Wait()
 
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
@@ -294,7 +296,7 @@ func ExecV3(ctx context.Context,
 							}
 						}
 
-						if err = agg.Flush(tx); err != nil {
+						if err = agg.Flush(ctx, tx); err != nil {
 							return err
 						}
 						if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
@@ -355,13 +357,13 @@ func ExecV3(ctx context.Context,
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
-						if err := rs.Flush(tx); err != nil {
+						if err := rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
 							return err
 						}
 						t2 = time.Since(tt)
 
 						tt = time.Now()
-						if err := agg.Flush(tx); err != nil {
+						if err := agg.Flush(ctx, tx); err != nil {
 							return err
 						}
 						t3 = time.Since(tt)
@@ -398,10 +400,10 @@ func ExecV3(ctx context.Context,
 					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
-			if err = rs.Flush(tx); err != nil {
+			if err = rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
 				return err
 			}
-			if err = agg.Flush(tx); err != nil {
+			if err = agg.Flush(ctx, tx); err != nil {
 				return err
 			}
 			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
@@ -580,7 +582,9 @@ Loop:
 					}
 					return nil
 				}(); err != nil {
-					if !errors.Is(err, context.Canceled) {
+					if errors.Is(err, context.Canceled) || errors.Is(err, common.ErrStopped) {
+						return err
+					} else {
 						log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", header.Hash().String(), "err", err)
 						if cfg.hd != nil {
 							cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
@@ -594,13 +598,13 @@ Loop:
 				}
 
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
-					panic(fmt.Errorf("State22.Apply: %w", err))
+					return fmt.Errorf("State22.Apply: %w", err)
 				}
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Inc()
 				outputBlockNum.Store(txTask.BlockNum)
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
-					panic(fmt.Errorf("State22.Apply: %w", err))
+					return fmt.Errorf("State22.Apply: %w", err)
 				}
 			}
 			stageProgress = blockNum
@@ -624,13 +628,13 @@ Loop:
 				if err := func() error {
 					t1 = time.Since(commitStart)
 					tt := time.Now()
-					if err := rs.Flush(applyTx); err != nil {
+					if err := rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
 						return err
 					}
 					t2 = time.Since(tt)
 
 					tt = time.Now()
-					if err := agg.Flush(applyTx); err != nil {
+					if err := agg.Flush(ctx, applyTx); err != nil {
 						return err
 					}
 					t3 = time.Since(tt)
@@ -664,10 +668,10 @@ Loop:
 			return err
 		}
 	} else {
-		if err = rs.Flush(applyTx); err != nil {
+		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
 			return err
 		}
-		if err = agg.Flush(applyTx); err != nil {
+		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err
 		}
 		if err = execStage.Update(applyTx, stageProgress); err != nil {
