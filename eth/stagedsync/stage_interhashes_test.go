@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"context"
 	"encoding/binary"
 	"testing"
 
@@ -31,7 +32,8 @@ func addTestAccount(tx kv.Putter, hash common.Hash, balance uint64, incarnation 
 }
 
 func TestAccountAndStorageTrie(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	db, tx := memdb.NewTestTx(t)
+	ctx := context.Background()
 
 	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 3*params.Ether, 0))
@@ -73,8 +75,8 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -167,7 +169,8 @@ func TestAccountAndStorageTrie(t *testing.T) {
 }
 
 func TestAccountTrieAroundExtensionNode(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	db, tx := memdb.NewTestTx(t)
+	ctx := context.Background()
 	historyV3 := false
 
 	acc := accounts.NewAccount()
@@ -194,7 +197,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReader()
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), common.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -222,7 +225,8 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 }
 
 func TestStorageDeletion(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	db, tx := memdb.NewTestTx(t)
+	ctx := context.Background()
 
 	address := common.HexToAddress("0x1000000000000000000000000000000000000000")
 	hashedAddress, err := common.HashData(address[:])
@@ -256,8 +260,8 @@ func TestStorageDeletion(t *testing.T) {
 	// ----------------------------------------------------------------
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
+	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -306,7 +310,8 @@ func TestStorageDeletion(t *testing.T) {
 }
 
 func TestHiveTrieRoot(t *testing.T) {
-	_, tx := memdb.NewTestTx(t)
+	db, tx := memdb.NewTestTx(t)
+	ctx := context.Background()
 
 	hashedAddress1, _ := common.HashData(common.FromHex("0000000000000000000000000000000000000000"))
 	require.Nil(t, tx.Put(kv.HashedAccounts, hashedAddress1[:],
@@ -374,8 +379,8 @@ func TestHiveTrieRoot(t *testing.T) {
 
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
-	cfg := StageTrieCfg(nil, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
 	require.Nil(t, err)
 
 	// Now add a new account
@@ -391,7 +396,7 @@ func TestHiveTrieRoot(t *testing.T) {
 	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)
 
-	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
 	require.Nil(t, err)
 
 	assert.Equal(t, regeneratedRoot, incrementalRoot)

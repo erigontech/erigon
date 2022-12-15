@@ -132,6 +132,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
+	&utils.DisableIPV4,
+	&utils.DisableIPV6,
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
 	&HealthCheckFlag,

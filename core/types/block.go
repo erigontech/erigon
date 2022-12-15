@@ -728,6 +728,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
+	rb.Withdrawals = []*Withdrawal{}
 	for err == nil {
 		var withdrawal Withdrawal
 		if err = withdrawal.DecodeRLP(s); err != nil {
@@ -909,6 +910,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
+	bb.Withdrawals = []*Withdrawal{}
 	for err == nil {
 		var withdrawal Withdrawal
 		if err = withdrawal.DecodeRLP(s); err != nil {
@@ -1083,6 +1085,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
+	bb.withdrawals = []*Withdrawal{}
 	for err == nil {
 		var withdrawal Withdrawal
 		if err = withdrawal.DecodeRLP(s); err != nil {

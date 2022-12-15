@@ -739,7 +739,7 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUselessRequest) (*emptypb.Empty, error) {
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	peerInfo := ss.getPeer(peerID)
-	if peerInfo != nil {
+	if ss.statusData != nil && !ss.statusData.PassivePeers && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
 		ss.removePeer(peerID)
 		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID), "name", peerInfo.peer.Name())
 	}
