@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -150,11 +151,11 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 				panic(err)
 			}
 			if n == from+numberOfBlocks-1 {
-				err := rs.Flush(tx)
+				err := rs.Flush(context.Background(), tx, "", time.NewTicker(time.Minute))
 				if err != nil {
 					panic(err)
 				}
-				if err := agg.Flush(tx); err != nil {
+				if err := agg.Flush(context.Background(), tx); err != nil {
 					panic(err)
 				}
 			}

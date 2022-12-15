@@ -314,7 +314,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
-	if err := rs.Flush(tx); err != nil {
+	if err := rs.Flush(ctx, tx, s.LogPrefix(), time.NewTicker(30*time.Second)); err != nil {
 		return fmt.Errorf("State22.Flush: %w", err)
 	}
 
