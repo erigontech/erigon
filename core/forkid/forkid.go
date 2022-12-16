@@ -54,18 +54,18 @@ type ID struct {
 type Filter func(id ID) error
 
 // NewID calculates the Ethereum fork ID from the chain config, genesis hash, head height and time.
-func NewID(config *params.ChainConfig, genesis common.Hash, height, time uint64) ID {
+func NewID(config *params.ChainConfig, genesis common.Hash, headHeight, headTime uint64) ID {
 	heightForks, timeForks := GatherForks(config)
-	return NewIDFromForks(heightForks, timeForks, genesis, height, time)
+	return NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
-func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) ID {
+func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
 	// Calculate the current fork checksum and the next fork block
 	for _, fork := range heightForks {
-		if height >= fork {
+		if headHeight >= fork {
 			// Fork already passed, checksum the previous hash and the fork number
 			hash = checksumUpdate(hash, fork)
 			continue
@@ -74,7 +74,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, height
 	}
 	var next uint64
 	for _, fork := range timeForks {
-		if time >= fork {
+		if headTime >= fork {
 			// Fork passed, checksum the previous hash and the fork time
 			hash = checksumUpdate(hash, fork)
 			continue
@@ -85,8 +85,8 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, height
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) [4]byte {
-	id := NewIDFromForks(heightForks, timeForks, genesis, height, time)
+func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
+	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 	if id.Next == 0 {
 		return id.Hash
 	} else {
@@ -97,8 +97,8 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
-func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) Filter {
-	return newFilter(heightForks, timeForks, genesis, height, time)
+func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
+	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
 // NewStaticFilter creates a filter at block zero.
