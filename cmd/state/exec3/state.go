@@ -70,11 +70,17 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
+	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
+	}
 
 	w.ibs = state.New(w.stateReader)
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
-
 	return w
 }
 
@@ -186,7 +192,12 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
 			vmenv = rw.starkNetEvm
 		} else {
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			blockContext := txTask.EvmBlockContext
+			if !rw.background {
+				getHashFn := core.GetHashFn(header, rw.getHeader)
+				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			}
+			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
 		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
