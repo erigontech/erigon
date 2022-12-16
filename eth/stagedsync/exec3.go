@@ -726,9 +726,6 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 				rs.AddWork(txTask)
 				continue
 			}
-
-			rs.AddWork(txTask)
-			continue
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
