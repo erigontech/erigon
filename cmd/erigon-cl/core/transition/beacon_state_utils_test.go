@@ -119,7 +119,7 @@ func TestComputeProposerIndex(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			got, err := ComputePropserIndex(tc.state, tc.indices, tc.seed)
+			got, err := ComputeProposerIndex(tc.state, tc.indices, tc.seed)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

@@ -54,7 +54,7 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 	return ind, nil
 }
 
-func ComputePropserIndex(state *cltypes.BeaconStateBellatrix, indices []uint64, seed [32]byte) (uint64, error) {
+func ComputeProposerIndex(state *cltypes.BeaconStateBellatrix, indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
 		return 0, fmt.Errorf("must have >0 indices")
 	}
