@@ -42,10 +42,6 @@ type State22 struct {
 	finished     bool
 }
 
-type statePair struct {
-	key, val []byte
-}
-
 func NewState22() *State22 {
 	rs := &State22{
 		triggers:     map[uint64]*exec22.TxTask{},
@@ -55,22 +51,6 @@ func NewState22() *State22 {
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
-}
-
-func (rs *State22) putHint(table string, key, val []byte, hint *btree2.PathHint) {
-	t, ok := rs.changes[table]
-	if !ok {
-		//t = btree2.NewBTreeGOptions[statePair](stateItemLess, btree2.Options{Degree: 128, NoLocks: true})
-		t = btree2.NewMap[string, []byte](128)
-		rs.changes[table] = t
-	}
-	old, ok := t.Set(string(key), val)
-	if ok {
-		rs.sizeEstimate += uint64(len(val))
-		rs.sizeEstimate -= uint64(len(old))
-	} else {
-		rs.sizeEstimate += btreeOverhead + uint64(len(key)) + uint64(len(val))
-	}
 }
 
 func (rs *State22) put(table string, key, val []byte) {
@@ -90,12 +70,6 @@ func (rs *State22) put(table string, key, val []byte) {
 
 const btreeOverhead = 16
 
-func (rs *State22) GetHint(table string, key []byte, hint *btree2.PathHint) []byte {
-	rs.lock.RLock()
-	v := rs.getHint(table, key, hint)
-	rs.lock.RUnlock()
-	return v
-}
 func (rs *State22) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
 	v := rs.get(table, key)
@@ -103,16 +77,6 @@ func (rs *State22) Get(table string, key []byte) []byte {
 	return v
 }
 
-func (rs *State22) getHint(table string, key []byte, hint *btree2.PathHint) []byte {
-	t, ok := rs.changes[table]
-	if !ok {
-		return nil
-	}
-	if i, ok := t.Get(string(key)); ok {
-		return i
-	}
-	return nil
-}
 func (rs *State22) get(table string, key []byte) []byte {
 	t, ok := rs.changes[table]
 	if !ok {
@@ -708,15 +672,12 @@ type StateReader22 struct {
 	rs        *State22
 	composite []byte
 	readLists map[string]*exec22.KvList
-
-	stateHint *btree2.PathHint
 }
 
 func NewStateReader22(rs *State22) *StateReader22 {
 	return &StateReader22{
 		rs:        rs,
 		readLists: newReadList(),
-		stateHint: &btree2.PathHint{},
 	}
 }
 
@@ -742,7 +703,7 @@ func (r *StateReader22) SetTrace(trace bool) {
 
 func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc := r.rs.GetHint(kv.PlainState, addr, r.stateHint)
+	enc := r.rs.Get(kv.PlainState, addr)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, addr)
@@ -768,7 +729,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc := r.rs.GetHint(kv.PlainState, composite, r.stateHint)
+	enc := r.rs.Get(kv.PlainState, composite)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, composite)
