@@ -18,10 +18,11 @@ import (
 
 // Methods of sentry called by Core
 
-func (cs *MultiClient) UpdateHead(ctx context.Context, height uint64, hash common.Hash, td *uint256.Int) {
+func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash common.Hash, td *uint256.Int) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
+	cs.headTime = time
 	cs.headHash = hash
 	cs.headTd = td
 	statusMsg := cs.makeStatusData()
