@@ -166,8 +166,8 @@ func merkleizeTrieLeaves(leaves [][32]byte) ([32]byte, error) {
 			return [32]byte{}, fmt.Errorf("hash layer is a non power of 2: %d", len(leaves))
 		}
 		layer := make([][32]byte, len(leaves)/2)
-		for j := 0; j < len(leaves); j += 2 {
-			layer[j/2] = utils.Keccak256(leaves[j][:], leaves[j+1][:])
+		if err := gohashtree.Hash(layer, leaves); err != nil {
+			return [32]byte{}, err
 		}
 		leaves = layer
 	}
