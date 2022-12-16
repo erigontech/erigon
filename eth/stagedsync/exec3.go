@@ -191,7 +191,7 @@ func ExecV3(ctx context.Context,
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount * 4
-	execWorkers, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
+	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
 	commitThreshold := batchSize.Bytes()
@@ -212,6 +212,8 @@ func ExecV3(ctx context.Context,
 		}
 		defer tx.Rollback()
 
+		applyWorker.ResetTx(tx)
+
 		notifyReceived := func() { rwsReceiveCond.Signal() }
 		for outputTxNum.Load() < maxTxNum.Load() {
 			select {
@@ -223,7 +225,7 @@ func ExecV3(ctx context.Context,
 					defer rwsLock.Unlock()
 					resultsSize.Add(txTask.ResultsSize)
 					heap.Push(rws, txTask)
-					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived); err != nil {
+					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 						return err
 					}
 					syncMetrics[stages.Execution].Set(outputBlockNum.Load())
@@ -324,7 +326,8 @@ func ExecV3(ctx context.Context,
 									drained = true
 								}
 							}
-							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}); err != nil {
+							applyWorker.ResetTx(tx)
+							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}, applyWorker); err != nil {
 								return err
 							}
 							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
@@ -708,16 +711,28 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) error {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) error {
+	var i int
 	var txTask *exec22.TxTask
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
-			rs.AddWork(txTask)
 			repeatCount.Inc()
+
+			i++
+			if i == 1 {
+				// immediately retry once
+				applyWorker.RunTxTask(txTask)
+				if txTask.Error != nil {
+					//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
+					rs.AddWork(txTask)
+					continue
+				}
+			}
+
+			rs.AddWork(txTask)
 			continue
-			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
