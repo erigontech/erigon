@@ -312,7 +312,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 	for i := 0; i < workerCount; i++ {
 		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
-	applyWorker = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	clear = func() {
 		wg.Wait()
 		for _, w := range reconWorkers {
