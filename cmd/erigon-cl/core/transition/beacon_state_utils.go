@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
 const SHUFFLE_ROUND_COUNT = uint8(90)
@@ -49,4 +52,35 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 		}
 	}
 	return ind, nil
+}
+
+func ComputePropserIndex(state *cltypes.BeaconStateBellatrix, indices []uint64, seed [32]byte) (uint64, error) {
+	if len(indices) == 0 {
+		return 0, fmt.Errorf("must have >0 indices")
+	}
+	maxRandomByte := uint64(1<<8 - 1)
+	i := uint64(0)
+	total := uint64(len(indices))
+	hash := sha256.New()
+	buf := make([]byte, 8)
+	for {
+		shuffled, err := ComputeShuffledIndex(i%total, total, seed)
+		if err != nil {
+			return 0, err
+		}
+		candidateIndex := indices[shuffled]
+		if candidateIndex >= uint64(len(state.Validators)) {
+			return 0, fmt.Errorf("candidate index out of range: %d for validator set of length: %d", candidateIndex, len(state.Validators))
+		}
+		binary.LittleEndian.PutUint64(buf, i/32)
+		input := append(seed[:], buf...)
+		hash.Reset()
+		hash.Write(input)
+		randomByte := uint64(hash.Sum(nil)[i%32])
+		effectiveBalance := state.Validators[candidateIndex].EffectiveBalance
+		if effectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
+			return candidateIndex, nil
+		}
+		i += 1
+	}
 }

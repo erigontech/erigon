@@ -258,7 +258,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
-			log.Warn("TxLookup pruning, empty block body", "height", blocknum)
+			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
 			return nil
 		}
 

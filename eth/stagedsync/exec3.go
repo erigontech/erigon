@@ -191,7 +191,7 @@ func ExecV3(ctx context.Context,
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount * 4
-	execWorkers, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
+	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
 	commitThreshold := batchSize.Bytes()
@@ -212,6 +212,8 @@ func ExecV3(ctx context.Context,
 		}
 		defer tx.Rollback()
 
+		applyWorker.ResetTx(tx)
+
 		notifyReceived := func() { rwsReceiveCond.Signal() }
 		for outputTxNum.Load() < maxTxNum.Load() {
 			select {
@@ -223,7 +225,7 @@ func ExecV3(ctx context.Context,
 					defer rwsLock.Unlock()
 					resultsSize.Add(txTask.ResultsSize)
 					heap.Push(rws, txTask)
-					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived); err != nil {
+					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 						return err
 					}
 					syncMetrics[stages.Execution].Set(outputBlockNum.Load())
@@ -324,7 +326,8 @@ func ExecV3(ctx context.Context,
 									drained = true
 								}
 							}
-							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}); err != nil {
+							applyWorker.ResetTx(tx)
+							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}, applyWorker); err != nil {
 								return err
 							}
 							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
@@ -708,16 +711,21 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func()) error {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.State22, agg *state2.Aggregator22, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) error {
 	var txTask *exec22.TxTask
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
-			rs.AddWork(txTask)
 			repeatCount.Inc()
-			continue
-			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+
+			// immediately retry once
+			applyWorker.RunTxTask(txTask)
+			if txTask.Error != nil {
+				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
+				rs.AddWork(txTask)
+				continue
+			}
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
@@ -1010,11 +1018,11 @@ func reconstituteStep(last bool,
 		return err
 	}
 
-	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("%s recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("%s recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("%s recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	var transposedKey []byte
 	if err = db.View(ctx, func(roTx kv.Tx) error {
@@ -1255,11 +1263,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		}
 	}
 	db.Close()
-	plainStateCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainStateCollector := etl.NewCollector(fmt.Sprintf("%s recon plainState", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainStateCollector.Close()
-	codeCollector := etl.NewCollector(fmt.Sprintf("[%s] recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
+	codeCollector := etl.NewCollector(fmt.Sprintf("%s recon code", s.LogPrefix()), dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
-	plainContractCollector := etl.NewCollector(fmt.Sprintf("[%s] recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	plainContractCollector := etl.NewCollector(fmt.Sprintf("%s recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
