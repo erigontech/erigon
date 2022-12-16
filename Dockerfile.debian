@@ -8,10 +8,7 @@ WORKDIR /app
 ADD go.mod go.mod
 ADD go.sum go.sum
 
-RUN --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/tmp/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 ADD . .
 
 RUN --mount=type=cache,target=/root/.cache \
