@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 func TestComputeShuffledIndex(t *testing.T) {
@@ -42,7 +43,7 @@ func TestComputeProposerIndex(t *testing.T) {
 	copy(seed[:], []byte("seed"))
 	testCases := []struct {
 		description string
-		state       *cltypes.BeaconStateBellatrix
+		state       *state.BeaconState
 		indices     []uint64
 		seed        [32]byte
 		expected    uint64
@@ -50,7 +51,7 @@ func TestComputeProposerIndex(t *testing.T) {
 	}{
 		{
 			description: "success",
-			state: &cltypes.BeaconStateBellatrix{
+			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
 				Validators: []*cltypes.Validator{
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
@@ -58,14 +59,14 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
-			},
+			}),
 			indices:  []uint64{0, 1, 2, 3, 4},
 			seed:     seed,
 			expected: 2,
 		},
 		{
 			description: "single_active_index",
-			state: &cltypes.BeaconStateBellatrix{
+			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
 				Validators: []*cltypes.Validator{
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
@@ -73,14 +74,14 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
-			},
+			}),
 			indices:  []uint64{3},
 			seed:     seed,
 			expected: 3,
 		},
 		{
 			description: "second_half_active",
-			state: &cltypes.BeaconStateBellatrix{
+			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
 				Validators: []*cltypes.Validator{
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
@@ -93,7 +94,7 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
-			},
+			}),
 			indices:  []uint64{5, 6, 7, 8, 9},
 			seed:     seed,
 			expected: 7,
@@ -107,11 +108,11 @@ func TestComputeProposerIndex(t *testing.T) {
 		{
 			description: "active_index_out_of_range",
 			indices:     []uint64{100},
-			state: &cltypes.BeaconStateBellatrix{
+			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
 				Validators: []*cltypes.Validator{
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
-			},
+			}),
 			seed:    seed,
 			wantErr: true,
 		},
