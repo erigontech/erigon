@@ -26,7 +26,7 @@ type Worker struct {
 	lock        sync.Locker
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
-	background  bool
+	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	rs          *state.State22
 	stateWriter *state.StateWriter22
