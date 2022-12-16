@@ -8,13 +8,11 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
-	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/log/v3"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -22,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -32,11 +29,8 @@ type MiningBlock struct {
 	Uncles      []*types.Header
 	Txs         types.Transactions
 	Receipts    types.Receipts
-	PreparedTxs types.TransactionsStream
 	Withdrawals []*types.Withdrawal
-
-	LocalTxs  types.TransactionsStream
-	RemoteTxs types.TransactionsStream
+	PreparedTxs types.TransactionsStream
 }
 
 type MiningState struct {
@@ -110,7 +104,6 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
-
 	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 	if parent == nil { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
@@ -129,6 +122,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	blockNum := executionAt + 1
+
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
@@ -312,122 +306,4 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 
 	}
 	return
-}
-
-func filterBadTransactions(transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {
-	initialCnt := len(transactions)
-	var filtered []types.Transaction
-	gasBailout := config.Consensus == params.ParliaConsensus
-
-	missedTxs := 0
-	noSenderCnt := 0
-	noAccountCnt := 0
-	nonceTooLowCnt := 0
-	notEOACnt := 0
-	feeTooLowCnt := 0
-	balanceTooLowCnt := 0
-	overflowCnt := 0
-	for len(transactions) > 0 && missedTxs != len(transactions) {
-		transaction := transactions[0]
-		sender, ok := transaction.GetSender()
-		if !ok {
-			transactions = transactions[1:]
-			noSenderCnt++
-			continue
-		}
-		var account accounts.Account
-		ok, err := rawdb.ReadAccount(simulationTx, sender, &account)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			transactions = transactions[1:]
-			noAccountCnt++
-			continue
-		}
-		// Check transaction nonce
-		if account.Nonce > transaction.GetNonce() {
-			transactions = transactions[1:]
-			nonceTooLowCnt++
-			continue
-		}
-		if account.Nonce < transaction.GetNonce() {
-			missedTxs++
-			transactions = append(transactions[1:], transaction)
-			continue
-		}
-		missedTxs = 0
-
-		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() {
-			transactions = transactions[1:]
-			notEOACnt++
-			continue
-		}
-
-		if config.IsLondon(blockNumber) {
-			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(baseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", baseFee)
-			}
-			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
-				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256, false /* isFree */); err != nil {
-					transactions = transactions[1:]
-					feeTooLowCnt++
-					continue
-				}
-			}
-		}
-		txnGas := transaction.GetGas()
-		txnPrice := transaction.GetPrice()
-		value := transaction.GetValue()
-		accountBalance := account.Balance
-
-		want := uint256.NewInt(0)
-		want.SetUint64(txnGas)
-		want, overflow := want.MulOverflow(want, txnPrice)
-		if overflow {
-			transactions = transactions[1:]
-			overflowCnt++
-			continue
-		}
-
-		if transaction.GetFeeCap() != nil {
-			want.SetUint64(txnGas)
-			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
-			want, overflow = want.AddOverflow(want, value)
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
-		}
-
-		if accountBalance.Cmp(want) < 0 {
-			if !gasBailout {
-				transactions = transactions[1:]
-				balanceTooLowCnt++
-				continue
-			}
-		}
-		// Updates account in the simulation
-		account.Nonce++
-		account.Balance.Sub(&account.Balance, want)
-		accountBuffer := make([]byte, account.EncodingLengthForStorage())
-		account.EncodeForStorage(accountBuffer)
-		if err := simulationTx.Put(kv.PlainState, sender[:], accountBuffer); err != nil {
-			return nil, err
-		}
-		// Mark transaction as valid
-		filtered = append(filtered, transaction)
-		transactions = transactions[1:]
-	}
-	log.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "filtered", len(filtered))
-	return filtered, nil
 }
