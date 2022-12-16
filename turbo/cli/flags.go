@@ -250,6 +250,19 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
+	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
+	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
+	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
+	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
+
+	log.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
+	if ctx.Bool(utils.DisableIPV6.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv6 = true
+	}
+
+	if ctx.Bool(utils.DisableIPV4.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv4 = true
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -371,7 +384,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,
-		InternalCL: !ctx.Bool(utils.ExternalConsensusFlag.Name),
 	}
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)

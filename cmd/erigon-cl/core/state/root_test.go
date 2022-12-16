@@ -35,6 +35,8 @@ func getTestBeaconState() *cltypes.BeaconStateBellatrix {
 	}
 }
 
+// Prev: 151849172
+// Curr: 5463452
 func BenchmarkStateRootNonCached(b *testing.B) {
 	base := getTestBeaconState()
 	for i := 0; i < b.N; i++ {
@@ -43,6 +45,8 @@ func BenchmarkStateRootNonCached(b *testing.B) {
 	}
 }
 
+// Prev: 13953
+// Curr: 2093
 func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	state := state.FromBellatrixState(getTestBeaconState())

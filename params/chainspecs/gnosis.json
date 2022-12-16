@@ -16,6 +16,7 @@
   "eip1559FeeCollectorTransition": 19040000,
   "eip1559FeeCollector": "0x6BBe78ee9e474842Dbd4AB4987b3CeFE88426A92",
   "terminalTotalDifficulty": 8626000000000000000000058750000000000000000000,
+  "terminalTotalDifficultyPassed": true,
   "aura": {
     "DBPath": "",
     "InMemory": false,

@@ -72,7 +72,7 @@ type MockSentry struct {
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
 	PeerId         *ptypes.H512
-	UpdateHead     func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	UpdateHead     func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int)
 	streams        map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages   []*proto_sentry.OutboundMessageData
 	StreamWg       sync.WaitGroup
@@ -224,7 +224,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
-		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		HistoryV3:      ethconfig.EnableHistoryV3InTest,

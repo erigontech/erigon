@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -53,7 +54,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
+func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -62,34 +63,35 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
 	fmt.Fprint(w, "\n \t\t stage_at \t prune_at\n")
 	for _, stage := range stages.AllStages {
-		if progress, err = stages.GetStageProgress(db, stage); err != nil {
+		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
 			return err
 		}
-		prunedTo, err := stages.GetStagePruneProgress(db, stage)
+		prunedTo, err := stages.GetStagePruneProgress(tx, stage)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "%s \t\t %d \t %d\n", string(stage), progress, prunedTo)
 	}
-	pm, err := prune.Get(db)
+	pm, err := prune.Get(tx)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
+	fmt.Fprintf(w, "history v3 idx steps: %.02f\n\n", rawdbhelpers.IdxStepsCountV3(tx))
 
-	s1, err := db.ReadSequence(kv.EthTx)
+	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err
 	}
-	s2, err := db.ReadSequence(kv.NonCanonicalTxs)
+	s2, err := tx.ReadSequence(kv.NonCanonicalTxs)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		firstNonGenesis, err := rawdb.SecondKey(db, kv.Headers)
+		firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
@@ -98,7 +100,7 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 		} else {
 			fmt.Fprintf(w, "no headers in db\n")
 		}
-		firstNonGenesis, err = rawdb.SecondKey(db, kv.BlockBody)
+		firstNonGenesis, err = rawdb.SecondKey(tx, kv.BlockBody)
 		if err != nil {
 			return err
 		}
