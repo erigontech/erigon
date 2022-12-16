@@ -98,23 +98,28 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
 func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, height, time uint64) Filter {
-	return newFilter(heightForks, genesis, height)
+	return newFilter(heightForks, timeForks, genesis, height, time)
 }
 
 // NewStaticFilter creates a filter at block zero.
 func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
-	forks, _ := GatherForks(config)
-	return newFilter(forks, genesis, 0)
+	heightForks, timeForks := GatherForks(config)
+	return newFilter(heightForks, timeForks, genesis, 0, 0)
 }
 
-// TODO(yperbasis):
-// 1) add time forks
-// 2) don't modify inputs
-func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
+// Simple heuristic returning true if the value is a Unix time after 2 Dec 2022.
+// There are no block heights in the ballpark of 1.67 billion.
+func forkIsTimeBased(fork uint64) bool {
+	return fork >= 1670000000
+}
+
+func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
+	var forks []uint64
+	forks = append(forks, heightForks...)
+	forks = append(forks, timeForks...)
+
 	// Calculate the all the valid fork hash and fork next combos
-	var (
-		sums = make([][4]byte, len(forks)+1) // 0th is the genesis
-	)
+	sums := make([][4]byte, len(forks)+1) // 0th is the genesis
 	hash := crc32.ChecksumIEEE(genesis[:])
 	sums[0] = checksumToBytes(hash)
 	for i, fork := range forks {
@@ -149,7 +154,7 @@ func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
 		for i, fork := range forks {
 			// If our head is beyond this fork, continue to the next (we have a dummy
 			// fork of maxuint64 as the last item to always fail this check eventually).
-			if headHeight > fork {
+			if headHeight > fork || (forkIsTimeBased(fork) && headTime > fork) {
 				continue
 			}
 			// Found the first unpassed fork block, check if our current state matches
@@ -157,8 +162,10 @@ func newFilter(forks []uint64, genesis common.Hash, headHeight uint64) Filter {
 			if sums[i] == id.Hash {
 				// Fork checksum matched, check if a remote future fork block already passed
 				// locally without the local node being aware of it (rule #1a).
-				if id.Next > 0 && headHeight >= id.Next {
-					return ErrLocalIncompatibleOrStale
+				if id.Next > 0 {
+					if headHeight >= id.Next || (forkIsTimeBased(id.Next) && headTime >= id.Next) {
+						return ErrLocalIncompatibleOrStale
+					}
 				}
 				// Haven't passed locally a remote-only fork, accept the connection (rule #1b).
 				return nil
