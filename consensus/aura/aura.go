@@ -823,19 +823,25 @@ func (c *AuRa) Initialize(config *params.ChainConfig, chain consensus.ChainHeade
 
 }
 
+func (c *AuRa) ApplyRewards(header *types.Header, state *state.IntraBlockState, syscall consensus.SystemCall) error {
+	beneficiaries, _, rewards, err := calculateRewards(c, header, syscall)
+	if err != nil {
+		return err
+	}
+	for i := range beneficiaries {
+		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
+		state.AddBalance(beneficiaries[i], rewards[i])
+	}
+	return nil
+}
+
 // word `signal epoch` == word `pending epoch`
 func (c *AuRa) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
-	// accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
-	beneficiaries, _, rewards, err := AccumulateRewards(config, c, header, uncles, syscall)
-	if err != nil {
-		return nil, nil, fmt.Errorf("buildAncestrySubChain: %w", err)
-	}
-	for i := range beneficiaries {
-		//fmt.Printf("beneficiary: n=%d, %x,%d\n", header.Number.Uint64(), beneficiaries[i], rewards[i])
-		state.AddBalance(beneficiaries[i], rewards[i])
+	if err := c.ApplyRewards(header, state, syscall); err != nil {
+		return nil, nil, err
 	}
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
@@ -1290,10 +1296,7 @@ func (c *AuRa) emptySteps(fromStep, toStep uint64, parentHash common.Hash) []Emp
 	return res
 }
 
-// AccumulateRewards returns rewards for a given block. The mining reward consists
-// of the static blockReward plus a reward for each included uncle (if any). Individual
-// uncle rewards are also returned in an array.
-func AccumulateRewards(_ *params.ChainConfig, aura *AuRa, header *types.Header, _ []*types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
+func calculateRewards(aura *AuRa, header *types.Header, syscall consensus.SystemCall) (beneficiaries []common.Address, rewardKind []aurainterfaces.RewardKind, rewards []*uint256.Int, err error) {
 	beneficiaries = append(beneficiaries, header.Coinbase)
 	rewardKind = append(rewardKind, aurainterfaces.RewardAuthor)
 

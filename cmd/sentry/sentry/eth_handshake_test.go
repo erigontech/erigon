@@ -7,11 +7,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCheckPeerStatusCompatibility(t *testing.T) {
@@ -23,17 +24,19 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 		TD:              big.NewInt(0),
 		Head:            common.Hash{},
 		Genesis:         params.MainnetGenesisHash,
-		ForkID:          forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0),
+		ForkID:          forkid.NewID(params.MainnetChainConfig, params.MainnetGenesisHash, 0, 0),
 	}
+	heightForks, timeForks := forkid.GatherForks(params.MainnetChainConfig)
 	status := proto_sentry.StatusData{
 		NetworkId:       networkID,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(new(uint256.Int)),
 		BestHash:        nil,
 		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(params.MainnetGenesisHash),
-			Forks:   forkid.GatherForks(params.MainnetChainConfig),
+			Genesis:     gointerfaces.ConvertHashToH256(params.MainnetGenesisHash),
+			HeightForks: heightForks,
+			TimeForks:   timeForks,
 		},
-		MaxBlock: 0,
+		MaxBlockHeight: 0,
 	}
 
 	t.Run("ok", func(t *testing.T) {
