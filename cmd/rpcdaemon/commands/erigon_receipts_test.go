@@ -158,6 +158,9 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
+	if m.HistoryV3 {
+		t.Skip("ErigonV3 doesn't store receipts in DB. Can't use \"rawdb\" package in this case. need somehow change assertion")
+	}
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
 			block, err := rawdb.ReadBlockByNumber(tx, i)
