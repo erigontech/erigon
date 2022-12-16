@@ -520,7 +520,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}
 
 	// If we choose not to run a consensus layer, run our embedded.
-	if !config.CL && clparams.Supported(config.NetworkID) {
+	if !config.ExternalCL && clparams.EmbeddedSupported(config.NetworkID) {
 		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
 		if err != nil {
 			return nil, err

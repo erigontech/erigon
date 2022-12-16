@@ -188,7 +188,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		excessDataGas = parentHeader.ExcessDataGas
 	}
 	_, current.Txs, current.Receipts, err = core.FinalizeBlockExecution(cfg.engine, stateReader, current.Header, excessDataGas, current.Txs, current.Uncles, stateWriter,
-		&cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, epochReader{tx: tx}, chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
+		&cfg.chainConfig, ibs, current.Receipts, current.Withdrawals, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, true)
 	if err != nil {
 		return err
 	}

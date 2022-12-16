@@ -70,6 +70,16 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
+	var excessDataGas *big.Int
+	parentBlock, err := api.blockByHashWithSenders(tx, block.ParentHash())
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+	if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
+	}
+
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		stream.WriteNil()
@@ -97,6 +107,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 		ibs.Prepare(txn.Hash(), block.Hash(), idx)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
+
+		if msg.FeeCap().IsZero() && engine != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), excessDataGas, engine, true /* constCall */)
+			}
+			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		}
+
 		txCtx := evmtypes.TxContext{
 			TxHash:   txn.Hash(),
 			Origin:   msg.From(),

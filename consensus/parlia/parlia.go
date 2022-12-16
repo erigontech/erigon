@@ -242,9 +242,9 @@ type Parlia struct {
 	slashABI        abi.ABI
 
 	// The fields below are for testing only
-	fakeDiff  bool     // Skip difficulty verifications
-	forks     []uint64 // Forks extracted from the chainConfig
-	snapshots *snapshotsync.RoSnapshots
+	fakeDiff               bool     // Skip difficulty verifications
+	heightForks, timeForks []uint64 // Forks extracted from the chainConfig
+	snapshots              *snapshotsync.RoSnapshots
 }
 
 // New creates a Parlia consensus engine.
@@ -289,9 +289,9 @@ func New(
 		validatorSetABI: vABI,
 		slashABI:        sABI,
 		signer:          types.LatestSigner(chainConfig),
-		forks:           forkid.GatherForks(chainConfig),
 		snapshots:       snapshots,
 	}
+	c.heightForks, c.timeForks = forkid.GatherForks(chainConfig)
 
 	return c
 }
@@ -622,21 +622,27 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 
+	parent := chain.GetHeader(header.ParentHash, number-1)
+	if parent == nil {
+		return consensus.ErrUnknownAncestor
+	}
+
 	// Set the correct difficulty
 	header.Difficulty = CalcDifficulty(snap, p.val)
+
+	// Ensure the timestamp has the correct delay
+	header.Time = p.blockTimeForRamanujanFork(snap, header, parent)
+	if header.Time < uint64(time.Now().Unix()) {
+		header.Time = uint64(time.Now().Unix())
+	}
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < extraVanity-nextForkHashSize {
 		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-nextForkHashSize-len(header.Extra))...)
 	}
 	header.Extra = header.Extra[:extraVanity-nextForkHashSize]
-	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
+	nextForkHash := forkid.NextForkHashFromForks(p.heightForks, p.timeForks, p.genesisHash, number, header.Time)
 	header.Extra = append(header.Extra, nextForkHash[:]...)
-
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
-		return consensus.ErrUnknownAncestor
-	}
 
 	if number%p.config.Epoch == 0 {
 		newValidators, err := p.getCurrentValidators(parent, ibs)
@@ -656,11 +662,6 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Mix digest is reserved for now, set to empty
 	header.MixDigest = common.Hash{}
 
-	// Ensure the timestamp has the correct delay
-	header.Time = p.blockTimeForRamanujanFork(snap, header, parent)
-	if header.Time < uint64(time.Now().Unix()) {
-		header.Time = uint64(time.Now().Unix())
-	}
 	return nil
 }
 

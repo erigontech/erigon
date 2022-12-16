@@ -34,6 +34,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -625,7 +626,7 @@ var (
 	}
 	SnapStopFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapStop,
-		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug",
+		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
@@ -654,6 +655,17 @@ var (
 	DownloaderVerifyFlag = cli.BoolFlag{
 		Name:  "downloader.verify",
 		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
+	}
+	DisableIPV6 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv6",
+		Usage: "Turns off ipv6 for the downlaoder",
+		Value: false,
+	}
+
+	DisableIPV4 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv4",
+		Usage: "Turn off ipv4 for the downloader",
+		Value: false,
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
@@ -1445,7 +1457,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.CL = ctx.Bool(ExternalConsensusFlag.Name)
 	cfg.LightClientDiscoveryAddr = ctx.String(LightClientDiscoveryAddrFlag.Name)
 	cfg.LightClientDiscoveryPort = ctx.Uint64(LightClientDiscoveryPortFlag.Name)
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
@@ -1578,6 +1589,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverrideMergeNetsplitBlock.Name) {
 		cfg.OverrideMergeNetsplitBlock = BigFlagValue(ctx, OverrideMergeNetsplitBlock.Name)
 	}
+
+	if ctx.IsSet(ExternalConsensusFlag.Name) {
+		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
+	} else {
+		cfg.ExternalCL = !clparams.EmbeddedSupported(cfg.NetworkID)
+	}
+	nodeConfig.Http.InternalCL = !cfg.ExternalCL
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

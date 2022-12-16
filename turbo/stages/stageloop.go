@@ -72,7 +72,7 @@ func StageLoop(
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *shards.Notifications,
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	updateHead func(ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 ) {
@@ -132,7 +132,7 @@ func StageLoopStep(
 	highestSeenHeader uint64,
 	notifications *shards.Notifications,
 	initialCycle bool,
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	updateHead func(ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int),
 	snapshotMigratorFinal func(tx kv.Tx) error,
 ) (headBlockHash common.Hash, err error) {
 	defer func() {
@@ -216,6 +216,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
+	headHeader := rawdb.ReadHeader(rotx, headHash, head)
 
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
@@ -241,12 +242,12 @@ func StageLoopStep(
 		}
 	}
 
-	if headTd != nil {
+	if headTd != nil && headHeader != nil {
 		headTd256, overflow := uint256.FromBig(headTd)
 		if overflow {
 			return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
 		}
-		updateHead(ctx, head, headHash, headTd256)
+		updateHead(ctx, head, headHeader.Time, headHash, headTd256)
 	}
 
 	if notifications != nil {

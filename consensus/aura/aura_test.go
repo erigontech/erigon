@@ -205,6 +205,8 @@ func TestEmptyBlock(t *testing.T) {
 	genesisBlock, _, err := genesis.ToBlock()
 	require.NoError(err)
 
+	genesis.Config.TerminalTotalDifficultyPassed = false
+
 	chainConfig := genesis.Config
 	auraDB := memdb.NewTestDB(t)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB, chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
