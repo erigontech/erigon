@@ -717,15 +717,10 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
+			rs.AddWork(txTask)
 			repeatCount.Inc()
-
-			// immediately retry once
-			applyWorker.RunTxTask(txTask)
-			if txTask.Error != nil {
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				rs.AddWork(txTask)
-				continue
-			}
+			continue
+			//fmt.Printf("Rolled back %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
