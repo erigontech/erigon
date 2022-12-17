@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -222,27 +221,40 @@ func promotePlainState(
 	}
 
 	in := make(chan pair, 10_000)
+	out := make(chan pair, 10_000)
 	g, groupCtx := errgroup.WithContext(ctx)
 
-	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
-		g.Go(func() error {
-			for item := range in {
-				newK, err := convertKey(item.k)
-				if err != nil {
-					return err
-				}
-				if err = atomicCollect(newK, item.v); err != nil {
-					return err
-				}
-				select {
-				case <-groupCtx.Done():
-					return groupCtx.Err()
-				default:
-				}
+	g.Go(func() error {
+		defer close(out)
+		for item := range in {
+			newK, err := convertKey(item.k)
+			if err != nil {
+				return err
 			}
-			return nil
-		})
-	}
+			item.k = newK
+			out <- item
+
+			select {
+			case <-groupCtx.Done():
+				return groupCtx.Err()
+			default:
+			}
+		}
+		return nil
+	})
+	g.Go(func() error {
+		for item := range out {
+			if err := atomicCollect(item.k, item.v); err != nil {
+				return err
+			}
+			select {
+			case <-groupCtx.Done():
+				return groupCtx.Err()
+			default:
+			}
+		}
+		return nil
+	})
 
 	t := time.Now()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -254,7 +266,7 @@ func promotePlainState(
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "ch", len(in), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "inCh", len(in), "outCh", len(out), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
 				return ctx.Err()
 			case in <- pair{k, v}:
@@ -271,7 +283,6 @@ func promotePlainState(
 
 	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
 	defer func(t time.Time) { log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t)) }(time.Now())
-
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
 		return err
