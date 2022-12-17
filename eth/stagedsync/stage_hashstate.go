@@ -183,15 +183,6 @@ func promotePlainState(
 	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
-	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
-	defer storageCollector.Close()
-
-	t := time.Now()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	var m runtime.MemStats
 
 	convertKey := func(k []byte) ([]byte, error) {
 		isAccount := len(k) == length.Addr
@@ -211,14 +202,22 @@ func promotePlainState(
 		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
 		return compositeKey, nil
 	}
-	lock := &sync.Mutex{}
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	defer accCollector.Close()
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	defer storageCollector.Close()
+
+	accLock := &sync.Mutex{}
+	storageLock := &sync.Mutex{}
 	atomicCollect := func(k, v []byte) error {
-		lock.Lock()
-		defer lock.Unlock()
 		isAccount := len(k) == length.Hash
 		if isAccount {
+			accLock.Lock()
+			defer accLock.Unlock()
 			return accCollector.Collect(k, v)
 		}
+		storageLock.Lock()
+		defer storageLock.Unlock()
 		return storageCollector.Collect(k, v)
 	}
 
@@ -245,6 +244,10 @@ func promotePlainState(
 		})
 	}
 
+	t := time.Now()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	var m runtime.MemStats
 	if err := func() error {
 		defer close(in)
 		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
