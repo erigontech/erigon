@@ -183,9 +183,9 @@ func promotePlainState(
 	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
 	defer storageCollector.Close()
 
 	t := time.Now()
