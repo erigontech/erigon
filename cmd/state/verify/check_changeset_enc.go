@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -40,8 +40,9 @@ func CheckEnc(chaindata string) error {
 	})
 	stop := make(chan struct{})
 	//run workers
-	g, ctx := errgroup.WithContext(context.Background())
-	for i := 0; i < runtime.NumCPU()-1; i++ {
+	ctx := context.Background()
+	g, groupCtx := errgroup.WithContext(ctx)
+	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
 		g.Go(func() error {
 			for {
 				select {
@@ -71,8 +72,8 @@ func CheckEnc(chaindata string) error {
 						return innerErr
 					}
 
-				case <-ctx.Done():
-					return nil
+				case <-groupCtx.Done():
+					return groupCtx.Err()
 				case <-stop:
 					return nil
 				}
@@ -85,7 +86,7 @@ func CheckEnc(chaindata string) error {
 		defer func() {
 			close(stop)
 		}()
-		return db.View(context.Background(), func(tx kv.Tx) error {
+		return db.View(groupCtx, func(tx kv.Tx) error {
 			return tx.ForEach(kv.StorageChangeSet, []byte{}, func(k, v []byte) error {
 				if i%100_000 == 0 {
 					blockNum := binary.BigEndian.Uint64(k)
@@ -98,8 +99,8 @@ func CheckEnc(chaindata string) error {
 				}
 
 				select {
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-groupCtx.Done():
+					return groupCtx.Err()
 				default:
 
 				}

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
@@ -629,7 +629,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 	var br *snapshotsync.BlockRetire
 	if snapshots.Cfg().Enabled {
-		workers := runtime.GOMAXPROCS(-1) - 1
+		workers := estimate.AlmostAllCPUs()
 		if workers < 1 {
 			workers = 1
 		}
