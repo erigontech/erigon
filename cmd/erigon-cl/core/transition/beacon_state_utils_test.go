@@ -184,6 +184,14 @@ func TestComputeProposerIndex(t *testing.T) {
 
 func TestGetBeaconProposerIndex(t *testing.T) {
 	state := getTestState(t)
+	numVals := 2048
+	validators := make([]*cltypes.Validator, numVals)
+	for i := 0; i < numVals; i++ {
+		validators[i] = &cltypes.Validator{
+			ActivationEpoch: 0,
+			ExitEpoch:       10000,
+		}
+	}
 	testCases := []struct {
 		description string
 		slot        uint64
