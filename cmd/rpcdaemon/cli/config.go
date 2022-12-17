@@ -459,7 +459,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 }
 
 func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, authAPI []rpc.API) error {
-	if len(authAPI) > 0 {
+	if len(authAPI) > 0 && !cfg.InternalCL {
 		engineInfo, err := startAuthenticatedRpcServer(cfg, authAPI)
 		if err != nil {
 			return err
