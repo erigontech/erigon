@@ -202,9 +202,9 @@ func promotePlainState(
 		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
 		return compositeKey, nil
 	}
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
 	accLock := &sync.Mutex{}
