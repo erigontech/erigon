@@ -18,17 +18,18 @@ package core
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -55,17 +56,16 @@ The state transitioning model does all the necessary work to work out a valid ne
 6) Derive new state root
 */
 type StateTransition struct {
-	gp         *GasPool
-	msg        Message
-	gas        uint64
-	gasPrice   *uint256.Int
-	gasFeeCap  *uint256.Int
-	tip        *uint256.Int
-	initialGas uint64
-	value      *uint256.Int
-	data       []byte
-	state      evmtypes.IntraBlockState
-	evm        vm.VMInterface
+	gp           *GasPool
+	msg          Message
+	gasRemaining uint64
+	gasPrice     *uint256.Int
+	gasFeeCap    *uint256.Int
+	tip          *uint256.Int
+	value        *uint256.Int
+	data         []byte
+	state        evmtypes.IntraBlockState
+	evm          vm.VMInterface
 
 	//some pre-allocated intermediate variables
 	sharedBuyGas        *uint256.Int
@@ -262,6 +262,23 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
+
+	// compute data fee for eip-4844 data blobs if any
+	dgBig := new(big.Int)
+	var dataGasUsed uint64
+	if st.evm.ChainRules().IsSharding {
+		dataGasUsed = st.dataGasUsed()
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInsufficientFunds)
+		}
+		// TODO: Update the misc library to work with uint256 instead of math/big
+		dgBig.Mul(misc.GetDataGasPrice(st.evm.Context().ExcessDataGas), new(big.Int).SetUint64(dataGasUsed))
+	}
+	dgval, overflow := uint256.FromBig(dgBig)
+	if overflow {
+		return fmt.Errorf("%w: overflow converting datafgas: %v", ErrInsufficientFunds, dgval)
+	}
+
 	balanceCheck := mgval
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
@@ -270,6 +287,10 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
 		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, st.value)
+		if overflow {
+			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		}
+		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, dgval)
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
@@ -287,11 +308,14 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 			return err
 		}
 	}
-	st.gas += st.msg.Gas()
+	st.gasRemaining += st.msg.Gas()
+	if err := st.gp.SubDataGas(dataGasUsed); err != nil {
+		return err
+	}
 
-	st.initialGas = st.msg.Gas()
 	if subBalance {
 		st.state.SubBalance(st.msg.From(), mgval)
+		st.state.SubBalance(st.msg.From(), dgval)
 	}
 	return nil
 }
@@ -343,6 +367,16 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
+	if st.dataGasUsed() > 0 && st.evm.ChainRules().IsSharding {
+		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		bigMaxFeePerDataGas := st.msg.MaxFeePerDataGas().ToBig()
+		if dataGasPrice.Cmp(bigMaxFeePerDataGas) > 0 {
+			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",
+				ErrMaxFeePerDataGas,
+				st.msg.From().Hex(), st.msg.MaxFeePerDataGas(), dataGasPrice, st.evm.Context().ExcessDataGas)
+		}
+	}
+
 	return st.buyGas(gasBailout)
 }
 
@@ -410,10 +444,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if err != nil {
 		return nil, err
 	}
-	if st.gas < gas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
+	if st.gasRemaining < gas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gasRemaining, gas)
 	}
-	st.gas -= gas
+	st.gasRemaining -= gas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -446,11 +480,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value)
+		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, st.data, st.gasRemaining, st.value)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
+		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), st.data, st.gasRemaining, st.value, bailout)
 	}
 	if refunds {
 		if rules.IsLondon {
@@ -513,18 +547,22 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 	if refund > st.state.GetRefund() {
 		refund = st.state.GetRefund()
 	}
-	st.gas += refund
+	st.gasRemaining += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
+	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasRemaining), st.gasPrice)
 	st.state.AddBalance(st.msg.From(), remaining)
 
 	// Also return remaining gas to the block gas counter so it is
 	// available for the next transaction.
-	st.gp.AddGas(st.gas)
+	st.gp.AddGas(st.gasRemaining)
 }
 
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
-	return st.initialGas - st.gas
+	return st.msg.Gas() - st.gasRemaining
+}
+
+func (st *StateTransition) dataGasUsed() uint64 {
+	return uint64(len(st.msg.DataHashes())) * params.DataGasPerBlob
 }
