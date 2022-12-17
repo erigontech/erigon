@@ -136,7 +136,7 @@ func TestPromoteHashedStateCleanlyShutdown(t *testing.T) {
 		cancelFuncExec bool
 		errExp         error
 	}{
-		{"cancel", true, libcommon.ErrStopped},
+		{"cancel", true, context.Canceled},
 		{"no cancel", false, nil},
 	}
 
@@ -191,7 +191,7 @@ func TestUnwindHashStateShutdown(t *testing.T) {
 			cfg := StageHashStateCfg(db, dirs, historyV3, nil)
 			err := PromoteHashedStateCleanly("logPrefix", tx, cfg, ctx)
 			if tc.cancelFuncExec {
-				require.ErrorIs(t, err, libcommon.ErrStopped)
+				require.ErrorIs(t, context.Canceled, err)
 			} else {
 				require.NoError(t, err)
 			}
