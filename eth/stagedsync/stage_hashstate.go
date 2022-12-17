@@ -9,6 +9,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -212,7 +213,7 @@ func promotePlainState(
 			return hashGroup.Wait()
 		})
 
-		for i := 0; i < estimate.AlmostAllCPUs(); i++ {
+		for i := 0; i < cmp.Max(1, estimate.AlmostAllCPUs()-2); i++ {
 			hashGroup.Go(func() error {
 				for item := range in {
 					newK, err := convertKey(item.k)
