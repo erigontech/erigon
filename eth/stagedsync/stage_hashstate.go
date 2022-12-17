@@ -6,10 +6,10 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -202,62 +202,43 @@ func promotePlainState(
 		return compositeKey, nil
 	}
 
-	in := make(chan pair, 10_000)
-	out := make(chan pair, 10_000)
-	mainGroup, mainGroupCtx := errgroup.WithContext(ctx)
-
-	{
-		hashGroup, hashGroupCtx := errgroup.WithContext(ctx)
-		mainGroup.Go(func() error {
-			defer close(out)
-			return hashGroup.Wait()
-		})
-
-		for i := 0; i < cmp.Max(1, estimate.AlmostAllCPUs()-2); i++ {
-			hashGroup.Go(func() error {
-				for item := range in {
-					newK, err := convertKey(item.k)
-					if err != nil {
-						return err
-					}
-					item.k = newK
-					out <- item
-
-					select {
-					case <-hashGroupCtx.Done():
-						return hashGroupCtx.Err()
-					default:
-					}
-				}
-				return nil
-			})
-		}
-	}
-
 	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accCollector.Close()
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
+	lock := &sync.Mutex{}
+	atomicCollect := func(k, v []byte) error {
+		lock.Lock()
+		defer lock.Unlock()
+		isAccount := len(k) == length.Hash
+		if isAccount {
+			return accCollector.Collect(k, v)
+		}
+		return storageCollector.Collect(k, v)
+	}
 
-	mainGroup.Go(func() error {
-		for item := range out {
-			isAccount := len(item.k) == length.Hash
-			if isAccount {
-				if err := accCollector.Collect(item.k, item.v); err != nil {
+	in := make(chan pair, 10_000)
+	g, groupCtx := errgroup.WithContext(ctx)
+
+	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
+		g.Go(func() error {
+			for item := range in {
+				newK, err := convertKey(item.k)
+				if err != nil {
 					return err
 				}
+				if err = atomicCollect(newK, item.v); err != nil {
+					return err
+				}
+				select {
+				case <-groupCtx.Done():
+					return groupCtx.Err()
+				default:
+				}
 			}
-			if err := storageCollector.Collect(item.k, item.v); err != nil {
-				return err
-			}
-			select {
-			case <-mainGroupCtx.Done():
-				return mainGroupCtx.Err()
-			default:
-			}
-		}
-		return nil
-	})
+			return nil
+		})
+	}
 
 	t := time.Now()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -269,7 +250,7 @@ func promotePlainState(
 			select {
 			case <-logEvery.C:
 				dbg.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "inCh", len(in), "outCh", len(out), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current key", fmt.Sprintf("%x...", k[:6]), "inCh", len(in), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
 				return ctx.Err()
 			case in <- pair{k, v}:
@@ -280,7 +261,7 @@ func promotePlainState(
 		return err
 	}
 
-	if err := mainGroup.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return err
 	}
 
