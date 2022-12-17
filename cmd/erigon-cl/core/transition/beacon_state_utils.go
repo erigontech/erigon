@@ -9,7 +9,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-const SHUFFLE_ROUND_COUNT = uint8(90)
+const (
+	SHUFFLE_ROUND_COUNT          = uint8(90)
+	EPOCHS_PER_HISTORICAL_VECTOR = uint64(1 << 16)
+	MIN_SEED_LOOKAHEAD           = uint64(1)
+	SLOTS_PER_EPOCH              = uint64(1 << 5)
+)
 
 func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) {
 	if ind >= ind_count {
@@ -83,4 +88,59 @@ func ComputeProposerIndex(state *state.BeaconState, indices []uint64, seed [32]b
 		}
 		i += 1
 	}
+}
+
+func GetRandaoMixes(state *state.BeaconState, epoch uint64) [32]byte {
+	return state.RandaoMixes()[epoch%EPOCHS_PER_HISTORICAL_VECTOR]
+}
+
+func GetSeed(state *state.BeaconState, epoch uint64, domain [4]byte) []byte {
+	mix := GetRandaoMixes(state, epoch+EPOCHS_PER_HISTORICAL_VECTOR-MIN_SEED_LOOKAHEAD-1)
+	epochByteArray := make([]byte, 8)
+	binary.LittleEndian.PutUint64(epochByteArray, epoch)
+	input := append(domain[:], epochByteArray...)
+	input = append(input, mix[:]...)
+	hash := sha256.New()
+	hash.Write(input)
+	return hash.Sum(nil)
+}
+
+func GetActiveValidatorIndices(state *state.BeaconState, epoch uint64) []uint64 {
+	indices := []uint64{}
+	for i := 0; i < len(state.Validators()); i++ {
+		v := state.ValidatorAt(i)
+		if v.ActivationEpoch <= epoch && epoch < v.ExitEpoch {
+			indices = append(indices, uint64(i))
+		}
+	}
+	return indices
+}
+
+func GetEpochAtSlot(slot uint64) uint64 {
+	return slot / SLOTS_PER_EPOCH
+}
+
+func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
+	epoch := GetEpochAtSlot(state.Slot())
+
+	hash := sha256.New()
+	// Input for the seed hash.
+	input := GetSeed(state, epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
+	slotByteArray := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotByteArray, state.Slot())
+
+	// Add slot to the end of the input.
+	inputWithSlot := append(input, slotByteArray...)
+
+	// Calculate the hash.
+	hash.Write(inputWithSlot)
+	seed := hash.Sum(nil)
+
+	indices := GetActiveValidatorIndices(state, epoch)
+
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed)
+
+	return ComputeProposerIndex(state, indices, seedArray)
 }
