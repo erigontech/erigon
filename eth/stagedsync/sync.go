@@ -33,6 +33,7 @@ type Timing struct {
 	took     time.Duration
 }
 
+func (s *Sync) HasUnwind() bool          { return s.unwindPoint != nil }
 func (s *Sync) Len() int                 { return len(s.stages) }
 func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
 
@@ -189,55 +190,33 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageS
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx, firstCycle bool) (badBlockUnwind bool, err error) {
+	s.prevUnwindPoint = nil
+	s.timings = s.timings[:0]
 	if s.unwindPoint == nil {
-		return nil
+		return badBlockUnwind, nil
 	}
+
 	for j := 0; j < len(s.unwindOrder); j++ {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, tx); err != nil {
-			return err
+		if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
+			return badBlockUnwind, err
 		}
 	}
 	s.prevUnwindPoint = s.unwindPoint
 	s.unwindPoint = nil
-	s.badBlock = common.Hash{}
-	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
+	if s.badBlock != (common.Hash{}) {
+		badBlockUnwind = true
 	}
-	return nil
+	s.badBlock = common.Hash{}
+	s.currentStage = 0
+	return badBlockUnwind, nil
 }
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
-	s.prevUnwindPoint = nil
-	s.timings = s.timings[:0]
 
-	for !s.IsDone() {
-		var badBlockUnwind bool
-		if s.unwindPoint != nil {
-			for j := 0; j < len(s.unwindOrder); j++ {
-				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
-					continue
-				}
-				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
-					return err
-				}
-			}
-			s.prevUnwindPoint = s.unwindPoint
-			s.unwindPoint = nil
-			if s.badBlock != (common.Hash{}) {
-				badBlockUnwind = true
-			}
-			s.badBlock = common.Hash{}
-			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-				return err
-			}
-			// If there were unwinds at the start, a heavier but invalid chain may be present, so
-			// we relax the rules for Stage1
-			firstCycle = false
-		}
-
+func (s *Sync) RunForward(db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind, quiet bool) error {
+	for s.currentStage < uint(len(s.stages)) && s.unwindPoint == nil {
 		stage := s.stages[s.currentStage]
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
@@ -262,6 +241,20 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 		}
 
 		s.NextStage()
+	}
+	return nil
+}
+
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
+	for !s.IsDone() {
+		badBlockUnwind, err := s.RunUnwind(db, tx, firstCycle)
+		if err != nil {
+			return err
+		}
+		err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {

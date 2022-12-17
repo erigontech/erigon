@@ -159,6 +159,27 @@ func StageLoopStep(
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+32_000 && highestSeenHeader < finishProgressBefore+32_000
 
 	var tx kv.RwTx // on this variable will run sync cycle.
+	var badBlockUnwind bool
+	if sync.HasUnwind() {
+		if canRunCycleInOneTransaction {
+			// -- Process new blocks + commit(no_sync)
+			tx, err = db.BeginRwAsync(ctx)
+			if err != nil {
+				return headBlockHash, err
+			}
+			defer tx.Rollback()
+		}
+		badBlockUnwind, err = sync.RunUnwind(db, tx, initialCycle)
+		if err != nil {
+			return headBlockHash, err
+		}
+		if canRunCycleInOneTransaction {
+			if err = tx.Commit(); err != nil {
+				return headBlockHash, err
+			}
+		}
+	}
+
 	if canRunCycleInOneTransaction {
 		// -- Process new blocks + commit(no_sync)
 		tx, err = db.BeginRwAsync(ctx)
@@ -176,10 +197,11 @@ func StageLoopStep(
 		notifications.Accumulator.Reset(stateVersion)
 	}
 
-	err = sync.Run(db, tx, initialCycle, false /* quiet */)
+	err = sync.RunForward(db, tx, initialCycle, badBlockUnwind, false /* quiet */)
 	if err != nil {
 		return headBlockHash, err
 	}
+
 	logCtx := sync.PrintTimings()
 	var tableSizes []interface{}
 	var commitTime time.Duration
@@ -311,7 +333,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 	if unwindPoint > 0 {
 		// Run it through the unwind
 		stateSync.UnwindTo(unwindPoint, common.Hash{})
-		if err = stateSync.RunUnwind(nil, batch); err != nil {
+		if _, err = stateSync.RunUnwind(nil, batch, false); err != nil {
 			return err
 		}
 	}
