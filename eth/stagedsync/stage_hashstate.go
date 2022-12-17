@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -201,24 +200,6 @@ func promotePlainState(
 		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
 		return compositeKey, nil
 	}
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer storageCollector.Close()
-
-	accLock := &sync.Mutex{}
-	storageLock := &sync.Mutex{}
-	atomicCollect := func(k, v []byte) error {
-		isAccount := len(k) == length.Hash
-		if isAccount {
-			accLock.Lock()
-			defer accLock.Unlock()
-			return accCollector.Collect(k, v)
-		}
-		storageLock.Lock()
-		defer storageLock.Unlock()
-		return storageCollector.Collect(k, v)
-	}
 
 	in := make(chan pair, 10_000)
 	out := make(chan pair, 10_000)
@@ -242,9 +223,21 @@ func promotePlainState(
 		}
 		return nil
 	})
+
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	defer accCollector.Close()
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	defer storageCollector.Close()
+
 	g.Go(func() error {
 		for item := range out {
-			if err := atomicCollect(item.k, item.v); err != nil {
+			isAccount := len(item.k) == length.Hash
+			if isAccount {
+				if err := accCollector.Collect(item.k, item.v); err != nil {
+					return err
+				}
+			}
+			if err := storageCollector.Collect(item.k, item.v); err != nil {
 				return err
 			}
 			select {
