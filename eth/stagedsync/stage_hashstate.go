@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -151,7 +150,6 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
-	kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.PlainState, nil, math.MaxUint32)
 	if err := promotePlainState(
 		logPrefix,
 		tx,
@@ -185,11 +183,12 @@ func promotePlainState(
 	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
+	defer func(t time.Time) { fmt.Printf("stage_hashstate.go:188: %s\n", time.Since(t)) }(time.Now())
 	bufferSize := etl.BufferOptimalSize
 
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize*2))
 	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize*2))
 	defer storageCollector.Close()
 
 	t := time.Now()
