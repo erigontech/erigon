@@ -374,7 +374,8 @@ func (ii *invertedIndexWAL) close() {
 	}
 }
 
-var WALCollectorRam = etl.BufferOptimalSize / 16
+// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
+var WALCollectorRam = 2 * (etl.BufferOptimalSize / 16)
 
 func init() {
 	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")
@@ -394,7 +395,6 @@ func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *inver
 		tmpdir:   tmpdir,
 	}
 	if buffered {
-		// 3 history + 4 indices = 10 etl collectors, 10*256Mb/16 = 256mb - for all indices buffers
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
