@@ -222,7 +222,7 @@ func promotePlainState(
 		return storageCollector.Collect(k, v)
 	}
 
-	in := make(chan pair, 1024)
+	in := make(chan pair, 10_000)
 	g, groupCtx := errgroup.WithContext(ctx)
 
 	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
