@@ -74,7 +74,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		pageSize:       kv.DefaultPageSize(),
 		dirtySpace:     2 * (memory.TotalMemory() / 42),
 		growthStep:     2 * datasize.GB,
-		mergeThreshold: 32768,
+		mergeThreshold: 3 * 8192,
 	}
 	return opts
 }
@@ -188,9 +188,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 	}
 	if dbg.NoSync() {
 		opts = opts.Flags(func(u uint) uint { return u | mdbx.SafeNoSync }) //nolint
-	}
-	if dbg.MergeTr() > 0 {
-		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
 	}
 	if dbg.MergeTr() > 0 {
 		opts = opts.WriteMergeThreshold(uint64(dbg.MergeTr() * 8192)) //nolint
