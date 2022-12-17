@@ -183,12 +183,9 @@ func promotePlainState(
 	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
-	defer func(t time.Time) { fmt.Printf("stage_hashstate.go:188: %s\n", time.Since(t)) }(time.Now())
-	bufferSize := etl.BufferOptimalSize
-
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize*2))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(bufferSize*2))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
 	t := time.Now()
