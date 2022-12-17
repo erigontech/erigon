@@ -10,7 +10,6 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -224,7 +224,8 @@ func promotePlainState(
 
 	in := make(chan pair, 1024)
 	g, groupCtx := errgroup.WithContext(ctx)
-	for i := 0; i < cmp.Max(1, runtime.NumCPU()-1); i++ {
+
+	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
 		g.Go(func() error {
 			for item := range in {
 				newK, err := convertKey(item.k)
