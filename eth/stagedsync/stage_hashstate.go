@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 )
@@ -181,7 +182,6 @@ func promotePlainState(
 	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
-
 	convertKey := func(k []byte) ([]byte, error) {
 		isAccount := len(k) == length.Addr
 		if isAccount {
@@ -203,33 +203,42 @@ func promotePlainState(
 
 	in := make(chan pair, 10_000)
 	out := make(chan pair, 10_000)
-	g, groupCtx := errgroup.WithContext(ctx)
+	mainGroup, mainGroupCtx := errgroup.WithContext(ctx)
 
-	g.Go(func() error {
-		defer close(out)
-		for item := range in {
-			newK, err := convertKey(item.k)
-			if err != nil {
-				return err
-			}
-			item.k = newK
-			out <- item
+	{
+		hashGroup, hashGroupCtx := errgroup.WithContext(ctx)
+		mainGroup.Go(func() error {
+			defer close(out)
+			return hashGroup.Wait()
+		})
 
-			select {
-			case <-groupCtx.Done():
-				return groupCtx.Err()
-			default:
-			}
+		for i := 0; i < estimate.AlmostAllCPUs(); i++ {
+			hashGroup.Go(func() error {
+				for item := range in {
+					newK, err := convertKey(item.k)
+					if err != nil {
+						return err
+					}
+					item.k = newK
+					out <- item
+
+					select {
+					case <-hashGroupCtx.Done():
+						return hashGroupCtx.Err()
+					default:
+					}
+				}
+				return nil
+			})
 		}
-		return nil
-	})
+	}
 
-	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accCollector.Close()
-	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize*2))
+	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
-	g.Go(func() error {
+	mainGroup.Go(func() error {
 		for item := range out {
 			isAccount := len(item.k) == length.Hash
 			if isAccount {
@@ -241,8 +250,8 @@ func promotePlainState(
 				return err
 			}
 			select {
-			case <-groupCtx.Done():
-				return groupCtx.Err()
+			case <-mainGroupCtx.Done():
+				return mainGroupCtx.Err()
 			default:
 			}
 		}
@@ -270,7 +279,7 @@ func promotePlainState(
 		return err
 	}
 
-	if err := g.Wait(); err != nil {
+	if err := mainGroup.Wait(); err != nil {
 		return err
 	}
 
