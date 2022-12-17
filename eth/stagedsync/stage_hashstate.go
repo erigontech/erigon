@@ -244,12 +244,6 @@ func promotePlainState(
 		})
 	}
 
-	c, err := tx.Cursor(kv.PlainState)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
 	if err := func() error {
 		defer close(in)
 		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
