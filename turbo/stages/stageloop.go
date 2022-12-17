@@ -159,6 +159,7 @@ func StageLoopStep(
 	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+32_000 && highestSeenHeader < finishProgressBefore+32_000
 
 	var tx kv.RwTx // on this variable will run sync cycle.
+Unwind:
 	var badBlockUnwind bool
 	if sync.HasUnwind() {
 		if canRunCycleInOneTransaction {
@@ -213,6 +214,11 @@ func StageLoopStep(
 			return headBlockHash, errTx
 		}
 		commitTime = time.Since(commitStart)
+	}
+
+	//TODO: we need test for StateStream to ensure we sending correct
+	if sync.HasUnwind() {
+		goto Unwind
 	}
 
 	// -- send notifications START
