@@ -265,12 +265,12 @@ func promotePlainState(
 		return err
 	}
 
-	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
-	defer func(t time.Time) { log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t)) }(time.Now())
-
 	if err := g.Wait(); err != nil {
 		return err
 	}
+
+	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
+	defer func(t time.Time) { log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t)) }(time.Now())
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
