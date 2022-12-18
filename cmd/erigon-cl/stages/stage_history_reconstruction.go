@@ -22,7 +22,7 @@ type StageHistoryReconstructionCfg struct {
 	state      *state.BeaconState
 }
 
-const RecEnabled = true
+const RecEnabled = false
 const DestinationSlot = 5100000
 const logIntervalTime = 30 * time.Second
 
