@@ -252,16 +252,19 @@ type MultiClient struct {
 	nodeName      string
 	sentries      []direct.SentryClient
 	headHeight    uint64
+	headTime      uint64
 	headHash      common.Hash
 	headTd        *uint256.Int
 	ChainConfig   *params.ChainConfig
-	forks         []uint64
+	heightForks   []uint64
+	timeForks     []uint64
 	genesisHash   common.Hash
 	networkId     uint64
 	db            kv.RwDB
 	Engine        consensus.Engine
 	blockReader   services.HeaderAndCanonicalReader
 	logPeerInfo   bool
+	passivePeers  bool
 
 	historyV3 bool
 }
@@ -307,14 +310,15 @@ func NewMultiClient(
 		logPeerInfo:   logPeerInfo,
 		forkValidator: forkValidator,
 		historyV3:     historyV3,
+		passivePeers:  chainConfig.TerminalTotalDifficultyPassed,
 	}
 	cs.ChainConfig = chainConfig
-	cs.forks = forkid.GatherForks(cs.ChainConfig)
+	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
 	cs.genesisHash = genesisHash
 	cs.networkId = networkID
 	var err error
 	err = db.View(context.Background(), func(tx kv.Tx) error {
-		cs.headHeight, cs.headHash, cs.headTd, err = cs.Bd.UpdateFromDb(tx)
+		cs.headHeight, cs.headTime, cs.headHash, cs.headTd, err = cs.Bd.UpdateFromDb(tx)
 		return err
 	})
 	return cs, err
@@ -388,6 +392,17 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
+	if len(pkt) == 0 {
+		outreq := proto_sentry.PeerUselessRequest{
+			PeerId: peerID,
+		}
+		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			return fmt.Errorf("sending peer useless request: %v", err)
+		}
+		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
+		// No point processing empty response
+		return nil
+	}
 	// Stream is at the BlockHeadersPacket, which is list of headers
 	if _, err := rlpStream.List(); err != nil {
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
@@ -529,12 +544,23 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	return nil
 }
 
-func (cs *MultiClient) blockBodies66(inreq *proto_sentry.InboundMessage, _ direct.SentryClient) error {
+func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
 	var request eth.BlockRawBodiesPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles := request.BlockRawBodiesPacket.Unpack()
+	if len(txs) == 0 && len(uncles) == 0 {
+		outreq := proto_sentry.PeerUselessRequest{
+			PeerId: inreq.PeerId,
+		}
+		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			return fmt.Errorf("sending peer useless request: %v", err)
+		}
+		log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
+		// No point processing empty response
+		return nil
+	}
 	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
@@ -703,7 +729,7 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 	case proto_sentry.MessageId_NEW_BLOCK_66:
 		return cs.newBlock66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_BLOCK_BODIES_66:
-		return cs.blockBodies66(inreq, sentry)
+		return cs.blockBodies66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_HEADERS_66:
 		return cs.getBlockHeaders66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_BLOCK_BODIES_66:
@@ -753,11 +779,14 @@ func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
 		NetworkId:       s.networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.headTd),
 		BestHash:        gointerfaces.ConvertHashToH256(s.headHash),
-		MaxBlock:        s.headHeight,
+		MaxBlockHeight:  s.headHeight,
+		MaxBlockTime:    s.headTime,
 		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(s.genesisHash),
-			Forks:   s.forks,
+			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
+			HeightForks: s.heightForks,
+			TimeForks:   s.timeForks,
 		},
+		PassivePeers: cs.passivePeers,
 	}
 }
 

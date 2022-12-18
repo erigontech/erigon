@@ -24,10 +24,9 @@ import (
 
 type Worker struct {
 	lock        sync.Locker
-	wg          *sync.WaitGroup
 	chainDb     kv.RoDB
 	chainTx     kv.Tx
-	background  bool
+	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	rs          *state.State22
 	stateWriter *state.StateWriter22
@@ -51,12 +50,10 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
-	ctx := context.Background()
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
-		wg:          wg,
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
@@ -73,11 +70,17 @@ func NewWorker(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.Wait
 		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
+	w.getHeader = func(hash common.Hash, number uint64) *types.Header {
+		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
+		if err != nil {
+			panic(err)
+		}
+		return h
+	}
 
 	w.ibs = state.New(w.stateReader)
 
 	w.posa, w.isPoSA = engine.(consensus.PoSA)
-
 	return w
 }
 
@@ -96,7 +99,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() {
-	defer rw.wg.Done()
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
 		rw.resultCh <- txTask // Needs to have outside of the lock
@@ -190,7 +192,12 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
 			vmenv = rw.starkNetEvm
 		} else {
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			blockContext := txTask.EvmBlockContext
+			if !rw.background {
+				getHashFn := core.GetHashFn(header, rw.getHeader)
+				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			}
+			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 			vmenv = rw.evm
 		}
 		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
@@ -308,23 +315,30 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, background bool, chainDb kv.RoDB, wg *sync.WaitGroup, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, resultCh chan *exec22.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.State22, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func()) {
+	var wg sync.WaitGroup
 	queueSize := workerCount * 4
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker(lock, background, chainDb, wg, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
+	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	clear = func() {
+		wg.Wait()
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
+		applyWorker.ResetTx(nil)
 	}
 	if background {
 		wg.Add(workerCount)
 		for i := 0; i < workerCount; i++ {
-			go reconWorkers[i].Run()
+			go func(i int) {
+				defer wg.Done()
+				reconWorkers[i].Run()
+			}(i)
 		}
 	}
-	return reconWorkers, resultCh, clear
+	return reconWorkers, applyWorker, resultCh, clear
 }

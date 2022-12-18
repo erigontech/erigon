@@ -430,7 +430,7 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	return fvn
 }
 
-var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
+var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Constants (Non-configurable)
 	FarFutureEpoch:           math.MaxUint64,
 	FarFutureSlot:            math.MaxUint64,
@@ -622,13 +622,13 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 }
 
 func mainnetConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	return cfg
 }
 
 func sepoliaConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1655647200
 	cfg.GenesisDelay = 86400
 	cfg.MinGenesisActiveValidatorCount = 1300
@@ -648,7 +648,7 @@ func sepoliaConfig() BeaconChainConfig {
 }
 
 func goerliConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1614588812
 	cfg.GenesisDelay = 1919188
 	cfg.ConfigName = "prater"
@@ -713,6 +713,6 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 1 is Ethereum Mainnet
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
-func Supported(id uint64) bool {
+func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
 }

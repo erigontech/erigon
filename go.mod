@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221209125705-04758c646827
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221117232719-cf68648bf146
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221218014745-b2b268f77313
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221216083351-ecfd28d911aa
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -29,7 +29,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
-	github.com/ferranbt/fastssz v0.1.2
+	github.com/ferranbt/fastssz v0.0.0-20210120143747-11b9eff30ea9
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/goccy/go-json v0.9.7
@@ -59,7 +59,9 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.6
 	github.com/pion/stun v0.3.5
 	github.com/pkg/errors v0.9.1
+	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
+	github.com/prysmaticlabs/gohashtree v0.0.0-20220517220438-192ee5ae6982
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/rs/cors v1.8.2
 	github.com/spf13/cobra v1.6.1

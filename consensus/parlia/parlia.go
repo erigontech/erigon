@@ -242,9 +242,9 @@ type Parlia struct {
 	slashABI        abi.ABI
 
 	// The fields below are for testing only
-	fakeDiff  bool     // Skip difficulty verifications
-	forks     []uint64 // Forks extracted from the chainConfig
-	snapshots *snapshotsync.RoSnapshots
+	fakeDiff               bool     // Skip difficulty verifications
+	heightForks, timeForks []uint64 // Forks extracted from the chainConfig
+	snapshots              *snapshotsync.RoSnapshots
 }
 
 // New creates a Parlia consensus engine.
@@ -289,9 +289,9 @@ func New(
 		validatorSetABI: vABI,
 		slashABI:        sABI,
 		signer:          types.LatestSigner(chainConfig),
-		forks:           forkid.GatherForks(chainConfig),
 		snapshots:       snapshots,
 	}
+	c.heightForks, c.timeForks = forkid.GatherForks(chainConfig)
 
 	return c
 }
@@ -622,21 +622,27 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 		return err
 	}
 
+	parent := chain.GetHeader(header.ParentHash, number-1)
+	if parent == nil {
+		return consensus.ErrUnknownAncestor
+	}
+
 	// Set the correct difficulty
 	header.Difficulty = CalcDifficulty(snap, p.val)
+
+	// Ensure the timestamp has the correct delay
+	header.Time = p.blockTimeForRamanujanFork(snap, header, parent)
+	if header.Time < uint64(time.Now().Unix()) {
+		header.Time = uint64(time.Now().Unix())
+	}
 
 	// Ensure the extra data has all it's components
 	if len(header.Extra) < extraVanity-nextForkHashSize {
 		header.Extra = append(header.Extra, bytes.Repeat([]byte{0x00}, extraVanity-nextForkHashSize-len(header.Extra))...)
 	}
 	header.Extra = header.Extra[:extraVanity-nextForkHashSize]
-	nextForkHash := forkid.NextForkHashFromForks(p.forks, p.genesisHash, number)
+	nextForkHash := forkid.NextForkHashFromForks(p.heightForks, p.timeForks, p.genesisHash, number, header.Time)
 	header.Extra = append(header.Extra, nextForkHash[:]...)
-
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
-		return consensus.ErrUnknownAncestor
-	}
 
 	if number%p.config.Epoch == 0 {
 		newValidators, err := p.getCurrentValidators(parent, ibs)
@@ -656,11 +662,6 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	// Mix digest is reserved for now, set to empty
 	header.MixDigest = common.Hash{}
 
-	// Ensure the timestamp has the correct delay
-	header.Time = p.blockTimeForRamanujanFork(snap, header, parent)
-	if header.Time < uint64(time.Now().Unix()) {
-		header.Time = uint64(time.Now().Unix())
-	}
 	return nil
 }
 
@@ -670,6 +671,8 @@ func (p *Parlia) Initialize(config *params.ChainConfig, chain consensus.ChainHea
 }
 
 func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs types.Transactions, systemTxs types.Transactions, err error) {
+	userTxs = types.Transactions{}
+	systemTxs = types.Transactions{}
 	for _, tx := range txs {
 		isSystemTx, err2 := p.IsSystemTransaction(tx, header)
 		if err2 != nil {
@@ -681,12 +684,6 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 		} else {
 			userTxs = append(userTxs, tx)
 		}
-	}
-	if userTxs == nil {
-		userTxs = types.Transactions{}
-	}
-	if systemTxs == nil {
-		systemTxs = types.Transactions{}
 	}
 	return
 }
@@ -767,7 +764,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 			var receipt *types.Receipt
 			if systemTxs, tx, receipt, err = p.slash(spoiledVal, state, header, len(txs), systemTxs, &header.GasUsed, mining); err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
-				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
+				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal, "error", err)
 			} else {
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
@@ -776,6 +773,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		}
 	}
 	if txs, systemTxs, receipts, err = p.distributeIncoming(header.Coinbase, state, header, txs, receipts, systemTxs, &header.GasUsed, mining); err != nil {
+		//log.Error("distributeIncoming", "block hash", header.Hash(), "error", err, "systemTxs", len(systemTxs))
 		return nil, nil, err
 	}
 	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
@@ -1197,8 +1195,11 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 			return nil, nil, nil, err
 		}
 	} else {
-		if len(systemTxs) == 0 || systemTxs[0] == nil {
+		if len(systemTxs) == 0 {
 			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get none")
+		}
+		if systemTxs[0] == nil {
+			return nil, nil, nil, fmt.Errorf("supposed to get a actual transaction, but get nil")
 		}
 		actualTx := systemTxs[0]
 		actualHash := actualTx.SigningHash(p.chainConfig.ChainID)
@@ -1233,7 +1234,7 @@ func (p *Parlia) applyTransaction(from common.Address, to common.Address, value 
 	receipt := types.NewReceipt(false, *usedGas)
 	receipt.TxHash = expectedTx.Hash()
 	receipt.GasUsed = gasUsed
-	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64()), state.NewNoopWriter()); err != nil {
+	if err := ibs.FinalizeTx(p.chainConfig.Rules(header.Number.Uint64(), header.Time), state.NewNoopWriter()); err != nil {
 		return nil, nil, nil, err
 	}
 	// Set the receipt logs and create a bloom for filtering

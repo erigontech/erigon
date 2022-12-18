@@ -292,7 +292,7 @@ func handShake(
 			TD:              ourTD.ToBig(),
 			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
+			ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
 		}
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
@@ -504,6 +504,9 @@ func runPeer(
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case 11:
+			// Ignore
+			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
 			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
@@ -733,6 +736,16 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
+func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUselessRequest) (*emptypb.Empty, error) {
+	peerID := ConvertH512ToPeerID(req.PeerId)
+	peerInfo := ss.getPeer(peerID)
+	if ss.statusData != nil && !ss.statusData.PassivePeers && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+		ss.removePeer(peerID)
+		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID), "name", peerInfo.peer.Name())
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
@@ -770,6 +783,28 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	return foundPeers
 }
 
+func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
+	// Choose a peer that we can send this request to, with maximum number of permits
+	var foundPeerInfo *PeerInfo
+	var maxPermits int
+	now := time.Now()
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if peerInfo.Height() >= minBlock {
+			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+			if deadlines < maxPermitsPerPeer {
+				permits := maxPermitsPerPeer - deadlines
+				if permits > maxPermits {
+					maxPermits = permits
+					foundPeerInfo = peerInfo
+				}
+			}
+		}
+		return true
+	})
+	return foundPeerInfo, maxPermits > 0
+}
+
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
@@ -777,6 +812,14 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
+	}
+	if !ss.GetStatus().PassivePeers {
+		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
+		if found {
+			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+			return reply, nil
+		}
 	}
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*proto_types.H512, len(peerInfos))
@@ -914,8 +957,8 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 		ss.P2pServer = srv
 	}
 
-	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
-	if ss.statusData == nil || statusData.MaxBlock != 0 {
+	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
+	if ss.statusData == nil || statusData.MaxBlockHeight != 0 {
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}

@@ -44,17 +44,17 @@ func main() {
 }
 
 func runErigon(cliCtx *cli.Context) error {
-	logger := logging.GetLoggerCtx("erigon", cliCtx)
-
-	// initializing the node and providing the current git commit there
-	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
-
 	configFilePath := cliCtx.String(utils.ConfigFlag.Name)
 	if configFilePath != "" {
 		if err := setFlagsFromConfigFile(cliCtx, configFilePath); err != nil {
 			log.Warn("failed setting config flags from yaml/toml file", "err", err)
 		}
 	}
+
+	logger := logging.GetLoggerCtx("erigon", cliCtx)
+
+	// initializing the node and providing the current git commit there
+	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx)
 	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg)

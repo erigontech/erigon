@@ -130,7 +130,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	replayTransactions = block.Transactions()[:transactionIndex]
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
 
 	if err != nil {
 		return nil, err
@@ -143,10 +143,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
-
-	// Get a new instance of the EVM
-	signer := types.MakeSigner(chainConfig, blockNum)
-	rules := chainConfig.Rules(blockNum)
 
 	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
@@ -175,7 +171,10 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		BaseFee:     &baseFee,
 	}
 
+	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	signer := types.MakeSigner(chainConfig, blockNum)
+	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	timeoutMilliSeconds := int64(5000)
 

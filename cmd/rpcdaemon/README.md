@@ -313,6 +313,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | db_getHex                                  | No      | deprecated                           |
 |                                            |         |                                      |
 | erigon_getHeaderByHash                     | Yes     | Erigon only                          |
+| erigon_getBlockReceiptsByBlockHash         | Yes     | Erigon only                          |
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                          |
 | erigon_getLogsByHash                       | Yes     | Erigon only                          |
 | erigon_forks                               | Yes     | Erigon only                          |

@@ -166,11 +166,11 @@ func executeBlock(
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
 	if isPoSa {
-		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	} else if isBor {
-		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	} else {
-		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	}
 	if err != nil {
 		return err
@@ -244,7 +244,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
-	if initialCycle && s.BlockNumber == 0 {
+	if initialCycle {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
 		if err != nil {
 			return err
@@ -278,9 +278,8 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
-		return err
+		return fmt.Errorf("ExecV3: %w", err)
 	}
-
 	return nil
 }
 
@@ -315,7 +314,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
 		return fmt.Errorf("State22.Unwind: %w", err)
 	}
-	if err := rs.Flush(tx); err != nil {
+	if err := rs.Flush(ctx, tx, s.LogPrefix(), time.NewTicker(30*time.Second)); err != nil {
 		return fmt.Errorf("State22.Flush: %w", err)
 	}
 
@@ -736,8 +735,14 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err = cfg.agg.Prune(ctx, 100); err != nil { // prune part of retired data, before commit
-			return err
+		if initialCycle {
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+				return err
+			}
+		} else {
+			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+				return err
+			}
 		}
 	} else {
 		if cfg.prune.History.Enabled() {

@@ -42,7 +42,7 @@ import (
 
 // AggregationStep number of transactions in smallest static file
 const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 32 // 100M / 32
+//const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
@@ -235,8 +235,8 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
-	// ConsenSUS layer
-	CL                          bool
+	// Consensus layer
+	ExternalCL                  bool
 	LightClientDiscoveryAddr    string
 	LightClientDiscoveryPort    uint64
 	LightClientDiscoveryTCPPort uint64
@@ -265,7 +265,6 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.MainnetChainName:    {},
 	networkname.BSCChainName:        {},
 	networkname.GoerliChainName:     {},
-	networkname.RopstenChainName:    {},
 	networkname.MumbaiChainName:     {},
 	networkname.BorMainnetChainName: {},
 	networkname.GnosisChainName:     {},

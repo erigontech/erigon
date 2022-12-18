@@ -142,7 +142,9 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 
 ### Embedded Consensus Layer
 
-By default the Engine API is disabled in favour of Erigon native Embedded Consensus Layer, if you want to either stake or sync an external Consensus Layer, run Erigon with flag `--externalcl`.
+By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded Consensus Layer.
+If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
+_Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
 
 ### Optional stages
 

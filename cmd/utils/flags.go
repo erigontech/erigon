@@ -34,6 +34,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -478,6 +479,11 @@ var (
 		Usage: "Version of eth p2p protocol",
 		Value: cli.NewUintSlice(nodecfg.DefaultConfig.P2P.ProtocolVersion...),
 	}
+	P2pProtocolAllowedPorts = cli.UintSliceFlag{
+		Name:  "p2p.allowed-ports",
+		Usage: "Allowed ports to pick for different eth p2p protocol versions as follows <porta>,<portb>,..,<porti>",
+		Value: cli.NewUintSlice(uint(ListenPortFlag.Value), 30304, 30305, 30306, 30307),
+	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
 		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
@@ -620,7 +626,7 @@ var (
 	}
 	SnapStopFlag = cli.BoolFlag{
 		Name:  ethconfig.FlagSnapStop,
-		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug",
+		Usage: "Workaround to stop producing new snapshots, if you meet some snapshots-related critical bug. It will stop move historical data from DB to new immutable snapshots. DB will grow and may slightly slow-down - and removing this flag in future will not fix this effect (db size will not greatly reduce).",
 	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
@@ -649,6 +655,17 @@ var (
 	DownloaderVerifyFlag = cli.BoolFlag{
 		Name:  "downloader.verify",
 		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
+	}
+	DisableIPV6 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv6",
+		Usage: "Turns off ipv6 for the downlaoder",
+		Value: false,
+	}
+
+	DisableIPV4 = cli.BoolFlag{
+		Name:  "downloader.disable.ipv4",
+		Usage: "Turn off ipv4 for the downloader",
+		Value: false,
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
@@ -850,6 +867,7 @@ func NewP2PConfig(
 	trustedPeers []string,
 	port,
 	protocol uint,
+	allowedPorts []uint,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -876,6 +894,7 @@ func NewP2PConfig(
 		Name:            nodeName,
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
+		AllowedPorts:    allowedPorts,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -922,6 +941,26 @@ func setListenAddress(ctx *cli.Context, cfg *p2p.Config) {
 	}
 	if ctx.IsSet(SentryAddrFlag.Name) {
 		cfg.SentryAddr = SplitAndTrim(ctx.String(SentryAddrFlag.Name))
+	}
+	// TODO cli lib doesn't store defaults for UintSlice properly so we have to get value directly
+	cfg.AllowedPorts = P2pProtocolAllowedPorts.Value.Value()
+	if ctx.IsSet(P2pProtocolAllowedPorts.Name) {
+		cfg.AllowedPorts = ctx.UintSlice(P2pProtocolAllowedPorts.Name)
+	}
+
+	if ctx.IsSet(ListenPortFlag.Name) {
+		// add non-default port to allowed port list
+		lp := ctx.Int(ListenPortFlag.Name)
+		found := false
+		for _, p := range cfg.AllowedPorts {
+			if int(p) == lp {
+				found = true
+				break
+			}
+		}
+		if !found {
+			cfg.AllowedPorts = append([]uint{uint(lp)}, cfg.AllowedPorts...)
+		}
 	}
 }
 
@@ -979,10 +1018,9 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	chainsWithValidatorMode := map[string]bool{
-		networkname.FermionChainName: true,
-		networkname.BSCChainName:     true,
-		networkname.RialtoChainName:  true,
-		networkname.ChapelChainName:  true,
+		networkname.BSCChainName:    true,
+		networkname.RialtoChainName: true,
+		networkname.ChapelChainName: true,
 	}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
@@ -1074,8 +1112,6 @@ func DataDirForNetwork(datadir string, network string) string {
 		return networkDataDirCheckingLegacy(datadir, "goerli")
 	case networkname.SokolChainName:
 		return networkDataDirCheckingLegacy(datadir, "sokol")
-	case networkname.FermionChainName:
-		return networkDataDirCheckingLegacy(datadir, "fermion")
 	case networkname.MumbaiChainName:
 		return networkDataDirCheckingLegacy(datadir, "mumbai")
 	case networkname.BorMainnetChainName:
@@ -1421,7 +1457,6 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.Config) {
-	cfg.CL = ctx.Bool(ExternalConsensusFlag.Name)
 	cfg.LightClientDiscoveryAddr = ctx.String(LightClientDiscoveryAddrFlag.Name)
 	cfg.LightClientDiscoveryPort = ctx.Uint64(LightClientDiscoveryPortFlag.Name)
 	cfg.LightClientDiscoveryTCPPort = ctx.Uint64(LightClientDiscoveryTCPPortFlag.Name)
@@ -1554,6 +1589,13 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(OverrideMergeNetsplitBlock.Name) {
 		cfg.OverrideMergeNetsplitBlock = BigFlagValue(ctx, OverrideMergeNetsplitBlock.Name)
 	}
+
+	if ctx.IsSet(ExternalConsensusFlag.Name) {
+		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
+	} else {
+		cfg.ExternalCL = !clparams.EmbeddedSupported(cfg.NetworkID)
+	}
+	nodeConfig.Http.InternalCL = !cfg.ExternalCL
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

@@ -34,7 +34,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	if err != nil {
 		return nil, err
 	}
-	if ok {
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumPtr == nil {
+			return nil, nil
+		}
+		blockNum = *blockNumPtr
+	}
+	if ok || (chainConfig.Bor != nil && blockNum != 0) {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -68,7 +79,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if borTx == nil {
 				return nil, nil
 			}
-			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -184,7 +195,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 			return nil, nil // not error
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -248,7 +259,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 			return nil, nil
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil

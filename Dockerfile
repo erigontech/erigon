@@ -4,18 +4,36 @@ FROM docker.io/library/golang:1.19-alpine3.16 AS builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
 WORKDIR /app
+ADD go.mod go.mod
+ADD go.sum go.sum
+
+RUN go mod download
 ADD . .
 
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make all db-tools
+    make all
+
+
+FROM docker.io/library/golang:1.19-alpine3.16 AS tools-builder
+RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+WORKDIR /app
+
+ADD Makefile Makefile
+ADD tools.go tools.go
+ADD go.mod go.mod
+ADD go.sum go.sum
+
+RUN mkdir -p /app/build/bin
+
+RUN make db-tools
 
 FROM docker.io/library/alpine:3.16
 
-RUN apk add --no-cache ca-certificates curl libstdc++ jq tzdata
-# copy compiled artifacts from builder
-COPY --from=builder /app/build/bin/* /usr/local/bin/
+# install required runtime libs, along with some helpers for debugging
+RUN apk add --no-cache ca-certificates libstdc++ tzdata
+RUN apk add --no-cache curl jq bind-tools
 
 # Setup user and group
 #
@@ -27,6 +45,36 @@ ARG GID=1000
 RUN adduser -D -u $UID -g $GID erigon
 USER erigon
 RUN mkdir -p ~/.local/share/erigon
+
+# copy compiled artifacts from builder
+## first do the mdbx ones - since these wont change as often
+COPY --from=tools-builder /app/build/bin/mdbx_chk /usr/local/bin/mdbx_chk
+COPY --from=tools-builder /app/build/bin/mdbx_copy /usr/local/bin/mdbx_copy
+COPY --from=tools-builder /app/build/bin/mdbx_drop /usr/local/bin/mdbx_drop
+COPY --from=tools-builder /app/build/bin/mdbx_dump /usr/local/bin/mdbx_dump
+COPY --from=tools-builder /app/build/bin/mdbx_load /usr/local/bin/mdbx_load
+COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
+
+## then give each binary its own layer
+COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
+COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
+COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
+COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
+COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
+COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
+COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
+COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
+COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
+COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
+COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
+COPY --from=builder /app/build/bin/rpctest /usr/local/bin/rpctest
+COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
+COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
+COPY --from=builder /app/build/bin/state /usr/local/bin/state
+COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
+COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+
+
 
 EXPOSE 8545 \
        8551 \
