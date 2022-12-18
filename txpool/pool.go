@@ -601,15 +601,16 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, isYielding bool) (bool, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip [][32]byte) (bool, [][32]byte, error) {
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
-		return false, nil // Too early
+		return false, nil, nil // Too early
 	}
 
 	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
 	j := 0
 	var toRemove []*metaTx
+	yielded := make([][32]byte, 0)
 
 	success, err := func() (bool, error) {
 		p.lock.Lock()
@@ -624,7 +625,14 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 			mt := best.ms[i]
 
-			if isYielding && mt.alreadyYielded {
+			skip := false
+			for _, id := range toSkip {
+				if mt.Tx.IDHash == id {
+					skip = true
+					break
+				}
+			}
+			if skip {
 				continue
 			}
 
@@ -657,9 +665,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			txs.Txs[j] = rlpTx
 			copy(txs.Senders.At(j), sender)
 			txs.IsLocal[j] = isLocal
-			if isYielding {
-				mt.alreadyYielded = true
-			}
+			yielded = append(yielded, mt.Tx.IDHash)
 			j++
 		}
 		return true, nil
@@ -672,7 +678,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			p.pending.Remove(mt)
 		}
 	}
-	return success, err
+	return success, yielded, err
 }
 
 func (p *TxPool) ResetYieldedStatus() {
@@ -684,12 +690,17 @@ func (p *TxPool) ResetYieldedStatus() {
 	}
 }
 
-func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, true)
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip [][32]byte) (bool, [][32]byte, error) {
+	return p.best(n, txs, tx, onTopOf, availableGas, toSkip)
 }
 
+var (
+	emptyToSkip = make([][32]byte, 0)
+)
+
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
-	return p.best(n, txs, tx, onTopOf, availableGas, false)
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, emptyToSkip)
+	return onTime, err
 }
 
 func (p *TxPool) CountContent() (int, int, int) {
