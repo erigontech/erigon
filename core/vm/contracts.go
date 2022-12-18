@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/protolambda/go-kzg/eth"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -153,9 +154,23 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
+var PrecompiledContractsDanksharding = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}):  &ecrecover{},
+	common.BytesToAddress([]byte{2}):  &sha256hash{},
+	common.BytesToAddress([]byte{3}):  &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):  &dataCopy{},
+	common.BytesToAddress([]byte{5}):  &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):  &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):  &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):  &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):  &blake2F{},
+	common.BytesToAddress([]byte{20}): &pointEvaluation{},
+}
+
 var (
 	PrecompiledAddressesMoran          []common.Address
 	PrecompiledAddressesNano           []common.Address
+	PrecompiledAddressesDanksharding   []common.Address
 	PrecompiledAddressesBerlin         []common.Address
 	PrecompiledAddressesIstanbul       []common.Address
 	PrecompiledAddressesIstanbulForBSC []common.Address
@@ -185,6 +200,9 @@ func init() {
 	for k := range PrecompiledContractsIsMoran {
 		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
 	}
+	for k := range PrecompiledContractsDanksharding {
+		PrecompiledAddressesDanksharding = append(PrecompiledAddressesDanksharding, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
@@ -194,6 +212,8 @@ func ActivePrecompiles(rules *params.Rules) []common.Address {
 		return PrecompiledAddressesMoran
 	case rules.IsNano:
 		return PrecompiledAddressesNano
+	case rules.IsSharding:
+		return PrecompiledAddressesDanksharding
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:
@@ -1123,4 +1143,17 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return g.EncodePoint(r), nil
+}
+
+// pointEvaluation implements the EIP-4844 point evaluation precompile
+// to check if a value is part of a blob at a specific point with a KZG proof.
+type pointEvaluation struct{}
+
+// RequiredGas returns the gas required to execute the pre-compiled contract.
+func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
+	return params.PointEvaluationGas
+}
+
+func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
+	return eth.PointEvaluationPrecompile(input)
 }
