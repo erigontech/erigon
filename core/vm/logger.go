@@ -420,7 +420,7 @@ func (t *mdLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
-func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -437,21 +437,12 @@ func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address
 `)
 }
 
-func (t *mdLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
-	if !create {
-		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
-			from.String(), to.String(),
-			input, gas, value)
-	} else {
-		fmt.Fprintf(t.out, "From: `%v`\nCreate at: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
-			from.String(), to.String(),
-			input, gas, value)
-	}
+func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+	t.captureStartOrEnter(from, to, create, input, gas, value)
+}
 
-	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost |   Stack   |   RStack  |  Refund |
-|-------|-------------|------|-----------|-----------|---------|
-`)
+func (t *mdLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
 func (t *mdLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
@@ -479,14 +470,17 @@ func (t *mdLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 
-func (t *mdLogger) CaptureEnd(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
+func (t *mdLogger) captureEndOrExit(output []byte, startGas, endGas uint64, err error) {
 	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
 		output, startGas-endGas, err)
 }
 
+func (t *mdLogger) CaptureEnd(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
+	t.captureEndOrExit(output, startGas, endGas, err)
+}
+
 func (t *mdLogger) CaptureExit(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
-	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
-		output, startGas-endGas, err)
+	t.captureEndOrExit(output, startGas, endGas, err)
 }
 
 func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
