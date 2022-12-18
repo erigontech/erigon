@@ -30,7 +30,7 @@ const (
 )
 
 // Time to wait before asking the same peer again.
-const reqRetryTime = 500 * time.Millisecond
+const reqRetryTime = 450 * time.Millisecond
 
 // Record Peer data.
 type Peer struct {

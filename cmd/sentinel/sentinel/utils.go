@@ -124,7 +124,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 	defer iterator.Close()
 
 	connectedPeer := false
-	maxTries := 10
+	maxTries := 20
 	tries := 0
 	for !connectedPeer {
 		if tries >= maxTries {
