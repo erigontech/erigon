@@ -15,6 +15,7 @@ package peers
 
 import (
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/log/v3"
@@ -28,11 +29,23 @@ const (
 	MaxBadResponses = 10
 )
 
+// Time to wait before asking the same peer again.
+const reqRetryTime = 500 * time.Millisecond
+
+// Record Peer data.
+type Peer struct {
+	lastQueried time.Time
+	busy        bool
+}
+
 type Peers struct {
 	badPeers  *lru.Cache // Keep track of bad peers
 	penalties *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
 	host      host.Host
-	mu        sync.Mutex
+
+	peers map[peer.ID]Peer
+
+	mu sync.Mutex
 }
 
 func New(host host.Host) *Peers {
@@ -49,6 +62,7 @@ func New(host host.Host) *Peers {
 		badPeers:  badPeers,
 		penalties: penalties,
 		host:      host,
+		peers:     make(map[peer.ID]Peer),
 	}
 }
 
@@ -87,4 +101,36 @@ func (p *Peers) DisconnectPeer(pid peer.ID) {
 	log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", pid)
 	p.host.Peerstore().RemovePeer(pid)
 	p.host.Network().ClosePeer(pid)
+}
+
+// PeerDoRequest signals that the peer is doing a request.
+func (p *Peers) PeerDoRequest(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peers[pid] = Peer{
+		lastQueried: time.Now(),
+		busy:        true,
+	}
+}
+
+// IsPeerAvaiable returns if the peer is in cooldown or is being requested already .
+func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	peer, ok := p.peers[pid]
+	return !ok || (!peer.busy && time.Since(peer.lastQueried) >= reqRetryTime)
+}
+
+// PeerFinishRequest signals that the peer is done doing a request.
+func (p *Peers) PeerFinishRequest(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	peer, ok := p.peers[pid]
+	if !ok {
+		return
+	}
+	p.peers[pid] = Peer{
+		busy:        false,
+		lastQueried: peer.lastQueried,
+	}
 }
