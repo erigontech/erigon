@@ -24,13 +24,13 @@ import (
 )
 
 const (
-	maxBadPeers     = 1000 // Always cap memory consumption at 1 MB
+	maxBadPeers     = 200
 	DefaultMaxPeers = 33
 	MaxBadResponses = 10
 )
 
 // Time to wait before asking the same peer again.
-const reqRetryTime = 500 * time.Millisecond
+const reqRetryTime = 450 * time.Millisecond
 
 // Record Peer data.
 type Peer struct {
@@ -67,15 +67,10 @@ func New(host host.Host) *Peers {
 }
 
 func (p *Peers) IsBadPeer(pid peer.ID) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.badPeers.Contains(pid)
 }
 
 func (p *Peers) Penalize(pid peer.ID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	penaltyInterface, has := p.penalties.Get(pid)
 	if !has {
 		p.penalties.Add(pid, 1)
@@ -89,6 +84,18 @@ func (p *Peers) Penalize(pid peer.ID) {
 		p.BanBadPeer(pid)
 		p.penalties.Remove(pid)
 	}
+}
+
+func (p *Peers) Forgive(pid peer.ID) {
+	penaltyInterface, has := p.penalties.Get(pid)
+	if !has {
+		return
+	}
+	penalties := penaltyInterface.(int) - 1
+	if penalties < 0 {
+		penalties = 0
+	}
+	p.penalties.Add(pid, penalties)
 }
 
 func (p *Peers) BanBadPeer(pid peer.ID) {

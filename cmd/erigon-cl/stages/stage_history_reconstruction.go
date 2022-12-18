@@ -22,7 +22,7 @@ type StageHistoryReconstructionCfg struct {
 	state      *state.BeaconState
 }
 
-const RecEnabled = false
+const RecEnabled = true
 const DestinationSlot = 5100000
 const logIntervalTime = 30 * time.Second
 
@@ -72,7 +72,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	prevProgress := cfg.downloader.Progress()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	triggerInterval := time.NewTicker(300 * time.Millisecond)
+	triggerInterval := time.NewTicker(75 * time.Millisecond)
 
 	for !cfg.downloader.Finished() {
 		cfg.downloader.RequestMore()
