@@ -21,13 +21,13 @@ func (t *DefaultTracer) CaptureTxEnd(restGas uint64) {}
 func (t *DefaultTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-func (t *DefaultTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *DefaultTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-func (t *DefaultTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *DefaultTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 }
 
-func (t *DefaultTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *DefaultTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 func (t *DefaultTracer) CaptureEnd(output []byte, startGas, endGas uint64, d time.Duration, err error) {

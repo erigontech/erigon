@@ -109,6 +109,7 @@ type opcodeTracer struct {
 	saveBblocks bool
 	blockNumber uint64
 	depth       int
+	env         *vm.EVM
 }
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
@@ -190,11 +191,12 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool
 }
 
 func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.env = env
 	ot.depth = 0
 	ot.captureStartOrEnter(from, to, create, input)
 }
 
-func (ot *opcodeTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth++
 	ot.captureStartOrEnter(from, to, create, input)
 }
@@ -240,7 +242,7 @@ func (ot *opcodeTracer) CaptureExit(output []byte, startGas, endGas uint64, t ti
 	ot.depth--
 }
 
-func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
 	contract := scope.Contract
 
@@ -250,7 +252,7 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	}
 
 	pc16 := uint16(pc)
-	currentTxHash := env.TxContext().TxHash
+	currentTxHash := ot.env.TxContext().TxHash
 	currentTxDepth := opDepth - 1
 
 	ls := len(ot.stack)
@@ -374,11 +376,11 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	currentEntry.lastOp = op
 }
 
-func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
+func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	ot.CaptureState(env, pc, op, gas, cost, scope, nil, opDepth, err)
+	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, err)
 
 }
 

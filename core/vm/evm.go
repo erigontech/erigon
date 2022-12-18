@@ -183,7 +183,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
 			}(gas, time.Now())
 		} else {
-			evm.config.Tracer.CaptureEnter(evm, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
+			evm.config.Tracer.CaptureEnter(caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
 			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
 			}(gas, time.Now())
@@ -325,7 +325,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
 			}(gas, time.Now())
 		} else {
-			evm.config.Tracer.CaptureEnter(evm, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
+			evm.config.Tracer.CaptureEnter(caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
 			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
 				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
 			}(gas, time.Now())

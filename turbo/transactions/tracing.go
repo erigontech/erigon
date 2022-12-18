@@ -236,6 +236,7 @@ type JsonStreamLogger struct {
 	logs      []vm.StructLog
 	output    []byte //nolint
 	err       error  //nolint
+	env       *vm.EVM
 }
 
 // NewStructLogger returns a new logger
@@ -258,15 +259,16 @@ func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	l.env = env
 }
 
-func (l *JsonStreamLogger) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
 //
 // CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	contract := scope.Contract
 	memory := scope.Memory
 	stack := scope.Stack
@@ -298,7 +300,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
 				value   uint256.Int
 			)
-			env.IntraBlockState().GetState(contract.Address(), &address, &value)
+			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
 			l.storage[contract.Address()][address] = value.Bytes32()
 			outputStorage = true
 		}
@@ -392,7 +394,7 @@ func (l *JsonStreamLogger) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (l *JsonStreamLogger) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.

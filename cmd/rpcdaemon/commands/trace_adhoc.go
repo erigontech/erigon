@@ -341,7 +341,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Add
 	ot.captureStartOrEnter(false /* deep */, from, to, precompile, create, callType, input, gas, value, code)
 }
 
-func (ot *OeTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.captureStartOrEnter(true /* deep */, from, to, precompile, create, callType, input, gas, value, code)
 }
 
@@ -438,7 +438,7 @@ func (ot *OeTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.D
 	ot.captureEndOrExit(true /* deep */, output, startGas, endGas, t, err)
 }
 
-func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	memory := scope.Memory
 	st := scope.Stack
 
@@ -566,7 +566,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	}
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
+func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
 func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
