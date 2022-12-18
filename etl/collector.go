@@ -227,7 +227,7 @@ func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType in
 			if args.LogDetailsLoad != nil {
 				logArs = append(logArs, args.LogDetailsLoad(k, v)...)
 			} else {
-				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
 			}
 
 			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", logPrefix), logArs...)
@@ -293,7 +293,7 @@ func makeCurrentKeyStr(k []byte) string {
 	} else if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 && len(k) >= 8 { // if key has leading zeroes, show a bit more info
 		currentKeyStr = hex.EncodeToString(k)
 	} else {
-		currentKeyStr = fmt.Sprintf("%x...", k[:4])
+		currentKeyStr = hex.EncodeToString(k[:4])
 	}
 	return currentKeyStr
 }

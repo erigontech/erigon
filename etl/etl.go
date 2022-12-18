@@ -138,7 +138,7 @@ func extractBucketIntoFiles(
 			if additionalLogArguments != nil {
 				logArs = append(logArs, additionalLogArguments(k, v)...)
 			} else {
-				logArs = append(logArs, "current key", makeCurrentKeyStr(k))
+				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
 			}
 
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), logArs...)
