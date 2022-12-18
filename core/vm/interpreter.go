@@ -213,9 +213,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	callback := in.setReadonly(readOnly)
-	defer func() {
-		callback()
-	}()
+	defer callback()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -250,9 +248,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
-	defer func() {
-		stack.ReturnNormalStack(locStack)
-	}()
+	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
 
 	if in.cfg.Debug {
