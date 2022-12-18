@@ -89,7 +89,7 @@ func (t *TransactionTracer) CaptureStart(env *vm.EVM, from common.Address, to co
 	t.captureStartOrEnter(from, to, precompile, callType, input, value)
 }
 
-func (t *TransactionTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.depth++
 	t.captureStartOrEnter(from, to, precompile, callType, input, value)
 }

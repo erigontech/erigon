@@ -30,12 +30,13 @@ import (
 type JSONLogger struct {
 	encoder *json.Encoder
 	cfg     *LogConfig
+	env     *EVM
 }
 
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
 // into the provided stream.
 func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
-	l := &JSONLogger{json.NewEncoder(writer), cfg}
+	l := &JSONLogger{json.NewEncoder(writer), cfg, nil}
 	if l.cfg == nil {
 		l.cfg = &LogConfig{}
 	}
@@ -47,13 +48,14 @@ func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 
 func (l *JSONLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	l.env = env
 }
 
-func (l *JSONLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (l *JSONLogger) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	memory := scope.Memory
 	stack := scope.Stack
 
@@ -65,7 +67,7 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 		MemorySize:    memory.Len(),
 		Storage:       nil,
 		Depth:         depth,
-		RefundCounter: env.IntraBlockState().GetRefund(),
+		RefundCounter: l.env.IntraBlockState().GetRefund(),
 		Err:           err,
 	}
 	if !l.cfg.DisableMemory {
@@ -83,7 +85,7 @@ func (l *JSONLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint
 }
 
 // CaptureFault outputs state information on the logger.
-func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (l *JSONLogger) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is triggered at end of execution.

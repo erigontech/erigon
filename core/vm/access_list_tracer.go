@@ -148,7 +148,7 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
-func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (a *AccessListTracer) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	stack := scope.Stack
 	if (op == SLOAD || op == SSTORE) && stack.Len() >= 1 {
 		slot := common.Hash(stack.Data[stack.Len()-1].Bytes32())
@@ -168,7 +168,7 @@ func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cos
 	}
 }
 
-func (*AccessListTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (*AccessListTracer) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
 func (*AccessListTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
@@ -178,7 +178,7 @@ func (a *AccessListTracer) CaptureStart(env *EVM, from common.Address, to common
 	panic("implement me")
 }
 
-func (a *AccessListTracer) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	panic("implement me")
 }
 
