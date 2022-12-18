@@ -40,16 +40,21 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	defer respRetryTimer.Stop()
 
 	resp, foundErrRequest, err := verifyResponse(stream, peerId)
+
+Loop:
 	for err != nil {
 		select {
 		case <-ctx.Done():
 			log.Warn("[Sentinel Resp] sentinel has been shutdown")
-			return nil, false, nil
+			break Loop
 		case <-respRetryTimer.C:
 			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)
-			return nil, false, err
+			break Loop
 		case <-respRetryTicker.C:
 			resp, foundErrRequest, err = verifyResponse(stream, peerId)
+			if err == network.ErrReset {
+				break Loop
+			}
 		}
 	}
 

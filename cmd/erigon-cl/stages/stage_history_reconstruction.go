@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -21,8 +22,9 @@ type StageHistoryReconstructionCfg struct {
 	state      *state.BeaconState
 }
 
-const RecEnabled = false
+const RecEnabled = true
 const DestinationSlot = 5100000
+const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
@@ -67,15 +69,27 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		// will arbitratly stop at slot 5.1M for testing reasons
 		return blk.Block.Slot == 5100000, nil
 	})
+	prevProgress := cfg.downloader.Progress()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	triggerInterval := time.NewTicker(50 * time.Millisecond)
+	triggerInterval := time.NewTicker(300 * time.Millisecond)
 
 	for !cfg.downloader.Finished() {
 		cfg.downloader.RequestMore()
 		select {
 		case <-logInterval.C:
-			log.Info("[History Reconstruction Phase] Backwards downloading phase", "progress", cfg.downloader.Progress())
+			currProgress := cfg.downloader.Progress()
+			speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
+			prevProgress = currProgress
+			peerCount, err := cfg.downloader.Peers()
+			if err != nil {
+				return err
+			}
+			log.Info("[History Reconstruction Phase] Backwards downloading phase",
+				"progress", currProgress,
+				"blk/sec", fmt.Sprintf("%.1f", speed),
+				"peers", peerCount,
+			)
 		case <-triggerInterval.C:
 		}
 	}
