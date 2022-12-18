@@ -69,6 +69,16 @@ func (b *BackwardBeaconDownloader) Progress() uint64 {
 	return b.slotToDownload
 }
 
+// Peers current amount of peers connected.
+func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
+	peerCount, err := b.sentinel.GetPeers(b.ctx, &sentinel.EmptyMessage{})
+	if err != nil {
+		return 0, err
+	}
+
+	return peerCount.Amount, nil
+}
+
 func (b *BackwardBeaconDownloader) RequestMore() {
 	go func() {
 		count := uint64(10)
@@ -85,6 +95,7 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 
 		b.mu.Lock()
 		defer b.mu.Unlock()
+		doLog := true
 		// Import new blocks, order is forward so reverse the whole packet
 		for i := len(responses) - 1; i >= 0; i-- {
 			if segment, ok := responses[i].(*cltypes.SignedBeaconBlockBellatrix); ok {
@@ -99,7 +110,10 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 				}
 				// No? Reject.
 				if blockRoot != b.expectedRoot {
-					log.Debug("Bad packet received", "start", start, "tasked", b.slotToDownload-count+1, "got", common.Hash(blockRoot), "received", b.expectedRoot)
+					if doLog {
+						log.Debug("Bad packet received", "got", common.Hash(blockRoot), "expected", b.expectedRoot)
+					}
+					doLog = false
 					continue
 				}
 				// Yes? then go for the callback.

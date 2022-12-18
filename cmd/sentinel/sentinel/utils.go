@@ -124,7 +124,13 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 	defer iterator.Close()
 
 	connectedPeer := false
+	maxTries := 20
+	tries := 0
 	for !connectedPeer {
+		if tries >= maxTries {
+			break
+		}
+		tries++
 		if exists := iterator.Next(); !exists {
 			break
 		}
@@ -134,22 +140,15 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 		if !isPeerWhitelisted(peerInfo.ID, validPeerList) {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("error converting to address info, err=%s", err)
-		}
 
-		if err := s.connectWithPeer(s.ctx, *peerInfo, false); err != nil {
-			log.Trace("[Sentinel] couldn't connect to peer", "err", err)
+		if !s.peers.IsPeerAvaiable(peerInfo.ID) {
 			continue
 		}
-		connectedPeer = true
+
+		return peerInfo, nil
 	}
 
-	if !connectedPeer {
-		return nil, fmt.Errorf("failed to connect to peer")
-	}
-
-	return peerInfo, nil
+	return nil, fmt.Errorf("failed to connect to peer")
 
 }
 func isPeerWhitelisted(peer peer.ID, whitelist []peer.ID) bool {

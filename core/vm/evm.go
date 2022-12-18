@@ -177,10 +177,17 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
-		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
-		}(gas, time.Now())
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		} else {
+			evm.config.Tracer.CaptureEnter(caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		}
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
@@ -312,10 +319,17 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
-		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
-		}(gas, time.Now())
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		} else {
+			evm.config.Tracer.CaptureEnter(caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		}
 	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())

@@ -34,6 +34,13 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
-
-	return communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, peerInfo.ID)
+	s.peers.PeerDoRequest(peerInfo.ID)
+	defer s.peers.PeerFinishRequest(peerInfo.ID)
+	data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, peerInfo.ID)
+	if err != nil || isError {
+		s.peers.Penalize(peerInfo.ID)
+	} else {
+		s.peers.Forgive(peerInfo.ID)
+	}
+	return data, isError, err
 }
