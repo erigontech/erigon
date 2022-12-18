@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 const SHUFFLE_ROUND_COUNT = uint8(90)
@@ -54,7 +54,7 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 	return ind, nil
 }
 
-func ComputeProposerIndex(state *cltypes.BeaconStateBellatrix, indices []uint64, seed [32]byte) (uint64, error) {
+func ComputeProposerIndex(state *state.BeaconState, indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
 		return 0, fmt.Errorf("must have >0 indices")
 	}
@@ -69,15 +69,15 @@ func ComputeProposerIndex(state *cltypes.BeaconStateBellatrix, indices []uint64,
 			return 0, err
 		}
 		candidateIndex := indices[shuffled]
-		if candidateIndex >= uint64(len(state.Validators)) {
-			return 0, fmt.Errorf("candidate index out of range: %d for validator set of length: %d", candidateIndex, len(state.Validators))
+		if candidateIndex >= uint64(len(state.Validators())) {
+			return 0, fmt.Errorf("candidate index out of range: %d for validator set of length: %d", candidateIndex, len(state.Validators()))
 		}
 		binary.LittleEndian.PutUint64(buf, i/32)
 		input := append(seed[:], buf...)
 		hash.Reset()
 		hash.Write(input)
 		randomByte := uint64(hash.Sum(nil)[i%32])
-		effectiveBalance := state.Validators[candidateIndex].EffectiveBalance
+		effectiveBalance := state.ValidatorAt(int(candidateIndex)).EffectiveBalance
 		if effectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
 			return candidateIndex, nil
 		}
