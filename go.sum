@@ -847,8 +847,8 @@ github.com/prometheus/procfs v0.6.0/go.mod h1:cz+aTbrPOrUb4q7XlbU9ygM+/jj0fzG6c1
 github.com/prometheus/procfs v0.7.3/go.mod h1:cz+aTbrPOrUb4q7XlbU9ygM+/jj0fzG6c1xBZuNvfVA=
 github.com/prometheus/procfs v0.8.0 h1:ODq8ZFEaYeCaZOJlZZdJA2AbQR98dSHSM1KW/You5mo=
 github.com/prometheus/procfs v0.8.0/go.mod h1:z7EfXMXOkbkqb9IINtpCn86r/to3BnA0uaxHdg830/4=
-github.com/protolambda/go-kzg v0.0.0-20221122014024-bb3fa3695412 h1:MQBDul/k5XDDYF5fVn18lNwkWKxpK93FbYeaum1b1UE=
-github.com/protolambda/go-kzg v0.0.0-20221122014024-bb3fa3695412/go.mod h1:7EhkBJFo/qJ9sToiW5baPqbyPo/TadVHn4iNdpwEW/w=
+github.com/protolambda/go-kzg v0.0.0-20221211233411-5a63dd26efb2 h1:SB/5ltUL5dfLNjq596e7ZwzCCcDz3hGd+WGDo9NMNJ4=
+github.com/protolambda/go-kzg v0.0.0-20221211233411-5a63dd26efb2/go.mod h1:7EhkBJFo/qJ9sToiW5baPqbyPo/TadVHn4iNdpwEW/w=
 github.com/protolambda/ztyp v0.2.2 h1:rVcL3vBu9W/aV646zF6caLS/dyn9BN8NYiuJzicLNyY=
 github.com/protolambda/ztyp v0.2.2/go.mod h1:9bYgKGqg3wJqT9ac1gI2hnVb0STQq7p/1lapqrqY1dU=
 github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab h1:Y3PcvUrnneMWLuypZpwPz8P70/DQsz6KgV9JveKpyZs=

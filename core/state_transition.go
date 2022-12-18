@@ -269,14 +269,14 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if st.evm.ChainRules().IsSharding {
 		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
-			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInsufficientFunds)
+			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil", ErrInternalFailure)
 		}
 		// TODO: Update the misc library to work with uint256 instead of math/big
 		dgBig.Mul(misc.GetDataGasPrice(st.evm.Context().ExcessDataGas), new(big.Int).SetUint64(dataGasUsed))
 	}
 	dgval, overflow := uint256.FromBig(dgBig)
 	if overflow {
-		return fmt.Errorf("%w: overflow converting datafgas: %v", ErrInsufficientFunds, dgval)
+		return fmt.Errorf("%w: overflow converting datagas: %v", ErrInsufficientFunds, dgval)
 	}
 
 	balanceCheck := mgval

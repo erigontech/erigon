@@ -59,6 +59,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.6
 	github.com/pion/stun v0.3.5
 	github.com/pkg/errors v0.9.1
+	github.com/protolambda/go-kzg v0.0.0-20221211233411-5a63dd26efb2
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
@@ -206,7 +207,6 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
-	github.com/protolambda/go-kzg v0.0.0-20221122014024-bb3fa3695412
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/spacemonkeygo/spacelog v0.0.0-20180420211403-2296661a0572 // indirect
 	github.com/supranational/blst v0.3.10 // indirect
