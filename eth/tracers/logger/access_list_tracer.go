@@ -142,7 +142,10 @@ func (a *AccessListTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (a *AccessListTracer) CaptureTxEnd(restGas uint64) {}
 
-func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+}
+
+func (a *AccessListTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
@@ -172,7 +175,9 @@ func (a *AccessListTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, ga
 
 func (*AccessListTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (*AccessListTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+}
+func (*AccessListTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 }
