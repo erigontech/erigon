@@ -124,9 +124,12 @@ type Tracer interface {
 	// Transaction level
 	CaptureTxStart(gasLimit uint64)
 	CaptureTxEnd(restGas uint64)
-	// Top call frame (when depth == 0) or rest of the frames (when depth > 0)
-	CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
-	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error)
+	// Top call frame
+	CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error)
+	// Rest of the frames
+	CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error)
 	// Opcode level
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
@@ -187,7 +190,11 @@ func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+}
+
+// CaptureEnter implements the Tracer interface to initialize the tracing operation for an internal call.
+func (l *StructLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -260,10 +267,7 @@ func (l *StructLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost ui
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
-	if depth != 0 {
-		return
-	}
+func (l *StructLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	l.output = output
 	l.err = err
 	if l.cfg.Debug {
@@ -272,6 +276,10 @@ func (l *StructLogger) CaptureEnd(depth int, output []byte, startGas, endGas uin
 			fmt.Printf(" error: %v\n", err)
 		}
 	}
+}
+
+// CaptureExit is called after the internal call finishes to finalize the tracing.
+func (l *StructLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
 func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
@@ -412,7 +420,24 @@ func (t *mdLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
-func (t *mdLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+	if !create {
+		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
+			from.String(), to.String(),
+			input, gas, value)
+	} else {
+		fmt.Fprintf(t.out, "From: `%v`\nCreate at: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
+			from.String(), to.String(),
+			input, gas, value)
+	}
+
+	fmt.Fprintf(t.out, `
+|  Pc   |      Op     | Cost |   Stack   |   RStack  |  Refund |
+|-------|-------------|------|-----------|-----------|---------|
+`)
+}
+
+func (t *mdLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -454,7 +479,12 @@ func (t *mdLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 
-func (t *mdLogger) CaptureEnd(_ int, output []byte, startGas, endGas uint64, tm time.Duration, err error) {
+func (t *mdLogger) CaptureEnd(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
+	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
+		output, startGas-endGas, err)
+}
+
+func (t *mdLogger) CaptureExit(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
 	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
 		output, startGas-endGas, err)
 }

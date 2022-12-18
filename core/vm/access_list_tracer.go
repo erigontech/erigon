@@ -171,11 +171,18 @@ func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cos
 func (*AccessListTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
-func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (*AccessListTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
-func (a *AccessListTracer) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	panic("implement me")
+}
+
+func (a *AccessListTracer) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	panic("implement me")
+}
+
+func (*AccessListTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
 func (a *AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

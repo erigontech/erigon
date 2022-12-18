@@ -46,7 +46,10 @@ func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 
-func (l *JSONLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+}
+
+func (l *JSONLogger) CaptureEnter(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState outputs state information on the logger.
@@ -84,21 +87,21 @@ func (l *JSONLogger) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint
 }
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JSONLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
 		Time    time.Duration       `json:"time"`
 		Err     string              `json:"error,omitempty"`
 	}
-	if depth != 0 {
-		return
-	}
 	var errMsg string
 	if err != nil {
 		errMsg = err.Error()
 	}
 	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(startGas - endGas), t, errMsg})
+}
+
+func (l *JSONLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
 func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

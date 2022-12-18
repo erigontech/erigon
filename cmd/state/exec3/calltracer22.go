@@ -24,7 +24,11 @@ func (ct *CallTracer) Tos() map[common.Address]struct{}   { return ct.tos }
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
-func (ct *CallTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
+}
+func (ct *CallTracer) CaptureEnter(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = struct{}{}
 }
@@ -32,7 +36,9 @@ func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, co
 }
 func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ct *CallTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+}
+func (ct *CallTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	ct.froms[from] = struct{}{}
