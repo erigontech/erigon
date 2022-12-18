@@ -258,11 +258,11 @@ func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
-func (l *JsonStreamLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment

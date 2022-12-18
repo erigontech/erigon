@@ -47,11 +47,11 @@ func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 
-func (l *JSONLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
-func (l *JSONLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState outputs state information on the logger.

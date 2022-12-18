@@ -26,10 +26,10 @@ func (t *TouchTracer) captureStartOrEnter(from, to common.Address) {
 	}
 }
 
-func (t *TouchTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TouchTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.captureStartOrEnter(from, to)
 }
 
-func (t *TouchTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TouchTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.captureStartOrEnter(from, to)
 }
