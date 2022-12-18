@@ -136,3 +136,64 @@ func TestComputeProposerIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestGetBeaconProposerIndex(t *testing.T) {
+	numVals := 2048
+	validators := make([]*cltypes.Validator, numVals)
+	for i := 0; i < numVals; i++ {
+		validators[i] = &cltypes.Validator{
+			ActivationEpoch: 0,
+			ExitEpoch:       10000,
+		}
+	}
+
+	state := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
+		Validators:  validators,
+		RandaoMixes: make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
+		Slot:        0,
+	})
+	testCases := []struct {
+		description string
+		slot        uint64
+		expected    uint64
+	}{
+		{
+			description: "slot1",
+			slot:        1,
+			expected:    2039,
+		},
+		{
+			description: "slot5",
+			slot:        5,
+			expected:    1895,
+		},
+		{
+			description: "slot19",
+			slot:        19,
+			expected:    1947,
+		},
+		{
+			description: "slot30",
+			slot:        30,
+			expected:    369,
+		},
+		{
+			description: "slot43",
+			slot:        43,
+			expected:    464,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			state.SetSlot(tc.slot)
+			got, err := GetBeaconProposerIndex(state)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if got != tc.expected {
+				t.Errorf("unexpected result: got %d, want %d", got, tc.expected)
+			}
+		})
+	}
+}
