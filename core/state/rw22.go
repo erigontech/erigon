@@ -113,7 +113,7 @@ func (rs *State22) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 
 			select {
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_key", hex.EncodeToString([]byte(iter.Key())))
+				log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
