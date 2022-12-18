@@ -39,7 +39,7 @@ type TransactionTracer struct {
 	DefaultTracer
 	ctx     context.Context
 	Results []*TraceEntry
-	depth   int // computer from CaptureStart, CaptureEnter, and CaptureExit calls
+	depth   int // computed from CaptureStart, CaptureEnter, and CaptureExit calls
 }
 
 func NewTransactionTracer(ctx context.Context) *TransactionTracer {
