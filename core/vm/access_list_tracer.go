@@ -118,6 +118,10 @@ func (a *AccessListTracer) CaptureAccountWrite(account common.Address) error {
 	panic("implement me")
 }
 
+func (*AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (*AccessListTracer) CaptureTxEnd(restGas uint64) {}
+
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
 // the resulting accesslist.

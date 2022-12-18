@@ -385,6 +385,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
+	if st.evm.Config().Debug {
+		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
+		defer func() {
+			st.evm.Config().Tracer.CaptureTxEnd(st.gas)
+		}()
+	}
+
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil

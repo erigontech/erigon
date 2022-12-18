@@ -15,6 +15,10 @@ import (
 type DefaultTracer struct {
 }
 
+func (t *DefaultTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (t *DefaultTracer) CaptureTxEnd(restGas uint64) {}
+
 func (t *DefaultTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *big.Int, code []byte) {
 }
 

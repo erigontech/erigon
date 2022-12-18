@@ -121,10 +121,16 @@ const (
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
 type Tracer interface {
+	// Transaction level
+	CaptureTxStart(gasLimit uint64)
+	CaptureTxEnd(restGas uint64)
+	// Top call frame (when depth == 0) or rest of the frames (when depth > 0)
 	CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error)
+	// Opcode level
 	CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
-	CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error)
+
 	CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int)
 	CaptureAccountRead(account common.Address) error
 	CaptureAccountWrite(account common.Address) error
@@ -175,6 +181,10 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 	}
 	return logger
 }
+
+func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
+
+func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *StructLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -397,6 +407,10 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	}
 	return l
 }
+
+func (t *mdLogger) CaptureTxStart(gasLimit uint64) {}
+
+func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
 func (t *mdLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	if !create {

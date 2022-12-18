@@ -138,6 +138,10 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 	}
 }
 
+func (a *AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (a *AccessListTracer) CaptureTxEnd(restGas uint64) {}
+
 func (a *AccessListTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
