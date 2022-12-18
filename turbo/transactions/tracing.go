@@ -252,6 +252,10 @@ func NewJsonStreamLogger(cfg *vm.LogConfig, ctx context.Context, stream *jsonite
 	return logger
 }
 
+func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
+
+func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
+
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }

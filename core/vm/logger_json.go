@@ -42,6 +42,10 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return l
 }
 
+func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
+
+func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
+
 func (l *JSONLogger) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 

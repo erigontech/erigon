@@ -156,6 +156,10 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
+func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
+
 func (ot *opcodeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 

@@ -22,6 +22,8 @@ func NewCallTracer() *CallTracer {
 func (ct *CallTracer) Froms() map[common.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[common.Address]struct{}   { return ct.tos }
 
+func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
+func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
 func (ct *CallTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = struct{}{}
