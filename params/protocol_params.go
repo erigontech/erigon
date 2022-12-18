@@ -166,6 +166,9 @@ const (
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
 
+	// Fixed cost for sending a data blob.
+	BlobGas uint64 = 120000
+
 	// stuff from EIP-4844
 	FieldElementsPerBlob       = 4096 // each field element is 32 bytes
 	MaxDataGasPerBlock         = 1 << 21

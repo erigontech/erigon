@@ -204,7 +204,7 @@ func enable3860(jt *JumpTable) {
 func enableSharding(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
 		execute:     opDataHash,
-		constantGas: 0,
+		constantGas: GasFastestStep,
 		minStack:    minStack(1, 1),
 		maxStack:    maxStack(1, 1),
 	}

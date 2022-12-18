@@ -44,6 +44,8 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
+	// case config.IsSharding(blockNumber):
+	// signer.
 	case config.IsLondon(blockNumber):
 		// All transaction types are still supported
 		signer.protected = true

@@ -114,6 +114,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.chainRules.IsSharding:
+		jt = &shardingInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsShanghai:

@@ -475,6 +475,7 @@ type Message struct {
 	accessList       AccessList
 	checkNonce       bool
 	isFree           bool
+	dataHashes       []common.Hash
 }
 
 func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
@@ -519,6 +520,7 @@ func (m Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
+func (m Message) DataHashes() []common.Hash { return m.dataHashes }
 
 type TxWrapData interface {
 	copy() TxWrapData

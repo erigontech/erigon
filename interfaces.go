@@ -124,6 +124,7 @@ type CallMsg struct {
 	FeeCap     *uint256.Int     // EIP-1559 fee cap per gas.
 	Tip        *uint256.Int     // EIP-1559 tip per gas.
 	AccessList types.AccessList // EIP-2930 access list.
+	DataHashes []common.Hash    // EIP-4844 versioned data hashes.
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

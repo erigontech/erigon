@@ -690,7 +690,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
 		{name: "shanghaiBlock", block: c.ShanghaiBlock},
 		{name: "cancunBlock", block: c.CancunBlock},
-
 		// {name: "shardingForkBlock", block: c.ShardingForkBlock},
 	} {
 		if lastFork.name != "" {
