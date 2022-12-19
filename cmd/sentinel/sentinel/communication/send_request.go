@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -87,6 +86,5 @@ func verifyResponse(stream network.Stream, peerId peer.ID) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-
-	return common.CopyBytes(message), code[0] != 0, nil
+	return message, code[0] != 0, nil
 }
