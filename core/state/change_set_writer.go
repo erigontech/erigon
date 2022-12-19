@@ -5,8 +5,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/historyv2"
-
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -39,8 +38,8 @@ func NewChangeSetWriterPlain(db kv.RwTx, blockNumber uint64) *ChangeSetWriter {
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() (*historyv2.ChangeSet, error) {
-	cs := historyv2.NewAccountChangeSet()
+func (w *ChangeSetWriter) GetAccountChanges() (*historyv22.ChangeSet, error) {
+	cs := historyv22.NewAccountChangeSet()
 	for address, val := range w.accountChanges {
 		if err := cs.Add(common.CopyBytes(address[:]), val); err != nil {
 			return nil, err
@@ -48,8 +47,8 @@ func (w *ChangeSetWriter) GetAccountChanges() (*historyv2.ChangeSet, error) {
 	}
 	return cs, nil
 }
-func (w *ChangeSetWriter) GetStorageChanges() (*historyv2.ChangeSet, error) {
-	cs := historyv2.NewStorageChangeSet()
+func (w *ChangeSetWriter) GetStorageChanges() (*historyv22.ChangeSet, error) {
+	cs := historyv22.NewStorageChangeSet()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
 			return nil, err
@@ -128,7 +127,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	if err = historyv2.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+	if err = historyv22.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
 		if err = w.db.AppendDup(kv.AccountChangeSet, k, v); err != nil {
 			return err
 		}
@@ -144,7 +143,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	if err = historyv2.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+	if err = historyv22.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
 		if err = w.db.AppendDup(kv.StorageChangeSet, k, v); err != nil {
 			return err
 		}

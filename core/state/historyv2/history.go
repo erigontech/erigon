@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
@@ -34,7 +34,7 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 		csBucket = kv.AccountChangeSet
 	}
 
-	k, v, seekErr := indexC.Seek(historyv2.Mapper[csBucket].IndexChunkKey(key, timestamp))
+	k, v, seekErr := indexC.Seek(historyv22.Mapper[csBucket].IndexChunkKey(key, timestamp))
 	if seekErr != nil {
 		return nil, seekErr
 	}
@@ -62,9 +62,9 @@ func FindByHistory(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storag
 	var data []byte
 	var err error
 	if ok {
-		data, err = historyv2.Mapper[csBucket].Find(changesC, changeSetBlock, key)
+		data, err = historyv22.Mapper[csBucket].Find(changesC, changeSetBlock, key)
 		if err != nil {
-			if !errors.Is(err, historyv2.ErrNotFound) {
+			if !errors.Is(err, historyv22.ErrNotFound) {
 				return nil, fmt.Errorf("finding %x in the changeset %d: %w", key, changeSetBlock, err)
 			}
 			return nil, ethdb.ErrKeyNotFound
