@@ -72,27 +72,35 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	prevProgress := cfg.downloader.Progress()
 
 	logInterval := time.NewTicker(30 * time.Second)
-	triggerInterval := time.NewTicker(75 * time.Millisecond)
+	finishCh := make(chan struct{})
+	// Start logging thread
+	go func() {
+		for {
+			select {
+			case <-logInterval.C:
+				currProgress := cfg.downloader.Progress()
+				speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
+				prevProgress = currProgress
+				peerCount, err := cfg.downloader.Peers()
+				if err != nil {
+					return
+				}
+				log.Info("[History Reconstruction Phase] Backwards downloading phase",
+					"progress", currProgress,
+					"blk/sec", fmt.Sprintf("%.1f", speed),
+					"peers", peerCount,
+				)
+			case <-finishCh:
+				return
+			case <-ctx.Done():
 
+			}
+		}
+	}()
 	for !cfg.downloader.Finished() {
 		cfg.downloader.RequestMore()
-		select {
-		case <-logInterval.C:
-			currProgress := cfg.downloader.Progress()
-			speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
-			prevProgress = currProgress
-			peerCount, err := cfg.downloader.Peers()
-			if err != nil {
-				return err
-			}
-			log.Info("[History Reconstruction Phase] Backwards downloading phase",
-				"progress", currProgress,
-				"blk/sec", fmt.Sprintf("%.1f", speed),
-				"peers", peerCount,
-			)
-		case <-triggerInterval.C:
-		}
 	}
+	close(finishCh)
 	if err := s.Update(tx, 1); err != nil {
 		return err
 	}

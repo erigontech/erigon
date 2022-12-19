@@ -271,3 +271,11 @@ func (s *Sentinel) GetPeersCount() int {
 	}
 	return len(sub.topic.ListPeers())
 }
+
+func (s *Sentinel) Host() host.Host {
+	return s.host
+}
+
+func (s *Sentinel) Peers() *peers.Peers {
+	return s.peers
+}
