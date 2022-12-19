@@ -10,9 +10,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -204,7 +204,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	startkey := dbutils.EncodeBlockNumber(blockNumber)
 
-	decodeFn := changeset.Mapper[kv.AccountChangeSet].Decode
+	decodeFn := historyv2.Mapper[kv.AccountChangeSet].Decode
 
 	balancesMapping := make(map[common.Address]*hexutil.Big)
 

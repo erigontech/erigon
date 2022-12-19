@@ -17,8 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -357,7 +357,7 @@ type Promoter struct {
 }
 
 func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _, err := decode(dbKey, dbValue)
 		if err != nil {
@@ -377,7 +377,7 @@ func getExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 }
 
 func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, _, err := decode(dbKey, dbValue)
 		if err != nil {
@@ -416,7 +416,7 @@ func getExtractCode(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
 }
 
 func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
 		if err != nil {
@@ -431,7 +431,7 @@ func getUnwindExtractStorage(changeSetBucket string) etl.ExtractFunc {
 }
 
 func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
 		if err != nil {
@@ -465,7 +465,7 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 }
 
 func getCodeUnwindExtractFunc(db kv.Tx, changeSetBucket string) etl.ExtractFunc {
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	return func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
 		if err != nil {

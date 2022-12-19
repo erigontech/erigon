@@ -15,13 +15,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
 	"github.com/ledgerwatch/erigon/core"
@@ -164,8 +164,8 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
 
-	expectedAccountChanges := make(map[uint64]*changeset.ChangeSet)
-	expectedStorageChanges := make(map[uint64]*changeset.ChangeSet)
+	expectedAccountChanges := make(map[uint64]*historyv2.ChangeSet)
+	expectedStorageChanges := make(map[uint64]*historyv2.ChangeSet)
 	changeSetHook := func(blockNum uint64, csw *state.ChangeSetWriter) {
 		if csw == nil {
 			return
@@ -381,7 +381,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	return nil
 }
 
-func checkChanges(expectedAccountChanges map[uint64]*changeset.ChangeSet, tx kv.Tx, expectedStorageChanges map[uint64]*changeset.ChangeSet, execAtBlock, prunedTo uint64) error {
+func checkChanges(expectedAccountChanges map[uint64]*historyv2.ChangeSet, tx kv.Tx, expectedStorageChanges map[uint64]*historyv2.ChangeSet, execAtBlock, prunedTo uint64) error {
 	checkHistoryFrom := execAtBlock
 	if prunedTo > checkHistoryFrom {
 		checkHistoryFrom = prunedTo
@@ -554,10 +554,10 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	}
 }
 
-func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset.ChangeSet, expectedStorageChanges *changeset.ChangeSet) error {
+func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2.ChangeSet, expectedStorageChanges *historyv2.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := changeset.ForPrefix(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+	err := historyv2.ForPrefix(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -578,12 +578,12 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 		return fmt.Errorf("db has less changesets")
 	}
 	if expectedStorageChanges == nil {
-		expectedStorageChanges = changeset.NewChangeSet()
+		expectedStorageChanges = historyv2.NewChangeSet()
 	}
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = changeset.ForPrefix(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+	err = historyv2.ForPrefix(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -608,9 +608,9 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *changeset
 }
 
 func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
-	indexBucket := changeset.Mapper[changeSetBucket].IndexBucket
+	indexBucket := historyv2.Mapper[changeSetBucket].IndexBucket
 	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
-	if err := changeset.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
+	if err := historyv2.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
 		k := dbutils.CompositeKeyWithoutIncarnation(address)
 		from := blockN
 		if from > 0 {

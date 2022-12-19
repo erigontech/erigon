@@ -12,8 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -265,7 +265,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 
 	startkey := dbutils.EncodeBlockNumber(from + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
@@ -442,7 +442,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 
 	startkey := dbutils.EncodeBlockNumber(to + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)

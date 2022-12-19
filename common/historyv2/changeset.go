@@ -1,16 +1,15 @@
-package changeset
+package historyv2
 
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	math2 "math"
 	"reflect"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 func NewChangeSet() *ChangeSet {
@@ -96,14 +95,6 @@ func (s *ChangeSet) Equals(s2 *ChangeSet) bool {
 	return reflect.DeepEqual(s.Changes, s2.Changes)
 }
 
-func (s *ChangeSet) String() string {
-	str := ""
-	for _, v := range s.Changes {
-		str += fmt.Sprintf("%v %s : %s\n", len(v.Key), common.Bytes2Hex(v.Key), string(v.Value))
-	}
-	return str
-}
-
 // Encoded Method
 func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 	if len(dbKey) == 8 {
@@ -116,57 +107,34 @@ func FromDBFormat(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 func AvailableFrom(tx kv.Tx) (uint64, error) {
 	c, err := tx.Cursor(kv.AccountChangeSet)
 	if err != nil {
-		return math.MaxUint64, err
+		return math2.MaxUint64, err
 	}
 	defer c.Close()
 	k, _, err := c.First()
 	if err != nil {
-		return math.MaxUint64, err
+		return math2.MaxUint64, err
 	}
 	if len(k) == 0 {
-		return math.MaxUint64, nil
+		return math2.MaxUint64, nil
 	}
 	return binary.BigEndian.Uint64(k), nil
 }
 func AvailableStorageFrom(tx kv.Tx) (uint64, error) {
 	c, err := tx.Cursor(kv.StorageChangeSet)
 	if err != nil {
-		return math.MaxUint64, err
+		return math2.MaxUint64, err
 	}
 	defer c.Close()
 	k, _, err := c.First()
 	if err != nil {
-		return math.MaxUint64, err
+		return math2.MaxUint64, err
 	}
 	if len(k) == 0 {
-		return math.MaxUint64, nil
+		return math2.MaxUint64, nil
 	}
 	return binary.BigEndian.Uint64(k), nil
 }
 
-// [from:to)
-func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint64, k, v []byte) error) error {
-	var blockN uint64
-	c, err := db.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	return ethdb.Walk(c, dbutils.EncodeBlockNumber(from), 0, func(k, v []byte) (bool, error) {
-		var err error
-		blockN, k, v, err = FromDBFormat(k, v)
-		if err != nil {
-			return false, err
-		}
-		if blockN >= to {
-			return false, nil
-		}
-		if err = walker(blockN, k, v); err != nil {
-			return false, err
-		}
-		return true, nil
-	})
-}
 func ForEach(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint64, k, v []byte) error) error {
 	var blockN uint64
 	return db.ForEach(bucket, startkey, func(k, v []byte) error {
@@ -191,7 +159,7 @@ func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint
 }
 
 func Truncate(tx kv.RwTx, from uint64) error {
-	keyStart := dbutils.EncodeBlockNumber(from)
+	keyStart := common.EncodeTs(from)
 
 	{
 		c, err := tx.RwCursorDupSort(kv.AccountChangeSet)
@@ -240,7 +208,7 @@ type CSMapper struct {
 var Mapper = map[string]CSMapper{
 	kv.AccountChangeSet: {
 		IndexBucket:   kv.AccountsHistory,
-		IndexChunkKey: dbutils.AccountIndexChunkKey,
+		IndexChunkKey: AccountIndexChunkKey,
 		New:           NewAccountChangeSet,
 		Find:          FindAccount,
 		Encode:        EncodeAccounts,
@@ -248,10 +216,28 @@ var Mapper = map[string]CSMapper{
 	},
 	kv.StorageChangeSet: {
 		IndexBucket:   kv.StorageHistory,
-		IndexChunkKey: dbutils.StorageIndexChunkKey,
+		IndexChunkKey: StorageIndexChunkKey,
 		Find:          FindStorage,
 		New:           NewStorageChangeSet,
 		Encode:        EncodeStorage,
 		Decode:        DecodeStorage,
 	},
+}
+
+func AccountIndexChunkKey(key []byte, blockNumber uint64) []byte {
+	blockNumBytes := make([]byte, length.Addr+8)
+	copy(blockNumBytes, key)
+	binary.BigEndian.PutUint64(blockNumBytes[length.Addr:], blockNumber)
+
+	return blockNumBytes
+}
+
+func StorageIndexChunkKey(key []byte, blockNumber uint64) []byte {
+	//remove incarnation and add block number
+	blockNumBytes := make([]byte, length.Addr+length.Hash+8)
+	copy(blockNumBytes, key[:length.Addr])
+	copy(blockNumBytes[length.Addr:], key[length.Addr+length.Incarnation:])
+	binary.BigEndian.PutUint64(blockNumBytes[length.Addr+length.Hash:], blockNumber)
+
+	return blockNumBytes
 }

@@ -8,9 +8,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -55,7 +55,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 		if err != nil {
 			return common.Hash{}, err
 		}
-		blockNumber, changesetKey, _, err := changeset.DecodeStorage(k, v)
+		blockNumber, changesetKey, _, err := historyv2.DecodeStorage(k, v)
 		if err != nil {
 			return common.Hash{}, err
 		}

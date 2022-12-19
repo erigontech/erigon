@@ -1,11 +1,13 @@
-package changeset
+package historyv2
 
 import (
 	"bytes"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"testing"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/assert"
@@ -23,9 +25,9 @@ func TestEncodingAccount(t *testing.T) {
 	assert.NoError(t, err)
 
 	vals := [][]byte{
-		common.FromHex("f7f6db1eb17c6d582078e0ffdd0c"),
-		common.FromHex("b1e9b5c16355eede662031dd621d08faf4ea"),
-		common.FromHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
+		common2.MustDecodeHex("f7f6db1eb17c6d582078e0ffdd0c"),
+		common2.MustDecodeHex("b1e9b5c16355eede662031dd621d08faf4ea"),
+		common2.MustDecodeHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
 	}
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
@@ -56,10 +58,10 @@ func TestEncodingAccount(t *testing.T) {
 
 			if !bytes.Equal(v.Key, ch2.Changes[i].Key) || !bytes.Equal(v.Value, ch2.Changes[i].Value) {
 				fmt.Println("Diff ", i)
-				fmt.Println("k1", common.Bytes2Hex(v.Key), len(v.Key))
-				fmt.Println("k2", common.Bytes2Hex(ch2.Changes[i].Key))
-				fmt.Println("v1", common.Bytes2Hex(v.Value))
-				fmt.Println("v2", common.Bytes2Hex(ch2.Changes[i].Value))
+				fmt.Println("k1", hex.EncodeToString(v.Key), len(v.Key))
+				fmt.Println("k2", hex.EncodeToString(ch2.Changes[i].Key))
+				fmt.Println("v1", hex.EncodeToString(v.Value))
+				fmt.Println("v2", hex.EncodeToString(ch2.Changes[i].Value))
 			}
 		}
 		fmt.Printf("%+v %+v\n", ch, ch2)

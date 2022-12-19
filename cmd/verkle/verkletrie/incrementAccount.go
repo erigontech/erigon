@@ -8,9 +8,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -65,7 +65,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 		if err != nil {
 			return err
 		}
-		blockNumber, addressBytes, _, err := changeset.DecodeAccounts(k, v)
+		blockNumber, addressBytes, _, err := historyv2.DecodeAccounts(k, v)
 		if err != nil {
 			return err
 		}

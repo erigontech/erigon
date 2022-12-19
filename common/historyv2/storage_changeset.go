@@ -1,4 +1,4 @@
-package changeset
+package historyv2
 
 import (
 	"bytes"
@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -74,40 +72,4 @@ func FindStorage(c kv.CursorDupSort, blockNumber uint64, k []byte) ([]byte, erro
 		return nil, ErrNotFound
 	}
 	return v[length.Hash:], nil
-}
-
-// RewindDataPlain generates rewind data for all plain buckets between the timestamp
-// timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func RewindData(db kv.Tx, timestampSrc, timestampDst uint64, changes *etl.Collector, quit <-chan struct{}) error {
-	if err := walkAndCollect(
-		changes.Collect,
-		db, kv.AccountChangeSet,
-		timestampDst+1, timestampSrc,
-		quit,
-	); err != nil {
-		return err
-	}
-
-	if err := walkAndCollect(
-		changes.Collect,
-		db, kv.StorageChangeSet,
-		timestampDst+1, timestampSrc,
-		quit,
-	); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func walkAndCollect(collectorFunc func([]byte, []byte) error, db kv.Tx, bucket string, timestampDst, timestampSrc uint64, quit <-chan struct{}) error {
-	return ForRange(db, bucket, timestampDst, timestampSrc+1, func(bl uint64, k, v []byte) error {
-		if err := libcommon.Stopped(quit); err != nil {
-			return err
-		}
-		if innerErr := collectorFunc(libcommon.Copy(k), libcommon.Copy(v)); innerErr != nil {
-			return innerErr
-		}
-		return nil
-	})
 }

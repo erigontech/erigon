@@ -21,6 +21,7 @@ import (
 	ecom "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/common/historyv2"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -675,7 +676,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		return err
 	}
 
-	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
+	if err := historyv2.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
 
