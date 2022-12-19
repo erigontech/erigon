@@ -35,9 +35,10 @@ type BlockContext struct {
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash   common.Hash
-	Origin   common.Address // Provides information for ORIGIN
-	GasPrice *uint256.Int   // Provides information for GASPRICE
+	TxHash     common.Hash
+	Origin     common.Address // Provides information for ORIGIN
+	GasPrice   *uint256.Int   // Provides information for GASPRICE
+	DataHashes []common.Hash  // Provides versioned data hashes for DATAHASH
 }
 
 type (
