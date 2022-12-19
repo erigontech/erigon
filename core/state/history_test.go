@@ -1140,7 +1140,7 @@ func assertChangesEquals(t *testing.T, changesObtained, changesExpected *history
 	sort.Sort(changesExpected)
 	if !reflect.DeepEqual(changesObtained, changesExpected) {
 		fmt.Printf("expected: %+v", changesExpected)
-		fmt.Println("obtained: %+v", changesObtained)
+		fmt.Printf("obtained: %+v", changesObtained)
 		t.Fatal("block result is incorrect")
 	}
 }
