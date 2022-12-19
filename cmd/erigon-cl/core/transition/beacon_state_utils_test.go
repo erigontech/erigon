@@ -1,11 +1,56 @@
 package transition
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
+
+func getTestState(t *testing.T) *state.BeaconState {
+	numVals := 2048
+	validators := make([]*cltypes.Validator, numVals)
+	for i := 0; i < numVals; i++ {
+		validators[i] = &cltypes.Validator{
+			ActivationEpoch: 0,
+			ExitEpoch:       10000,
+		}
+	}
+	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
+		Slot: 19,
+		LatestBlockHeader: &cltypes.BeaconBlockHeader{
+			Slot: 18,
+		},
+		Validators:  validators,
+		RandaoMixes: make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
+	})
+}
+
+func getTestBlock(t *testing.T) *cltypes.BeaconBlockBellatrix {
+	header, err := hex.DecodeString("56bdd539e5c03fe53cff0f4af01d459c30f88818a2541339000c1f2a329e84bc")
+	if err != nil {
+		t.Fatalf("unable to decode test header: %v", err)
+	}
+	headerArr := [32]byte{}
+	copy(headerArr[:], header)
+	return &cltypes.BeaconBlockBellatrix{
+		Slot:          19,
+		ProposerIndex: 1947,
+		ParentRoot:    headerArr,
+		Body: &cltypes.BeaconBodyBellatrix{
+			Graffiti: make([]byte, 32),
+			Eth1Data: &cltypes.Eth1Data{},
+			SyncAggregate: &cltypes.SyncAggregate{
+				SyncCommiteeBits: make([]byte, 64),
+			},
+			ExecutionPayload: &cltypes.ExecutionPayload{
+				LogsBloom:     make([]byte, 256),
+				BaseFeePerGas: make([]byte, 32),
+			},
+		},
+	}
+}
 
 func TestComputeShuffledIndex(t *testing.T) {
 	testCases := []struct {
@@ -138,20 +183,7 @@ func TestComputeProposerIndex(t *testing.T) {
 }
 
 func TestGetBeaconProposerIndex(t *testing.T) {
-	numVals := 2048
-	validators := make([]*cltypes.Validator, numVals)
-	for i := 0; i < numVals; i++ {
-		validators[i] = &cltypes.Validator{
-			ActivationEpoch: 0,
-			ExitEpoch:       10000,
-		}
-	}
-
-	state := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Validators:  validators,
-		RandaoMixes: make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
-		Slot:        0,
-	})
+	state := getTestState(t)
 	testCases := []struct {
 		description string
 		slot        uint64
@@ -193,6 +225,95 @@ func TestGetBeaconProposerIndex(t *testing.T) {
 			}
 			if got != tc.expected {
 				t.Errorf("unexpected result: got %d, want %d", got, tc.expected)
+			}
+		})
+	}
+}
+
+func TestProcessBlockHeader(t *testing.T) {
+	testStateSuccess := getTestState(t)
+	testState := getTestState(t)
+	testBlock := getTestBlock(t)
+
+	badBlockSlot := getTestBlock(t)
+	badBlockSlot.Slot = testStateSuccess.Slot() + 1
+
+	badLatestSlot := getTestState(t)
+	badLatestSlot.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: testBlock.Slot})
+
+	badProposerInd := getTestBlock(t)
+	badProposerInd.ProposerIndex += 1
+
+	badParentRoot := getTestBlock(t)
+	badParentRoot.ParentRoot[0] += 1
+
+	badBlockBodyHash := getTestBlock(t)
+	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
+
+	badStateSlashed := getTestState(t)
+	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex)).Slashed = true
+
+	testCases := []struct {
+		description string
+		state       *state.BeaconState
+		block       *cltypes.BeaconBlockBellatrix
+		wantErr     bool
+	}{
+		{
+			description: "success",
+			state:       testStateSuccess,
+			block:       testBlock,
+			wantErr:     false,
+		},
+		{
+			description: "slot_not_equal_state",
+			state:       testState,
+			block:       badBlockSlot,
+			wantErr:     true,
+		},
+		{
+			description: "slot_matches_latest_block",
+			state:       badLatestSlot,
+			block:       testBlock,
+			wantErr:     true,
+		},
+		{
+			description: "bad_proposer_index",
+			state:       testState,
+			block:       badProposerInd,
+			wantErr:     true,
+		},
+		{
+			description: "bad_parent_root",
+			state:       testState,
+			block:       badParentRoot,
+			wantErr:     true,
+		},
+		{
+			description: "bad_block_body_hash",
+			state:       testState,
+			block:       badBlockBodyHash,
+			wantErr:     true,
+		},
+		{
+			description: "bad_state_slashed",
+			state:       badStateSlashed,
+			block:       testBlock,
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			err := ProcessBlockHeader(tc.state, tc.block)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("unexpected success, wanted error")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
 			}
 		})
 	}

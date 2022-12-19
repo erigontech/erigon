@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -143,4 +144,43 @@ func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
 	copy(seedArray[:], seed)
 
 	return ComputeProposerIndex(state, indices, seedArray)
+}
+
+func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBellatrix) error {
+	if block.Slot != state.Slot() {
+		return fmt.Errorf("state slot: %d, not equal to block slot: %d", state.Slot(), block.Slot)
+	}
+	if block.Slot <= state.LatestBlockHeader().Slot {
+		return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, state.LatestBlockHeader().Slot)
+	}
+	propInd, err := GetBeaconProposerIndex(state)
+	if err != nil {
+		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
+	}
+	if block.ProposerIndex != propInd {
+		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
+	}
+	latestRoot, err := state.LatestBlockHeader().HashTreeRoot()
+	if err != nil {
+		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
+	}
+	if block.ParentRoot != latestRoot {
+		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
+	}
+	bodyRoot, err := block.Body.HashTreeRoot()
+	if err != nil {
+		return fmt.Errorf("unable to hash tree root of block body: %v", err)
+	}
+	state.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		BodyRoot:      bodyRoot,
+	})
+
+	proposer := state.ValidatorAt(int(block.ProposerIndex))
+	if proposer.Slashed {
+		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
+	}
+	return nil
 }
