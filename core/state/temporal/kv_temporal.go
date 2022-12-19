@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	state2 "github.com/ledgerwatch/erigon/core/state"
+	state2 "github.com/ledgerwatch/erigon/core/state/historyv2"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
