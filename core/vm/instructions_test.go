@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"testing"
 
@@ -648,6 +649,47 @@ func TestCreate2Addreses(t *testing.T) {
 		expected := common.BytesToAddress(common.FromHex(tt.expected))
 		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
+		}
+	}
+}
+
+func TestDataHash(t *testing.T) {
+	type testcase struct {
+		name   string
+		idx    uint64
+		expect common.Hash
+		hashes []common.Hash
+	}
+	var (
+		zero  = common.Hash{0}
+		one   = common.Hash{1}
+		two   = common.Hash{2}
+		three = common.Hash{3}
+	)
+	for _, tt := range []testcase{
+		{name: "[{1}]", idx: 0, expect: one, hashes: []common.Hash{one}},
+		{name: "[1,{2},3]", idx: 2, expect: three, hashes: []common.Hash{one, two, three}},
+		{name: "out-of-bounds (empty)", idx: 10, expect: zero, hashes: []common.Hash{}},
+		{name: "out-of-bounds", idx: 25, expect: zero, hashes: []common.Hash{one, two, three}},
+	} {
+		var (
+			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{DataHashes: tt.hashes}, nil, params.TestChainConfig, Config{})
+			stack          = stack.New()
+			pc             = uint64(0)
+			evmInterpreter = NewEVMInterpreter(env, env.Config())
+		)
+		stack.Push(uint256.NewInt(tt.idx))
+		opDataHash(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		if len(stack.Data) != 1 {
+			t.Errorf("Expected one item on stack after %v, got %d: ", tt.name, len(stack.Data))
+		}
+		actual := stack.Pop()
+		expected, overflow := uint256.FromBig(new(big.Int).SetBytes(tt.expect.Bytes()))
+		if overflow {
+			t.Errorf("Testcase %v: invalid overflow", tt.name)
+		}
+		if actual.Cmp(expected) != 0 {
+			t.Errorf("Testcase %v: expected  %x, got %x", tt.name, expected, actual)
 		}
 	}
 }

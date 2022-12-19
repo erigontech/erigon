@@ -67,10 +67,19 @@ var (
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
+	shardingInstructionSet         = newShardingInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
 type JumpTable [256]*operation
+
+// newShardingInstructionSet returns the london instruction set plus the new instructions from
+// proto-danksharding.
+func newShardingInstructionSet() JumpTable {
+	instructionSet := newLondonInstructionSet()
+	enableSharding(&instructionSet)
+	return instructionSet
+}
 
 // newCancunInstructionSet returns the frontier, homestead, byzantium,
 // constantinople, istanbul, petersburg, berlin, london, paris, shanghai,

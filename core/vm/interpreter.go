@@ -120,6 +120,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
+	case evm.ChainRules().IsSharding:
+		jt = &shardingInstructionSet
 	case evm.ChainRules().IsBerlin:
 		jt = &berlinInstructionSet
 	case evm.ChainRules().IsIstanbul:

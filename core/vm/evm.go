@@ -39,6 +39,8 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 		precompiles = PrecompiledContractsIsMoran
 	case evm.chainRules.IsNano:
 		precompiles = PrecompiledContractsNano
+	case evm.chainRules.IsSharding:
+		precompiles = PrecompiledContractsDanksharding
 	case evm.chainRules.IsBerlin:
 		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsIstanbul:
