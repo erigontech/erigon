@@ -24,13 +24,13 @@ import (
 )
 
 const (
-	maxBadPeers     = 200
+	maxBadPeers     = 50
 	DefaultMaxPeers = 33
 	MaxBadResponses = 10
 )
 
 // Time to wait before asking the same peer again.
-const reqRetryTime = 600 * time.Millisecond
+const reqRetryTime = 300 * time.Millisecond
 
 // Record Peer data.
 type Peer struct {
@@ -82,6 +82,7 @@ func (p *Peers) Penalize(pid peer.ID) {
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
 		p.DisconnectPeer(pid)
+		p.penalties.Remove(pid)
 	}
 }
 

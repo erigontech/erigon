@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p-core/crypto"
@@ -122,7 +123,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 	}
 
 	connectedPeer := false
-	maxTries := 20
+	maxTries := peers.DefaultMaxPeers
 	tries := 0
 	for !connectedPeer {
 		if tries >= maxTries {
@@ -140,6 +141,7 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 
 		node := validPeerList[index]
 		if !isPeerWhitelisted(node, validPeerList) {
+
 			continue
 		}
 

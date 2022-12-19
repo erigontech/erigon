@@ -56,7 +56,7 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 }
 
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
-	retryReqInterval := time.NewTicker(100 * time.Millisecond)
+	retryReqInterval := time.NewTicker(10 * time.Millisecond)
 	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
@@ -71,6 +71,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				// Wait a bit to not exhaust CPU and skip.
 				continue
 			}
+			log.Debug("Sent request", "pid", pid)
 			s.sentinel.Peers().PeerDoRequest(pid)
 			go func() {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
