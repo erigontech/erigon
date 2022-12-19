@@ -15,7 +15,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -184,7 +183,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = historyv2.ForPrefix(historyTx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.AccountChangeSet, common.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(accountChanges.Changes) {
 					if len(v) != 0 {
 						fmt.Printf("Unexpected account changes in block %d\n", blockNum)
@@ -231,7 +230,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			}
 			sort.Sort(expectedStorageChanges)
 			match = true
-			err = historyv2.ForPrefix(historyTx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.StorageChangeSet, common.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(expectedStorageChanges.Changes) {
 					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 					fmt.Printf("0x%x: %x\n", k, v)

@@ -557,7 +557,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2.ChangeSet, expectedStorageChanges *historyv2.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := historyv2.ForPrefix(db, kv.AccountChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+	err := historyv2.ForPrefix(db, kv.AccountChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -583,7 +583,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = historyv2.ForPrefix(db, kv.StorageChangeSet, dbutils.EncodeBlockNumber(blockNum), func(blockN uint64, k, v []byte) error {
+	err = historyv2.ForPrefix(db, kv.StorageChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -609,7 +609,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2
 
 func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
 	indexBucket := historyv2.Mapper[changeSetBucket].IndexBucket
-	blockNumBytes := dbutils.EncodeBlockNumber(blockNum)
+	blockNumBytes := common2.EncodeTs(blockNum)
 	if err := historyv2.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
 		k := dbutils.CompositeKeyWithoutIncarnation(address)
 		from := blockN

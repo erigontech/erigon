@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
@@ -51,7 +51,7 @@ func IncrementStorage(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	marker := NewVerkleMarker()
 	defer marker.Rollback()
 
-	for k, v, err := storageCursor.Seek(dbutils.EncodeBlockNumber(from)); k != nil; k, v, err = storageCursor.Next() {
+	for k, v, err := storageCursor.Seek(common2.EncodeTs(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
 			return common.Hash{}, err
 		}
