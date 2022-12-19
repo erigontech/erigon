@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestEOFMarshaling(t *testing.T) {
