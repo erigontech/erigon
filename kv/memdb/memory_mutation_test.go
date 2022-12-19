@@ -14,7 +14,6 @@
 package memdb
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,8 +30,7 @@ func initializeDbNonDupSort(rwTx kv.RwTx) {
 }
 
 func TestPutAppendHas(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.Nil(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -60,8 +58,7 @@ func TestPutAppendHas(t *testing.T) {
 }
 
 func TestLastMiningDB(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -85,8 +82,7 @@ func TestLastMiningDB(t *testing.T) {
 }
 
 func TestLastMiningMem(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -110,8 +106,7 @@ func TestLastMiningMem(t *testing.T) {
 }
 
 func TestDeleteMining(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "")
@@ -137,8 +132,7 @@ func TestDeleteMining(t *testing.T) {
 }
 
 func TestFlush(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 	batch := NewMemoryBatch(rwTx, "")
@@ -158,8 +152,7 @@ func TestFlush(t *testing.T) {
 }
 
 func TestForEach(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -169,7 +162,7 @@ func TestForEach(t *testing.T) {
 
 	var keys []string
 	var values []string
-	err = batch.ForEach(kv.HashedAccounts, []byte("XYAZ"), func(k, v []byte) error {
+	err := batch.ForEach(kv.HashedAccounts, []byte("XYAZ"), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -201,8 +194,7 @@ func TestForEach(t *testing.T) {
 }
 
 func TestForPrefix(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -210,7 +202,7 @@ func TestForPrefix(t *testing.T) {
 	var keys1 []string
 	var values1 []string
 
-	err = batch.ForPrefix(kv.HashedAccounts, []byte("AB"), func(k, v []byte) error {
+	err := batch.ForPrefix(kv.HashedAccounts, []byte("AB"), func(k, v []byte) error {
 		keys1 = append(keys1, string(k))
 		values1 = append(values1, string(v))
 		return nil
@@ -241,8 +233,7 @@ func TestForPrefix(t *testing.T) {
 }
 
 func TestForAmount(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
@@ -251,7 +242,7 @@ func TestForAmount(t *testing.T) {
 
 	var keys []string
 	var values []string
-	err = batch.ForAmount(kv.HashedAccounts, []byte("C"), uint32(3), func(k, v []byte) error {
+	err := batch.ForAmount(kv.HashedAccounts, []byte("C"), uint32(3), func(k, v []byte) error {
 		keys = append(keys, string(k))
 		values = append(values, string(v))
 		return nil
@@ -275,15 +266,14 @@ func TestForAmount(t *testing.T) {
 }
 
 func TestGetOneAfterClearBucket(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "")
 	defer batch.Close()
 
-	err = batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HashedAccounts)
 	require.Nil(t, err)
 
 	cond := batch.isTableCleared(kv.HashedAccounts)
@@ -299,15 +289,14 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 }
 
 func TestSeekExactAfterClearBucket(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "")
 	defer batch.Close()
 
-	err = batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HashedAccounts)
 	require.Nil(t, err)
 
 	cond := batch.isTableCleared(kv.HashedAccounts)
@@ -336,15 +325,14 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 }
 
 func TestFirstAfterClearBucket(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "")
 	defer batch.Close()
 
-	err = batch.ClearBucket(kv.HashedAccounts)
+	err := batch.ClearBucket(kv.HashedAccounts)
 	require.Nil(t, err)
 
 	err = batch.Put(kv.HashedAccounts, []byte("BBBB"), []byte("value5"))
@@ -365,15 +353,14 @@ func TestFirstAfterClearBucket(t *testing.T) {
 }
 
 func TestIncReadSequence(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
 
 	batch := NewMemoryBatch(rwTx, "")
 	defer batch.Close()
 
-	_, err = batch.IncrementSequence(kv.HashedAccounts, uint64(12))
+	_, err := batch.IncrementSequence(kv.HashedAccounts, uint64(12))
 	require.Nil(t, err)
 
 	val, err := batch.ReadSequence(kv.HashedAccounts)
@@ -389,8 +376,7 @@ func initializeDbDupSort(rwTx kv.RwTx) {
 }
 
 func TestNext(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -434,8 +420,7 @@ func TestNext(t *testing.T) {
 }
 
 func TestNextNoDup(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -462,8 +447,7 @@ func TestNextNoDup(t *testing.T) {
 }
 
 func TestDeleteCurrentDuplicates(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbDupSort(rwTx)
 
@@ -497,8 +481,7 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 }
 
 func TestSeekBothRange(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	rwTx.Put(kv.AccountChangeSet, []byte("key1"), []byte("value1.1"))
 	rwTx.Put(kv.AccountChangeSet, []byte("key3"), []byte("value3.3"))
@@ -533,8 +516,7 @@ func initializeDbAutoConversion(rwTx kv.RwTx) {
 }
 
 func TestAutoConversion(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 
@@ -590,8 +572,7 @@ func TestAutoConversion(t *testing.T) {
 }
 
 func TestAutoConversionDelete(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 
@@ -628,8 +609,7 @@ func TestAutoConversionDelete(t *testing.T) {
 }
 
 func TestAutoConversionSeekBothRange(t *testing.T) {
-	rwTx, err := New().BeginRw(context.Background())
-	require.NoError(t, err)
+	_, rwTx := NewTestTx(t)
 
 	initializeDbAutoConversion(rwTx)
 

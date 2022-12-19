@@ -30,13 +30,7 @@ import (
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	db := memdb.New()
-	defer db.Close()
-
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(err)
-	defer tx.Rollback()
+	db, tx := memdb.NewTestTx(t)
 
 	normalBucket := kv.ChaindataTables[15]
 	deprecatedBucket := kv.ChaindataDeprecatedTables[0]

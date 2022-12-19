@@ -18,14 +18,12 @@ package aggregator
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
 
@@ -72,14 +70,8 @@ func accountWithBalance(i uint64) []byte {
 }
 
 func TestSimpleAggregator(t *testing.T) {
-	db := memdb.New()
-	defer db.Close()
-	var rwTx kv.RwTx
-	var err error
-	if rwTx, err = db.BeginRw(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer rwTx.Rollback()
+	_, rwTx := memdb.NewTestTx(t)
+
 	tmpDir := t.TempDir()
 	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
 	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
@@ -114,14 +106,8 @@ func TestSimpleAggregator(t *testing.T) {
 }
 
 func TestLoopAggregator(t *testing.T) {
-	db := memdb.New()
-	defer db.Close()
-	var rwTx kv.RwTx
-	var err error
-	if rwTx, err = db.BeginRw(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer rwTx.Rollback()
+	_, rwTx := memdb.NewTestTx(t)
+
 	tmpDir := t.TempDir()
 	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
 	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
@@ -161,14 +147,7 @@ func TestLoopAggregator(t *testing.T) {
 }
 
 func TestRecreateAccountWithStorage(t *testing.T) {
-	db := memdb.New()
-	defer db.Close()
-	var rwTx kv.RwTx
-	var err error
-	if rwTx, err = db.BeginRw(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer rwTx.Rollback()
+	_, rwTx := memdb.NewTestTx(t)
 	tmpDir := t.TempDir()
 
 	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
@@ -271,14 +250,8 @@ func TestRecreateAccountWithStorage(t *testing.T) {
 }
 
 func TestChangeCode(t *testing.T) {
-	db := memdb.New()
-	defer db.Close()
-	var rwTx kv.RwTx
-	var err error
-	if rwTx, err = db.BeginRw(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	defer rwTx.Rollback()
+	_, rwTx := memdb.NewTestTx(t)
+
 	tmpDir := t.TempDir()
 	trie := commitment.InitializeTrie(commitment.VariantHexPatriciaTrie)
 	a, err := NewAggregator(tmpDir, 16, 4, true, true, 1000, trie, rwTx)
