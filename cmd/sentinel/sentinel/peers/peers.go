@@ -24,13 +24,14 @@ import (
 )
 
 const (
-	maxBadPeers     = 200
-	DefaultMaxPeers = 33
-	MaxBadResponses = 10
+	maxBadPeers       = 50
+	maxPeerRecordSize = 1000
+	DefaultMaxPeers   = 33
+	MaxBadResponses   = 10
 )
 
 // Time to wait before asking the same peer again.
-const reqRetryTime = 450 * time.Millisecond
+const reqRetryTime = 300 * time.Millisecond
 
 // Record Peer data.
 type Peer struct {
@@ -39,11 +40,10 @@ type Peer struct {
 }
 
 type Peers struct {
-	badPeers  *lru.Cache // Keep track of bad peers
-	penalties *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
-	host      host.Host
-
-	peers map[peer.ID]Peer
+	badPeers   *lru.Cache // Keep track of bad peers
+	penalties  *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	peerRecord *lru.Cache // Keep track of our peer statuses
+	host       host.Host
 
 	mu sync.Mutex
 }
@@ -58,11 +58,16 @@ func New(host host.Host) *Peers {
 	if err != nil {
 		panic(err)
 	}
+
+	peerRecord, err := lru.New(maxPeerRecordSize)
+	if err != nil {
+		panic(err)
+	}
 	return &Peers{
-		badPeers:  badPeers,
-		penalties: penalties,
-		host:      host,
-		peers:     make(map[peer.ID]Peer),
+		badPeers:   badPeers,
+		penalties:  penalties,
+		host:       host,
+		peerRecord: peerRecord,
 	}
 }
 
@@ -81,7 +86,7 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
-		p.BanBadPeer(pid)
+		p.DisconnectPeer(pid)
 		p.penalties.Remove(pid)
 	}
 }
@@ -114,30 +119,26 @@ func (p *Peers) DisconnectPeer(pid peer.ID) {
 func (p *Peers) PeerDoRequest(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.peers[pid] = Peer{
+	p.peerRecord.Add(pid, Peer{
 		lastQueried: time.Now(),
 		busy:        true,
-	}
+	})
 }
 
 // IsPeerAvaiable returns if the peer is in cooldown or is being requested already .
 func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	peer, ok := p.peers[pid]
-	return !ok || (!peer.busy && time.Since(peer.lastQueried) >= reqRetryTime)
+	peer, ok := p.peerRecord.Get(pid)
+	return !ok || (!peer.(Peer).busy && time.Since(peer.(Peer).lastQueried) >= reqRetryTime)
 }
 
 // PeerFinishRequest signals that the peer is done doing a request.
 func (p *Peers) PeerFinishRequest(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	peer, ok := p.peers[pid]
-	if !ok {
-		return
-	}
-	p.peers[pid] = Peer{
+	p.peerRecord.Add(pid, Peer{
 		busy:        false,
-		lastQueried: peer.lastQueried,
-	}
+		lastQueried: time.Now(),
+	})
 }

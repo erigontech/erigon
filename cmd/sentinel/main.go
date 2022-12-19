@@ -216,7 +216,7 @@ func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
 
 // Debug function to recieve test packets on the req/resp domain.
 func sendRequest(ctx context.Context, s sentinelrpc.SentinelClient, req *sentinelrpc.RequestData) {
-	newReqTicker := time.NewTicker(1000 * time.Millisecond)
+	newReqTicker := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():
