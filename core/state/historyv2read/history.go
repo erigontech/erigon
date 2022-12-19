@@ -1,4 +1,4 @@
-package historyv2
+package historyv2read
 
 import (
 	"bytes"
@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
+
+const DefaultIncarnation = uint64(1)
 
 func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool, key []byte, timestamp uint64) ([]byte, error) {
 	v, err := FindByHistory(tx, indexC, changesC, storage, key, timestamp)

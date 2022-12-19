@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	state2 "github.com/ledgerwatch/erigon/core/state/historyv2"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
@@ -90,9 +90,9 @@ func (tx *Tx) GetNoState(name History, key []byte, ts uint64) (v []byte, ok bool
 	} else {
 		switch name {
 		case Accounts:
-			v, err = state2.FindByHistory(tx.kv, tx.accHistoryC, tx.accChangesC, false, key, ts)
+			v, err = historyv2read.FindByHistory(tx.kv, tx.accHistoryC, tx.accChangesC, false, key, ts)
 		case Storage:
-			v, err = state2.FindByHistory(tx.kv, tx.storageHistoryC, tx.storageChangesC, true, key, ts)
+			v, err = historyv2read.FindByHistory(tx.kv, tx.storageHistoryC, tx.storageChangesC, true, key, ts)
 		case Code:
 			panic("not implemented")
 		default:
