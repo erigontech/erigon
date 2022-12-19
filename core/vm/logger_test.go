@@ -39,7 +39,7 @@ func TestStoreCapture(t *testing.T) {
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))
 	var index common.Hash
-	logger.CaptureStart(env, common.Address{}, common.Address{}, false, false, CALLT, nil, 0, nil, nil)
+	logger.CaptureStart(env, common.Address{}, common.Address{}, false, false, nil, 0, nil, nil)
 	logger.CaptureState(0, SSTORE, 0, 0, &ScopeContext{
 		Memory:   mem,
 		Stack:    stack,

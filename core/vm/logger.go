@@ -104,17 +104,6 @@ func (s *StructLog) ErrorString() string {
 	return ""
 }
 
-type CallType int
-
-const (
-	CALLT CallType = iota
-	CALLCODET
-	DELEGATECALLT
-	STATICCALLT
-	CREATET
-	CREATE2T
-)
-
 // Tracer is used to collect execution traces from an EVM transaction
 // execution. CaptureState is called for each step of the VM with the
 // current VM state.
@@ -125,10 +114,10 @@ type Tracer interface {
 	CaptureTxStart(gasLimit uint64)
 	CaptureTxEnd(restGas uint64)
 	// Top call frame
-	CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
 	CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error)
 	// Rest of the frames
-	CaptureEnter(efrom common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte)
+	CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
 	CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error)
 	// Opcode level
 	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
@@ -191,12 +180,12 @@ func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
 // CaptureEnter implements the Tracer interface to initialize the tracing operation for an internal call.
-func (l *StructLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -440,12 +429,12 @@ func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, inp
 `)
 }
 
-func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	t.env = env
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
-func (t *mdLogger) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 

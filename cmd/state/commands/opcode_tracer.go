@@ -190,13 +190,13 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool
 	ot.stack = append(ot.stack, &newTx)
 }
 
-func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.env = env
 	ot.depth = 0
 	ot.captureStartOrEnter(from, to, create, input)
 }
 
-func (ot *opcodeTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth++
 	ot.captureStartOrEnter(from, to, create, input)
 }

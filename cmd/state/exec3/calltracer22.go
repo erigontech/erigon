@@ -28,10 +28,10 @@ func (ct *CallTracer) captureStartOrEnter(from, to common.Address) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = struct{}{}
 }
-func (ct *CallTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.captureStartOrEnter(from, to)
 }
-func (ct *CallTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.captureStartOrEnter(from, to)
 }
 func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {

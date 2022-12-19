@@ -585,7 +585,7 @@ func (jst *Tracer) CaptureTxStart(gasLimit uint64) {}
 func (jst *Tracer) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (jst *Tracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	jst.env = env
 	jst.ctx["type"] = "CALL"
 	if create {
@@ -613,7 +613,7 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	jst.ctx["intrinsicGas"] = intrinsicGas
 }
 
-func (jst *Tracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (jst *Tracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState implements the Tracer interface to trace a single step of VM execution.

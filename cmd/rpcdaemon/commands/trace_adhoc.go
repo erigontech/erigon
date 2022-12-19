@@ -239,7 +239,7 @@ func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
 
-func (ot *OeTracer) captureStartOrEnter(deep bool, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
@@ -293,7 +293,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, from common.Address, to commo
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if callType == vm.DELEGATECALLT {
+		if typ == vm.DELEGATECALL {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
 				value, _ = uint256.FromBig(action.Value.ToInt())
@@ -301,7 +301,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, from common.Address, to commo
 				value, _ = uint256.FromBig(action.Value.ToInt())
 			}
 		}
-		if callType == vm.STATICCALLT {
+		if typ == vm.STATICCALL {
 			value = uint256.NewInt(0)
 		}
 	}
@@ -316,14 +316,14 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, from common.Address, to commo
 		trace.Action = &action
 	} else {
 		action := CallTraceAction{}
-		switch callType {
-		case vm.CALLT:
+		switch typ {
+		case vm.CALL:
 			action.CallType = CALL
-		case vm.CALLCODET:
+		case vm.CALLCODE:
 			action.CallType = CALLCODE
-		case vm.DELEGATECALLT:
+		case vm.DELEGATECALL:
 			action.CallType = DELEGATECALL
-		case vm.STATICCALLT:
+		case vm.STATICCALL:
 			action.CallType = STATICCALL
 		}
 		action.From = from
@@ -337,12 +337,12 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, from common.Address, to commo
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ot.captureStartOrEnter(false /* deep */, from, to, precompile, create, callType, input, gas, value, code)
+func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
-func (ot *OeTracer) CaptureEnter(from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ot.captureStartOrEnter(true /* deep */, from, to, precompile, create, callType, input, gas, value, code)
+func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
 }
 
 func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas uint64, t time.Duration, err error) {
