@@ -1253,6 +1253,9 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
 	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
 	aggSteps := agg.MakeSteps()
+	for _, as := range aggSteps {
+		as.Clone()
+	}
 	for step, as := range aggSteps {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
 		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
