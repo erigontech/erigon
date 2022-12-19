@@ -1181,6 +1181,9 @@ func (ac *Aggregator22Context) ReadAccountStorageNoStateWithRecent(addr []byte, 
 	copy(ac.keyBuf[len(addr):], loc)
 	return ac.storage.GetNoStateWithRecent(ac.keyBuf, txNum, ac.tx)
 }
+func (ac *Aggregator22Context) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64) ([]byte, bool, error) {
+	return ac.storage.GetNoStateWithRecent(key, txNum, ac.tx)
+}
 
 func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {

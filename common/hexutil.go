@@ -16,12 +16,33 @@
 
 package common
 
-import "encoding/hex"
+import (
+	"encoding/binary"
+	"encoding/hex"
+)
 
 func MustDecodeHex(in string) []byte {
+	in = strip0x(in)
+	if len(in)%2 == 1 {
+		in = "0" + in
+	}
 	payload, err := hex.DecodeString(in)
 	if err != nil {
 		panic(err)
 	}
 	return payload
+}
+
+func strip0x(str string) string {
+	if len(str) >= 2 && str[0] == '0' && (str[1] == 'x' || str[1] == 'X') {
+		return str[2:]
+	}
+	return str
+}
+
+// EncodeTs encodes a TimeStamp (BlockNumber or TxNumber or other uin64) as big endian
+func EncodeTs(number uint64) []byte {
+	enc := make([]byte, 8)
+	binary.BigEndian.PutUint64(enc, number)
+	return enc
 }
