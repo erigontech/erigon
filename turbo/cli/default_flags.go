@@ -136,6 +136,7 @@ var DefaultFlags = []cli.Flag{
 	&HealthCheckFlag,
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
+	&utils.HeimdallgRPCAddressFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideTerminalTotalDifficulty,
 	&utils.OverrideMergeNetsplitBlock,
