@@ -15,7 +15,9 @@ package sentinel
 
 import (
 	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
+	"math/big"
 	"net"
 	"strings"
 
@@ -102,7 +104,7 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 }
 
 // will iterate onto randoms nodes until our sentinel connects to one
-func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, err error) {
+func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error) {
 	var sub *GossipSubscription
 	for t, currSub := range s.subManager.subscriptions {
 		if strings.Contains(t, topic) {
@@ -111,17 +113,13 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 	}
 
 	if sub == nil {
-		return nil, fmt.Errorf("no peers")
+		return peer.ID(""), fmt.Errorf("no peers")
 	}
 
 	validPeerList := sub.topic.ListPeers()
-
 	if len(validPeerList) == 0 {
-		return nil, fmt.Errorf("no peers")
+		return peer.ID(""), fmt.Errorf("no peers")
 	}
-
-	iterator := s.listener.RandomNodes()
-	defer iterator.Close()
 
 	connectedPeer := false
 	maxTries := 20
@@ -131,24 +129,28 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo *peer.AddrInfo, er
 			break
 		}
 		tries++
-		if exists := iterator.Next(); !exists {
-			break
+		index := int64(0)
+		if len(validPeerList) > 1 {
+			n, err := rand.Int(rand.Reader, big.NewInt(int64(len(validPeerList)-1)))
+			if err != nil {
+				panic(err)
+			}
+			index = n.Int64()
 		}
 
-		node := iterator.Node()
-		peerInfo, _, err = convertToAddrInfo(node)
-		if !isPeerWhitelisted(peerInfo.ID, validPeerList) {
+		node := validPeerList[index]
+		if !isPeerWhitelisted(node, validPeerList) {
 			continue
 		}
 
-		if !s.peers.IsPeerAvaiable(peerInfo.ID) {
+		if !s.peers.IsPeerAvaiable(node) {
 			continue
 		}
 
-		return peerInfo, nil
+		return node, nil
 	}
 
-	return nil, fmt.Errorf("failed to connect to peer")
+	return peer.ID(""), fmt.Errorf("failed to connect to peer")
 
 }
 func isPeerWhitelisted(peer peer.ID, whitelist []peer.ID) bool {

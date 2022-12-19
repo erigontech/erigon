@@ -40,16 +40,16 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 
 func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 	var (
-		peerInfo *peer.AddrInfo
-		err      error
+		pid peer.ID
+		err error
 	)
 	if strings.Contains(topic, "light_client") && !strings.Contains(topic, "bootstrap") {
-		peerInfo, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
+		pid, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
 	} else {
-		peerInfo, err = connectToRandomPeer(s, string(BeaconBlockTopic))
+		pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
 	}
 	if err != nil {
 		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
-	return peerInfo.ID, nil
+	return pid, nil
 }

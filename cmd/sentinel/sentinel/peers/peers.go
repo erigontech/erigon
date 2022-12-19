@@ -30,7 +30,7 @@ const (
 )
 
 // Time to wait before asking the same peer again.
-const reqRetryTime = 450 * time.Millisecond
+const reqRetryTime = 600 * time.Millisecond
 
 // Record Peer data.
 type Peer struct {
@@ -81,8 +81,7 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
-		p.BanBadPeer(pid)
-		p.penalties.Remove(pid)
+		p.DisconnectPeer(pid)
 	}
 }
 
@@ -132,12 +131,8 @@ func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
 func (p *Peers) PeerFinishRequest(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	peer, ok := p.peers[pid]
-	if !ok {
-		return
-	}
 	p.peers[pid] = Peer{
 		busy:        false,
-		lastQueried: peer.lastQueried,
+		lastQueried: time.Now(),
 	}
 }

@@ -69,19 +69,17 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			pid, err := s.sentinel.RandomPeer(req.Topic)
 			if err != nil {
 				// Wait a bit to not exhaust CPU and skip.
-				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 			s.sentinel.Peers().PeerDoRequest(pid)
 			go func() {
-				defer s.sentinel.Peers().PeerFinishRequest(pid)
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
+				s.sentinel.Peers().PeerFinishRequest(pid)
 				if err != nil {
-					//fmt.Println(err)
 					s.sentinel.Peers().Penalize(pid)
 					return
 				} else if isError {
-					s.sentinel.Peers().BanBadPeer(pid)
+					s.sentinel.Peers().DisconnectPeer(pid)
 				}
 				doneCh <- &sentinelrpc.ResponseData{
 					Data:  data,
