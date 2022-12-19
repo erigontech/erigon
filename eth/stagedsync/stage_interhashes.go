@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/bits"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -263,7 +264,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	}
 	log.Trace(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(from + 1)
+	startkey := common2.EncodeTs(from + 1)
 
 	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
@@ -440,7 +441,7 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(to + 1)
+	startkey := common2.EncodeTs(to + 1)
 
 	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte

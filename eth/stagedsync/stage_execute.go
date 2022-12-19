@@ -691,7 +691,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	// Truncate CallTraceSet
-	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	keyStart := common.EncodeTs(u.UnwindPoint + 1)
 	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err

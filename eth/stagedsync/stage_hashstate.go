@@ -615,7 +615,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 	}
 
-	startkey := dbutils.EncodeBlockNumber(from + 1)
+	startkey := libcommon.EncodeTs(from + 1)
 
 	var loadBucket string
 	var extract etl.ExtractFunc
@@ -770,7 +770,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 
-	startkey := dbutils.EncodeBlockNumber(to + 1)
+	startkey := libcommon.EncodeTs(to + 1)
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = etl.IdentityLoadFunc

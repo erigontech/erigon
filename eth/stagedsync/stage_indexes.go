@@ -290,7 +290,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 	defer logEvery.Stop()
 
 	updates := map[string]struct{}{}
-	if err := historyv2.ForEach(db, csBucket, dbutils.EncodeBlockNumber(to), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(db, csBucket, libcommon.EncodeTs(to), func(blockN uint64, k, v []byte) error {
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
