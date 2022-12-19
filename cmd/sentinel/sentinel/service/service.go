@@ -82,9 +82,12 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				} else if isError {
 					s.sentinel.Peers().DisconnectPeer(pid)
 				}
-				doneCh <- &sentinelrpc.ResponseData{
+				select {
+				case doneCh <- &sentinelrpc.ResponseData{
 					Data:  data,
 					Error: isError,
+				}:
+				default:
 				}
 			}()
 		case resp := <-doneCh:
