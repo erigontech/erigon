@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -148,7 +149,7 @@ func init() {
 
 func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
-	chainConfig, historyV3, pm := fromdb.ChainConfig(db), fromdb.HistoryV3(db), fromdb.PruneMode(db)
+	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
 	_, agg := allSnapshots(db)
 
@@ -422,7 +423,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
-	historyV3 := fromdb.HistoryV3(db)
+	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
@@ -506,7 +507,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	sync.EnableStages(stages.Execution)
 	var batchSize datasize.ByteSize
 	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-	historyV3, err := rawdb.HistoryV3.Enabled(tx)
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err
 	}

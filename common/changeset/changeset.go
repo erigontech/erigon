@@ -228,14 +228,16 @@ func Truncate(tx kv.RwTx, from uint64) error {
 	return nil
 }
 
-var Mapper = map[string]struct {
+type CSMapper struct {
 	IndexBucket   string
 	IndexChunkKey func([]byte, uint64) []byte
 	Find          func(cursor kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error)
 	New           func() *ChangeSet
 	Encode        Encoder
 	Decode        Decoder
-}{
+}
+
+var Mapper = map[string]CSMapper{
 	kv.AccountChangeSet: {
 		IndexBucket:   kv.AccountsHistory,
 		IndexChunkKey: dbutils.AccountIndexChunkKey,

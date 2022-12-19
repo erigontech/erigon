@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -135,7 +136,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 			}
 		}
 
-		historyV3, err := rawdb.HistoryV3.Enabled(tx)
+		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}
