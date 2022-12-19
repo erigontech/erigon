@@ -9,9 +9,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -83,7 +83,7 @@ func TestExec(t *testing.T) {
 		err := stages.SaveStageProgress(tx, stages.Execution, 20)
 		require.NoError(err)
 
-		available, err := changeset.AvailableFrom(tx)
+		available, err := historyv2.AvailableFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(1), available)
 
@@ -92,10 +92,10 @@ func TestExec(t *testing.T) {
 		err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: prune.Distance(100), Receipts: prune.Distance(101), CallTraces: prune.Distance(200)}}, ctx, false)
 		require.NoError(err)
 
-		available, err = changeset.AvailableFrom(tx)
+		available, err = historyv2.AvailableFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(1), available)
-		available, err = changeset.AvailableStorageFrom(tx)
+		available, err = historyv2.AvailableStorageFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(1), available)
 
@@ -104,10 +104,10 @@ func TestExec(t *testing.T) {
 			Receipts: prune.Distance(10), CallTraces: prune.Distance(15)}}, ctx, false)
 		require.NoError(err)
 
-		available, err = changeset.AvailableFrom(tx)
+		available, err = historyv2.AvailableFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(15), available)
-		available, err = changeset.AvailableStorageFrom(tx)
+		available, err = historyv2.AvailableStorageFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(15), available)
 
@@ -116,10 +116,10 @@ func TestExec(t *testing.T) {
 			Receipts: prune.Distance(15), CallTraces: prune.Distance(25)}}, ctx, false)
 		require.NoError(err)
 
-		available, err = changeset.AvailableFrom(tx)
+		available, err = historyv2.AvailableFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(15), available)
-		available, err = changeset.AvailableStorageFrom(tx)
+		available, err = historyv2.AvailableStorageFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(15), available)
 	})

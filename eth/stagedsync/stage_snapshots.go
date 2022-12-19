@@ -18,8 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -216,7 +216,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 					return err
 				}
-				if err := h2n.Collect(blockHash[:], dbutils.EncodeBlockNumber(blockNum)); err != nil {
+				if err := h2n.Collect(blockHash[:], libcommon.EncodeTs(blockNum)); err != nil {
 					return err
 				}
 				select {
@@ -256,7 +256,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				return fmt.Errorf("snapshot not found for block: %d", blocksAvailable)
 			}
 
-			historyV3, err := rawdb.HistoryV3.Enabled(tx)
+			historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 			if err != nil {
 				return err
 			}

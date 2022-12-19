@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"sync"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -78,7 +79,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
+	if err := tx.ForEach(kv.BlockBody, common2.EncodeTs(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
 
@@ -135,7 +136,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 			}
 		}
 
-		historyV3, err := rawdb.HistoryV3.Enabled(tx)
+		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}
