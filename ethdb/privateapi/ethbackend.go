@@ -532,6 +532,59 @@ func (s *EthBackendServer) EngineGetPayloadV3(ctx context.Context, req *remote.E
 	return &types2.ExecutionPayloadV3{Payload: &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, ExcessDataGas: excessDataGasReply}, nil
 }
 
+// GetBlobsBundleV1 returns a bundle of all blobs and theirf corresponding KZG commitments by payload id
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	log.Debug("[GetBlobsBundleV1] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[GetBlobsBundleV1] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	blobsBundle := &types2.BlobsBundleV1{
+		BlockHash: gointerfaces.ConvertHashToH256(block.Header().Hash()),
+	}
+	// TODO: Adapt the geth code below to finish the implementation after support for
+	// BlobWrapData() is added
+	/*
+		for i, tx := range block.Transactions() {
+			if tx.Type() != types.BlobTxType {
+				continue
+			}
+			versionedHashes, kzgs, blobs, aggProof := tx.BlobWrapData()
+			if len(versionedHashes) != len(kzgs) || len(versionedHashes) != len(blobs) {
+				return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d)"+
+					" / versioned hashes (%d)", i, blockHash, len(blobs), len(kzgs), len(versionedHashes))
+			}
+			var zProof types.KZGProof
+			if zProof == aggProof {
+				return nil, errors.New("aggregated proof is not available in blobs")
+			}
+			blobsBundle.Blobs = append(blobsBundle.Blobs, blobs...)
+			blobsBundle.KZGs = append(blobsBundle.KZGs, kzgs...)
+		}
+	*/
+	return blobsBundle, nil
+}
+
 // engineGetPayload retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) engineGetPayload(req *remote.EngineGetPayloadRequest) (*types.Block, *types2.ExecutionPayload, error) {
 	if !s.proposing {

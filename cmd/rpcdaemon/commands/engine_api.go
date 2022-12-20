@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -57,6 +58,26 @@ type ExecutionPayloadV2 struct {
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
 }
 
+// ExecutionPayloadV3 represents an execution payload (aka block) with withdrawals & excess data gas
+type ExecutionPayloadV3 struct {
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
+	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
+	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
+	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
+	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
+	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
+	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
+	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
+	ExcessDataGas *hexutil.Big        `json:"excessDataGas" gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
+	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
+}
+
 // PayloadAttributes represent the attributes required to start assembling a payload
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
@@ -86,14 +107,24 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
+// BlobsBundleV1 holds the blobs of an execution payload, to be retrieved separately
+type BlobsBundleV1 struct {
+	BlockHash common.Hash           `json:"blockHash"     gencodec:"required"`
+	KZGs      []types.KZGCommitment `json:"kzgs"      gencodec:"required"`
+	Blobs     []types.Blob          `json:"blobs"      gencodec:"required"`
+}
+
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayloadV1) (map[string]interface{}, error)
 	NewPayloadV2(context.Context, *ExecutionPayloadV2) (map[string]interface{}, error)
+	NewPayloadV3(context.Context, *ExecutionPayloadV3) (map[string]interface{}, error)
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV1) (map[string]interface{}, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV2) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV1, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV2, error)
+	GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV3, error)
+	GetBlobsBundleV1(ctx context.Context, payloadID hexutil.Bytes) (*BlobsBundleV1, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 }
 
@@ -332,6 +363,66 @@ func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload
 	return convertPayloadStatus(ctx, e.db, res)
 }
 
+// NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & excess data gas.
+// See https://github.com/ethereum/execution-apis/blob/main/src/engine/specification.md#engine_newpayloadv3
+func (e *EngineImpl) NewPayloadV3(ctx context.Context, payload *ExecutionPayloadV3) (map[string]interface{}, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+	log.Debug("Received NewPayloadV3", "height", uint64(payload.BlockNumber), "hash", payload.BlockHash)
+
+	var baseFee *uint256.Int
+	if payload.BaseFeePerGas != nil {
+		var overflow bool
+		baseFee, overflow = uint256.FromBig((*big.Int)(payload.BaseFeePerGas))
+		if overflow {
+			log.Warn("NewPayload BaseFeePerGas overflow")
+			return nil, fmt.Errorf("invalid request")
+		}
+	}
+
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([][]byte, len(payload.Transactions))
+	for i, transaction := range payload.Transactions {
+		transactions[i] = transaction
+	}
+	ep := &types2.ExecutionPayload{
+		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
+		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
+		StateRoot:     gointerfaces.ConvertHashToH256(payload.StateRoot),
+		ReceiptRoot:   gointerfaces.ConvertHashToH256(payload.ReceiptsRoot),
+		LogsBloom:     gointerfaces.ConvertBytesToH2048(payload.LogsBloom),
+		PrevRandao:    gointerfaces.ConvertHashToH256(payload.PrevRandao),
+		BlockNumber:   uint64(payload.BlockNumber),
+		GasLimit:      uint64(payload.GasLimit),
+		GasUsed:       uint64(payload.GasUsed),
+		Timestamp:     uint64(payload.Timestamp),
+		ExtraData:     payload.ExtraData,
+		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
+		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
+		Transactions:  transactions,
+	}
+	withdrawals := privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
+	var excessDataGas *uint256.Int
+	if payload.ExcessDataGas != nil {
+		var overflow bool
+		excessDataGas, overflow = uint256.FromBig((*big.Int)(payload.ExcessDataGas))
+		if overflow {
+			log.Warn("NewPayload ExcessDataGas overflow")
+			return nil, fmt.Errorf("invalid request")
+		}
+	}
+	edg := gointerfaces.ConvertUint256IntToH256(excessDataGas)
+
+	res, err := e.api.EngineNewPayloadV3(ctx, &types2.ExecutionPayloadV3{Payload: &types2.ExecutionPayloadV2{Payload: ep, Withdrawals: withdrawals}, ExcessDataGas: edg})
+	if err != nil {
+		log.Warn("NewPayloadV3", "err", err)
+		return nil, err
+	}
+	return convertPayloadStatus(ctx, e.db, res)
+}
+
 func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV1, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
@@ -418,6 +509,99 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) 
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 		Withdrawals:   privateapi.ConvertWithdrawalsFromRpc(ep.Withdrawals),
+	}, nil
+}
+
+func (e *EngineImpl) GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV3, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	log.Info("Received GetPayloadV3", "payloadId", decodedPayloadId)
+
+	ep, err := e.api.EngineGetPayloadV3(ctx, decodedPayloadId)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := ep.Payload.Payload
+	var bloom types.Bloom = gointerfaces.ConvertH2048ToBloom(payload.LogsBloom)
+
+	var baseFee *big.Int
+	if payload.BaseFeePerGas != nil {
+		baseFee = gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
+	}
+
+	var excessDataGas *big.Int
+	if ep.ExcessDataGas != nil {
+		excessDataGas = gointerfaces.ConvertH256ToUint256Int(ep.ExcessDataGas).ToBig()
+	}
+
+	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	transactions := make([]hexutil.Bytes, len(payload.Transactions))
+	for i, transaction := range payload.Transactions {
+		transactions[i] = transaction
+	}
+	return &ExecutionPayloadV3{
+		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payload.ReceiptRoot),
+		LogsBloom:     bloom[:],
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payload.PrevRandao),
+		BlockNumber:   hexutil.Uint64(payload.BlockNumber),
+		GasLimit:      hexutil.Uint64(payload.GasLimit),
+		GasUsed:       hexutil.Uint64(payload.GasUsed),
+		Timestamp:     hexutil.Uint64(payload.Timestamp),
+		ExtraData:     payload.ExtraData,
+		BaseFeePerGas: (*hexutil.Big)(baseFee),
+		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
+		Transactions:  transactions,
+		Withdrawals:   privateapi.ConvertWithdrawalsFromRpc(ep.Payload.Withdrawals),
+		ExcessDataGas: (*hexutil.Big)(excessDataGas),
+	}, nil
+}
+
+func (e *EngineImpl) GetBlobsBundleV1(ctx context.Context, payloadID hexutil.Bytes) (*BlobsBundleV1, error) {
+	if e.internalCL {
+		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
+		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
+	}
+
+	decodedPayloadId := binary.BigEndian.Uint64(payloadID)
+	log.Info("Received GetBlobsBundleV1", "payloadId", decodedPayloadId)
+
+	ep, err := e.api.EngineGetBlobsBundleV1(ctx, decodedPayloadId)
+	if err != nil {
+		return nil, err
+	}
+
+	kzgs := ep.GetKzgs()
+	blobs := ep.GetBlobs()
+	if len(kzgs) != len(blobs) {
+		return nil, fmt.Errorf("should have same number of kzgs and blobs, got %v vs %v", len(kzgs), len(blobs))
+	}
+	replyKzgs := make([]types.KZGCommitment, len(kzgs))
+	replyBlobs := make([]types.Blob, len(blobs))
+	for i := range kzgs {
+		copy(replyKzgs[i][:], kzgs[i])
+		blob := blobs[i]
+		// The engine-provided blobs are "flattened" into a single byte array, so we need to parse
+		// out the individual field elements for the reply type.
+		if len(blob) != params.FieldElementsPerBlob*32 {
+			return nil, fmt.Errorf("Got blob of unexpected length: %v", len(blob))
+		}
+		for j := 0; j < params.FieldElementsPerBlob; j++ {
+			offset := j * 32
+			copy(replyBlobs[i][j][:], blobs[i][offset:offset+32])
+		}
+	}
+	return &BlobsBundleV1{
+		BlockHash: gointerfaces.ConvertH256ToHash(ep.BlockHash),
+		KZGs:      replyKzgs,
+		Blobs:     replyBlobs,
 	}, nil
 }
 
