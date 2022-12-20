@@ -569,6 +569,13 @@ func (it *InvertedIterator) Next() uint64 {
 	it.advance()
 	return n
 }
+func (it *InvertedIterator) ToBitamp() *roaring64.Bitmap {
+	bm := bitmapdb.NewBitmap64()
+	for it.HasNext() {
+		bm.Add(it.Next())
+	}
+	return bm
+}
 
 type InvertedIndexContext struct {
 	ii    *InvertedIndex

@@ -24,6 +24,8 @@ const (
 	Addr = 20
 	// BlockNumberLen length of uint64 big endian
 	BlockNum = 8
+	// Ts TimeStamp (BlockNum, TxNum or any other uint64 equivalent of Time)
+	Ts = 8
 	// Incarnation length of uint64 for contract incarnations
 	Incarnation = 8
 )

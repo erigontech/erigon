@@ -26,6 +26,7 @@ import (
 //Naming:
 //  ts - TimeStamp
 //  tx - Database Transaction
+//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
 //  RoTx - Read-Only Database Transaction
 //  RwTx - Read-Write Database Transaction
 //  k - key
