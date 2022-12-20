@@ -2,19 +2,20 @@ package temporal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 //Naming:
 //  ts - TimeStamp
 //  tx - Database Transaction
+//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
 //  RoTx - Read-Only Database Transaction
 //  RwTx - Read-Write Database Transaction
 //  k - key
@@ -34,20 +35,20 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (*Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{kv: kvTx, agg: db.agg.MakeContext()}
+	tx := &Tx{Tx: kvTx, agg: db.agg.MakeContext()}
 	if db.hitoryV3 {
 
 	} else {
-		tx.accHistoryC, _ = tx.kv.Cursor(kv.AccountsHistory)
-		tx.storageHistoryC, _ = tx.kv.Cursor(kv.StorageHistory)
-		tx.accChangesC, _ = tx.kv.CursorDupSort(kv.AccountChangeSet)
-		tx.storageChangesC, _ = tx.kv.CursorDupSort(kv.StorageChangeSet)
+		tx.accHistoryC, _ = tx.Cursor(kv.AccountsHistory)
+		tx.storageHistoryC, _ = tx.Cursor(kv.StorageHistory)
+		tx.accChangesC, _ = tx.CursorDupSort(kv.AccountChangeSet)
+		tx.storageChangesC, _ = tx.CursorDupSort(kv.StorageChangeSet)
 	}
 	return tx, nil
 }
 
 type Tx struct {
-	kv  kv.Tx
+	kv.Tx
 	agg *state.Aggregator22Context
 
 	//HistoryV2 fields
@@ -90,23 +91,14 @@ func (tx *Tx) GetNoState(name History, key []byte, ts uint64) (v []byte, ok bool
 	} else {
 		switch name {
 		case Accounts:
-			v, err = historyv2read.FindByHistory(tx.kv, tx.accHistoryC, tx.accChangesC, false, key, ts)
+			return historyv2.FindByHistory(tx.accHistoryC, tx.accChangesC, false, key, ts)
 		case Storage:
-			v, err = historyv2read.FindByHistory(tx.kv, tx.storageHistoryC, tx.storageChangesC, true, key, ts)
+			return historyv2.FindByHistory(tx.storageHistoryC, tx.storageChangesC, true, key, ts)
 		case Code:
 			panic("not implemented")
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-		// `nil`-value means "key was created"
-		if err != nil {
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				return nil, false, nil
-			} else {
-				return nil, false, err
-			}
-		}
-		return v, true, nil
 	}
 }
 
@@ -129,21 +121,38 @@ type It interface {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) InvertedIndexRange(name InvertedIdx, key []byte, fromTs, toTs uint64) (it It, err error) {
-	switch name {
-	case LogTopic:
-		t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case LogAddr:
-		t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case TracesFrom:
-		t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case TracesTo:
-		t := tx.agg.TraceToIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
+func (tx *Tx) InvertedIndexRange(name InvertedIdx, key []byte, fromTs, toTs uint64) (bitmap *roaring64.Bitmap, err error) {
+	if tx.hitoryV3 {
+		switch name {
+		case LogTopic:
+			t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
+			return t.ToBitamp(), nil
+		case LogAddr:
+			t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
+			return t.ToBitamp(), nil
+		case TracesFrom:
+			t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx)
+			return t.ToBitamp(), nil
+		case TracesTo:
+			t := tx.agg.TraceToIterator(key, fromTs, toTs, tx)
+			return t.ToBitamp(), nil
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
+	} else {
+		var table string
+		switch name {
+		case LogTopic:
+			table = kv.LogTopicIndex
+		case LogAddr:
+			table = kv.LogAddressIdx
+		case TracesFrom:
+			table = kv.TracesFromIdx
+		case TracesTo:
+			table = kv.TracesToIdx
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
+		return bitmapdb.Get64(tx, table, key, fromTs, toTs)
 	}
 }

@@ -106,7 +106,7 @@ func (hr *HistoryReaderInc) ReadAccountData(address common.Address) (*accounts.A
 		return nil, nil
 	}
 	var a accounts.Account
-	if err = accounts.Deserialise2(&a, enc); err != nil {
+	if err = accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, err
 	}
 	if hr.trace {
