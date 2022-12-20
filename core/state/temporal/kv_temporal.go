@@ -28,6 +28,7 @@ type DB struct {
 }
 
 func New(kv kv.RwDB, agg *state.Aggregator22) *DB {
+	fmt.Printf("asdf: %t\n", kvcfg.HistoryV3.FromDB(kv))
 	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv)}
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -35,7 +36,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{Tx: kvTx}
+	tx := &Tx{Tx: kvTx, hitoryV3: db.hitoryV3}
 	if db.hitoryV3 {
 		tx.agg = db.agg.MakeContext()
 	} else {

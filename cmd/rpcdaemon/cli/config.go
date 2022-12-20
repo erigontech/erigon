@@ -385,6 +385,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				return nil
 			})
 			if histV3Enabled {
+				log.Info("HistoryV3", "enable", histV3Enabled)
 				db = temporal.New(rwKv, agg)
 			}
 		}
