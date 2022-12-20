@@ -150,7 +150,8 @@ func init() {
 }
 
 func doWarmup(ctx context.Context, chaindata string, bucket string) error {
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(100_000)).Readonly().MustOpen()
+	const ThreadsLimit = 5_000
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).Readonly().MustOpen()
 	defer db.Close()
 
 	var total uint64
@@ -165,6 +166,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 	defer logEvery.Stop()
 
 	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(ThreadsLimit)
 	for i := 0; i < 256; i++ {
 		for j := 0; j < 256; j++ {
 			i := i
