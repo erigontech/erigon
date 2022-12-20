@@ -566,8 +566,6 @@ github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3PYPwICLl+/9oulQauOuETfgFvhBDffs0=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20221216104209-125788cbacf5 h1:iDh4fZ+rYJnu++nBypatQ19fSzhDobNqEqFt+yMEM4Y=
-github.com/ledgerwatch/erigon-lib v0.0.0-20221216104209-125788cbacf5/go.mod h1:5GCPOzxAshLF7f0wrMZu2Bdq0qqIiMcIubM9n+25gGo=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221216083351-ecfd28d911aa h1:y108r7dJ42t7GLxNiSeiKApO4d4C9Y9ppbbRYsWl98I=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221216083351-ecfd28d911aa/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.6.0 h1:JBUSK1epPyutUrz7KYDTcJtQLEHnehECRpKbM1ugy5M=
@@ -864,6 +862,8 @@ github.com/raulk/go-watchdog v1.3.0/go.mod h1:fIvOnLbF0b0ZwkB9YU4mOW9Did//4vPZtD
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 h1:OdAsTTz6OkFY5QxjkYwrChwuRruF69c169dPK26NUlk=
 github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+github.com/roberto-bayardo/erigon-lib v0.0.0-20221220032111-191cf182196c h1:eev0kLdxiUrAHHP3LUmjXoYQynuFxrDP1kPhMup34TI=
+github.com/roberto-bayardo/erigon-lib v0.0.0-20221220032111-191cf182196c/go.mod h1:5GCPOzxAshLF7f0wrMZu2Bdq0qqIiMcIubM9n+25gGo=
 github.com/rogpeppe/fastuuid v0.0.0-20150106093220-6724a57986af/go.mod h1:XWv6SoW27p1b0cqNHllgS5HIMJraePCO15w5zCzIWYg=
 github.com/rogpeppe/fastuuid v1.2.0/go.mod h1:jVj6XXZzXRy/MSR5jhDC/2q6DgLz+nrA6LYCDYWNEvQ=
 github.com/rogpeppe/go-internal v1.3.0/go.mod h1:M8bDsm7K2OlrFYOpmOWEs/qY81heoFRclV5y23lUDJ4=

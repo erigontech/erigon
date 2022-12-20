@@ -244,7 +244,7 @@ func getNextTransactions(
 		counter := 0
 		for !onTime && counter < 1000 {
 			remainingGas := header.GasLimit - header.GasUsed
-			if onTime, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas); err != nil {
+			if onTime, _, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, [][32]byte{}); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)
