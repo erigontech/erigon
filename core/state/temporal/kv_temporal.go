@@ -99,7 +99,6 @@ func (tx *Tx) GetNoState(name History, key []byte, ts uint64) (v []byte, ok bool
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-		return v, true, nil
 	}
 }
 
