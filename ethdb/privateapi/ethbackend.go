@@ -280,32 +280,38 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 }
 
 func (s *EthBackendServer) EngineNewPayloadV1(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
-	return s.engineNewPayload(req, nil)
+	return s.engineNewPayload(req, nil, nil)
 }
 
 func (s *EthBackendServer) EngineNewPayloadV2(ctx context.Context, req *types2.ExecutionPayloadV2) (*remote.EnginePayloadStatus, error) {
-	return s.engineNewPayload(req.Payload, ConvertWithdrawalsFromRpc(req.Withdrawals))
+	return s.engineNewPayload(req.Payload, ConvertWithdrawalsFromRpc(req.Withdrawals), nil)
+}
+
+func (s *EthBackendServer) EngineNewPayloadV3(ctx context.Context, req *types2.ExecutionPayloadV3) (*remote.EnginePayloadStatus, error) {
+	edg := gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+	return s.engineNewPayload(req.Payload.Payload, ConvertWithdrawalsFromRpc(req.Payload.Withdrawals), edg)
 }
 
 // engineNewPayload validates and possibly executes payload
-func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdrawals []*types.Withdrawal) (*remote.EnginePayloadStatus, error) {
+func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdrawals []*types.Withdrawal, excessDataGas *big.Int) (*remote.EnginePayloadStatus, error) {
 	header := types.Header{
-		ParentHash:  gointerfaces.ConvertH256ToHash(req.ParentHash),
-		Coinbase:    gointerfaces.ConvertH160toAddress(req.Coinbase),
-		Root:        gointerfaces.ConvertH256ToHash(req.StateRoot),
-		Bloom:       gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
-		BaseFee:     gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig(),
-		Extra:       req.ExtraData,
-		Number:      big.NewInt(int64(req.BlockNumber)),
-		GasUsed:     req.GasUsed,
-		GasLimit:    req.GasLimit,
-		Time:        req.Timestamp,
-		MixDigest:   gointerfaces.ConvertH256ToHash(req.PrevRandao),
-		UncleHash:   types.EmptyUncleHash,
-		Difficulty:  serenity.SerenityDifficulty,
-		Nonce:       serenity.SerenityNonce,
-		ReceiptHash: gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
-		TxHash:      types.DeriveSha(types.BinaryTransactions(req.Transactions)),
+		ParentHash:    gointerfaces.ConvertH256ToHash(req.ParentHash),
+		Coinbase:      gointerfaces.ConvertH160toAddress(req.Coinbase),
+		Root:          gointerfaces.ConvertH256ToHash(req.StateRoot),
+		Bloom:         gointerfaces.ConvertH2048ToBloom(req.LogsBloom),
+		BaseFee:       gointerfaces.ConvertH256ToUint256Int(req.BaseFeePerGas).ToBig(),
+		ExcessDataGas: excessDataGas,
+		Extra:         req.ExtraData,
+		Number:        big.NewInt(int64(req.BlockNumber)),
+		GasUsed:       req.GasUsed,
+		GasLimit:      req.GasLimit,
+		Time:          req.Timestamp,
+		MixDigest:     gointerfaces.ConvertH256ToHash(req.PrevRandao),
+		UncleHash:     types.EmptyUncleHash,
+		Difficulty:    serenity.SerenityDifficulty,
+		Nonce:         serenity.SerenityNonce,
+		ReceiptHash:   gointerfaces.ConvertH256ToHash(req.ReceiptRoot),
+		TxHash:        types.DeriveSha(types.BinaryTransactions(req.Transactions)),
 	}
 	if withdrawals != nil {
 		wh := types.DeriveSha(types.Withdrawals(withdrawals))
