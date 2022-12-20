@@ -871,6 +871,8 @@ func NewP2PConfig(
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth66")
 	case eth.ETH67:
 		enodeDBPath = filepath.Join(dirs.Nodes, "eth67")
+	case eth.ETH68:
+		enodeDBPath = filepath.Join(dirs.Nodes, "eth68")
 	default:
 		return nil, fmt.Errorf("unknown protocol: %v", protocol)
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	mapset "github.com/deckarep/golang-set"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -266,7 +267,37 @@ type MultiClient struct {
 	logPeerInfo   bool
 	passivePeers  bool
 
-	historyV3 bool
+	historyV3  bool
+	knownVotes *knownCache // Set of vote hashes known to be known by this peer
+}
+
+// knownCache is a cache for known hashes.
+type knownCache struct {
+	hashes mapset.Set
+	max    int
+}
+
+// max is a helper function which returns the larger of the two given integers.
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// Add adds a list of elements to the set.
+func (k *knownCache) Add(hashes ...common.Hash) {
+	for k.hashes.Cardinality() > max(0, k.max-len(hashes)) {
+		k.hashes.Pop()
+	}
+	for _, hash := range hashes {
+		k.hashes.Add(hash)
+	}
+}
+
+// Contains returns whether the given item is in the set.
+func (k *knownCache) Contains(hash common.Hash) bool {
+	return k.hashes.Contains(hash)
 }
 
 func NewMultiClient(
@@ -389,6 +420,44 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 	// Now stream is at the BlockHeadersPacket, which is list of headers
 
 	return cs.blockHeaders(ctx, pkt.BlockHeadersPacket, rlpStream, in.PeerId, sentry)
+}
+
+func (cs *MultiClient) voteMessage68(ctx context.Context, in *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
+	// Parse the entire packet from scratch
+	var pkt eth.VotesPacket
+	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
+		return fmt.Errorf("decode VoteMessage68: %w", err)
+	}
+
+	if err := rlp.DecodeBytes(in.Data, &pkt); err != nil {
+		return fmt.Errorf("decode VoteMessage68: %w", err)
+	}
+	for _, vote := range pkt.Votes {
+		voteHash := vote.Hash()
+		if cs.knownVotes.Contains(voteHash) {
+			continue
+		}
+		cs.knownVotes.Add(voteHash)
+		b, err := rlp.EncodeToBytes(&pkt)
+		if err != nil {
+			return fmt.Errorf("encode header request: %w", err)
+		}
+		outreq := proto_sentry.SendMessageByIdRequest{
+			PeerId: in.PeerId,
+			Data: &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_VOTE_MESSAGE_68,
+				Data: b,
+			},
+		}
+
+		if _, err = sentry.SendMessageById(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+			if isPeerNotFoundErr(err) {
+				continue
+			}
+			return fmt.Errorf("send voteMessage: %w", err)
+		}
+	}
+	return nil
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
@@ -741,6 +810,9 @@ func (cs *MultiClient) handleInboundMessage(ctx context.Context, inreq *proto_se
 		return cs.receipts66(ctx, inreq, sentry)
 	case proto_sentry.MessageId_GET_RECEIPTS_66:
 		return cs.getReceipts66(ctx, inreq, sentry)
+	// === voteMessage ===
+	case proto_sentry.MessageId_VOTE_MESSAGE_68:
+		return cs.voteMessage68(ctx, inreq, sentry)
 	default:
 		return fmt.Errorf("not implemented for message Id: %s", inreq.Id)
 	}

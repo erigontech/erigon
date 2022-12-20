@@ -338,6 +338,57 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	return fields, nil
 }
 
+/*TODO
+// GetJustifiedHeader returns the highest justified block before the input block.
+func (s *PublicBlockChainAPI) GetJustifiedHeader(ctx context.Context, blockNrOrHash *rpc.BlockNumberOrHash) (*types.Header, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	// Retrieve the block to act as the gas ceiling
+	header, err := s.b.HeaderByNumberOrHash(ctx, bNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errors.New("block header not found")
+	}
+
+	if posa, ok := s.b.Engine().(consensus.PoSA); ok {
+		return posa.GetJustifiedHeader(s.b.Chain(), header), nil
+	}
+
+	// Not support.
+	return nil, nil
+}
+*/
+/*
+// GetFinalizedHeader returns the highest finalized block header before the input block.
+func (s *PublicBlockChainAPI) GetFinalizedHeader(ctx context.Context, blockNrOrHash *rpc.BlockNumberOrHash) (*types.Header, error) {
+	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	if blockNrOrHash != nil {
+		bNrOrHash = *blockNrOrHash
+	}
+
+	// Retrieve the block to act as the gas ceiling
+	header, err := s.b.HeaderByNumberOrHash(ctx, bNrOrHash)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errors.New("block header not found")
+	}
+
+	if posa, ok := s.b.Engine().(consensus.PoSA); ok {
+		return posa.GetFinalizedHeader(s.b.Chain(), header, types.NaturallyFinalizedDist), nil
+	}
+
+	// Not support.
+	return nil, nil
+}
+*/
+
 /*
 
 // rpcMarshalHeader uses the generalized output filler, then adds the total difficulty field, which requires
