@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 )
 
@@ -155,7 +156,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		sig := TypeAnnotation{
 			Input:          b[idx+i*4],
 			Output:         b[idx+i*4+1],
-			MaxStackHeight: uint16(parseUint16(b[idx+i*4+2:])),
+			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
 		}
 		if sig.MaxStackHeight > 1024 {
 			return fmt.Errorf("type annotation %d max stack height must not exceed 1024", i)
@@ -196,7 +197,7 @@ func (c *Container) ValidateCode() error {
 
 // parseSection decodes a (kind, size) pair from an EOF header.
 func parseSection(b []byte, idx int) (kind, size int) {
-	return int(b[idx]), parseUint16(b[idx+1:])
+	return int(b[idx]), int(binary.BigEndian.Uint16(b[idx+1:]))
 }
 
 // parseSectionList decodes a (kind, len, []codeSize) section list from an EOF
@@ -207,19 +208,12 @@ func parseSectionList(b []byte, idx int) (kind int, list []int) {
 
 // parseList decodes a list of uint16..
 func parseList(b []byte, idx int) []int {
-	count := parseUint16(b[idx:])
+	count := int(binary.BigEndian.Uint16(b[idx:]))
 	list := make([]int, count)
 	for i := 0; i < count; i++ {
-		list[i] = parseUint16(b[idx+2*i+2:])
+		list[i] = int(binary.BigEndian.Uint16(b[idx+2*i+2:]))
 	}
 	return list
-}
-
-// parseUint16 parses a 16 bit unsigned integer.
-func parseUint16(b []byte) int {
-	size := uint16(b[0]) << 8
-	size += uint16(b[1])
-	return int(size)
 }
 
 // check returns if b[idx] == want after performing a bounds check.
