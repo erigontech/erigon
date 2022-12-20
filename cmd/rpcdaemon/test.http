@@ -20,8 +20,8 @@ Content-Type: application/json
   "jsonrpc": "2.0",
   "method": "eth_getBalance",
   "params": [
-    "0xfffa4763f94f7ad191b366a343092a5d1a47ed08",
-    "0xde84"
+    "0xa6DD2974B96e959F2c8930024451a30aFEC24203",
+    "0x291A6"
   ],
   "id": 1
 }
