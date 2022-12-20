@@ -516,6 +516,22 @@ func (s *EthBackendServer) EngineGetPayloadV2(ctx context.Context, req *remote.E
 	return &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, nil
 }
 
+func (s *EthBackendServer) EngineGetPayloadV3(ctx context.Context, req *remote.EngineGetPayloadRequest) (*types2.ExecutionPayloadV3, error) {
+	block, payload, err := s.engineGetPayload(req)
+	if err != nil {
+		return nil, err
+	}
+	withdrawals := ConvertWithdrawalsToRpc(block.Withdrawals())
+
+	var excessDataGasReply *types2.H256
+	if block.ExcessDataGas() != nil {
+		var excessDataGas uint256.Int
+		excessDataGas.SetFromBig(block.Header().BaseFee)
+		excessDataGasReply = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+	}
+	return &types2.ExecutionPayloadV3{Payload: &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, ExcessDataGas: excessDataGasReply}, nil
+}
+
 // engineGetPayload retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) engineGetPayload(req *remote.EngineGetPayloadRequest) (*types.Block, *types2.ExecutionPayload, error) {
 	if !s.proposing {
