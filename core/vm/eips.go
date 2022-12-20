@@ -211,7 +211,6 @@ func enableEOF(jt *JumpTable) {
 	jt[SELFDESTRUCT] = undefined
 	jt[JUMP] = undefined
 	jt[JUMPI] = undefined
-	jt[PC] = undefined
 
 	// New opcodes
 	jt[RJUMP] = &operation{
