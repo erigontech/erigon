@@ -672,7 +672,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, 
 			if len(v) == 0 {
 				return nil
 			}
-			if err := accounts.Deserialise2(&acc, v); err != nil {
+			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				return err
 			}
 
@@ -738,7 +738,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, 
 			}
 			return nil
 		}
-		if err := accounts.Deserialise2(&acc, v); err != nil {
+		if err := accounts.DeserialiseV3(&acc, v); err != nil {
 			return err
 		}
 		if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
