@@ -564,7 +564,7 @@ func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyRlp)
 
 	body := new(types.Body)
-	rlp.DecodeBytes([]byte(bstring), body)
+	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
 	require.Equal(2, len(body.Transactions))
@@ -578,7 +578,7 @@ func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes([]byte(bstring), body)
+	rlp.DecodeBytes(bstring, body)
 
 	require.Nil(body.Withdrawals)
 	require.Equal(uint32(2), body.TxAmount)
@@ -592,7 +592,7 @@ func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes([]byte(bstring), body)
+	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(2, len(body.Withdrawals))
@@ -607,7 +607,7 @@ func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
 	bstring, _ := hex.DecodeString(bodyForStorageRlp)
 
 	body := new(types.BodyForStorage)
-	rlp.DecodeBytes([]byte(bstring), body)
+	rlp.DecodeBytes(bstring, body)
 
 	require.NotNil(body.Withdrawals)
 	require.Equal(0, len(body.Withdrawals))
