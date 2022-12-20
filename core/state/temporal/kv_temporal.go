@@ -28,7 +28,6 @@ type DB struct {
 }
 
 func New(kv kv.RwDB, agg *state.Aggregator22) *DB {
-	fmt.Printf("asdf: %t\n", kvcfg.HistoryV3.FromDB(kv))
 	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv)}
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
@@ -58,7 +57,7 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 
 // TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
 func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	return db.BeginTemporalRo(ctx)
+	return db.BeginTemporalRo(sdfctx)
 }
 func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)

@@ -28,7 +28,6 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	fmt.Printf("sdf: %T\n", hr.tx)
 	var enc []byte
 	var ok bool
 	var err error
