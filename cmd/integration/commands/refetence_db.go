@@ -20,6 +20,7 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 var stateBuckets = []string{
@@ -149,15 +150,35 @@ func init() {
 }
 
 func doWarmup(ctx context.Context, chaindata string, bucket string) error {
-	db := mdbx2.MustOpen(chaindata)
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(1024)).MustOpen()
 	defer db.Close()
+
+	var total uint64
+	db.View(ctx, func(tx kv.Tx) error {
+		c, _ := tx.Cursor(bucket)
+		total, _ = c.Count()
+		return nil
+	})
+	progress := atomic.NewInt64(0)
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	g, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < 256; i++ {
 		i := i
 		g.Go(func() error {
 			return db.View(ctx, func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error { return nil })
+				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error {
+					progress.Inc()
+
+					select {
+					case <-logEvery.C:
+						log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
+					default:
+					}
+					return nil
+				})
 			})
 		})
 	}
