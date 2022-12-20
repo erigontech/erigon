@@ -205,6 +205,10 @@ func (back *RemoteBackend) EngineNewPayloadV2(ctx context.Context, payload *type
 	return back.remoteEthBackend.EngineNewPayloadV2(ctx, payload)
 }
 
+func (back *RemoteBackend) EngineNewPayloadV3(ctx context.Context, payload *types2.ExecutionPayloadV3) (res *remote.EnginePayloadStatus, err error) {
+	return back.remoteEthBackend.EngineNewPayloadV3(ctx, payload)
+}
+
 func (back *RemoteBackend) EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
 	return back.remoteEthBackend.EngineForkChoiceUpdatedV1(ctx, request)
 }
@@ -221,6 +225,18 @@ func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uin
 
 func (back *RemoteBackend) EngineGetPayloadV2(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayloadV2, err error) {
 	return back.remoteEthBackend.EngineGetPayloadV2(ctx, &remote.EngineGetPayloadRequest{
+		PayloadId: payloadId,
+	})
+}
+
+func (back *RemoteBackend) EngineGetPayloadV3(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayloadV3, err error) {
+	return back.remoteEthBackend.EngineGetPayloadV3(ctx, &remote.EngineGetPayloadRequest{
+		PayloadId: payloadId,
+	})
+}
+
+func (back *RemoteBackend) EngineGetBlobsBundleV1(ctx context.Context, payloadId uint64) (*types2.BlobsBundleV1, error) {
+	return back.remoteEthBackend.EngineGetBlobsBundleV1(ctx, &remote.EngineGetBlobsBundleRequest{
 		PayloadId: payloadId,
 	})
 }
