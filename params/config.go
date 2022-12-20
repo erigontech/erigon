@@ -855,6 +855,7 @@ func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 	if chainID == nil {
 		chainID = new(big.Int)
 	}
+
 	return &Rules{
 		ChainID:               new(big.Int).Set(chainID),
 		IsHomestead:           c.IsHomestead(num),
