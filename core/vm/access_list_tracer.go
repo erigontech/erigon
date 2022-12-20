@@ -118,6 +118,10 @@ func (a *AccessListTracer) CaptureAccountWrite(account common.Address) error {
 	panic("implement me")
 }
 
+func (*AccessListTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (*AccessListTracer) CaptureTxEnd(restGas uint64) {}
+
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
 // the resulting accesslist.
@@ -144,7 +148,7 @@ func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompi
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
-func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (a *AccessListTracer) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
 	stack := scope.Stack
 	if (op == SLOAD || op == SSTORE) && stack.Len() >= 1 {
 		slot := common.Hash(stack.Data[stack.Len()-1].Bytes32())
@@ -164,14 +168,21 @@ func (a *AccessListTracer) CaptureState(env *EVM, pc uint64, op OpCode, gas, cos
 	}
 }
 
-func (*AccessListTracer) CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (*AccessListTracer) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
 }
 
-func (*AccessListTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (*AccessListTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
-func (a *AccessListTracer) CaptureStart(env *EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	panic("implement me")
+}
+
+func (a *AccessListTracer) CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	panic("implement me")
+}
+
+func (*AccessListTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
 func (a *AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

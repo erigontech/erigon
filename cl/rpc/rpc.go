@@ -131,12 +131,14 @@ func sendBlocksRequest(ctx context.Context, opts blocksRequestOpts) ([]cltypes.O
 		return nil, err
 	}
 	if message.Error {
-		log.Trace("received error", "err", string(message.Data))
+		log.Debug("received range req error", "err", string(message.Data))
 		return nil, nil
 	}
-	if err := ssz_snappy.DecodeListSSZBeaconBlock(message.Data, uint64(opts.count), responsePacket); err != nil {
+	var n int
+	if n, err = ssz_snappy.DecodeListSSZBeaconBlock(message.Data, uint64(opts.count), responsePacket); err != nil {
 		return nil, fmt.Errorf("unable to decode packet: %v", err)
 	}
+	responsePacket = responsePacket[:n]
 	return responsePacket, nil
 }
 

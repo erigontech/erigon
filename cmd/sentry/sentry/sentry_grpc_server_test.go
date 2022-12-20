@@ -11,6 +11,8 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -18,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/stretchr/testify/require"
 )
 
 func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Hash) *GrpcServer {
@@ -34,14 +35,17 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash common.Ha
 
 	headTd256 := new(uint256.Int)
 	headTd256.SetFromBig(headTd)
+	heightForks, timeForks := forkid.GatherForks(genesis.Config)
 	s.statusData = &proto_sentry.StatusData{
 		NetworkId:       1,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(headTd256),
 		BestHash:        gointerfaces.ConvertHashToH256(head.Hash()),
-		MaxBlock:        head.Number.Uint64(),
+		MaxBlockHeight:  head.Number.Uint64(),
+		MaxBlockTime:    head.Time,
 		ForkData: &proto_sentry.Forks{
-			Genesis: gointerfaces.ConvertHashToH256(genesisHash),
-			Forks:   forkid.GatherForks(genesis.Config),
+			Genesis:     gointerfaces.ConvertHashToH256(genesisHash),
+			HeightForks: heightForks,
+			TimeForks:   timeForks,
 		},
 	}
 	return s
@@ -107,8 +111,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	s1.statusData.MaxBlock = 1
-	s2.statusData.MaxBlock = 1
+	s1.statusData.MaxBlockHeight = 1
+	s2.statusData.MaxBlockHeight = 1
 
 	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()
 	go func() { errc <- handShake(ctx, s2.GetStatus(), [64]byte{2}, p2pProFork, protocol, protocol, nil) }()
@@ -125,8 +129,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 	}
 
 	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	s1.statusData.MaxBlock = 2
-	s2.statusData.MaxBlock = 2
+	s1.statusData.MaxBlockHeight = 2
+	s2.statusData.MaxBlockHeight = 2
 
 	// Both nodes should allow the other to connect (same genesis, next fork is the same)
 	go func() { errc <- handShake(ctx, s1.GetStatus(), [64]byte{1}, p2pNoFork, protocol, protocol, nil) }()

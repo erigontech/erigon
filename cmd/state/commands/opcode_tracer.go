@@ -108,6 +108,8 @@ type opcodeTracer struct {
 	saveOpcodes bool
 	saveBblocks bool
 	blockNumber uint64
+	depth       int
+	env         *vm.EVM
 }
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
@@ -156,44 +158,59 @@ type blockTxs struct {
 	Txs      slicePtrTx
 }
 
-func (ot *opcodeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
+
+func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
 	//calculate the "address" of the Tx in its tree
 	ltid := len(ot.txsInDepth)
-	if ltid-1 != depth {
-		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", depth, ltid))
+	if ltid-1 != ot.depth {
+		panic(fmt.Sprintf("Wrong addr slice depth: d=%d, slice len=%d", ot.depth, ltid))
 	}
 
-	ot.txsInDepth[depth]++
+	ot.txsInDepth[ot.depth]++
 	ot.txsInDepth = append(ot.txsInDepth, 0)
 
 	ls := len(ot.stack)
 	txAddr := ""
 	if ls > 0 {
-		txAddr = ot.stack[ls-1].TxAddr + "-" + strconv.Itoa(int(ot.txsInDepth[depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
+		txAddr = ot.stack[ls-1].TxAddr + "-" + strconv.Itoa(int(ot.txsInDepth[ot.depth])) // fmt.Sprintf("%s-%d", ot.stack[ls-1].TxAddr, ot.txsInDepth[depth])
 	} else {
-		txAddr = strconv.Itoa(int(ot.txsInDepth[depth]))
+		txAddr = strconv.Itoa(int(ot.txsInDepth[ot.depth]))
 	}
 
-	newTx := tx{From: from, To: to, Create: create, Input: input, Depth: depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
+	newTx := tx{From: from, To: to, Create: create, Input: input, Depth: ot.depth, TxAddr: txAddr, lastOp: 0xfe, lastPc16: MaxUint16}
 	ot.Txs = append(ot.Txs, &newTx)
 
 	// take note in our own stack that the tx stack has grown
 	ot.stack = append(ot.stack, &newTx)
 }
 
-func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.env = env
+	ot.depth = 0
+	ot.captureStartOrEnter(from, to, create, input)
+}
+
+func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.depth++
+	ot.captureStartOrEnter(from, to, create, input)
+}
+
+func (ot *opcodeTracer) captureEndOrExit(err error) {
 	// When a CaptureEnd is called, a Tx has finished. Pop our stack
 	ls := len(ot.stack)
 	currentEntry := ot.stack[ls-1]
 	ot.stack = ot.stack[:ls-1]
-	ot.txsInDepth = ot.txsInDepth[:depth+1]
+	ot.txsInDepth = ot.txsInDepth[:ot.depth+1]
 
 	// sanity check: depth of stack == depth reported by system
-	if ls-1 != depth || depth != currentEntry.Depth {
-		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%d", depth, ls, currentEntry.Depth))
+	if ls-1 != ot.depth || ot.depth != currentEntry.Depth {
+		panic(fmt.Sprintf("End of Tx at d=%d but stack has d=%d and entry has d=%d", ot.depth, ls, currentEntry.Depth))
 	}
 
 	// Close the last bblock
@@ -214,10 +231,18 @@ func (ot *opcodeTracer) CaptureEnd(depth int, output []byte, startGas, endGas ui
 		errstr = err.Error()
 		currentEntry.Fault = errstr
 	}
-
 }
 
-func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *opcodeTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+	ot.captureEndOrExit(err)
+}
+
+func (ot *opcodeTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+	ot.captureEndOrExit(err)
+	ot.depth--
+}
+
+func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
 	contract := scope.Contract
 
@@ -227,7 +252,7 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	}
 
 	pc16 := uint16(pc)
-	currentTxHash := env.TxContext().TxHash
+	currentTxHash := ot.env.TxContext().TxHash
 	currentTxDepth := opDepth - 1
 
 	ls := len(ot.stack)
@@ -351,11 +376,11 @@ func (ot *opcodeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, 
 	currentEntry.lastOp = op
 }
 
-func (ot *opcodeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
+func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 	// CaptureFault sees the system as it is after the fault happens
 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
-	ot.CaptureState(env, pc, op, gas, cost, scope, nil, opDepth, err)
+	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, err)
 
 }
 

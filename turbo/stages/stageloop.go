@@ -72,7 +72,7 @@ func StageLoop(
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *shards.Notifications,
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
+	updateHead func(ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 ) {
@@ -90,8 +90,7 @@ func StageLoop(
 		}
 
 		// Estimate the current top height seen from the peer
-		height := hd.TopSeenHeight()
-		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, height, notifications, initialCycle, updateHead, nil)
+		headBlockHash, err := StageLoopStep(ctx, chainConfig, db, sync, notifications, initialCycle, updateHead, nil)
 
 		SendPayloadStatus(hd, headBlockHash, err)
 
@@ -124,29 +123,20 @@ func StageLoop(
 	}
 }
 
-func StageLoopStep(
-	ctx context.Context,
-	chainConfig *params.ChainConfig,
-	db kv.RwDB,
-	sync *stagedsync.Sync,
-	highestSeenHeader uint64,
-	notifications *shards.Notifications,
-	initialCycle bool,
-	updateHead func(ctx context.Context, head uint64, hash common.Hash, td *uint256.Int),
-	snapshotMigratorFinal func(tx kv.Tx) error,
-) (headBlockHash common.Hash, err error) {
+func StageLoopStep(ctx context.Context,
+	chainConfig *params.ChainConfig, db kv.RwDB, sync *stagedsync.Sync,
+	notifications *shards.Notifications, initialCycle bool,
+	updateHead func(ctx context.Context, headHeight uint64,
+		headTime uint64, hash common.Hash, td *uint256.Int,
+	), snapshotMigratorFinal func(tx kv.Tx) error) (headBlockHash common.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	var origin, finishProgressBefore uint64
+	var finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		origin, err = stages.GetStageProgress(tx, stages.Headers)
-		if err != nil {
-			return err
-		}
 		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
@@ -155,8 +145,7 @@ func StageLoopStep(
 	}); err != nil {
 		return headBlockHash, err
 	}
-
-	canRunCycleInOneTransaction := !initialCycle && highestSeenHeader < origin+32_000 && highestSeenHeader < finishProgressBefore+32_000
+	canRunCycleInOneTransaction := !initialCycle
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
@@ -216,6 +205,7 @@ func StageLoopStep(
 		return headBlockHash, err
 	}
 	headBlockHash = rawdb.ReadHeadBlockHash(rotx)
+	headHeader := rawdb.ReadHeader(rotx, headHash, head)
 
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
@@ -241,12 +231,12 @@ func StageLoopStep(
 		}
 	}
 
-	if headTd != nil {
+	if headTd != nil && headHeader != nil {
 		headTd256, overflow := uint256.FromBig(headTd)
 		if overflow {
 			return headBlockHash, fmt.Errorf("headTds higher than 2^256-1")
 		}
-		updateHead(ctx, head, headHash, headTd256)
+		updateHead(ctx, head, headHeader.Time, headHash, headTd256)
 	}
 
 	if notifications != nil {

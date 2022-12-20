@@ -72,9 +72,9 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 	contract := vm.NewContract(account{}, account{}, value, startGas, false)
 	contract.Code = []byte{byte(vm.PUSH1), 0x1, byte(vm.PUSH1), 0x1, 0x0}
 
-	tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CallType(0), []byte{}, startGas, uint256.NewInt(value.Uint64()), contract.Code)
+	tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, false, []byte{}, startGas, uint256.NewInt(value.Uint64()), contract.Code)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	tracer.CaptureEnd(0, ret, startGas, contract.Gas, 1, err)
+	tracer.CaptureEnd(ret, startGas, contract.Gas, 1, err)
 	if err != nil {
 		return nil, err
 	}
@@ -158,13 +158,14 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	env := vm.NewEVM(evmtypes.BlockContext{
 		BlockNumber: 1,
-	}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	}, evmtypes.TxContext{GasPrice: &uint256.Int{}}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 	contract := vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false)
 
-	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
+	tracer.CaptureStart(env, common.Address{}, common.Address{}, false, false, nil, 0, &uint256.Int{}, nil)
+	tracer.CaptureState(0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.CaptureState(env, 0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
+	tracer.CaptureState(0, 0, 0, 0, &vm.ScopeContext{Contract: contract}, nil, 0, nil) //nolint:errcheck
 
 	if _, err := tracer.GetResult(); err.Error() != timeout.Error() {
 		t.Errorf("Expected timeout error, got %v", err)
@@ -178,8 +179,8 @@ func TestNoStepExec(t *testing.T) {
 		env := vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 		startGas := uint64(10000)
 		contract := vm.NewContract(account{}, account{}, uint256.NewInt(1), startGas, true)
-		tracer.CaptureStart(env, 0, contract.Caller(), contract.Address(), false, false, vm.CALLT, nil, 0, uint256.NewInt(0), nil)
-		tracer.CaptureEnd(0, nil, startGas-contract.Gas, 1, 0, nil)
+		tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, false, nil, 0, uint256.NewInt(0), nil)
+		tracer.CaptureEnd(nil, startGas-contract.Gas, 1, 0, nil)
 		return tracer.GetResult()
 	}
 	execTracer := func(code string) []byte {

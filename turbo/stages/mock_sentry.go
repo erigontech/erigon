@@ -20,6 +20,7 @@ import (
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -72,7 +73,7 @@ type MockSentry struct {
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
 	PeerId         *ptypes.H512
-	UpdateHead     func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	UpdateHead     func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int)
 	streams        map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages   []*proto_sentry.OutboundMessageData
 	StreamWg       sync.WaitGroup
@@ -224,7 +225,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
-		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		HistoryV3:      ethconfig.EnableHistoryV3InTest,
@@ -249,7 +250,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
-		_, _ = rawdb.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
 		return nil
 	})
 
@@ -550,11 +551,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := false
-	highestSeenHeader := chain.Blocks[n-1].NumberU64()
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -574,8 +574,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	initialCycle := false
-	highestSeenHeader := chain.TopBlock.NumberU64()
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, nil)
 	if err != nil {
 		return err
 	}
@@ -588,7 +587,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead, nil)
 	if err != nil {
 		return err
 	}

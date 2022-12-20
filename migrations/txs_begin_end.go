@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -101,14 +100,14 @@ var txsBeginEnd = Migration{
 			}
 
 			// del first tx in block
-			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId)); err != nil {
+			if err = tx.Delete(kv.EthTx, common2.EncodeTs(b.BaseTxId)); err != nil {
 				return err
 			}
 			if err := writeTransactionsNewDeprecated(tx, txs, b.BaseTxId+1); err != nil {
 				return fmt.Errorf("failed to write body txs: %w", err)
 			}
 			// del last tx in block
-			if err = tx.Delete(kv.EthTx, dbutils.EncodeBlockNumber(b.BaseTxId+uint64(b.TxAmount)-1)); err != nil {
+			if err = tx.Delete(kv.EthTx, common2.EncodeTs(b.BaseTxId+uint64(b.TxAmount)-1)); err != nil {
 				return err
 			}
 
@@ -310,8 +309,8 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 			return err
 		}
 		id := newBaseId
-		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
+		if err := tx.ForAmount(kv.EthTx, common2.EncodeTs(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
+			if err := tx.Put(kv.NonCanonicalTxs, common2.EncodeTs(id), v); err != nil {
 				return err
 			}
 			id++

@@ -154,7 +154,7 @@ func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
-func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	if evm.config.NoRecursion && evm.depth > 0 {
 		return nil, gas, nil
 	}
@@ -162,7 +162,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 	if evm.depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
-	if callType == CALLT || callType == CALLCODET {
+	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance
 		if !value.IsZero() && !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 			if !bailout {
@@ -177,15 +177,22 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 	}
 	// Capture the tracer start/end events in debug mode
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), addr, isPrecompile, false /* create */, callType, input, gas, value, code)
-		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
-		}(gas, time.Now())
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, value, code)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, value, code)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		}
 	}
 
 	snapshot := evm.intraBlockState.Snapshot()
 
-	if callType == CALLT {
+	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
 				return nil, gas, nil
@@ -193,7 +200,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
 		evm.context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
-	} else if callType == STATICCALLT {
+	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
@@ -217,16 +224,16 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 		// The contract is a scoped environment for this execution context only.
 		codeHash := evm.intraBlockState.GetCodeHash(addrCopy)
 		var contract *Contract
-		if callType == CALLCODET {
+		if typ == CALLCODE {
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis)
-		} else if callType == DELEGATECALLT {
+		} else if typ == DELEGATECALL {
 			contract = NewContract(caller, AccountRef(caller.Address()), value, gas, evm.config.SkipAnalysis).AsDelegate()
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
 		contract.SetCallCode(&addrCopy, codeHash, code)
 		readOnly := false
-		if callType == STATICCALLT {
+		if typ == STATICCALL {
 			readOnly = true
 		}
 		ret, err = run(evm, contract, input, readOnly)
@@ -252,7 +259,7 @@ func (evm *EVM) call(callType CallType, caller ContractRef, addr common.Address,
 // the necessary steps to create accounts and reverses the state in case of an
 // execution error or failed value transfer.
 func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLT, caller, addr, input, gas, value, bailout)
+	return evm.call(CALL, caller, addr, input, gas, value, bailout)
 }
 
 // CallCode executes the contract associated with the addr with the given input
@@ -263,7 +270,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 // CallCode differs from Call in the sense that it executes the given address'
 // code with the caller as context.
 func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(CALLCODET, caller, addr, input, gas, value, false)
+	return evm.call(CALLCODE, caller, addr, input, gas, value, false)
 }
 
 // DelegateCall executes the contract associated with the addr with the given input
@@ -272,7 +279,7 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 // DelegateCall differs from CallCode in the sense that it executes the given address'
 // code with the caller as context and the caller is set to the caller of the caller.
 func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(DELEGATECALLT, caller, addr, input, gas, nil, false)
+	return evm.call(DELEGATECALL, caller, addr, input, gas, nil, false)
 }
 
 // StaticCall executes the contract associated with the addr with the given input
@@ -280,7 +287,7 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 // Opcodes that attempt to perform such modifications will result in exceptions
 // instead of performing the modifications.
 func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error) {
-	return evm.call(STATICCALLT, caller, addr, input, gas, new(uint256.Int), false)
+	return evm.call(STATICCALL, caller, addr, input, gas, new(uint256.Int), false)
 }
 
 type codeAndHash struct {
@@ -296,7 +303,7 @@ func (c *codeAndHash) Hash() common.Hash {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, calltype CallType, incrementNonce bool) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce bool) ([]byte, common.Address, uint64, error) {
 	var ret []byte
 	var err error
 	// Depth check execution. Fail if we're trying to execute above the
@@ -312,10 +319,17 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
 	if evm.config.Debug {
-		evm.config.Tracer.CaptureStart(evm, evm.depth, caller.Address(), address, false /* precompile */, true /* create */, calltype, codeAndHash.code, gas, value, nil)
-		defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-			evm.config.Tracer.CaptureEnd(evm.depth, ret, startGas, gas, time.Since(startTime), err)
-		}(gas, time.Now())
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureEnd(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureExit(ret, startGas, gas, time.Since(startTime), err)
+			}(gas, time.Now())
+		}
 	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
@@ -399,7 +413,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATET, true /* incrementNonce */)
+	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */)
 }
 
 // Create2 creates a new contract using code as deployment code.
@@ -410,13 +424,13 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2T, true /* incrementNonce */)
+	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */)
 }
 
 // SysCreate is a special (system) contract creation methods for genesis constructors.
 // Unlike the normal Create & Create2, it doesn't increment caller's nonce.
 func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, contractAddr common.Address) (ret []byte, leftOverGas uint64, err error) {
-	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATET, false /* incrementNonce */)
+	ret, _, leftOverGas, err = evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, false /* incrementNonce */)
 	return
 }
 

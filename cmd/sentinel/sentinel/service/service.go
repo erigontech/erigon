@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -54,12 +56,50 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 }
 
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
-	// Send the request and get the data if we get an answer.
-	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
-	return &sentinelrpc.ResponseData{
-		Data:  respData,
-		Error: foundErrReq,
-	}, err
+	retryReqInterval := time.NewTicker(10 * time.Millisecond)
+	defer retryReqInterval.Stop()
+	doneCh := make(chan *sentinelrpc.ResponseData)
+	// Try finding the data to our peers
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil, fmt.Errorf("interrupted")
+		case <-retryReqInterval.C:
+			// Spawn new thread for request
+			pid, err := s.sentinel.RandomPeer(req.Topic)
+			if err != nil {
+				// Wait a bit to not exhaust CPU and skip.
+				continue
+			}
+			log.Debug("Sent request", "pid", pid)
+			s.sentinel.Peers().PeerDoRequest(pid)
+			go func() {
+				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
+				s.sentinel.Peers().PeerFinishRequest(pid)
+				if err != nil {
+					s.sentinel.Peers().Penalize(pid)
+					return
+				} else if isError {
+					s.sentinel.Peers().DisconnectPeer(pid)
+				}
+				select {
+				case doneCh <- &sentinelrpc.ResponseData{
+					Data:  data,
+					Error: isError,
+				}:
+				default:
+				}
+			}()
+		case resp := <-doneCh:
+			return resp, nil
+		}
+	}
+	/*
+		&sentinelrpc.ResponseData{
+					Data:  respData,
+					Error: foundErrReq,
+				}*/
+
 }
 
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {

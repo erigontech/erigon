@@ -7,13 +7,13 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -26,15 +26,15 @@ import (
 const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, common.Hash{}, nil, err
 	}
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, common.Hash{}, nil, err
 	}
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
@@ -51,12 +51,12 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, common.Hash{}, nil, err
 	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)
@@ -64,9 +64,14 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 	headTd256 = new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
 	if overflow {
-		return 0, [32]byte{}, nil, fmt.Errorf("headTd higher than 2^256-1")
+		return 0, 0, common.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
 	}
-	return headHeight, headHash, headTd256, nil
+	headTime = 0
+	headHeader := rawdb.ReadHeader(db, headHash, headHeight)
+	if headHeader != nil {
+		headTime = headHeader.Time
+	}
+	return headHeight, headTime, headHash, headTd256, nil
 }
 
 // RequestMoreBodies - returns nil if nothing to request
@@ -103,7 +108,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		// if we already have the body we can continue on to populate header info and then skip
 		// the body request altogether
 		var err error
-		key := dbutils.EncodeBlockNumber(blockNum)
+		key := common2.EncodeTs(blockNum)
 		var bodyInBucket bool
 		if !bd.UsingExternalTx {
 			bodyInBucket, err = tx.Has("BodiesStage", key)
@@ -438,7 +443,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 		writer.Reset()
 		writer.WriteString(hexutil.Encode(rlpBytes))
 
-		k := dbutils.EncodeBlockNumber(key)
+		k := common2.EncodeTs(key)
 		err = tx.Put("BodiesStage", k, writer.Bytes())
 		if err != nil {
 			return err
@@ -454,7 +459,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 
 func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
 	if !bd.UsingExternalTx {
-		key := dbutils.EncodeBlockNumber(blockNum)
+		key := common2.EncodeTs(blockNum)
 		body, err := tx.GetOne("BodiesStage", key)
 		if err != nil {
 			return nil, err
