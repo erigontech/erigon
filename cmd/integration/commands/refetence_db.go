@@ -150,7 +150,7 @@ func init() {
 }
 
 func doWarmup(ctx context.Context, chaindata string, bucket string) error {
-	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(1024)).MustOpen()
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(1024)).Readonly().MustOpen()
 	defer db.Close()
 
 	var total uint64
