@@ -202,7 +202,6 @@ func ResetTxLookup(tx kv.RwTx) error {
 var Tables = map[stages.SyncStage][]string{
 	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
 	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
 	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
 	stages.AccountHistoryIndex: {kv.AccountsHistory},
