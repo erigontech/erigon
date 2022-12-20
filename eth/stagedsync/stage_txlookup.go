@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"math/big"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -128,8 +128,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: common2.EncodeTs(blockFrom),
+		ExtractEndKey:   common2.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -154,8 +154,8 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: common2.EncodeTs(blockFrom),
+		ExtractEndKey:   common2.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -271,8 +271,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: common2.EncodeTs(blockFrom),
+		ExtractEndKey:   common2.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -292,8 +292,8 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: common2.EncodeTs(blockFrom),
+		ExtractEndKey:   common2.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},

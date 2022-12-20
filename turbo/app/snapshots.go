@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -390,7 +391,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	if !fromdb.HistoryV3(db) {
+	if !kvcfg.HistoryV3.FromDB(db) {
 		return nil
 	}
 

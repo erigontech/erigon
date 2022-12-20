@@ -25,7 +25,12 @@ func FullClientRule(status *cltypes.Status, ourStatus *cltypes.Status, genesisCo
 	if err != nil {
 		return false
 	}
-	return status.ForkDigest == forkDigest
+
+	accept := status.ForkDigest == forkDigest
+	if ourStatus.HeadSlot != utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot) {
+		accept = accept && ourStatus.HeadSlot < status.HeadSlot
+	}
+	return accept
 }
 
 // LightClientRule checks against fork digest and whether the peer head is on chain tip.

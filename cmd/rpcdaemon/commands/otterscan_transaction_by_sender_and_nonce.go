@@ -7,8 +7,8 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -33,7 +33,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	defer accChangesC.Close()
 
 	// Locate the chunk where the nonce happens
-	acs := changeset.Mapper[kv.AccountChangeSet]
+	acs := historyv2.Mapper[kv.AccountChangeSet]
 	k, v, err := accHistoryC.Seek(acs.IndexChunkKey(addr.Bytes(), 0))
 	if err != nil {
 		return nil, err

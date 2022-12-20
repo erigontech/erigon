@@ -20,6 +20,7 @@ import (
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -249,7 +250,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.StartOnInit = true
 
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
-		_, _ = rawdb.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
 		return nil
 	})
 

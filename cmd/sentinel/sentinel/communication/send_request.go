@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -40,16 +39,21 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	defer respRetryTimer.Stop()
 
 	resp, foundErrRequest, err := verifyResponse(stream, peerId)
+
+Loop:
 	for err != nil {
 		select {
 		case <-ctx.Done():
 			log.Warn("[Sentinel Resp] sentinel has been shutdown")
-			return nil, false, nil
+			break Loop
 		case <-respRetryTimer.C:
 			log.Trace("[Sentinel Resp] timeout", "topic", topic, "peer", peerId)
-			return nil, false, err
+			break Loop
 		case <-respRetryTicker.C:
 			resp, foundErrRequest, err = verifyResponse(stream, peerId)
+			if err == network.ErrReset {
+				break Loop
+			}
 		}
 	}
 
@@ -82,6 +86,5 @@ func verifyResponse(stream network.Stream, peerId peer.ID) ([]byte, bool, error)
 	if err != nil {
 		return nil, false, err
 	}
-
-	return common.CopyBytes(message), code[0] != 0, nil
+	return message, code[0] != 0, nil
 }

@@ -113,30 +113,23 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBel
 }
 
 func (f *ForwardBeaconDownloader) RequestMore() {
-	go func() {
-		count := uint64(10)
-		if f.highestSlotProcessed-1 >= f.targetSlot {
-			return
+	count := uint64(10)
+
+	responses, err := rpc.SendBeaconBlocksByRangeReq(
+		f.ctx,
+		f.highestSlotProcessed+1,
+		count,
+		f.sentinel,
+	)
+	if err != nil {
+		return
+	}
+	for _, response := range responses {
+		if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
+			f.addSegment(segment)
 		}
-		// count must match the target slot
-		if f.highestSlotProcessed+count+1 > f.targetSlot {
-			count = f.targetSlot - f.highestSlotProcessed
-		}
-		responses, err := rpc.SendBeaconBlocksByRangeReq(
-			f.ctx,
-			f.highestSlotProcessed+1,
-			count,
-			f.sentinel,
-		)
-		if err != nil {
-			return
-		}
-		for _, response := range responses {
-			if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
-				f.addSegment(segment)
-			}
-		}
-	}()
+	}
+
 }
 
 // ProcessBlocks processes blocks we accumulated.

@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -89,7 +90,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	accData, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
 	if err != nil {
 		return err
 	}
@@ -161,7 +162,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 }
 
 func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +199,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
+	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +232,7 @@ func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uin
 }
 
 func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
+	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
 	if err != nil {
 		return 0, err
 	}

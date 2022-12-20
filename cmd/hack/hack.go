@@ -20,10 +20,12 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -34,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
@@ -317,7 +318,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	}
 	defer tx.Rollback()
 
-	if err := changeset.ForEach(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.AccountChangeSet, common2.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -337,7 +338,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.ForEach(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.StorageChangeSet, common2.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -476,7 +477,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
+	blockEncoded := common2.EncodeTs(block)
 	blockTotal := getBlockTotal(tx, block, blockTotalOrOffset)
 	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
@@ -1001,7 +1002,7 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	blockNum, err := changeset.AvailableFrom(tx)
+	blockNum, err := historyv2.AvailableFrom(tx)
 	if err != nil {
 		return err
 	}
