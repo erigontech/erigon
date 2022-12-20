@@ -222,13 +222,13 @@ func enableEOF(jt *JumpTable) {
 	}
 	jt[RJUMPI] = &operation{
 		execute:     opRjumpi,
-		constantGas: GasFastishStep,
+		constantGas: GasSwiftStep,
 		minStack:    minStack(1, 0),
 		maxStack:    maxStack(1, 0),
 	}
 	jt[RJUMPV] = &operation{
 		execute:     opRjumpv,
-		constantGas: GasFastishStep,
+		constantGas: GasSwiftStep,
 		minStack:    minStack(1, 0),
 		maxStack:    maxStack(1, 0),
 	}
@@ -240,7 +240,7 @@ func enableEOF(jt *JumpTable) {
 	}
 	jt[RETF] = &operation{
 		execute:     opRetf,
-		constantGas: GasFastishStep,
+		constantGas: GasSwiftStep,
 		minStack:    minStack(0, 0),
 		maxStack:    maxStack(0, 0),
 	}
