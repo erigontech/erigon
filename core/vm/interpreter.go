@@ -281,10 +281,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
 		operation := in.jt[op]
-
-		if operation == nil {
-			return nil, &ErrInvalidOpCode{opcode: op}
-		}
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.minStack {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}
