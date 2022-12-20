@@ -174,7 +174,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 
 					select {
 					case <-logEvery.C:
-						log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)), "prefix", hex.EncodeToString(k))
+						log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
 					default:
 					}
 					return nil
