@@ -188,11 +188,6 @@ func promotePlainState(
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
-	t := time.Now()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	var m runtime.MemStats
-
 	convertAccFunc := func(key []byte) ([]byte, error) {
 		hash, err := common.HashData(key)
 		return hash[:], err
@@ -212,7 +207,6 @@ func promotePlainState(
 		return compositeKey, nil
 	}
 
-	type pair struct{ k, v []byte }
 	transform := func(item pair) (outItem pair, err error) {
 		if len(item.k) == 20 {
 			item.k, err = convertAccFunc(item.k)
@@ -229,7 +223,7 @@ func promotePlainState(
 	}
 
 	{
-		// pipeline: read -> in -> out -> collect
+		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 
 		g, ctx := errgroup.WithContext(ctx)
@@ -252,31 +246,13 @@ func promotePlainState(
 		})
 
 		parWarmup(ctx, db, kv.PlainState, 8)
-
-		if err := func() error {
-			defer close(in)
-			return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-				select {
-				case in <- pair{k, v}:
-				case <-logEvery.C:
-					dbg.ReadMemStats(&m)
-					log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-				case <-ctx.Done():
-					return fmt.Errorf("err-ctx12: %w", ctx.Err())
-				default:
-				}
-				return nil
-			})
-		}(); err != nil {
+		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
 		}
 		if err := g.Wait(); err != nil {
 			return err
 		}
 	}
-
-	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
-	defer func(t time.Time) { log.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t)) }(time.Now())
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
@@ -288,6 +264,28 @@ func promotePlainState(
 
 	return nil
 }
+
+type pair struct{ v, k []byte }
+
+func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string) error {
+	defer close(in)
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	var m runtime.MemStats
+	return tx.ForEach(table, nil, func(k, v []byte) error {
+		select {
+		case in <- pair{k, v}:
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		case <-ctx.Done():
+			return fmt.Errorf("err-ctx12: %w", ctx.Err())
+		default:
+		}
+		return nil
+	})
+}
+
 func parTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
