@@ -576,13 +576,8 @@ type StateWriter22 struct {
 
 func NewStateWriter22(rs *State22) *StateWriter22 {
 	return &StateWriter22{
-		rs: rs,
-		writeLists: map[string]*exec22.KvList{
-			kv.PlainState:        {},
-			kv.Code:              {},
-			kv.PlainContractCode: {},
-			kv.IncarnationMap:    {},
-		},
+		rs:           rs,
+		writeLists:   newWriteList(),
 		accountPrevs: map[string][]byte{},
 		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},

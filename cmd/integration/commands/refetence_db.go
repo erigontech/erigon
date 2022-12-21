@@ -8,11 +8,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -65,20 +63,6 @@ var cmdCompareBucket = &cobra.Command{
 			referenceChaindata = chaindata + "-copy"
 		}
 		err := compareBucketBetweenDatabases(ctx, chaindata, referenceChaindata, bucket)
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-		return nil
-	},
-}
-
-var warmupCmd = &cobra.Command{
-	Use:   "warmup",
-	Short: "",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx, _ := common2.RootContext()
-		err := warmup(ctx, datadirCli, bucket, from)
 		if err != nil {
 			log.Error(err.Error())
 			return err
@@ -151,12 +135,6 @@ func init() {
 	withBucket(cmdCompareStates)
 
 	rootCmd.AddCommand(cmdCompareStates)
-
-	withDataDir(warmupCmd)
-	withBucket(warmupCmd)
-	withFrom(warmupCmd)
-
-	rootCmd.AddCommand(warmupCmd)
 
 	withDataDir(cmdMdbxToMdbx)
 	withToChaindata(cmdMdbxToMdbx)
@@ -253,46 +231,6 @@ func compareBucketBetweenDatabases(ctx context.Context, chaindata string, refere
 	}); err != nil {
 		return err
 	}
-
-	return nil
-}
-
-func warmup(ctx context.Context, datadirCli string, bucket string, from uint64) error {
-	dirs := datadir.New(datadirCli)
-	fmt.Printf("path: %s\n", dirs.Chaindata)
-
-	db, err := mdbx2.Open(dirs.Chaindata, log.New(""), true)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-
-	logEvery := time.NewTicker(5 * time.Second)
-	defer logEvery.Stop()
-
-	wg := sync.WaitGroup{}
-	log.Info("from", "from", from)
-	for i := from; i < 256; i++ {
-		prefix := []byte{byte(i)}
-		wg.Add(1)
-		go func(perfix []byte) {
-			defer wg.Done()
-			if err := db.View(context.Background(), func(tx kv.Tx) error {
-				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
-					select {
-					case <-logEvery.C:
-						log.Info("progress", "k", fmt.Sprintf("%x", k))
-					default:
-					}
-					return nil
-				})
-			}); err != nil {
-				log.Error(err.Error())
-			}
-			log.Info("end", "prefix", fmt.Sprintf("%x", prefix))
-		}(prefix)
-	}
-	wg.Wait()
 
 	return nil
 }
