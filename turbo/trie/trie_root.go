@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"golang.org/x/sync/errgroup"
 )
 
 /*
@@ -198,7 +200,9 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //	   SkipAccounts:
 //			use(AccTrie)
 //		}
-func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan struct{}) (libcommon.Hash, error) {
+func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, ctx context.Context) (libcommon.Hash, error) {
+	r, ctx := NewAsyncReceiver(ctx, l.receiver)
+	quit := ctx.Done()
 
 	accC, err := tx.Cursor(kv.HashedAccounts)
 	if err != nil {
@@ -249,7 +253,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
 				return EmptyRoot, fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
-			if err = l.receiver.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
+			if err = r.Receive(AccountStreamItem, kHex, nil, &l.accountValue, nil, nil, false, 0); err != nil {
 				return EmptyRoot, err
 			}
 			if l.accountValue.Incarnation == 0 {
@@ -275,7 +279,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 					if keyIsBefore(ihKS, l.kHexS) { // read until next AccTrie
 						break
 					}
-					if err = l.receiver.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
+					if err = r.Receive(StorageStreamItem, accWithInc, l.kHexS, nil, vS[32:], nil, false, 0); err != nil {
 						return EmptyRoot, err
 					}
 				}
@@ -285,7 +289,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 					break
 				}
 
-				if err = l.receiver.Receive(SHashStreamItem, accWithInc, ihKS, nil, nil, ihVS, hasTreeS, 0); err != nil {
+				if err = r.Receive(SHashStreamItem, accWithInc, ihKS, nil, nil, ihVS, hasTreeS, 0); err != nil {
 					return EmptyRoot, err
 				}
 				if len(ihKS) == 0 { // means we just sent acc.storageRoot
@@ -305,15 +309,19 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 			break
 		}
 
-		if err = l.receiver.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV, hasTree, 0); err != nil {
+		if err = r.Receive(AHashStreamItem, ihK, nil, nil, nil, ihV, hasTree, 0); err != nil {
 			return EmptyRoot, err
 		}
 	}
 
-	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
+	if err := r.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
 		return EmptyRoot, err
 	}
-	return l.receiver.Root(), nil
+
+	if err := r.Wait(); err != nil {
+		return EmptyRoot, err
+	}
+	return r.Root(), nil
 }
 
 func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {
@@ -351,6 +359,64 @@ func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2,
 	r.hb.trace = trace
 }
 
+type pair struct {
+	itemType     StreamItem
+	accountKey   []byte
+	storageKey   []byte
+	accountValue *accounts.Account
+	storageValue []byte
+	hash         []byte
+	hasTree      bool
+	cutoff       int
+}
+
+type AsyncReceiver struct {
+	r  StreamReceiver
+	ch chan pair
+	g  *errgroup.Group
+}
+
+func NewAsyncReceiver(ctx context.Context, r StreamReceiver) (*AsyncReceiver, context.Context) {
+	ch := make(chan pair, 4096)
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		for item := range ch {
+			if err := r.Receive(item.itemType, item.accountKey, item.storageKey, item.accountValue, item.storageValue, item.hash, item.hasTree, item.cutoff); err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+		return nil
+	})
+	return &AsyncReceiver{ch: ch, g: g, r: r}, ctx
+}
+func (r *AsyncReceiver) Result() SubTries     { return r.r.Result() }
+func (r *AsyncReceiver) Root() libcommon.Hash { return r.r.Root() }
+func (r *AsyncReceiver) Wait() error {
+	close(r.ch)
+	return r.g.Wait()
+}
+
+func (r *AsyncReceiver) Receive(itemType StreamItem, accountKey []byte,
+	storageKey []byte,
+	accountValue *accounts.Account,
+	storageValue []byte,
+	hash []byte,
+	hasTree bool,
+	cutoff int) error {
+	if accountValue != nil {
+		accountValue = accountValue.SelfCopy()
+	}
+	r.ch <- pair{itemType: itemType,
+		accountKey: common.CopyBytes(accountKey), storageKey: common.CopyBytes(storageKey),
+		accountValue: accountValue, storageValue: common.CopyBytes(storageValue),
+		hash: common.CopyBytes(hash), hasTree: hasTree, cutoff: cutoff}
+	return nil
+}
 func (r *RootHashAggregator) Receive(itemType StreamItem,
 	accountKey []byte,
 	storageKey []byte,
@@ -1493,7 +1559,7 @@ func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
 		return EmptyRoot, err
 	}
 
-	h, err := loader.CalcTrieRoot(tx, nil, nil)
+	h, err := loader.CalcTrieRoot(tx, nil, context.Background())
 	if err != nil {
 		return EmptyRoot, err
 	}
