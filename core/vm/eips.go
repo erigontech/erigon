@@ -45,6 +45,7 @@ func EnableEIP(eipNum int, jt *JumpTable) error {
 		return fmt.Errorf("undefined eip %d", eipNum)
 	}
 	enablerFn(jt)
+	validateAndFillMaxStack(jt)
 	return nil
 }
 
@@ -76,8 +77,8 @@ func enable1884(jt *JumpTable) {
 	jt[SELFBALANCE] = &operation{
 		execute:     opSelfBalance,
 		constantGas: GasFastStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -94,8 +95,8 @@ func enable1344(jt *JumpTable) {
 	jt[CHAINID] = &operation{
 		execute:     opChainID,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -162,8 +163,8 @@ func enable3198(jt *JumpTable) {
 	jt[BASEFEE] = &operation{
 		execute:     opBaseFee,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -180,8 +181,8 @@ func enable3855(jt *JumpTable) {
 	jt[PUSH0] = &operation{
 		execute:     opPush0,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
