@@ -514,6 +514,17 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 			return err
 		}
 	}
+	// encode withdrawals
+	if bb.Withdrawals != nil {
+		if err := types.EncodeStructSizePrefix(len(bb.Withdrawals), w, b[:]); err != nil {
+			return err
+		}
+		for _, withdrawal := range bb.Withdrawals {
+			if err := withdrawal.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -552,6 +563,29 @@ func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+	// decode Withdrawals
+	if _, err = s.List(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			bb.Withdrawals = nil
+			return s.ListEnd()
+		}
+		return err
+	}
+	bb.Withdrawals = []*types.Withdrawal{}
+	for err == nil {
+		var withdrawal types.Withdrawal
+		if err = withdrawal.DecodeRLP(s); err != nil {
+			break
+		}
+		bb.Withdrawals = append(bb.Withdrawals, &withdrawal)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Withdrawals
 	if err = s.ListEnd(); err != nil {
 		return err
 	}
