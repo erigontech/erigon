@@ -196,25 +196,9 @@ func promotePlainState(
 	defer storageCollector.Close()
 
 	transform := func(k, v []byte) ([]byte, []byte, error) {
-		if len(k) == 20 {
-			h, err := common.HashData(k)
-			if err != nil {
-				return nil, nil, err
-			}
-			return h[:], v, nil
-		}
-		addrHash, err := common.HashData(k[:length.Addr])
-		if err != nil {
-			return nil, nil, err
-		}
-		inc := binary.BigEndian.Uint64(k[length.Addr:])
-		secKey, err := common.HashData(k[length.Addr+length.Incarnation:])
-		if err != nil {
-			return nil, nil, err
-		}
-		return dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey), v, nil
+		newK, err := transformPlainStateKey(k)
+		return newK, v, err
 	}
-
 	collect := func(k, v []byte) error {
 		if len(k) == 32 {
 			return accCollector.Collect(k, v)
@@ -229,7 +213,6 @@ func promotePlainState(
 		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
-
 		parallelWarmup(ctx, db, kv.PlainState, 4)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
@@ -327,16 +310,6 @@ func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int)
 		}
 	}
 	_ = g.Wait()
-}
-
-func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
-	return func(k, v []byte, next etl.ExtractNextFunc) error {
-		newK, err := transformKey(k)
-		if err != nil {
-			return err
-		}
-		return next(k, newK, v)
-	}
 }
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
