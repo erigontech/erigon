@@ -229,20 +229,7 @@ func promotePlainState(
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform) })
-		g.Go(func() error {
-			for item := range out {
-				if err := collect(item); err != nil {
-					return err
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-			}
-			return nil
-		})
+		g.Go(func() error { return collectChan(ctx, out, collect) })
 
 		parallelWarmup(ctx, db, kv.PlainState, 8)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
@@ -285,6 +272,20 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	})
 }
 
+func collectChan[outT any](ctx context.Context, out chan outT, collect func(outT) error) error {
+	for item := range out {
+		if err := collect(item); err != nil {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
+}
 func parallelTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
