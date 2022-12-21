@@ -245,7 +245,10 @@ func promotePlainState(
 				return nil
 			})
 		}
-		return hashG.Wait()
+		if err := hashG.Wait(); err != nil {
+			return fmt.Errorf("err1: %w", err)
+		}
+		return nil
 	})
 	g.Go(func() error {
 		for item := range out {
@@ -279,15 +282,16 @@ func promotePlainState(
 				dbg.ReadMemStats(&m)
 				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 			return nil
 		})
 	}(); err != nil {
-		return err
+		return fmt.Errorf("err3: %w", err)
 	}
 	if err := g.Wait(); err != nil {
-		return err
+		return fmt.Errorf("err2: %w", err)
 	}
 
 	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
