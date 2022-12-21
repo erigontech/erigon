@@ -98,10 +98,7 @@ func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 // the root hash of the length of the input array.
 func Uint64ListRootWithLimit(list []uint64, limit uint64) ([32]byte, error) {
 	var err error
-	roots, err := PackUint64IntoChunks(list)
-	if err != nil {
-		return [32]byte{}, err
-	}
+	roots := PackUint64IntoChunks(list)
 
 	base, err := MerkleizeVector(roots, limit)
 	if err != nil {
