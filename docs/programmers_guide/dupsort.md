@@ -68,7 +68,7 @@ for k, _ := cursor.SeekDup(subTableName, keyInSubTable); k != nil; k, _ = cursor
 } 
 ```
 
-Enough strait forward. No performance penalty (only profit from smaller database size).
+Enough straight forward. No performance penalty (only profit from smaller database size).
 
 MDBX in-depth
 -------------

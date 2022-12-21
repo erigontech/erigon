@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	commonold "github.com/ledgerwatch/erigon/common"
 	ecom "github.com/ledgerwatch/erigon/common"
@@ -675,7 +676,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		return err
 	}
 
-	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
+	if err := historyv2.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
 
@@ -690,7 +691,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	// Truncate CallTraceSet
-	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	keyStart := common.EncodeTs(u.UnwindPoint + 1)
 	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err

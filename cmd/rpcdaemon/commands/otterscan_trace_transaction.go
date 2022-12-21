@@ -57,7 +57,9 @@ func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.A
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
-	_value.Set(value.ToBig())
+	if value != nil {
+		_value.Set(value.ToBig())
+	}
 	if typ == vm.CALL {
 		t.Results = append(t.Results, &TraceEntry{"CALL", t.depth, from, to, (*hexutil.Big)(_value), inputCopy})
 		return

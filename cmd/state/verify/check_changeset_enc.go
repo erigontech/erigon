@@ -11,7 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common/changeset"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -29,9 +29,9 @@ func CheckEnc(chaindata string) error {
 	)
 
 	//set test methods
-	chainDataStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
-	testStorageEncoder := changeset.Mapper[kv.StorageChangeSet].Encode
-	testStorageDecoder := changeset.Mapper[kv.StorageChangeSet].Decode
+	chainDataStorageDecoder := historyv22.Mapper[kv.StorageChangeSet].Decode
+	testStorageEncoder := historyv22.Mapper[kv.StorageChangeSet].Encode
+	testStorageDecoder := historyv22.Mapper[kv.StorageChangeSet].Decode
 
 	startTime := time.Now()
 	ch := make(chan struct {
@@ -50,7 +50,7 @@ func CheckEnc(chaindata string) error {
 					if err != nil {
 						return err
 					}
-					cs := changeset.NewStorageChangeSet()
+					cs := historyv22.NewStorageChangeSet()
 					_ = cs.Add(v.k, v.v)
 					atomic.AddUint64(&currentSize, uint64(len(v.v)))
 					innerErr := testStorageEncoder(blockNum, cs, func(k, v []byte) error {

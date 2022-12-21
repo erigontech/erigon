@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"math/big"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	rawdb2 "github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -365,7 +365,7 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatr
 	if err != nil {
 		return nil, err
 	}
-	if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(body.BaseTxId+1), body.TxAmount-2, func(k, v []byte) error {
+	if err := tx.ForAmount(kv.EthTx, common2.EncodeTs(body.BaseTxId+1), body.TxAmount-2, func(k, v []byte) error {
 		payload.Transactions = append(payload.Transactions, v)
 		return nil
 	}); err != nil {
