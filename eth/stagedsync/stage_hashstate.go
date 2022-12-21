@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -151,9 +150,9 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
-	kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.PlainState, nil, math.MaxUint32)
 	if err := promotePlainState(
 		logPrefix,
+		cfg.db,
 		tx,
 		cfg.dirs.Tmp,
 		etl.IdentityLoadFunc,
@@ -178,6 +177,7 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 
 func promotePlainState(
 	logPrefix string,
+	db kv.RoDB,
 	tx kv.RwTx,
 	tmpdir string,
 	loadFunc etl.LoadFunc,
@@ -269,6 +269,9 @@ func promotePlainState(
 		}
 		return nil
 	})
+
+	parWarmup(ctx, db, kv.PlainState, 8)
+
 	if err := func() error {
 		defer close(in)
 		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
@@ -301,6 +304,26 @@ func promotePlainState(
 	}
 
 	return nil
+}
+
+func parWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) {
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
+	for i := 0; i < 256; i++ {
+		for j := 0; j < 256; j++ {
+			i := i
+			j := j
+			g.Go(func() error {
+				return db.View(ctx, func(tx kv.Tx) error {
+					return tx.ForPrefix(bucket, []byte{byte(i), byte(j)}, func(k, v []byte) error { return nil })
+				})
+			})
+		}
+	}
+	_ = g.Wait()
 }
 
 func keyTransformExtractFunc(transformKey func([]byte) ([]byte, error)) etl.ExtractFunc {
