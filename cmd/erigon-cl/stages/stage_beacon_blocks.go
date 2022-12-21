@@ -122,7 +122,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	cfg.downloader.SetIsDownloading(true)
 	logInterval := time.NewTicker(30 * time.Second)
 	defer logInterval.Stop()
-	triggerInterval := time.NewTicker(50 * time.Millisecond)
+	triggerInterval := time.NewTicker(150 * time.Millisecond)
 	defer triggerInterval.Stop()
 	// Process blocks until we reach our target
 	for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); targetSlot > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {

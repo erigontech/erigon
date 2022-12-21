@@ -213,9 +213,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
 	callback := in.setReadonly(readOnly)
-	defer func() {
-		callback()
-	}()
+	defer callback()
 
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
@@ -250,18 +248,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
-	defer func() {
-		stack.ReturnNormalStack(locStack)
-	}()
+	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
 
 	if in.cfg.Debug {
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(in.evm, pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 				} else {
-					in.cfg.Tracer.CaptureFault(in.evm, pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
+					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
 				}
 			}
 		}()
@@ -280,15 +276,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
 		}
-
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(_pc)
 		operation := in.jt[op]
-
-		if operation == nil {
-			return nil, &ErrInvalidOpCode{opcode: op}
-		}
+		cost = operation.constantGas // For tracing
 		// Validate stack
 		if sLen := locStack.Len(); sLen < operation.minStack {
 			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}
@@ -306,48 +298,43 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 				return nil, ErrWriteProtection
 			}
 		}
-		// Static portion of gas
-		cost = operation.constantGas // For tracing
-		if !contract.UseGas(operation.constantGas) {
+		if !contract.UseGas(cost) {
 			return nil, ErrOutOfGas
 		}
-
-		var memorySize uint64
-		// calculate the new memory size and expand the memory to fit
-		// the operation
-		// Memory check needs to be done prior to evaluating the dynamic gas portion,
-		// to detect calculation overflows
-		if operation.memorySize != nil {
-			memSize, overflow := operation.memorySize(locStack)
-			if overflow {
-				return nil, ErrGasUintOverflow
-			}
-			// memory is expanded in words of 32 bytes. Gas
-			// is also calculated in words.
-			if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
-				return nil, ErrGasUintOverflow
-			}
-		}
-		// Dynamic portion of gas
-		// consume the gas and return an error if not enough gas is available.
-		// cost is explicitly set so that the capture state defer method can get the proper cost
 		if operation.dynamicGas != nil {
+			// All ops with a dynamic memory usage also has a dynamic gas cost.
+			var memorySize uint64
+			// calculate the new memory size and expand the memory to fit
+			// the operation
+			// Memory check needs to be done prior to evaluating the dynamic gas portion,
+			// to detect calculation overflows
+			if operation.memorySize != nil {
+				memSize, overflow := operation.memorySize(locStack)
+				if overflow {
+					return nil, ErrGasUintOverflow
+				}
+				// memory is expanded in words of 32 bytes. Gas
+				// is also calculated in words.
+				if memorySize, overflow = math.SafeMul(ToWordSize(memSize), 32); overflow {
+					return nil, ErrGasUintOverflow
+				}
+			}
+			// Consume the gas and return an error if not enough gas is available.
+			// cost is explicitly set so that the capture state defer method can get the proper cost
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
-			cost += dynamicCost // total cost, for debug tracing
+			cost += dynamicCost // for tracing
 			if err != nil || !contract.UseGas(dynamicCost) {
 				return nil, ErrOutOfGas
 			}
+			if memorySize > 0 {
+				mem.Resize(memorySize)
+			}
 		}
-		if memorySize > 0 {
-			mem.Resize(memorySize)
-		}
-
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(in.evm, _pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
 			logged = true
 		}
-
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
 		// if the operation clears the return data (e.g. it has returning data)

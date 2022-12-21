@@ -319,6 +319,7 @@ type Tracer struct {
 	reason    error  // Textual reason for the interruption
 
 	activePrecompiles []common.Address // Updated on CaptureStart based on given rules
+	env               *vm.EVM
 }
 
 // Context contains some contextual infos for a transaction execution that is not
@@ -579,11 +580,13 @@ func wrapError(context string, err error) error {
 	return fmt.Errorf("%v    in server-side tracer function '%v'", err, context)
 }
 
+func (jst *Tracer) CaptureTxStart(gasLimit uint64) {}
+
+func (jst *Tracer) CaptureTxEnd(restGas uint64) {}
+
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if depth != 0 {
-		return
-	}
+func (jst *Tracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	jst.env = env
 	jst.ctx["type"] = "CALL"
 	if create {
 		jst.ctx["type"] = "CREATE"
@@ -610,8 +613,11 @@ func (jst *Tracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to 
 	jst.ctx["intrinsicGas"] = intrinsicGas
 }
 
+func (jst *Tracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+}
+
 // CaptureState implements the Tracer interface to trace a single step of VM execution.
-func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rdata []byte, depth int, err error) {
+func (jst *Tracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rdata []byte, depth int, err error) {
 	if jst.err != nil {
 		return
 	}
@@ -629,7 +635,7 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 	*jst.gasValue = uint(gas)
 	*jst.costValue = uint(cost)
 	*jst.depthValue = uint(depth)
-	*jst.refundValue = uint(env.IntraBlockState().GetRefund())
+	*jst.refundValue = uint(jst.env.IntraBlockState().GetRefund())
 
 	jst.errorValue = nil
 	if err != nil {
@@ -644,7 +650,7 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 
 // CaptureFault implements the Tracer interface to trace an execution fault
 // while running an opcode.
-func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (jst *Tracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 	if jst.err != nil {
 		return
 	}
@@ -657,10 +663,7 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
-	if depth != 0 {
-		return
-	}
+func (jst *Tracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	jst.ctx["output"] = output
 	jst.ctx["time"] = t.String()
 	jst.ctx["gasUsed"] = startGas - endGas
@@ -668,6 +671,9 @@ func (jst *Tracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64,
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
+}
+
+func (jst *Tracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
 }
 
 func (jst *Tracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

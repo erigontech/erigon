@@ -15,6 +15,7 @@ package peers
 
 import (
 	"sync"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/log/v3"
@@ -23,16 +24,28 @@ import (
 )
 
 const (
-	maxBadPeers     = 1000 // Always cap memory consumption at 1 MB
-	DefaultMaxPeers = 33
-	MaxBadResponses = 10
+	maxBadPeers       = 50
+	maxPeerRecordSize = 1000
+	DefaultMaxPeers   = 33
+	MaxBadResponses   = 10
 )
 
+// Time to wait before asking the same peer again.
+const reqRetryTime = 0
+
+// Record Peer data.
+type Peer struct {
+	lastQueried time.Time
+	busy        bool
+}
+
 type Peers struct {
-	badPeers  *lru.Cache // Keep track of bad peers
-	penalties *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
-	host      host.Host
-	mu        sync.Mutex
+	badPeers   *lru.Cache // Keep track of bad peers
+	penalties  *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	peerRecord *lru.Cache // Keep track of our peer statuses
+	host       host.Host
+
+	mu sync.Mutex
 }
 
 func New(host host.Host) *Peers {
@@ -45,23 +58,24 @@ func New(host host.Host) *Peers {
 	if err != nil {
 		panic(err)
 	}
+
+	peerRecord, err := lru.New(maxPeerRecordSize)
+	if err != nil {
+		panic(err)
+	}
 	return &Peers{
-		badPeers:  badPeers,
-		penalties: penalties,
-		host:      host,
+		badPeers:   badPeers,
+		penalties:  penalties,
+		host:       host,
+		peerRecord: peerRecord,
 	}
 }
 
 func (p *Peers) IsBadPeer(pid peer.ID) bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.badPeers.Contains(pid)
 }
 
 func (p *Peers) Penalize(pid peer.ID) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	penaltyInterface, has := p.penalties.Get(pid)
 	if !has {
 		p.penalties.Add(pid, 1)
@@ -72,9 +86,21 @@ func (p *Peers) Penalize(pid peer.ID) {
 	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
 	if penalties > MaxBadResponses {
-		p.BanBadPeer(pid)
+		p.DisconnectPeer(pid)
 		p.penalties.Remove(pid)
 	}
+}
+
+func (p *Peers) Forgive(pid peer.ID) {
+	penaltyInterface, has := p.penalties.Get(pid)
+	if !has {
+		return
+	}
+	penalties := penaltyInterface.(int) - 1
+	if penalties < 0 {
+		penalties = 0
+	}
+	p.penalties.Add(pid, penalties)
 }
 
 func (p *Peers) BanBadPeer(pid peer.ID) {
@@ -87,4 +113,32 @@ func (p *Peers) DisconnectPeer(pid peer.ID) {
 	log.Trace("[Sentinel Peers] disconnecting from peer", "peer-id", pid)
 	p.host.Peerstore().RemovePeer(pid)
 	p.host.Network().ClosePeer(pid)
+}
+
+// PeerDoRequest signals that the peer is doing a request.
+func (p *Peers) PeerDoRequest(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peerRecord.Add(pid, Peer{
+		lastQueried: time.Now(),
+		busy:        true,
+	})
+}
+
+// IsPeerAvaiable returns if the peer is in cooldown or is being requested already .
+func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	peer, ok := p.peerRecord.Get(pid)
+	return !ok || (!peer.(Peer).busy && time.Since(peer.(Peer).lastQueried) >= reqRetryTime)
+}
+
+// PeerFinishRequest signals that the peer is done doing a request.
+func (p *Peers) PeerFinishRequest(pid peer.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peerRecord.Add(pid, Peer{
+		busy:        false,
+		lastQueried: time.Now(),
+	})
 }

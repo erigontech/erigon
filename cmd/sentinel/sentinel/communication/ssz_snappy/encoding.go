@@ -101,20 +101,23 @@ func readUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
+func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSSZ) (n int, err error) {
 	r := bytes.NewReader(data)
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)
 		// TODO(issues/5884): assert the fork digest matches the expectation for
 		// a specific configuration.
 		if _, err := r.Read(forkDigest); err != nil {
-			return err
+			if err == io.EOF {
+				return n, nil
+			}
+			return 0, err
 		}
 
 		// Read varint for length of message.
 		encodedLn, _, err := readUvarint(r)
 		if err != nil {
-			return fmt.Errorf("unable to read varint from message prefix: %v", err)
+			return 0, fmt.Errorf("unable to read varint from message prefix: %v", err)
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -124,19 +127,20 @@ func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSS
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
 			if err != nil {
-				return fmt.Errorf("read error: %w", err)
+				return 0, fmt.Errorf("read error: %w", err)
 			}
 			bytesRead += n
 		}
 
 		if err := list[i].UnmarshalSSZ(raw); err != nil {
-			return fmt.Errorf("unmarshalling: %w", err)
+			return 0, fmt.Errorf("unmarshalling: %w", err)
 		}
 
+		n++
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
-	return nil
+	return n, nil
 }
 
 func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {

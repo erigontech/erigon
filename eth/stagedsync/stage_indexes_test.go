@@ -15,8 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -34,7 +34,7 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			require.NoError(t, err)
 			defer tx.Rollback()
 
-			csInfo, ok := changeset.Mapper[csBucket]
+			csInfo, ok := historyv2.Mapper[csBucket]
 			if !ok {
 				t.Fatal("incorrect cs bucket")
 			}
@@ -72,7 +72,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		defer tx.Rollback()
 
 		hashes, expected := generateTestData(t, tx, csbucket, 2100)
-		mp := changeset.Mapper[csbucket]
+		mp := historyv2.Mapper[csbucket]
 		indexBucket := mp.IndexBucket
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
@@ -178,7 +178,7 @@ func expectNoHistoryBefore(t *testing.T, tx kv.Tx, csbucket string, prunedTo uin
 		prefixLen = length.Hash
 	}
 	afterPrune := 0
-	err := tx.ForEach(changeset.Mapper[csbucket].IndexBucket, nil, func(k, _ []byte) error {
+	err := tx.ForEach(historyv2.Mapper[csbucket].IndexBucket, nil, func(k, _ []byte) error {
 		n := binary.BigEndian.Uint64(k[prefixLen:])
 		require.True(t, n >= prunedTo)
 		afterPrune++
@@ -189,7 +189,7 @@ func expectNoHistoryBefore(t *testing.T, tx kv.Tx, csbucket string, prunedTo uin
 }
 
 func generateTestData(t *testing.T, tx kv.RwTx, csBucket string, numOfBlocks int) ([][]byte, map[string][]uint64) { //nolint
-	csInfo, ok := changeset.Mapper[csBucket]
+	csInfo, ok := historyv2.Mapper[csBucket]
 	if !ok {
 		t.Fatal("incorrect cs bucket")
 	}

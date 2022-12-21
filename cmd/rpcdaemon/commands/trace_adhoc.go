@@ -235,11 +235,15 @@ type OeTracer struct {
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
+
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
-		if depth > 0 {
+		if deep {
 			var vmT *VmTrace
 			if len(ot.vmOpStack) > 0 {
 				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
@@ -266,7 +270,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && (value == nil || value.IsZero()) {
+	if precompile && deep && (value == nil || value.IsZero()) {
 		ot.precompile = true
 		return
 	}
@@ -284,12 +288,12 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		trace.Result = &TraceResult{}
 		trace.Type = CALL
 	}
-	if depth > 0 {
+	if deep {
 		topTrace := ot.traceStack[len(ot.traceStack)-1]
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if callType == vm.DELEGATECALLT {
+		if typ == vm.DELEGATECALL {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
 				value, _ = uint256.FromBig(action.Value.ToInt())
@@ -297,7 +301,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 				value, _ = uint256.FromBig(action.Value.ToInt())
 			}
 		}
-		if callType == vm.STATICCALLT {
+		if typ == vm.STATICCALL {
 			value = uint256.NewInt(0)
 		}
 	}
@@ -312,14 +316,14 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		trace.Action = &action
 	} else {
 		action := CallTraceAction{}
-		switch callType {
-		case vm.CALLT:
+		switch typ {
+		case vm.CALL:
 			action.CallType = CALL
-		case vm.CALLCODET:
+		case vm.CALLCODE:
 			action.CallType = CALLCODE
-		case vm.DELEGATECALLT:
+		case vm.DELEGATECALL:
 			action.CallType = DELEGATECALL
-		case vm.STATICCALLT:
+		case vm.STATICCALL:
 			action.CallType = STATICCALL
 		}
 		action.From = from
@@ -333,16 +337,24 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
+}
+
+func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
+}
+
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas uint64, t time.Duration, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
 		}
-		if !ot.compat && depth > 0 {
+		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
 		}
-		if depth > 0 {
+		if deep {
 			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
 			ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
 			ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
@@ -353,13 +365,13 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ot.precompile = false
 		return
 	}
-	if depth == 0 {
+	if !deep {
 		ot.r.Output = common.CopyBytes(output)
 	}
 	ignoreError := false
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.compat {
-		ignoreError = depth == 0 && topTrace.Type == CREATE
+		ignoreError = !deep && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
 		if err == vm.ErrExecutionReverted {
@@ -413,12 +425,20 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
-	if depth > 0 {
+	if deep {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	}
 }
 
-func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *OeTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+	ot.captureEndOrExit(false /* deep */, output, startGas, endGas, t, err)
+}
+
+func (ot *OeTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+	ot.captureEndOrExit(true /* deep */, output, startGas, endGas, t, err)
+}
+
+func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	memory := scope.Memory
 	st := scope.Stack
 
@@ -546,7 +566,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	}
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
+func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
 func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

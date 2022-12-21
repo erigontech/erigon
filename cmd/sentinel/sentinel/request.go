@@ -22,18 +22,34 @@ import (
 )
 
 func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, error) {
+
+	pid, err := s.RandomPeer(topic)
+	if err != nil {
+		return nil, false, err
+	}
+	s.peers.PeerDoRequest(pid)
+	defer s.peers.PeerFinishRequest(pid)
+	data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, pid)
+	if err != nil || isError {
+		s.peers.Penalize(pid)
+	} else {
+		s.peers.Forgive(pid)
+	}
+	return data, isError, err
+}
+
+func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 	var (
-		peerInfo *peer.AddrInfo
-		err      error
+		pid peer.ID
+		err error
 	)
 	if strings.Contains(topic, "light_client") && !strings.Contains(topic, "bootstrap") {
-		peerInfo, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
+		pid, err = connectToRandomPeer(s, string(LightClientFinalityUpdateTopic))
 	} else {
-		peerInfo, err = connectToRandomPeer(s, string(BeaconBlockTopic))
+		pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to connect to a random peer err=%s", err)
+		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)
 	}
-
-	return communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, peerInfo.ID)
+	return pid, nil
 }

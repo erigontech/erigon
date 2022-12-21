@@ -609,8 +609,18 @@ func (a *Account) Equals(acc *Account) bool {
 		a.Incarnation == acc.Incarnation
 }
 
-// Deserialise2 - method to deserialize accounts in Erigon22 history
-func Deserialise2(a *Account, enc []byte) error {
+func ConvertV3toV2(v []byte) ([]byte, error) {
+	var a Account
+	if err := DeserialiseV3(&a, v); err != nil {
+		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
+	}
+	v = make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(v)
+	return v, nil
+}
+
+// DeserialiseV3 - method to deserialize accounts in Erigon22 history
+func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
 	pos := 0
 	nonceBytes := int(enc[pos])
@@ -642,7 +652,7 @@ func Deserialise2(a *Account, enc []byte) error {
 	return nil
 }
 
-func Serialise2(a *Account) []byte {
+func SerialiseV3(a *Account) []byte {
 	var l int
 	l++
 	if a.Nonce > 0 {

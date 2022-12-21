@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"testing"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -141,7 +142,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 
 	assert.Nil(t, addTestAccount(tx, hash4b, 5*params.Ether, 0))
 
-	err = tx.Put(kv.AccountChangeSet, dbutils.EncodeBlockNumber(1), newAddress[:])
+	err = tx.Put(kv.AccountChangeSet, common2.EncodeTs(1), newAddress[:])
 	assert.Nil(t, err)
 
 	var s StageState
@@ -285,13 +286,13 @@ func TestStorageDeletion(t *testing.T) {
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation2)))
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation3)))
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
+	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
+	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(dbutils.EncodeBlockNumber(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
+	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
 	assert.Nil(t, err)
 
 	var s StageState
@@ -389,7 +390,7 @@ func TestHiveTrieRoot(t *testing.T) {
 	require.Nil(t, err)
 
 	require.Nil(t, tx.Put(kv.HashedAccounts, newHash[:], common.FromHex("02081bc16d674ec80000")))
-	require.Nil(t, tx.Put(kv.AccountChangeSet, dbutils.EncodeBlockNumber(1), newAddress[:]))
+	require.Nil(t, tx.Put(kv.AccountChangeSet, common2.EncodeTs(1), newAddress[:]))
 
 	var s StageState
 	s.BlockNumber = 0
