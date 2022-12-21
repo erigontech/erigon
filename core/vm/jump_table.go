@@ -49,8 +49,6 @@ type operation struct {
 	opNum   int // only for push, swap, dup
 	// memorySize returns the memory size required for the operation
 	memorySize memorySizeFunc
-
-	writes bool // determines whether this a state modifying operation
 }
 
 var (
@@ -183,7 +181,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		numPop:      4,
 		numPush:     1,
 		memorySize:  memoryCreate2,
-		writes:      true,
 	}
 	validate(&instructionSet)
 	return instructionSet
@@ -685,7 +682,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:   maxStack(2, 0),
 			numPop:     2,
 			numPush:    0,
-			writes:     true,
 		},
 		JUMP: {
 			execute:     opJump,
@@ -1383,7 +1379,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     2,
 			numPush:    0,
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG1: {
 			execute:    makeLog(1),
@@ -1393,7 +1388,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     3,
 			numPush:    0,
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG2: {
 			execute:    makeLog(2),
@@ -1403,7 +1397,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     4,
 			numPush:    0,
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG3: {
 			execute:    makeLog(3),
@@ -1413,7 +1406,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     5,
 			numPush:    0,
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		LOG4: {
 			execute:    makeLog(4),
@@ -1423,7 +1415,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:     6,
 			numPush:    0,
 			memorySize: memoryLog,
-			writes:     true,
 		},
 		CREATE: {
 			execute:     opCreate,
@@ -1434,7 +1425,6 @@ func newFrontierInstructionSet() JumpTable {
 			numPop:      3,
 			numPush:     1,
 			memorySize:  memoryCreate,
-			writes:      true,
 		},
 		CALL: {
 			execute:     opCall,
@@ -1472,7 +1462,6 @@ func newFrontierInstructionSet() JumpTable {
 			maxStack:   maxStack(1, 0),
 			numPop:     1,
 			numPush:    0,
-			writes:     true,
 		},
 	}
 

@@ -245,17 +245,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.ChainRules().IsByzantium {
-			// If the interpreter is operating in readonly mode, make sure no
-			// state-modifying operation is performed. The 3rd stack item
-			// for a call operation is the value. Transferring value from one
-			// account to the others means the state is modified and should also
-			// return with an error.
-			if operation.writes || (op == CALL && !locStack.Back(2).IsZero()) {
-				return nil, ErrWriteProtection
-			}
-		}
 		if !contract.UseGas(cost) {
 			return nil, ErrOutOfGas
 		}
