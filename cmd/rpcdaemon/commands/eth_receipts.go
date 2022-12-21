@@ -333,7 +333,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var signer *types.Signer
 	var rules *params.Rules
 	var skipAnalysis bool
-	stateReader := state.NewHistoryReader22(ac)
+	stateReader := state.NewHistoryReaderV3(ac)
 	stateReader.SetTx(tx)
 	ibs := state.New(stateReader)
 

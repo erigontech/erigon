@@ -17,13 +17,19 @@ type HistoryReaderV3 struct {
 	txNum uint64
 	trace bool
 	tx    kv.Tx
+	ttx   kv.TemporalTx
 }
 
-func NewHistoryReader22(ac *libstate.Aggregator22Context) *HistoryReaderV3 {
+func NewHistoryReaderV3(ac *libstate.Aggregator22Context) *HistoryReaderV3 {
 	return &HistoryReaderV3{ac: ac}
 }
 
-func (hr *HistoryReaderV3) SetTx(tx kv.Tx)        { hr.tx = tx }
+func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
+	if ttx, casted := tx.(kv.TemporalTx); casted {
+		hr.ttx = ttx
+	}
+	hr.tx = tx
+}
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
@@ -31,8 +37,8 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	var enc []byte
 	var ok bool
 	var err error
-	if ttx, casted := hr.tx.(kv.TemporalTx); casted {
-		enc, ok, err = ttx.HistoryGetNoState(temporal.Accounts, address.Bytes(), hr.txNum)
+	if hr.ttx != nil {
+		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Accounts, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountDataNoStateWithRecent(address.Bytes(), hr.txNum)
 	}
@@ -80,8 +86,8 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	var enc []byte
 	var ok bool
 	var err error
-	if ttx, casted := hr.tx.(kv.TemporalTx); casted {
-		enc, ok, err = ttx.HistoryGetNoState(temporal.Storage, append(address.Bytes(), key.Bytes()...), hr.txNum)
+	if hr.ttx != nil {
+		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Storage, append(address.Bytes(), key.Bytes()...), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountStorageNoStateWithRecent(address.Bytes(), key.Bytes(), hr.txNum)
 	}
@@ -112,8 +118,8 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 	var enc []byte
 	var ok bool
 	var err error
-	if ttx, casted := hr.tx.(kv.TemporalTx); casted {
-		enc, ok, err = ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
+	if hr.ttx != nil {
+		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	}
@@ -137,8 +143,8 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnati
 	var ok bool
 	var size int
 	var err error
-	if ttx, casted := hr.tx.(kv.TemporalTx); casted {
-		enc, ok, err = ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
+	if hr.ttx != nil {
+		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	}

@@ -241,7 +241,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		t:           t,
 		Log:         log.New(),
 		Dirs:        dirs,
@@ -651,7 +651,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 	if ms.HistoryV3 {
 		aggCtx := ms.agg.MakeContext()
 		aggCtx.SetTx(tx)
-		r := state.NewHistoryReader22(aggCtx)
+		r := state.NewHistoryReaderV3(aggCtx)
 		r.SetTx(tx)
 		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
 		if err != nil {
