@@ -213,85 +213,66 @@ func promotePlainState(
 	}
 
 	type pair struct{ k, v []byte }
-	// pipeline: read -> in -> out -> collect
-	in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.Go(func() error {
-		defer close(out)
-		hashG, ctx2 := errgroup.WithContext(ctx)
-		for i := 0; i < estimate.AlmostAllCPUs(); i++ {
-			hashG.Go(func() (err error) {
-				for item := range in {
-					if len(item.k) == 20 {
-						item.k, err = convertAccFunc(item.k)
-						if err != nil {
-							return err
-						}
-					} else {
-						item.k, err = convertStorageFunc(item.k)
-						if err != nil {
-							return err
-						}
-					}
-
-					select {
-					case out <- item:
-					case <-ctx2.Done():
-						return ctx2.Err()
-					default:
-					}
-				}
-				return nil
-			})
+	transform := func(item pair) (outItem pair, err error) {
+		if len(item.k) == 20 {
+			item.k, err = convertAccFunc(item.k)
+			return item, err
 		}
-		if err := hashG.Wait(); err != nil {
-			return fmt.Errorf("err1: %w", err)
+		item.k, err = convertStorageFunc(item.k)
+		return item, err
+	}
+	collect := func(item pair) error {
+		if len(item.k) == 32 {
+			return accCollector.Collect(item.k, item.v)
 		}
-		return nil
-	})
-	g.Go(func() error {
-		for item := range out {
-			if len(item.k) == 32 {
-				if err := accCollector.Collect(item.k, item.v); err != nil {
+		return storageCollector.Collect(item.k, item.v)
+	}
+
+	{
+		// pipeline: read -> in -> out -> collect
+		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
+
+		g, ctx := errgroup.WithContext(ctx)
+		g.Go(func() error {
+			return parTransform(ctx, in, out, transform)
+		})
+		g.Go(func() error {
+			for item := range out {
+				if err := collect(item); err != nil {
 					return err
 				}
-			} else {
-				if err := storageCollector.Collect(item.k, item.v); err != nil {
-					return err
+
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
 				}
-			}
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		return nil
-	})
-
-	parWarmup(ctx, db, kv.PlainState, 8)
-
-	if err := func() error {
-		defer close(in)
-		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			select {
-			case in <- pair{k, v}:
-			case <-logEvery.C:
-				dbg.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
 			}
 			return nil
 		})
-	}(); err != nil {
-		return fmt.Errorf("err3: %w", err)
-	}
-	if err := g.Wait(); err != nil {
-		return fmt.Errorf("err2: %w", err)
+
+		parWarmup(ctx, db, kv.PlainState, 8)
+
+		if err := func() error {
+			defer close(in)
+			return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+				select {
+				case in <- pair{k, v}:
+				case <-logEvery.C:
+					dbg.ReadMemStats(&m)
+					log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+				case <-ctx.Done():
+					return fmt.Errorf("err-ctx12: %w", ctx.Err())
+				default:
+				}
+				return nil
+			})
+		}(); err != nil {
+			return err
+		}
+		if err := g.Wait(); err != nil {
+			return err
+		}
 	}
 
 	log.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
@@ -299,13 +280,36 @@ func promotePlainState(
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
-		return err
+		return fmt.Errorf("err-ctx14: %w", err)
 	}
 	if err := storageCollector.Load(tx, kv.HashedStorage, loadFunc, args); err != nil {
-		return err
+		return fmt.Errorf("err-ctx15: %w", err)
 	}
 
 	return nil
+}
+func parTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
+	defer close(out)
+	hashG, ctx := errgroup.WithContext(ctx)
+	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
+		hashG.Go(func() error {
+			for item := range in {
+				newItem, err := transform(item)
+				if err != nil {
+					return err
+				}
+
+				select {
+				case out <- newItem:
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+			}
+			return nil
+		})
+	}
+	return hashG.Wait()
 }
 
 func parWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) {
