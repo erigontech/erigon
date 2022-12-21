@@ -221,20 +221,18 @@ func promotePlainState(
 		defer close(out)
 		hashG, ctx := errgroup.WithContext(ctx)
 		for i := 0; i < estimate.AlmostAllCPUs(); i++ {
-			hashG.Go(func() error {
+			hashG.Go(func() (err error) {
 				for item := range in {
 					if len(item.k) == 20 {
-						newK, err := convertAccFunc(item.k)
+						item.k, err = convertAccFunc(item.k)
 						if err != nil {
 							return err
 						}
-						item.k = newK
 					} else {
-						newK, err := convertStorageFunc(item.k)
+						item.k, err = convertStorageFunc(item.k)
 						if err != nil {
 							return err
 						}
-						item.k = newK
 					}
 
 					select {
