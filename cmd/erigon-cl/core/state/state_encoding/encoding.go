@@ -40,13 +40,17 @@ const (
 	bit5
 )
 
-// Uint64Root retrieve the root of uint64 fields
+// This code is a collection of functions related to encoding and
+// hashing state data in the Ethereum 2.0 beacon chain.
+
+// Uint64Root retrieves the root hash of a uint64 value by converting it to a byte array and returning it as a hash.
 func Uint64Root(val uint64) common.Hash {
 	var root common.Hash
 	binary.LittleEndian.PutUint64(root[:], val)
 	return root
 }
 
+// ArraysRoot calculates the root hash of an array of hashes by first making a copy of the input array, then calculating the Merkle root of the copy using the MerkleRootFromLeaves function.
 func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
 	leaves := make([][32]byte, length)
 	copy(leaves, input)
@@ -59,6 +63,7 @@ func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
 	return res, nil
 }
 
+// ArraysRootWithLimit calculates the root hash of an array of hashes by first vectorizing the input array using the MerkleizeVector function, then calculating the root hash of the vectorized array using the Keccak256 function and the root hash of the length of the input array.
 func ArraysRootWithLimit(input [][32]byte, limit uint64) ([32]byte, error) {
 	base, err := MerkleizeVector(input, limit)
 	if err != nil {
@@ -69,6 +74,9 @@ func ArraysRootWithLimit(input [][32]byte, limit uint64) ([32]byte, error) {
 	return utils.Keccak256(base[:], lengthRoot[:]), nil
 }
 
+// Eth1DataVectorRoot calculates the root hash of an array of Eth1Data values by first vectorizing the input array using
+// the HashTreeRoot method on each Eth1Data value, then calculating the root hash of the vectorized array using
+// the ArraysRootWithLimit function and the Eth1DataVotesRootsLimit constant.
 func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	var err error
 
@@ -84,6 +92,10 @@ func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	return ArraysRootWithLimit(vectorizedVotesRoot, Eth1DataVotesRootsLimit)
 }
 
+// Uint64ListRootWithLimit calculates the root hash of an array of uint64 values by first packing the input array into chunks using the PackUint64IntoChunks function,
+// then vectorizing the chunks using the MerkleizeVector function, then calculating the
+// root hash of the vectorized array using the Keccak256 function and
+// the root hash of the length of the input array.
 func Uint64ListRootWithLimit(list []uint64, limit uint64) ([32]byte, error) {
 	var err error
 	roots, err := PackUint64IntoChunks(list)

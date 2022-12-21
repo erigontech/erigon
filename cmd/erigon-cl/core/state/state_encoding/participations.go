@@ -19,28 +19,12 @@ func ParticipationBitsRoot(bits []byte) ([32]byte, error) {
 	return utils.Keccak256(base[:], lengthRoot[:]), nil
 }
 
-// packParticipationBits into chunks. It'll pad the last chunk with zero bytes if
-// it does not have length bytes per chunk.
 func packParticipationBits(bytes []byte) ([][32]byte, error) {
-	numItems := len(bytes)
-	chunks := make([][32]byte, 0, numItems/32)
-	for i := 0; i < numItems; i += 32 {
-		j := i + 32
-		// We create our upper bound index of the chunk, if it is greater than numItems,
-		// we set it as numItems itself.
-		if j > numItems {
-			j = numItems
-		}
-		// We create chunks from the list of items based on the
-		// indices determined above.
-		chunk := [32]byte{}
-		copy(chunk[:], bytes[i:j])
+	var chunks [][32]byte
+	for i := 0; i < len(bytes); i += 32 {
+		var chunk [32]byte
+		copy(chunk[:], bytes[i:])
 		chunks = append(chunks, chunk)
 	}
-
-	if len(chunks) == 0 {
-		return chunks, nil
-	}
-
 	return chunks, nil
 }
