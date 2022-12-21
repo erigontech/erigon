@@ -459,6 +459,7 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		gasPriceInt,
 		uint256.NewInt(feeCap.Uint64()),
 		uint256.NewInt(tipCap.Uint64()),
+		uint256.NewInt(tipCap.Uint64()),
 		data,
 		accessList,
 		false, /* checkNonce */

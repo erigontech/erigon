@@ -486,7 +486,7 @@ type Message struct {
 	dataHashes       []common.Hash
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, maxFeePerDataGas *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -506,6 +506,9 @@ func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *u
 	}
 	if feeCap != nil {
 		m.feeCap.Set(feeCap)
+	}
+	if maxFeePerDataGas != nil {
+		m.maxFeePerDataGas.Set(maxFeePerDataGas)
 	}
 	return m
 }
