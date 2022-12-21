@@ -167,7 +167,13 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		kv.PlainContractCode,
 		kv.ContractCode,
 		cfg.dirs.Tmp,
-		keyTransformExtractFunc(transformContractCodeKey),
+		func(k, v []byte, next etl.ExtractNextFunc) error {
+			newK, err := transformContractCodeKey(k)
+			if err != nil {
+				return err
+			}
+			return next(k, newK, v)
+		},
 		etl.IdentityLoadFunc,
 		etl.TransformArgs{
 			Quit: ctx.Done(),
@@ -188,41 +194,38 @@ func promotePlainState(
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
-	transform := func(item pair) (pair, error) {
-		if len(item.k) == 20 {
-			h, err := common.HashData(item.k)
+	transform := func(k, v []byte) ([]byte, []byte, error) {
+		if len(k) == 20 {
+			h, err := common.HashData(k)
 			if err != nil {
-				return pair{}, err
+				return nil, nil, err
 			}
-			item.k = h[:]
-			return item, err
+			return h[:], v, nil
 		}
-		key := item.k
-		addrHash, err := common.HashData(key[:length.Addr])
+		addrHash, err := common.HashData(k[:length.Addr])
 		if err != nil {
-			return pair{}, err
+			return nil, nil, err
 		}
-		inc := binary.BigEndian.Uint64(key[length.Addr:])
-		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
+		inc := binary.BigEndian.Uint64(k[length.Addr:])
+		secKey, err := common.HashData(k[length.Addr+length.Incarnation:])
 		if err != nil {
-			return pair{}, err
+			return nil, nil, err
 		}
-		item.k = dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
-		return item, nil
+		return dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey), v, nil
 	}
 
-	collect := func(item pair) error {
-		if len(item.k) == 32 {
-			return accCollector.Collect(item.k, item.v)
+	collect := func(k, v []byte) error {
+		if len(k) == 32 {
+			return accCollector.Collect(k, v)
 		}
-		return storageCollector.Collect(item.k, item.v)
+		return storageCollector.Collect(k, v)
 	}
 
 	{ //errgroup cancelation scope
 		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
-		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
+		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		parallelWarmup(ctx, db, kv.PlainState, 8)
@@ -266,9 +269,9 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	})
 }
 
-func collectChan[outT any](ctx context.Context, out chan outT, collect func(outT) error) error {
+func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) error) error {
 	for item := range out {
-		if err := collect(item); err != nil {
+		if err := collect(item.k, item.v); err != nil {
 			return err
 		}
 
@@ -280,19 +283,19 @@ func collectChan[outT any](ctx context.Context, out chan outT, collect func(outT
 	}
 	return nil
 }
-func parallelTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error), workers int) error {
+func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
 			for item := range in {
-				newItem, err := transform(item)
+				k, v, err := transform(item.k, item.v)
 				if err != nil {
 					return err
 				}
 
 				select {
-				case out <- newItem:
+				case out <- pair{k, v}:
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
