@@ -161,6 +161,7 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		return err
 	}
 
+	parallelWarmup(ctx, cfg.db, kv.PlainContractCode, 2)
 	return etl.Transform(
 		logPrefix,
 		tx,
