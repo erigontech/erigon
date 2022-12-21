@@ -737,8 +737,11 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
 	_, agg := allSnapshots(db)
 
+	if warmup {
+		return reset2.Warmup(ctx, db, stages.IntermediateHashes)
+	}
 	if reset {
-		return reset2.ResetIH(ctx, db)
+		return reset2.Reset(ctx, db, stages.IntermediateHashes)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -788,8 +791,11 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 	must(sync.SetCurrentStage(stages.HashState))
 	_, agg := allSnapshots(db)
 
+	if warmup {
+		return reset2.Warmup(ctx, db, stages.HashState)
+	}
 	if reset {
-		return reset2.ResetHashState(ctx, db)
+		return reset2.Reset(ctx, db, stages.HashState)
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -841,7 +847,10 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
 	if reset {
-		return reset2.ResetLogIndex(ctx, db)
+		return reset2.Warmup(ctx, db, stages.LogIndex)
+	}
+	if reset {
+		return reset2.Reset(ctx, db, stages.LogIndex)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -893,8 +902,11 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
 
+	if warmup {
+		return reset2.Warmup(ctx, db, stages.CallTraces)
+	}
 	if reset {
-		return reset2.ResetCallTraces(ctx, db)
+		return reset2.Reset(ctx, db, stages.CallTraces)
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -953,8 +965,11 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
+	if warmup {
+		return reset2.Warmup(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
+	}
 	if reset {
-		return reset2.ResetHistory(ctx, db)
+		return reset2.Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
