@@ -11,6 +11,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/stretchr/testify/assert"
@@ -59,7 +60,7 @@ func doTestEncodingStorageNew(
 	incarnationGenerator func() uint64,
 	valueGenerator func(int) []byte,
 ) {
-	m := Mapper[storageTable]
+	m := historyv22.Mapper[storageTable]
 
 	f := func(t *testing.T, numOfElements int, numOfKeys int) {
 		var err error
@@ -143,7 +144,7 @@ func doTestEncodingStorageNew(
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
-	m := Mapper[storageTable]
+	m := historyv22.Mapper[storageTable]
 
 	ch := m.New()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
@@ -204,7 +205,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationWalk(t *testing.T) {
 }
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
-	m := Mapper[storageTable]
+	m := historyv22.Mapper[storageTable]
 	_, tx := memdb.NewTestTx(t)
 
 	clear := func() {
@@ -227,7 +228,7 @@ func TestEncodingStorageNewWithoutNotDefaultIncarnationFind(t *testing.T) {
 
 func TestEncodingStorageNewWithoutNotDefaultIncarnationFindWithoutIncarnation(t *testing.T) {
 	bkt := storageTable
-	m := Mapper[bkt]
+	m := historyv22.Mapper[bkt]
 	_, tx := memdb.NewTestTx(t)
 
 	clear := func() {
@@ -254,7 +255,7 @@ func doTestFind(
 	findFunc func(kv.CursorDupSort, uint64, []byte) ([]byte, error),
 	clear func(),
 ) {
-	m := Mapper[storageTable]
+	m := historyv22.Mapper[storageTable]
 	t.Helper()
 	f := func(t *testing.T, numOfElements, numOfKeys int) {
 		defer clear()
@@ -311,7 +312,7 @@ func doTestFind(
 func BenchmarkDecodeNewStorage(t *testing.B) {
 	numOfElements := 10
 	// empty StorageChangeSet first
-	ch := NewStorageChangeSet()
+	ch := historyv22.NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
@@ -324,11 +325,11 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 	}
 
 	t.ResetTimer()
-	var ch2 *ChangeSet
+	var ch2 *historyv22.ChangeSet
 	for i := 0; i < t.N; i++ {
-		err := EncodeStorage(1, ch, func(k, v []byte) error {
+		err := historyv22.EncodeStorage(1, ch, func(k, v []byte) error {
 			var err error
-			_, _, _, err = DecodeStorage(k, v)
+			_, _, _, err = historyv22.DecodeStorage(k, v)
 			return err
 		})
 		if err != nil {
@@ -341,7 +342,7 @@ func BenchmarkDecodeNewStorage(t *testing.B) {
 func BenchmarkEncodeNewStorage(t *testing.B) {
 	numOfElements := 10
 	// empty StorageChangeSet first
-	ch := NewStorageChangeSet()
+	ch := historyv22.NewStorageChangeSet()
 	var err error
 	for i := 0; i < numOfElements; i++ {
 		address := []byte("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21ef" + strconv.Itoa(i))
@@ -355,7 +356,7 @@ func BenchmarkEncodeNewStorage(t *testing.B) {
 
 	t.ResetTimer()
 	for i := 0; i < t.N; i++ {
-		err := EncodeStorage(1, ch, func(k, v []byte) error {
+		err := historyv22.EncodeStorage(1, ch, func(k, v []byte) error {
 			return nil
 		})
 		if err != nil {
@@ -370,7 +371,7 @@ func formatTestName(elements, keys int) string {
 
 func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	bkt := kv.StorageChangeSet
-	m := Mapper[bkt]
+	m := historyv22.Mapper[bkt]
 	_, tx := memdb.NewTestTx(t)
 
 	c1, err := tx.CursorDupSort(bkt)
@@ -400,7 +401,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	c, err := tx.RwCursorDupSort(bkt)
 	require.NoError(t, err)
 
-	ch := NewStorageChangeSet()
+	ch := historyv22.NewStorageChangeSet()
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key1.Bytes()), val1))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 1, key5.Bytes()), val5))
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractA.Bytes(), 2, key6.Bytes()), val6))
@@ -410,7 +411,7 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 
 	assert.NoError(t, ch.Add(dbutils.PlainGenerateCompositeStorageKey(contractC.Bytes(), 5, key4.Bytes()), val4))
 
-	assert.NoError(t, EncodeStorage(1, ch, func(k, v []byte) error {
+	assert.NoError(t, historyv22.EncodeStorage(1, ch, func(k, v []byte) error {
 		return c.Put(k, v)
 	}))
 

@@ -70,7 +70,7 @@ func (hr *HistoryReader23) ReadAccountData(address common.Address) (*accounts.Ac
 		return nil, nil
 	}
 	var a accounts.Account
-	if err := accounts.Deserialise2(&a, enc); err != nil {
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 	}
 

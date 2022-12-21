@@ -279,7 +279,7 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 		return err
 	}
 	defer c.Close()
-	for k, v, err := c.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(libcommon.EncodeTs(to + 1)); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}

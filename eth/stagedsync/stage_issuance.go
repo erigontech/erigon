@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -85,7 +86,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	if err != nil {
 		return err
 	}
-	for k, v, err := headerC.Seek(dbutils.EncodeBlockNumber(currentBlockNumber)); k != nil && !stopped; k, v, err = headerC.Next() {
+	for k, v, err := headerC.Seek(common2.EncodeTs(currentBlockNumber)); k != nil && !stopped; k, v, err = headerC.Next() {
 		if err != nil {
 			return err
 		}

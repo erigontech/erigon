@@ -86,7 +86,7 @@ func makeTestDb(ctx context.Context, db kv.RwDB) {
 }
 
 func TestMockDownloadRequest(t *testing.T) {
-	db := memdb.New()
+	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
@@ -143,7 +143,7 @@ func TestMockDownloadRequest(t *testing.T) {
 }
 
 func TestMockValidExecution(t *testing.T) {
-	db := memdb.New()
+	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
@@ -179,7 +179,7 @@ func TestMockValidExecution(t *testing.T) {
 }
 
 func TestMockInvalidExecution(t *testing.T) {
-	db := memdb.New()
+	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
@@ -215,7 +215,7 @@ func TestMockInvalidExecution(t *testing.T) {
 }
 
 func TestNoTTD(t *testing.T) {
-	db := memdb.New()
+	db := memdb.NewTestDB(t)
 	ctx := context.Background()
 	require := require.New(t)
 
