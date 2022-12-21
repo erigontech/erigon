@@ -222,14 +222,13 @@ func promotePlainState(
 		return storageCollector.Collect(item.k, item.v)
 	}
 
-	{
+	{ //ctx cancelation scope
+		g, ctx := errgroup.WithContext(ctx)
+
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 
-		g, ctx := errgroup.WithContext(ctx)
-		g.Go(func() error {
-			return parTransform(ctx, in, out, transform)
-		})
+		g.Go(func() error { return parallelTransform(ctx, in, out, transform) })
 		g.Go(func() error {
 			for item := range out {
 				if err := collect(item); err != nil {
@@ -245,7 +244,7 @@ func promotePlainState(
 			return nil
 		})
 
-		parWarmup(ctx, db, kv.PlainState, 8)
+		parallelWarmup(ctx, db, kv.PlainState, 8)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
 		}
@@ -256,10 +255,10 @@ func promotePlainState(
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
-		return fmt.Errorf("err-ctx14: %w", err)
+		return err
 	}
 	if err := storageCollector.Load(tx, kv.HashedStorage, loadFunc, args); err != nil {
-		return fmt.Errorf("err-ctx15: %w", err)
+		return err
 	}
 
 	return nil
@@ -286,7 +285,7 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	})
 }
 
-func parTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
+func parallelTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
@@ -310,7 +309,7 @@ func parTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT
 	return hashG.Wait()
 }
 
-func parWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) {
+func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
