@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -311,7 +312,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		var bitmapForORing roaring64.Bitmap
 		it := ac.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, tx)
 		for it.HasNext() {
-			bitmapForORing.Add(it.Next())
+			n, err := it.NextBatch()
+			if err != nil {
+				return nil, err
+			}
+			bitmapForORing.AddMany(n)
 		}
 		if addrBitmap == nil {
 			addrBitmap = &bitmapForORing
@@ -458,9 +463,21 @@ func getTopicsBitmapV3(ac *libstate.Aggregator22Context, tx kv.Tx, topics [][]co
 	for _, sub := range topics {
 		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			it := ac.LogTopicIterator(topic.Bytes(), from, to, tx)
-			for it.HasNext() {
-				bitmapForORing.Add(it.Next())
+			if ttx, casted := tx.(kv.TemporalTx); casted {
+				it, err := ttx.InvertedIndexRange(temporal.LogTopic, topic.Bytes(), from, to)
+				if err != nil {
+					return nil, err
+				}
+				for it.HasNext() {
+					n, err := it.NextBatch()
+					if err != nil {
+						return nil, err
+					}
+					bitmapForORing.AddMany(n)
+				}
+			} else {
+				it := ac.LogTopicIterator(topic.Bytes(), from, to, tx)
+				bitmapForORing.Or(it.ToBitamp())
 			}
 		}
 

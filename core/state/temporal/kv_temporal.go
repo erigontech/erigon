@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -131,28 +130,22 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-type It interface {
-	Next() uint64
-	HasNext() bool
-	Close()
-}
-
 // [fromTs, toTs)
-func (tx *Tx) InvertedIndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (bitmap *roaring64.Bitmap, err error) {
+func (tx *Tx) InvertedIndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.Iter[uint64], err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopic:
 			t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
-			return t.ToBitamp(), nil
+			return t, nil
 		case LogAddr:
 			t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
-			return t.ToBitamp(), nil
+			return t, nil
 		case TracesFrom:
 			t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx)
-			return t.ToBitamp(), nil
+			return t, nil
 		case TracesTo:
 			t := tx.agg.TraceToIterator(key, fromTs, toTs, tx)
-			return t.ToBitamp(), nil
+			return t, nil
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
@@ -170,6 +163,10 @@ func (tx *Tx) InvertedIndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs u
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-		return bitmapdb.Get64(tx, table, key, fromTs, toTs)
+		bm, err := bitmapdb.Get64(tx, table, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+		return kv.IterFromArray(bm.ToArray()), nil
 	}
 }

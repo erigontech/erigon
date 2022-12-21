@@ -554,7 +554,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				allTxs.Add(it.Next())
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				allTxs.AddMany(n)
 			}
 			fromAddresses[*addr] = struct{}{}
 		}
@@ -564,7 +568,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				txsTo.Add(it.Next())
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				txsTo.AddMany(n)
 			}
 			toAddresses[*addr] = struct{}{}
 		}
