@@ -247,7 +247,7 @@ func promotePlainState(
 				return nil
 			})
 		}
-		return g.Wait()
+		return hashG.Wait()
 	})
 	g.Go(func() error {
 		for item := range out {
