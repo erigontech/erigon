@@ -45,6 +45,7 @@ func EnableEIP(eipNum int, jt *JumpTable) error {
 		return fmt.Errorf("undefined eip %d", eipNum)
 	}
 	enablerFn(jt)
+	validateAndFillMaxStack(jt)
 	return nil
 }
 
