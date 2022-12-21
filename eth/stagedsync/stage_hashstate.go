@@ -258,12 +258,12 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	var m runtime.MemStats
 	return tx.ForEach(table, nil, func(k, v []byte) error {
 		select {
-		case in <- pair{common.CopyBytes(k), common.CopyBytes(v)}:
+		case in <- pair{k: k, v: v}:
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
 		case <-ctx.Done():
-			return fmt.Errorf("err-ctx12: %w", ctx.Err())
+			return ctx.Err()
 		default:
 		}
 		return nil
