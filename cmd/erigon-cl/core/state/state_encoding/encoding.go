@@ -21,25 +21,6 @@ const (
 	SlashingsLength         = 8192
 )
 
-// Bits and masks are used for depth calculation.
-const (
-	mask0 = ^uint64((1 << (1 << iota)) - 1)
-	mask1
-	mask2
-	mask3
-	mask4
-	mask5
-)
-
-const (
-	bit0 = uint8(1 << iota)
-	bit1
-	bit2
-	bit3
-	bit4
-	bit5
-)
-
 // This code is a collection of functions related to encoding and
 // hashing state data in the Ethereum 2.0 beacon chain.
 
@@ -135,37 +116,27 @@ func MerkleRootFromLeaves(leaves [][32]byte) ([32]byte, error) {
 	return merkleizeTrieLeaves(hashLayer)
 }
 
-// depth retrieves the appropriate depth for the provided trie size.
-func getDepth(v uint64) (out uint8) {
+// getDepth returns the depth of a merkle tree with a given number of nodes.
+// The depth is defined as the number of levels in the tree, with the root
+// node at level 0 and each child node at a level one greater than its parent.
+// If the number of nodes is less than or equal to 1, the depth is 0.
+func getDepth(v uint64) uint8 {
+	// If there are 0 or 1 nodes, the depth is 0.
 	if v <= 1 {
 		return 0
 	}
-	v--
-	if v&mask5 != 0 {
-		v >>= bit5
-		out |= bit5
+
+	// Initialize the depth to 0.
+	depth := uint8(0)
+
+	// Divide the number of nodes by 2 until it is less than or equal to 1.
+	// The number of iterations is the depth of the tree.
+	for v > 1 {
+		v >>= 1
+		depth++
 	}
-	if v&mask4 != 0 {
-		v >>= bit4
-		out |= bit4
-	}
-	if v&mask3 != 0 {
-		v >>= bit3
-		out |= bit3
-	}
-	if v&mask2 != 0 {
-		v >>= bit2
-		out |= bit2
-	}
-	if v&mask1 != 0 {
-		v >>= bit1
-		out |= bit1
-	}
-	if v&mask0 != 0 {
-		out |= bit0
-	}
-	out++
-	return
+
+	return depth
 }
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
