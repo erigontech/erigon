@@ -157,48 +157,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
-	var jt *JumpTable
-	switch {
-	case vm.evm.ChainRules().IsCancun:
-		jt = &cancunInstructionSet
-	case vm.evm.ChainRules().IsShanghai:
-		jt = &shanghaiInstructionSet
-	case vm.evm.ChainRules().IsLondon:
-		jt = &londonInstructionSet
-	case vm.evm.ChainRules().IsBerlin:
-		jt = &berlinInstructionSet
-	case vm.evm.ChainRules().IsIstanbul:
-		jt = &istanbulInstructionSet
-	case vm.evm.ChainRules().IsConstantinople:
-		jt = &constantinopleInstructionSet
-	case vm.evm.ChainRules().IsByzantium:
-		jt = &byzantiumInstructionSet
-	case vm.evm.ChainRules().IsSpuriousDragon:
-		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules().IsTangerineWhistle:
-		jt = &tangerineWhistleInstructionSet
-	case vm.evm.ChainRules().IsHomestead:
-		jt = &homesteadInstructionSet
-	default:
-		jt = &frontierInstructionSet
-	}
-	if len(vm.cfg.ExtraEips) > 0 {
-		for i, eip := range vm.cfg.ExtraEips {
-			if err := EnableEIP(eip, jt); err != nil {
-				// Disable it, so caller can check if it's activated or not
-				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "err", err)
-			}
-		}
-	}
-
-	return &EVMInterpreter{
-		VM: vm,
-		jt: jt,
-	}
-}
-
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
