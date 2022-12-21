@@ -188,33 +188,29 @@ func promotePlainState(
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
 
-	convertAccFunc := func(key []byte) ([]byte, error) {
-		hash, err := common.HashData(key)
-		return hash[:], err
-	}
-
-	convertStorageFunc := func(key []byte) ([]byte, error) {
+	transform := func(item pair) (pair, error) {
+		if len(item.k) == 20 {
+			h, err := common.HashData(item.k)
+			if err != nil {
+				return pair{}, err
+			}
+			item.k = h[:]
+			return item, err
+		}
+		key := item.k
 		addrHash, err := common.HashData(key[:length.Addr])
 		if err != nil {
-			return nil, err
+			return pair{}, err
 		}
 		inc := binary.BigEndian.Uint64(key[length.Addr:])
 		secKey, err := common.HashData(key[length.Addr+length.Incarnation:])
 		if err != nil {
-			return nil, err
+			return pair{}, err
 		}
-		compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
-		return compositeKey, nil
+		item.k = dbutils.GenerateCompositeStorageKey(addrHash, inc, secKey)
+		return item, nil
 	}
 
-	transform := func(item pair) (outItem pair, err error) {
-		if len(item.k) == 20 {
-			item.k, err = convertAccFunc(item.k)
-			return item, err
-		}
-		item.k, err = convertStorageFunc(item.k)
-		return item, err
-	}
 	collect := func(item pair) error {
 		if len(item.k) == 32 {
 			return accCollector.Collect(item.k, item.v)
@@ -227,7 +223,7 @@ func promotePlainState(
 
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-		g.Go(func() error { return parallelTransform(ctx, in, out, transform) })
+		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		parallelWarmup(ctx, db, kv.PlainState, 8)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
@@ -284,10 +280,10 @@ func collectChan[outT any](ctx context.Context, out chan outT, collect func(outT
 	}
 	return nil
 }
-func parallelTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error)) error {
+func parallelTransform[inT, outT any](ctx context.Context, in chan inT, out chan outT, transform func(inT) (outT, error), workers int) error {
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
-	for i := 0; i < estimate.AlmostAllCPUs(); i++ {
+	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
 			for item := range in {
 				newItem, err := transform(item)
