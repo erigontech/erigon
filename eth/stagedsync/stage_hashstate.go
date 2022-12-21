@@ -219,7 +219,7 @@ func promotePlainState(
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		defer close(out)
-		hashG, ctx := errgroup.WithContext(ctx)
+		hashG, ctx2 := errgroup.WithContext(ctx)
 		for i := 0; i < estimate.AlmostAllCPUs(); i++ {
 			hashG.Go(func() (err error) {
 				for item := range in {
@@ -237,8 +237,8 @@ func promotePlainState(
 
 					select {
 					case out <- item:
-					case <-ctx.Done():
-						return ctx.Err()
+					case <-ctx2.Done():
+						return ctx2.Err()
 					default:
 					}
 				}
