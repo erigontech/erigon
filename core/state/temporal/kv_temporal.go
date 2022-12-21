@@ -57,7 +57,7 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 
 // TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
 func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
-	return db.BeginTemporalRo(sdfctx)
+	return db.BeginTemporalRo(ctx)
 }
 func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	tx, err := db.BeginTemporalRo(ctx)
