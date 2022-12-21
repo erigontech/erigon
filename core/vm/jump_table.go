@@ -90,7 +90,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 func newCancunEOFInstructionSet() JumpTable {
 	instructionSet := newCancunInstructionSet()
 	enableEOF(&instructionSet)
-	validate(&instructionSet)
+	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
 
@@ -106,7 +106,7 @@ func newCancunInstructionSet() JumpTable {
 func newShanghaiEOFInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
 	enableEOF(&instructionSet)
-	validate(&instructionSet)
+	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
 

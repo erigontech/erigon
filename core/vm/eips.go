@@ -206,8 +206,8 @@ func enableEOF(jt *JumpTable) {
 	undefined := &operation{
 		execute:     opUndefined,
 		constantGas: 0,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
+		numPop:      0,
+		numPush:     0,
 	}
 	jt[CALLCODE] = undefined
 	jt[SELFDESTRUCT] = undefined
@@ -218,38 +218,38 @@ func enableEOF(jt *JumpTable) {
 	jt[RJUMP] = &operation{
 		execute:     opRjump,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
+		numPop:      0,
+		numPush:     0,
 	}
 	jt[RJUMPI] = &operation{
 		execute:     opRjumpi,
 		constantGas: GasSwiftStep,
-		minStack:    minStack(1, 0),
-		maxStack:    maxStack(1, 0),
+		numPop:      1,
+		numPush:     0,
 	}
 	jt[RJUMPV] = &operation{
 		execute:     opRjumpv,
 		constantGas: GasSwiftStep,
-		minStack:    minStack(1, 0),
-		maxStack:    maxStack(1, 0),
+		numPop:      1,
+		numPush:     0,
 	}
 	jt[CALLF] = &operation{
 		execute:     opCallf,
 		constantGas: GasFastStep,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
+		numPop:      0,
+		numPush:     0,
 	}
 	jt[RETF] = &operation{
 		execute:     opRetf,
 		constantGas: GasSwiftStep,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
+		numPop:      0,
+		numPush:     0,
 	}
 	jt[JUMPF] = &operation{
 		execute:     opJumpf,
 		constantGas: GasFastestStep,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
+		numPop:      0,
+		numPush:     0,
 	}
 }
 
