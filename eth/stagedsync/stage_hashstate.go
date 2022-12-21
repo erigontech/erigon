@@ -222,15 +222,13 @@ func promotePlainState(
 		return storageCollector.Collect(item.k, item.v)
 	}
 
-	{ //ctx cancelation scope
+	{ //errgroup cancelation scope
 		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
-
 		parallelWarmup(ctx, db, kv.PlainState, 8)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
@@ -260,7 +258,7 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	var m runtime.MemStats
 	return tx.ForEach(table, nil, func(k, v []byte) error {
 		select {
-		case in <- pair{k, v}:
+		case in <- pair{common.CopyBytes(k), common.CopyBytes(v)}:
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
