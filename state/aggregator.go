@@ -932,19 +932,19 @@ func (a *Aggregator) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
 }
 
-func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) *InvertedIterator {
 	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) *InvertedIterator {
 	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) *InvertedIterator {
 	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
-func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) InvertedIterator {
+func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) *InvertedIterator {
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, roTx)
 }
 
