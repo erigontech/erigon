@@ -44,6 +44,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, hitoryV3: db.hitoryV3}
 	if db.hitoryV3 {
 		tx.agg = db.agg.MakeContext()
+		tx.agg.SetTx(kvTx)
 	} else {
 		tx.accHistoryC, _ = tx.Cursor(kv.AccountsHistory)
 		tx.storageHistoryC, _ = tx.Cursor(kv.StorageHistory)
