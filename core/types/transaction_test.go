@@ -101,7 +101,7 @@ var (
 
 func TestDecodeEmptyInput(t *testing.T) {
 	input := []byte{}
-	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	_, err := DecodeTransaction(input)
 	if !errors.Is(err, io.EOF) {
 		t.Fatal("wrong error:", err)
 	}
@@ -109,7 +109,7 @@ func TestDecodeEmptyInput(t *testing.T) {
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
 	input := []byte{0x80}
-	_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
+	_, err := DecodeTransaction(input)
 	if !errors.Is(err, rlp.EOL) {
 		t.Fatal("wrong error:", err)
 	}
@@ -263,9 +263,9 @@ func TestEIP1559TransactionEncode(t *testing.T) {
 		have := buf.Bytes()
 		want := common.FromHex("02f864010301018261a894b94f5374fce5edbc8e2a8697c15331677e6ebf0b0a825544c001a0c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b2660a032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d37521")
 		if !bytes.Equal(have, want) {
-			t.Errorf("encoded RLP mismatch, got %x", have)
+			t.Errorf("encoded RLP mismatch, want %x got %x", want, have)
 		}
-		_, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(buf.Bytes()), 0))
+		_, err := DecodeTransaction(buf.Bytes())
 		if err != nil {
 			t.Fatalf("decode error: %v", err)
 		}
@@ -274,7 +274,7 @@ func TestEIP1559TransactionEncode(t *testing.T) {
 }
 
 func decodeTx(data []byte) (Transaction, error) {
-	return DecodeTransaction(rlp.NewStream(bytes.NewReader(data), 0))
+	return DecodeTransaction(data)
 }
 
 func defaultTestKey() (*ecdsa.PrivateKey, common.Address) {

@@ -390,7 +390,7 @@ func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
-	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), uint64(len(v))))
+	txn, err := types.DecodeTransaction(v)
 	if err != nil {
 		return nil, err
 	}
@@ -402,17 +402,13 @@ func CanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 		return []types.Transaction{}, nil
 	}
 	txIdKey := make([]byte, 8)
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
 	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
-		reader.Reset(v)
-		stream.Reset(reader, 0)
-		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
 			return decodeErr
 		}
 		i++
@@ -429,17 +425,13 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 		return []types.Transaction{}, nil
 	}
 	txIdKey := make([]byte, 8)
-	reader := bytes.NewReader(nil)
-	stream := rlp.NewStream(reader, 0)
 	txs := make([]types.Transaction, amount)
 	binary.BigEndian.PutUint64(txIdKey, baseTxId)
 	i := uint32(0)
 
 	if err := db.ForAmount(kv.NonCanonicalTxs, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
-		reader.Reset(v)
-		stream.Reset(reader, 0)
-		if txs[i], decodeErr = types.DecodeTransaction(stream); decodeErr != nil {
+		if txs[i], decodeErr = types.DecodeTransaction(v); decodeErr != nil {
 			return decodeErr
 		}
 		i++

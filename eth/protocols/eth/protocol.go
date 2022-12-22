@@ -231,7 +231,7 @@ func (tp *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx types.Transaction
-	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
 		*tp = append(*tp, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
@@ -527,7 +527,7 @@ func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx types.Transaction
-	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
 		bb.Transactions = append(bb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
@@ -800,7 +800,7 @@ func (ptp *PooledTransactionsPacket) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx types.Transaction
-	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
 		*ptp = append(*ptp, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
@@ -897,7 +897,7 @@ func (ptp66 *PooledTransactionsPacket66) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx types.Transaction
-	for tx, err = types.DecodeTransaction(s); err == nil; tx, err = types.DecodeTransaction(s) {
+	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
 		ptp66.PooledTransactionsPacket = append(ptp66.PooledTransactionsPacket, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {

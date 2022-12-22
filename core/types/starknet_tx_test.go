@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 )
@@ -77,7 +76,7 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 
 			encodedTx := buf.Bytes()
 
-			txnObj, err := DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
+			txnObj, err := UnmarshalTransactionFromBinary(encodedTx)
 			require.NoError(err)
 
 			txn, ok := txnObj.(*StarknetTransaction)

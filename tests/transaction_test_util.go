@@ -17,7 +17,6 @@
 package tests
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -29,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // TransactionTest checks RLP decoding and sender derivation of transactions.
@@ -60,7 +58,7 @@ type ttFork struct {
 
 func (tt *TransactionTest) Run(chainID *big.Int) error {
 	validateTx := func(rlpData hexutil.Bytes, signer types.Signer, rules *params.Rules) (*common.Address, *common.Hash, uint64, error) {
-		tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(rlpData), 0))
+		tx, err := types.DecodeTransaction(rlpData)
 		if err != nil {
 			return nil, nil, 0, err
 		}

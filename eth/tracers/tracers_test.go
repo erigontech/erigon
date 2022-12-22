@@ -17,7 +17,6 @@
 package tracers
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
@@ -38,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/stretchr/testify/require"
 
@@ -234,7 +232,7 @@ func TestCallTracer(t *testing.T) {
 				t.Fatalf("failed to parse testcase: %v", err)
 			}
 			// Configure a blockchain with the given prestate
-			txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(common.FromHex(test.Input)), 0))
+			txn, err := types.DecodeTransaction(common.FromHex(test.Input))
 			if err != nil {
 				t.Fatalf("failed to parse testcase input: %v", err)
 			}

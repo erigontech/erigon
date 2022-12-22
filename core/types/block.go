@@ -930,7 +930,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx Transaction
-	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+	for tx, err = DecodeRLPTransaction(s); err == nil; tx, err = DecodeRLPTransaction(s) {
 		bb.Transactions = append(bb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
@@ -1113,7 +1113,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx Transaction
-	for tx, err = DecodeTransaction(s); err == nil; tx, err = DecodeTransaction(s) {
+	for tx, err = DecodeRLPTransaction(s); err == nil; tx, err = DecodeRLPTransaction(s) {
 		bb.transactions = append(bb.transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
