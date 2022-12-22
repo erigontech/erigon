@@ -3,6 +3,7 @@ package remotedb
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"runtime"
 
@@ -281,29 +282,29 @@ func (tx *remoteTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, w
 	return nil
 }
 
-func (tx *remoteTx) GetOne(bucket string, key []byte) (val []byte, err error) {
+func (tx *remoteTx) GetOne(bucket string, k []byte) (val []byte, err error) {
 	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return nil, err
 	}
-	_, val, err = c.SeekExact(key)
+	_, val, err = c.SeekExact(k)
 	return val, err
 }
 
-func (tx *remoteTx) Has(bucket string, key []byte) (bool, error) {
+func (tx *remoteTx) Has(bucket string, k []byte) (bool, error) {
 	c, err := tx.statelessCursor(bucket)
 	if err != nil {
 		return false, err
 	}
-	k, _, err := c.Seek(key)
+	kk, _, err := c.Seek(k)
 	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(key, k), nil
+	return bytes.Equal(k, kk), nil
 }
 
-func (c *remoteCursor) SeekExact(key []byte) (k, val []byte, err error) {
-	return c.seekExact(key)
+func (c *remoteCursor) SeekExact(k []byte) (key, val []byte, err error) {
+	return c.seekExact(k)
 }
 
 func (c *remoteCursor) Prev() ([]byte, []byte, error) {
@@ -325,12 +326,22 @@ func (tx *remoteTx) Cursor(bucket string) (kv.Cursor, error) {
 	return c, nil
 }
 
-func (c *remoteCursor) Put(key []byte, value []byte) error            { panic("not supported") }
-func (c *remoteCursor) PutNoOverwrite(key []byte, value []byte) error { panic("not supported") }
-func (c *remoteCursor) Append(key []byte, value []byte) error         { panic("not supported") }
-func (c *remoteCursor) Delete(k []byte) error                         { panic("not supported") }
-func (c *remoteCursor) DeleteCurrent() error                          { panic("not supported") }
-func (c *remoteCursor) Count() (uint64, error)                        { panic("not supported") }
+func (c *remoteCursor) Put(k []byte, v []byte) error            { panic("not supported") }
+func (c *remoteCursor) PutNoOverwrite(k []byte, v []byte) error { panic("not supported") }
+func (c *remoteCursor) Append(k []byte, v []byte) error         { panic("not supported") }
+func (c *remoteCursor) Delete(k []byte) error                   { panic("not supported") }
+func (c *remoteCursor) DeleteCurrent() error                    { panic("not supported") }
+func (c *remoteCursor) Count() (uint64, error) {
+	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_COUNT}); err != nil {
+		return 0, err
+	}
+	pair, err := c.stream.Recv()
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(pair.V), nil
+
+}
 
 func (c *remoteCursor) first() ([]byte, []byte, error) {
 	if err := c.stream.Send(&remote.Cursor{Cursor: c.id, Op: remote.Op_FIRST}); err != nil {
@@ -566,35 +577,23 @@ func (tx *remoteTx) CursorDupSort(bucket string) (kv.CursorDupSort, error) {
 	return &remoteCursorDupSort{remoteCursor: c}, nil
 }
 
-func (c *remoteCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, error) {
-	return c.seekBothExact(key, value)
+func (c *remoteCursorDupSort) SeekBothExact(k, v []byte) ([]byte, []byte, error) {
+	return c.seekBothExact(k, v)
 }
 
-func (c *remoteCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) {
-	return c.getBothRange(key, value)
+func (c *remoteCursorDupSort) SeekBothRange(k, v []byte) ([]byte, error) {
+	return c.getBothRange(k, v)
 }
 
-func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error      { panic("not supported") }
-func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error   { panic("not supported") }
-func (c *remoteCursorDupSort) PutNoDupData(key, value []byte) error { panic("not supported") }
-func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error       { panic("not supported") }
-func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)     { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteExact(k1, k2 []byte) error    { panic("not supported") }
+func (c *remoteCursorDupSort) AppendDup(k []byte, v []byte) error { panic("not supported") }
+func (c *remoteCursorDupSort) PutNoDupData(k, v []byte) error     { panic("not supported") }
+func (c *remoteCursorDupSort) DeleteCurrentDuplicates() error     { panic("not supported") }
+func (c *remoteCursorDupSort) CountDuplicates() (uint64, error)   { panic("not supported") }
 
-func (c *remoteCursorDupSort) FirstDup() ([]byte, error) {
-	return c.firstDup()
-}
-func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error) {
-	return c.nextDup()
-}
-func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) {
-	return c.nextNoDup()
-}
-func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error) {
-	return c.prevDup()
-}
-func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) {
-	return c.prevNoDup()
-}
-func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
-	return c.lastDup()
-}
+func (c *remoteCursorDupSort) FirstDup() ([]byte, error)          { return c.firstDup() }
+func (c *remoteCursorDupSort) NextDup() ([]byte, []byte, error)   { return c.nextDup() }
+func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) { return c.nextNoDup() }
+func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error)   { return c.prevDup() }
+func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.prevNoDup() }
+func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }

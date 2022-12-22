@@ -260,6 +260,12 @@ func handleOp(c kv.Cursor, stream remote.KV_TxServer, in *remote.Cursor) error {
 		k, v, err = c.SeekExact(in.K)
 	case remote.Op_SEEK_BOTH_EXACT:
 		k, v, err = c.(kv.CursorDupSort).SeekBothExact(in.K, in.V)
+	case remote.Op_COUNT:
+		cnt, err := c.Count()
+		if err != nil {
+			return err
+		}
+		v = common.EncodeTs(cnt)
 	default:
 		return fmt.Errorf("unknown operation: %s", in.Op)
 	}
