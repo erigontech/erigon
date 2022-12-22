@@ -165,7 +165,7 @@ type Mode struct {
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
 	Enabled() bool
-	toValue() uint64
+	ToValue() uint64
 	dbType() []byte
 	useDefaultValue() bool
 }
@@ -180,7 +180,7 @@ type BlockAmount interface {
 type Distance uint64
 
 func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
-func (p Distance) toValue() uint64       { return uint64(p) }
+func (p Distance) ToValue() uint64       { return uint64(p) }
 func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
@@ -198,7 +198,7 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 type Before uint64
 
 func (b Before) Enabled() bool         { return b > 0 }
-func (b Before) toValue() uint64       { return uint64(b) }
+func (b Before) ToValue() uint64       { return uint64(b) }
 func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
 func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
 
@@ -221,28 +221,28 @@ func (m Mode) String() string {
 		if m.History.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
+			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.ToValue())
 		}
 	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
+			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.ToValue())
 		}
 	}
 	if m.TxIndex.Enabled() {
 		if m.TxIndex.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.t.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
+			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.ToValue())
 		}
 	}
 	if m.CallTraces.Enabled() {
 		if m.CallTraces.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.c.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
+			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.ToValue())
 		}
 	}
 
@@ -366,7 +366,7 @@ func get(db kv.Getter, key []byte) (BlockAmount, error) {
 
 func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
 	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, blockAmount.toValue())
+	binary.BigEndian.PutUint64(v, blockAmount.ToValue())
 	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
 		return err
 	}
@@ -391,7 +391,7 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 	}
 	if len(mode) == 0 {
 		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, blockAmount.toValue())
+		binary.BigEndian.PutUint64(v, blockAmount.ToValue())
 		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
 			return err
 		}

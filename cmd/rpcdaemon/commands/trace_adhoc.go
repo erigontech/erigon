@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -914,17 +915,25 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
+	num := rpc.LatestBlockNumber
+	latestBlockNumber, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &num}, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	ibs := state.New(stateReader)
+	pruneAmount, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if latestBlockNumber-pruneAmount.CallTraces.ToValue() >= blockNumber {
+		return nil, fmt.Errorf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestBlockNumber-pruneAmount.CallTraces.ToValue())
+	}
 
 	block, err := api.blockWithSenders(tx, hash, blockNumber)
 	if err != nil {
@@ -934,6 +943,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("block %d(%x) not found", blockNumber, hash)
 	}
 	header := block.Header()
+
+	stateReader, err := rpchelper.CreateStateReaderWithBlockNumber(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName, blockNumber, latest)
+	if err != nil {
+		return nil, err
+	}
+
+	ibs := state.New(stateReader)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
