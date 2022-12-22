@@ -15,6 +15,7 @@ package lightclient
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"time"
 
@@ -207,12 +208,18 @@ func (l *LightClient) Start() {
 		case <-logPeers.C:
 			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyMessage{})
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
 			log.Info("[LightClient] P2P", "peers", peers.Amount)
 		case <-updateStatusSentinel.C:
 			if err := l.updateStatus(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Error("Could not update sentinel status", "err", err)
 				return
 			}
