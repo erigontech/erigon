@@ -176,7 +176,7 @@ func (back *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter
 	if b == nil {
 		return nil, nil
 	}
-	if len(b.Transactions) < i {
+	if len(b.Transactions) <= i {
 		return nil, nil
 	}
 	return b.Transactions[i], nil
