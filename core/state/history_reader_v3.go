@@ -91,6 +91,9 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	} else {
 		enc, ok, err = hr.ac.ReadAccountStorageNoStateWithRecent(address.Bytes(), key.Bytes(), hr.txNum)
 	}
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
 		k := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 		enc, err = hr.tx.GetOne(kv.PlainState, k)
