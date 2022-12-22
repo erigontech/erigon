@@ -70,7 +70,7 @@ require (
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
 	github.com/tidwall/btree v1.5.0
-	github.com/torquem-ch/mdbx-go v0.27.1-0.20221222011243-71d097a81181
+	github.com/torquem-ch/mdbx-go v0.27.1-0.20221222011740-980cc7efce82
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli/v2 v2.23.5
