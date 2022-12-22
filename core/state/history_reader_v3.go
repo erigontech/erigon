@@ -43,7 +43,9 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	if hr.ttx != nil {
 		enc, ok, err = hr.ttx.HistoryGet(temporal.Accounts, address.Bytes(), hr.txNum)
 		{
+			fmt.Printf("found: %x, %t\n", enc, ok)
 			enc, ok, err = hr.ttx.HistoryGet(temporal.Accounts, address.Bytes(), hr.txNum+1)
+			fmt.Printf("found2: %x, %t\n", enc, ok)
 		}
 	} else {
 		enc, ok, err = hr.ac.ReadAccountDataNoStateWithRecent(address.Bytes(), hr.txNum)
@@ -71,6 +73,8 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("found current: %x\n", enc)
+
 	if len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
