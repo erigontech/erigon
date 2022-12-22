@@ -41,7 +41,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	var ok bool
 	var err error
 	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Accounts, address.Bytes(), hr.txNum)
+		enc, ok, err = hr.ttx.HistoryGet(temporal.Accounts, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountDataNoStateWithRecent(address.Bytes(), hr.txNum)
 	}
@@ -90,7 +90,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnatio
 	var ok bool
 	var err error
 	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Storage, append(address.Bytes(), key.Bytes()...), hr.txNum)
+		enc, ok, err = hr.ttx.HistoryGet(temporal.Storage, append(address.Bytes(), key.Bytes()...), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountStorageNoStateWithRecent(address.Bytes(), key.Bytes(), hr.txNum)
 	}
@@ -125,7 +125,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 	var ok bool
 	var err error
 	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
+		enc, ok, err = hr.ttx.HistoryGet(temporal.Code, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	}
@@ -150,7 +150,7 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnati
 	var size int
 	var err error
 	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGetNoState(temporal.Code, address.Bytes(), hr.txNum)
+		enc, ok, err = hr.ttx.HistoryGet(temporal.Code, address.Bytes(), hr.txNum)
 	} else {
 		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
 	}

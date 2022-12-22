@@ -306,7 +306,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var addrBitmap *roaring64.Bitmap
 	for _, addr := range crit.Addresses {
 		var bitmapForORing roaring64.Bitmap
-		it, err := tx.InvertedIndexRange(temporal.LogAddr, addr.Bytes(), fromTxNum, toTxNum)
+		it, err := tx.IndexRange(temporal.LogAddr, addr.Bytes(), fromTxNum, toTxNum)
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +463,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 	for _, sub := range topics {
 		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			it, err := tx.InvertedIndexRange(temporal.LogTopic, topic.Bytes(), from, to)
+			it, err := tx.IndexRange(temporal.LogTopic, topic.Bytes(), from, to)
 			if err != nil {
 				return nil, err
 			}

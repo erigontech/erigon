@@ -15,9 +15,9 @@ const DefaultIncarnation = uint64(1)
 func GetAsOfV3(tx kv.TemporalTx, storage bool, key []byte, timestamp uint64, histV3 bool) (v []byte, err error) {
 	var ok bool
 	if storage {
-		v, ok, err = tx.HistoryGetNoState(temporal.Storage, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.Storage, key, timestamp)
 	} else {
-		v, ok, err = tx.HistoryGetNoState(temporal.Accounts, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.Accounts, key, timestamp)
 	}
 	if err != nil {
 		return nil, err

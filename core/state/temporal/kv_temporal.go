@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
-//Naming:
+//Variables Naming:
 //  ts - TimeStamp
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
@@ -19,6 +19,13 @@ import (
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
+
+//Methods Naming:
+// Get: exact match of criterias
+// Range: [from, to)
+// Each: [from, INF)
+// Prefix: Has(k, prefix)
+// Amount: [from, INF) AND maximum N records
 
 type DB struct {
 	kv.RwDB
@@ -92,7 +99,7 @@ const (
 	TracesTo   kv.InvertedIdx = "TracesTo"
 )
 
-func (tx *Tx) HistoryGetNoState(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case Accounts:
@@ -131,7 +138,7 @@ type Cursor struct {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) InvertedIndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.Iter[uint64], err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.Iter[uint64], err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopic:
