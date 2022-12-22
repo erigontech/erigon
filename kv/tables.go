@@ -420,9 +420,10 @@ const (
 
 	// Erigon-CL
 	BeaconState = "BeaconState"
-	// [slot + block root] => [signature + block without execution payload]
+	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
-
+	// [slot] => [attestation list (ssz)]
+	Attestetations = "Attestetations"
 	// LightClientStore => LightClientStore object
 	// LightClientFinalityUpdate => latest finality update
 	// LightClientOptimisticUpdate => latest optimistic update
@@ -571,9 +572,10 @@ var ChaindataTables = []string{
 
 	VerkleRoots,
 	VerkleTrie,
-
+	// Beacon stuff
 	BeaconState,
 	BeaconBlocks,
+	Attestetations,
 	LightClient,
 	LightClientUpdates,
 }
