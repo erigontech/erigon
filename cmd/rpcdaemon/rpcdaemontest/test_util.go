@@ -17,10 +17,12 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
@@ -318,4 +320,114 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 		server.Stop()
 	})
 	return ctx, conn
+}
+
+func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
+	var (
+		a0 = common.HexToAddress("0x00000000000000000000000000000000000000ff")
+		a1 = common.HexToAddress("0x00000000000000000000000000000000000001ff")
+		a2 = common.HexToAddress("0x00000000000000000000000000000000000002ff")
+		// Generate a canonical chain to act as the main dataset
+
+		// A sender who makes transactions, has some funds
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: params.TestChainConfig,
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+				// The address 0x00ff
+				a0: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						byte(vm.CALLDATASIZE), // call data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+				// The address 0x01ff
+				a1: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						// Prepare arguments for the CALL
+						byte(vm.CALLDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,  // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.CALLDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+						byte(vm.RETURNDATASIZE), // return data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+				// The address 0x02ff
+				a2: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						// Prepare arguments for the CALL
+						byte(vm.CALLDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,  // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.CALLDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+
+						// Prepare arguments for the CALL
+						byte(vm.RETURNDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,    // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.RETURNDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+
+						byte(vm.RETURNDATASIZE), // return data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+			},
+		}
+	)
+	m := stages.MockWithGenesis(t, gspec, key, false)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		// One transaction to AAAA
+		tx, _ := types.SignTx(types.NewTransaction(0, a2,
+			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
+		b.AddTx(tx)
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	if err := m.InsertChain(chain); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
+	}
+	return m
 }
