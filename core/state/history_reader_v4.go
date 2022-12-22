@@ -19,8 +19,8 @@ func bytesToUint64(buf []byte) (x uint64) {
 	return
 }
 
-// HistoryReader23 Implements StateReader and StateWriter
-type HistoryReader23 struct {
+// HistoryReaderV4 Implements StateReader and StateWriter
+type HistoryReaderV4 struct {
 	ac    *libstate.AggregatorContext
 	ri    *libstate.ReadIndices
 	txNum uint64
@@ -28,32 +28,32 @@ type HistoryReader23 struct {
 	tx    kv.Tx
 }
 
-func NewHistoryReader23(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReader23 {
-	return &HistoryReader23{ac: ac, ri: ri}
+func NewHistoryReader23(ac *libstate.AggregatorContext, ri *libstate.ReadIndices) *HistoryReaderV4 {
+	return &HistoryReaderV4{ac: ac, ri: ri}
 }
 
-func (hr *HistoryReader23) SetTx(tx kv.Tx) { hr.tx = tx }
+func (hr *HistoryReaderV4) SetTx(tx kv.Tx) { hr.tx = tx }
 
-func (hr *HistoryReader23) SetRwTx(tx kv.RwTx) {
+func (hr *HistoryReaderV4) SetRwTx(tx kv.RwTx) {
 	hr.ri.SetTx(tx)
 }
 
-func (hr *HistoryReader23) SetTxNum(txNum uint64) {
+func (hr *HistoryReaderV4) SetTxNum(txNum uint64) {
 	hr.txNum = txNum
 	if hr.ri != nil {
 		hr.ri.SetTxNum(txNum)
 	}
 }
 
-func (hr *HistoryReader23) FinishTx() error {
+func (hr *HistoryReaderV4) FinishTx() error {
 	return hr.ri.FinishTx()
 }
 
-func (hr *HistoryReader23) SetTrace(trace bool) {
+func (hr *HistoryReaderV4) SetTrace(trace bool) {
 	hr.trace = trace
 }
 
-func (hr *HistoryReader23) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV4) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountData(address.Bytes()); err != nil {
 			return nil, err
@@ -80,7 +80,7 @@ func (hr *HistoryReader23) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
-func (hr *HistoryReader23) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV4) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountStorage(address.Bytes(), key.Bytes()); err != nil {
 			return nil, err
@@ -103,7 +103,7 @@ func (hr *HistoryReader23) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (hr *HistoryReader23) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV4) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCode(address.Bytes()); err != nil {
 			return nil, err
@@ -119,7 +119,7 @@ func (hr *HistoryReader23) ReadAccountCode(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (hr *HistoryReader23) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (hr *HistoryReaderV4) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCodeSize(address.Bytes()); err != nil {
 			return 0, err
@@ -135,6 +135,6 @@ func (hr *HistoryReader23) ReadAccountCodeSize(address common.Address, incarnati
 	return size, nil
 }
 
-func (hr *HistoryReader23) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (hr *HistoryReaderV4) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	return 0, nil
 }

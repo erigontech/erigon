@@ -46,6 +46,10 @@ func (g *GossipManager) Loop() {
 			log.Warn("[Beacon Gossip] Failure in receiving", "err", err)
 			continue
 		}
+		// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
+		// then attempts to deserialize the received data into it.
+		//If the deserialization fails, an error is logged and the loop continues to the next iteration.
+		//If the deserialization is successful, the object is set to the deserialized value and the loop continues to the next iteration.
 		receivers := g.receivers[data.Type]
 		var object cltypes.ObjectSSZ
 		switch data.Type {

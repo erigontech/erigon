@@ -157,48 +157,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func NewEVMInterpreterByVM(vm *VM) *EVMInterpreter {
-	var jt *JumpTable
-	switch {
-	case vm.evm.ChainRules().IsCancun:
-		jt = &cancunInstructionSet
-	case vm.evm.ChainRules().IsShanghai:
-		jt = &shanghaiInstructionSet
-	case vm.evm.ChainRules().IsLondon:
-		jt = &londonInstructionSet
-	case vm.evm.ChainRules().IsBerlin:
-		jt = &berlinInstructionSet
-	case vm.evm.ChainRules().IsIstanbul:
-		jt = &istanbulInstructionSet
-	case vm.evm.ChainRules().IsConstantinople:
-		jt = &constantinopleInstructionSet
-	case vm.evm.ChainRules().IsByzantium:
-		jt = &byzantiumInstructionSet
-	case vm.evm.ChainRules().IsSpuriousDragon:
-		jt = &spuriousDragonInstructionSet
-	case vm.evm.ChainRules().IsTangerineWhistle:
-		jt = &tangerineWhistleInstructionSet
-	case vm.evm.ChainRules().IsHomestead:
-		jt = &homesteadInstructionSet
-	default:
-		jt = &frontierInstructionSet
-	}
-	if len(vm.cfg.ExtraEips) > 0 {
-		for i, eip := range vm.cfg.ExtraEips {
-			if err := EnableEIP(eip, jt); err != nil {
-				// Disable it, so caller can check if it's activated or not
-				vm.cfg.ExtraEips = append(vm.cfg.ExtraEips[:i], vm.cfg.ExtraEips[i+1:]...)
-				log.Error("EIP activation failed", "eip", eip, "err", err)
-			}
-		}
-	}
-
-	return &EVMInterpreter{
-		VM: vm,
-		jt: jt,
-	}
-}
-
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -282,21 +240,10 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		operation := in.jt[op]
 		cost = operation.constantGas // For tracing
 		// Validate stack
-		if sLen := locStack.Len(); sLen < operation.minStack {
-			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.minStack}
+		if sLen := locStack.Len(); sLen < operation.numPop {
+			return nil, &ErrStackUnderflow{stackLen: sLen, required: operation.numPop}
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
-		}
-		// If the operation is valid, enforce and write restrictions
-		if in.readOnly && in.evm.ChainRules().IsByzantium {
-			// If the interpreter is operating in readonly mode, make sure no
-			// state-modifying operation is performed. The 3rd stack item
-			// for a call operation is the value. Transferring value from one
-			// account to the others means the state is modified and should also
-			// return with an error.
-			if operation.writes || (op == CALL && !locStack.Back(2).IsZero()) {
-				return nil, ErrWriteProtection
-			}
 		}
 		if !contract.UseGas(cost) {
 			return nil, ErrOutOfGas
@@ -337,24 +284,18 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)
-		// if the operation clears the return data (e.g. it has returning data)
-		// set the last return to the result of the operation.
-		if operation.returns {
-			in.returnData = res
-		}
 
-		switch {
-		case err != nil:
-			return nil, err
-		case operation.reverts:
-			return res, ErrExecutionReverted
-		case operation.halts:
-			return res, nil
-		case !operation.jumps:
-			_pc++
+		if err != nil {
+			break
 		}
+		_pc++
 	}
-	return nil, nil
+
+	if err == errStopToken {
+		err = nil // clear stop token error
+	}
+
+	return res, err
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {

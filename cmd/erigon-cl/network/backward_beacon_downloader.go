@@ -70,18 +70,24 @@ func (b *BackwardBeaconDownloader) Progress() uint64 {
 	return b.slotToDownload
 }
 
-// Peers current amount of peers connected.
+// Peers returns the current number of peers connected to the BackwardBeaconDownloader.
 func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 	peerCount, err := b.sentinel.GetPeers(b.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
 		return 0, err
 	}
-
+	// The GetPeers method returns a value of type sentinel.PeerCount
+	// which contains a field called Amount that holds the number of peers.
 	return peerCount.Amount, nil
 }
 
+// RequestMore downloads a range of blocks in a backward manner.
+// The function sends a request for a range of blocks starting from a given slot and ending count blocks before it.
+// It then processes the response by iterating over the blocks in reverse order and calling a provided callback function onNewBlock on each block.
+// If the callback returns an error or signals that the download should be finished, the function will exit.
+// If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore() {
-	count := uint64(10)
+	count := uint64(32)
 	start := b.slotToDownload - count + 1
 	responses, err := rpc.SendBeaconBlocksByRangeReq(
 		b.ctx,

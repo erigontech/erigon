@@ -14,19 +14,23 @@ Content-Type: application/json
 ###
 
 POST localhost:8545
+#POST https://goerli.infura.io/v3/e8e57acb3dde4a889e15107e796332aa
 Content-Type: application/json
 
 {
   "jsonrpc": "2.0",
   "method": "eth_getBalance",
   "params": [
-    "0xfffa4763f94f7ad191b366a343092a5d1a47ed08",
-    "0xde84"
+    "0xa6DD2974B96e959F2c8930024451a30aFEC24203",
+    "0x27100"
   ],
   "id": 1
 }
 
 ###
+# 0x68d39d934c85200
+# 0x68d39d934c85200
+# 0x68d39d934c85200
 
 POST localhost:8545
 Content-Type: application/json
