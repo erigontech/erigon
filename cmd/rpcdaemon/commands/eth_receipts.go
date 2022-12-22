@@ -425,8 +425,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		gp := new(core.GasPool).AddGas(msg.Gas())
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d", err, blockNum, txNum)
+			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, blockNum, txNum, ibs.Error())
 		}
+
 		rawLogs := ibs.GetLogs(txHash)
 		var logIndex uint
 		for _, log := range rawLogs {

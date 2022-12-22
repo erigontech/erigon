@@ -2,6 +2,7 @@ package historyv2read
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -22,6 +23,7 @@ func GetAsOfV3(tx kv.TemporalTx, storage bool, key []byte, timestamp uint64, his
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("GetAsOfV3: %x, %d\n", key, timestamp)
 	if !ok {
 		return tx.GetOne(kv.PlainState, key)
 	}

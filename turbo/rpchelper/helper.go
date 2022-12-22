@@ -127,6 +127,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("hist reader v3: bn=%d, txNum=%d\n", tx, blockNumber)
 	r.SetTxNum(minTxNum + txnIndex)
 	return r, nil
 }
