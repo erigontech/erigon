@@ -87,7 +87,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore() {
-	count := uint64(32)
+	count := uint64(64)
 	start := b.slotToDownload - count + 1
 	responses, err := rpc.SendBeaconBlocksByRangeReq(
 		b.ctx,
