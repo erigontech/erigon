@@ -651,8 +651,9 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 	if ms.HistoryV3 {
 		aggCtx := ms.agg.MakeContext()
 		aggCtx.SetTx(tx)
-		r := state.NewHistoryReaderV3(aggCtx)
+		r := state.NewHistoryReaderV3()
 		r.SetTx(tx)
+		r.SetAc(aggCtx)
 		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
 		if err != nil {
 			panic(err)

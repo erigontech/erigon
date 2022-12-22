@@ -624,8 +624,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReaderV3(ac)
+	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
+	stateReader.SetAc(ac)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()
