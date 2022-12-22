@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -25,11 +26,10 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 	for i := uint8(0); i < SHUFFLE_ROUND_COUNT; i++ {
 		// Construct first hash input.
 		input := append(seed[:], i)
-		hash := sha256.New()
-		hash.Write(input)
+		hashedInput := utils.Keccak256(input)
 
 		// Read hash value.
-		hashValue := binary.LittleEndian.Uint64(hash.Sum(nil)[:8])
+		hashValue := binary.LittleEndian.Uint64(hashedInput[:8])
 
 		// Caclulate pivot and flip.
 		pivot := hashValue % ind_count
@@ -47,11 +47,9 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 		input2 := append(seed[:], i)
 		input2 = append(input2, positionByteArray...)
 
-		hash.Reset()
-		hash.Write(input2)
+		hashedInput2 := utils.Keccak256(input2)
 		// Read hash value.
-		source := hash.Sum(nil)
-		byteVal := source[(position%256)/8]
+		byteVal := hashedInput2[(position%256)/8]
 		bitVal := (byteVal >> (position % 8)) % 2
 		if bitVal == 1 {
 			ind = flip

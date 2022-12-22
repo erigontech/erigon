@@ -180,7 +180,8 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 	}
 
 	// -- send notifications START
-	var headHeader *types.Header
+	//TODO: can this 2 headers be 1
+	var headHeader, currentHeder *types.Header
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		// Update sentry status for peers to see our sync status
 		var headTd *big.Int
@@ -197,6 +198,7 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 			return err
 		}
 		headHeader = rawdb.ReadHeader(tx, headHash, head)
+		currentHeder = rawdb.ReadCurrentHeader(tx)
 
 		// update the accumulator with a new plain state version so the cache can be notified that
 		// state has moved on
@@ -234,13 +236,13 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 	}); err != nil {
 		return headBlockHash, err
 	}
-	if notifications != nil && notifications.Accumulator != nil {
-		pendingBaseFee := misc.CalcBaseFee(chainConfig, headHeader)
-		if headHeader.Number.Uint64() == 0 {
-			notifications.Accumulator.StartChange(0, headHeader.Hash(), nil, false)
+	if notifications != nil && notifications.Accumulator != nil && currentHeder != nil {
+		pendingBaseFee := misc.CalcBaseFee(chainConfig, currentHeder)
+		if currentHeder.Number.Uint64() == 0 {
+			notifications.Accumulator.StartChange(0, currentHeder.Hash(), nil, false)
 		}
 
-		notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), headHeader.GasLimit)
+		notifications.Accumulator.SendAndReset(ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), currentHeder.GasLimit)
 	}
 	// -- send notifications END
 
