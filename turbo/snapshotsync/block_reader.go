@@ -176,10 +176,13 @@ func (back *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter
 	if b == nil {
 		return nil, nil
 	}
-	if len(b.Transactions) <= i {
+	if i < 0 {
 		return nil, nil
 	}
-	return b.Transactions[i], nil
+	if len(b.Transactions) < i+1 {
+		return nil, nil
+	}
+	return b.Transactions[i+1], nil
 }
 
 func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
