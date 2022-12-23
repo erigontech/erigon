@@ -4,16 +4,12 @@ import (
 	"context"
 )
 
-type SubManager[K comparable, T any] interface {
-	Get(K) (res Sub[T], ok bool)
-	Delete(K) (res Sub[T], ok bool)
-	Put(K, Sub[T]) bool
-	Range(func(k K, t Sub[T]) error) error
-}
-
 type Sub[T any] interface {
+	// Send should sends T to the subscriber. should be safe to send after Close()
 	Send(T)
+	// Recv should receive T and whether or not the sub is done. should be safe to recv after Close() is called
 	Recv() (res T, done bool)
+	// Close should mark the subscription closed. It should be safe to call Close multiple times
 	Close()
 }
 
@@ -47,13 +43,16 @@ func (s *chan_sub[T]) Close() {
 	case <-s.ctx.Done():
 		return
 	default:
-		s.cn()
 	}
-	// ensure that channel is only closed once
+	// at this point, mark the subscription as cancelled
+	s.cn()
+	// its possible for multiple goroutines to get to this point
 	select {
 	case s.closed <- struct{}{}:
+		// but it is not possible for multiple goroutines to get to this point
+		// close the channel
 		close(s.ch)
-		// drain channel
+		// drain the channel
 		for _ = range s.ch {
 		}
 	default:
@@ -62,7 +61,7 @@ func (s *chan_sub[T]) Close() {
 func (s *chan_sub[T]) Recv() (T, bool) {
 	var t T
 	select {
-	case <-s.closed:
+	case <-s.ctx.Done():
 		return t, false
 	default:
 	}
