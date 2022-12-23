@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
@@ -16,6 +15,9 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/stretchr/testify/assert"
+
+	// Force-load native and js packages, to trigger registration
+	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 )
 
 /*
@@ -39,7 +41,6 @@ func TestGeneratedDebugApi(t *testing.T) {
 	if err = stream.Flush(); err != nil {
 		t.Fatalf("error flusing: %v", err)
 	}
-	fmt.Printf("buf: %s\n", buf.Bytes())
 	var result interface{}
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
@@ -96,7 +97,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 			],
 			"from": "0x71562b71999873db5b286df957af199ec94617f7",
 			"gas": "0x7120",
-			"gasUsed": "0x161c",
+			"gasUsed": "0x684c",
 			"input": "0x01000100",
 			"output": "0x",
 			"to": "0x00000000000000000000000000000000000002ff",

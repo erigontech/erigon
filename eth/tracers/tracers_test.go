@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package tracers
+package tracers_test
 
 import (
 	"bytes"
@@ -27,6 +27,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -43,6 +44,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
+
+	// Force-load native and js packages, to trigger registration
+	"github.com/ledgerwatch/erigon/eth/tracers"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 )
 
 // To generate a new callTracer test, copy paste the makeTest method below into
@@ -94,6 +99,15 @@ var makeTest = function(tx, rewind) {
   }, null, 2));
 }
 */
+
+// camel converts a snake cased input string into a camel cased output.
+func camel(str string) string {
+	pieces := strings.Split(str, "_")
+	for i := 1; i < len(pieces); i++ {
+		pieces[i] = string(unicode.ToUpper(rune(pieces[i][0]))) + pieces[i][1:]
+	}
+	return strings.Join(pieces, "")
+}
 
 // callTrace is the result of a callTracer run.
 type callTrace struct {
@@ -181,7 +195,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
-	tracer, err := New("prestateTracer", new(Context), json.RawMessage{})
+	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage{})
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
@@ -260,7 +274,7 @@ func TestCallTracer(t *testing.T) {
 			require.NoError(t, err)
 
 			// Create the tracer, the EVM environment and run it
-			tracer, err := New("callTracer", new(Context))
+			tracer, err := tracers.New("callTracer", new(tracers.Context), json.RawMessage{})
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}

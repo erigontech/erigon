@@ -43,7 +43,6 @@ var assetTracers = make(map[string]string)
 
 // init retrieves the JavaScript transaction tracers included in go-ethereum.
 func init() {
-	fmt.Printf("GOJA INIT\n")
 	var err error
 	assetTracers, err = jsassets.Load()
 	if err != nil {
@@ -238,7 +237,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	t.ctx["input"] = t.vm.ToValue(input)
 	t.ctx["gas"] = t.vm.ToValue(gas)
 	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice.ToBig())
-	valueBig, err := t.toBig(t.vm, value.String())
+	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
 		return
