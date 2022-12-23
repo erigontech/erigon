@@ -4,6 +4,8 @@
 **/*.o
 **/*.dSYM
 
+/.git
+
 build
 tests/testdata
 cmd/prometheus
