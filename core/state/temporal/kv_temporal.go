@@ -140,12 +140,15 @@ type Cursor struct {
 
 // [fromTs, toTs)
 func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.Iter[uint64], err error) {
+	fmt.Printf("temp.IndexRange: %t\n", tx.hitoryV3)
+
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopic:
 			t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
 			return t, nil
 		case LogAddr:
+			fmt.Printf("temp.IndexRange2: %t\n", tx.hitoryV3)
 			t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
 			return t, nil
 		case TracesFrom:
