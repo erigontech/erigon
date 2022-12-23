@@ -308,7 +308,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var addrBitmap *roaring64.Bitmap
 	for _, addr := range crit.Addresses {
 		var bitmapForORing roaring64.Bitmap
-		it, err := tx.IndexRange(temporal.LogAddr, addr.Bytes(), fromTxNum, toTxNum)
+		it, err := tx.IndexRange(temporal.LogAddr, addr.Bytes(), fromTxNum-10, toTxNum+10)
 		if err != nil {
 			return nil, err
 		}
