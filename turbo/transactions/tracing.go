@@ -134,7 +134,7 @@ func TraceTx(
 ) error {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
-		tracer vm.Tracer
+		tracer vm.EVMLogger
 		err    error
 	)
 	var streaming bool
@@ -398,10 +398,10 @@ func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint6
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *JsonStreamLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

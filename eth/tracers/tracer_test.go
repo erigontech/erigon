@@ -74,7 +74,7 @@ func runTrace(tracer *Tracer, vmctx *vmContext) (json.RawMessage, error) {
 
 	tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, false, []byte{}, startGas, uint256.NewInt(value.Uint64()), contract.Code)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	tracer.CaptureEnd(ret, startGas, contract.Gas, 1, err)
+	tracer.CaptureEnd(ret, startGas-contract.Gas, err)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func TestNoStepExec(t *testing.T) {
 		startGas := uint64(10000)
 		contract := vm.NewContract(account{}, account{}, uint256.NewInt(1), startGas, true)
 		tracer.CaptureStart(env, contract.Caller(), contract.Address(), false, false, nil, 0, uint256.NewInt(0), nil)
-		tracer.CaptureEnd(nil, startGas-contract.Gas, 1, 0, nil)
+		tracer.CaptureEnd(nil, startGas-contract.Gas, nil)
 		return tracer.GetResult()
 	}
 	execTracer := func(code string) []byte {
