@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"sync/atomic"
-	"time"
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -663,17 +662,16 @@ func (jst *Tracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (jst *Tracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 	jst.ctx["output"] = output
-	jst.ctx["time"] = t.String()
-	jst.ctx["gasUsed"] = startGas - endGas
+	jst.ctx["gasUsed"] = usedGas
 
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
 }
 
-func (jst *Tracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (jst *Tracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (jst *Tracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
