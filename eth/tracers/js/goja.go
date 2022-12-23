@@ -584,7 +584,7 @@ func (mo *memoryObj) slice(begin, end int64) ([]byte, error) {
 	slice := make([]byte, end-begin)
 	end = min(end, int64(mo.memory.Len()))
 	ptr := mo.memory.GetPtr(begin, end-begin)
-	copy(slice[:], ptr)
+	copy(slice, ptr)
 	return slice, nil
 }
 
