@@ -430,8 +430,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		rawLogs := ibs.GetLogs(txHash)
 
-		fmt.Printf("tx: %d\n", txIndex)
-		logIndex := uint(txIndex)
+		//TODO: logIndex within the block! no way to calc it now
+		logIndex := uint(0)
 		for _, log := range rawLogs {
 			log.Index = logIndex
 			logIndex++
