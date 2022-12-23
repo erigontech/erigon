@@ -310,6 +310,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+		defer it.Close()
 		for it.HasNext() {
 			n, err := it.NextBatch()
 			if err != nil {
@@ -470,6 +471,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
+			defer it.Close()
 			for it.HasNext() {
 				n, err := it.NextBatch()
 				if err != nil {
