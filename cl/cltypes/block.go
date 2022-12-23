@@ -393,7 +393,7 @@ func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
 				slot:          block.Block.Slot,
 				proposerIndex: block.Block.ProposerIndex,
 				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.ParentRoot,
+				stateRoot:     block.Block.StateRoot,
 				body: &BeaconBody{
 					randaoReveal:      block.Block.Body.RandaoReveal,
 					eth1Data:          block.Block.Body.Eth1Data,
@@ -414,7 +414,7 @@ func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
 				slot:          block.Block.Slot,
 				proposerIndex: block.Block.ProposerIndex,
 				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.ParentRoot,
+				stateRoot:     block.Block.StateRoot,
 				body: &BeaconBody{
 					randaoReveal:      block.Block.Body.RandaoReveal,
 					eth1Data:          block.Block.Body.Eth1Data,
@@ -436,7 +436,7 @@ func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
 				slot:          block.Block.Slot,
 				proposerIndex: block.Block.ProposerIndex,
 				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.ParentRoot,
+				stateRoot:     block.Block.StateRoot,
 				body: &BeaconBody{
 					randaoReveal:      block.Block.Body.RandaoReveal,
 					eth1Data:          block.Block.Body.Eth1Data,

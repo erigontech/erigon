@@ -195,7 +195,6 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatr
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("A")
 
 	signedBlock.Block.Body.Attestations, err = ReadAttestations(tx, slot)
 	return signedBlock, err

@@ -70,25 +70,26 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	cfg.downloader.SetSlotToDownload(cfg.state.LatestBlockHeader().Slot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
 	// Set up onNewBlock callback
-	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlockBellatrix) (finished bool, err error) {
+	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
+		slot := blk.Block().Slot()
 		// Collect attestations
-		encodedAttestations, err := rawdb.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
+		encodedAttestations, err := rawdb.EncodeAttestationsForStorage(blk.Block().Body().Attestations())
 		if err != nil {
 			return false, err
 		}
-		if err := attestationsCollector.Collect(rawdb.EncodeNumber(blk.Block.Slot), encodedAttestations); err != nil {
+		if err := attestationsCollector.Collect(rawdb.EncodeNumber(slot), encodedAttestations); err != nil {
 			return false, err
 		}
 		// Collect beacon blocks
-		encodedBeaconBlock, err := rawdb.EncodeBeaconBlockForStorage(blk)
+		encodedBeaconBlock, err := blk.EncodeForStorage()
 		if err != nil {
 			return false, err
 		}
-		if err := beaconBlocksCollector.Collect(rawdb.EncodeNumber(blk.Block.Slot), encodedBeaconBlock); err != nil {
+		if err := beaconBlocksCollector.Collect(rawdb.EncodeNumber(slot), encodedBeaconBlock); err != nil {
 			return false, err
 		}
 		// will arbitratly stop at slot 5.1M for testing reasons
-		return blk.Block.Slot <= 5300000, nil
+		return slot == 5300000, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -138,5 +139,6 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return err
 		}
 	}
+	panic("stop")
 	return nil
 }
