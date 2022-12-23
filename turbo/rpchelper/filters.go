@@ -30,33 +30,33 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs        map[HeadsSubID]Sub[*types.Header]
-	pendingLogsSubs  map[PendingLogsSubID]Sub[types.Logs]
-	pendingBlockSubs map[PendingBlockSubID]Sub[*types.Block]
-	pendingTxsSubs   map[PendingTxsSubID]Sub[[]types.Transaction]
+	headsSubs        *SyncMap[HeadsSubID, Sub[*types.Header]]
+	pendingLogsSubs  *SyncMap[PendingLogsSubID, Sub[types.Logs]]
+	pendingBlockSubs *SyncMap[PendingBlockSubID, Sub[*types.Block]]
+	pendingTxsSubs   *SyncMap[PendingTxsSubID, Sub[[]types.Transaction]]
 	logsSubs         *LogsFilterAggregator
 	logsRequestor    atomic.Value
 	onNewSnapshot    func()
 
 	storeMu            sync.Mutex
-	logsStores         map[LogsSubID][]*types.Log
-	pendingHeadsStores map[HeadsSubID][]*types.Header
-	pendingTxsStores   map[PendingTxsSubID][][]types.Transaction
+	logsStores         *SyncMap[LogsSubID, []*types.Log]
+	pendingHeadsStores *SyncMap[HeadsSubID, []*types.Header]
+	pendingTxsStores   *SyncMap[PendingTxsSubID, [][]types.Transaction]
 }
 
 func New(ctx context.Context, ethBackend ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, onNewSnapshot func()) *Filters {
 	log.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
-		headsSubs:          make(map[HeadsSubID]Sub[*types.Header]),
-		pendingTxsSubs:     make(map[PendingTxsSubID]Sub[[]types.Transaction]),
-		pendingLogsSubs:    make(map[PendingLogsSubID]Sub[types.Logs]),
-		pendingBlockSubs:   make(map[PendingBlockSubID]Sub[*types.Block]),
+		headsSubs:          NewSyncMap[HeadsSubID, Sub[*types.Header]](),
+		pendingTxsSubs:     NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
+		pendingLogsSubs:    NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
+		pendingBlockSubs:   NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
-		logsStores:         make(map[LogsSubID][]*types.Log),
-		pendingHeadsStores: make(map[HeadsSubID][]*types.Header),
-		pendingTxsStores:   make(map[PendingTxsSubID][][]types.Transaction),
+		logsStores:         NewSyncMap[LogsSubID, []*types.Log](),
+		pendingHeadsStores: NewSyncMap[HeadsSubID, []*types.Header](),
+		pendingTxsStores:   NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 	}
 
 	go func() {
@@ -247,9 +247,10 @@ func (ff *Filters) HandlePendingBlock(reply *txpool.OnPendingBlockReply) {
 	defer ff.mu.Unlock()
 	ff.pendingBlock = b
 
-	for _, v := range ff.pendingBlockSubs {
+	ff.pendingBlockSubs.Range(func(k PendingBlockSubID, v Sub[*types.Block]) error {
 		v.Send(b)
-	}
+		return nil
+	})
 }
 
 func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.MiningClient) error {
@@ -263,7 +264,6 @@ func (ff *Filters) subscribeToPendingLogs(ctx context.Context, mining txpool.Min
 			return nil
 		default:
 		}
-
 		event, err := subscription.Recv()
 		if errors.Is(err, io.EOF) {
 			log.Debug("rpcdaemon: the subscription to pending logs channel was closed")
@@ -286,118 +286,72 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 	if err := rlp.Decode(bytes.NewReader(reply.RplLogs), &l); err != nil {
 		log.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
-
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-	for _, v := range ff.pendingLogsSubs {
+	ff.pendingLogsSubs.Range(func(k PendingLogsSubID, v Sub[types.Logs]) error {
 		v.Send(l)
-	}
+		return nil
+	})
 }
 
 func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	id := HeadsSubID(generateSubscriptionID())
-	ff.headsSubs[id] = NewChanSub(out)
+	ff.headsSubs.Put(id, NewChanSub(out))
 	return id
 }
 
 func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
-	ff.mu.RLock()
-	ch, ok := ff.headsSubs[id]
-	ff.mu.RUnlock()
+	ch, ok := ff.headsSubs.Get(id)
 	if !ok {
 		return false
 	}
-	// Drain the channel to avoid the deadlock in the OnNewEvent function
-	// Draining of the channel is safe without a lock because it does not panic
-	// when the channel is closed
-	for {
-		if _, ok := ch.Recv(); !ok {
-			ff.mu.Lock()
-			defer ff.mu.Unlock()
-			// Need to re-check the channel because it might have been closed and removed from the map
-			// which we were not holding the lock
-			if ch, ok = ff.headsSubs[id]; !ok {
-				return false
-			}
-			ch.Close()
-			delete(ff.headsSubs, id)
-			ff.storeMu.Lock()
-			delete(ff.pendingHeadsStores, id)
-			ff.storeMu.Unlock()
-			return true
-		}
+	ch.Close()
+	if ch, ok = ff.headsSubs.Delete(id); !ok {
+		return false
 	}
+	ff.pendingHeadsStores.Delete(id)
+	return true
 }
 
 func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	id := PendingLogsSubID(generateSubscriptionID())
-	ff.pendingLogsSubs[id] = NewChanSub(c)
+	ff.pendingLogsSubs.Put(id, NewChanSub(c))
 	return id
 }
 
 func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	delete(ff.pendingLogsSubs, id)
+	ff.pendingLogsSubs.Delete(id)
 }
 
 func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	id := PendingBlockSubID(generateSubscriptionID())
-	ff.pendingBlockSubs[id] = NewChanSub(f)
+	ff.pendingBlockSubs.Put(id, NewChanSub(f))
 	return id
 }
 
 func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
-	delete(ff.pendingBlockSubs, id)
+	ff.pendingBlockSubs.Delete(id)
 }
 
 func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
-	ff.mu.Lock()
-	defer ff.mu.Unlock()
 	id := PendingTxsSubID(generateSubscriptionID())
-	ff.pendingTxsSubs[id] = NewChanSub(out)
+	ff.pendingTxsSubs.Put(id, NewChanSub(out))
 	return id
 }
 
 func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
-	ff.mu.RLock()
-	ch, ok := ff.pendingTxsSubs[id]
-	ff.mu.RUnlock()
+	ch, ok := ff.pendingTxsSubs.Get(id)
 	if !ok {
 		return false
 	}
-	// Drain the channel to avoid the deadlock in the OnNewTxs function
-	// Draining of the channel is safe without a lock because it does not panic
-	// when the channel is closed
-	for {
-		if _, ok := ch.Recv(); !ok {
-			ff.mu.Lock()
-			defer ff.mu.Unlock()
-			// Need to re-check the channel because it might have been closed and removed from the map
-			// which we were not holding the lock
-			if ch, ok = ff.pendingTxsSubs[id]; !ok {
-				return false
-			}
-			ch.Close()
-			delete(ff.pendingTxsSubs, id)
-			ff.storeMu.Lock()
-			delete(ff.pendingTxsStores, id)
-			ff.storeMu.Unlock()
-			return true
-		}
+	ch.Close()
+	if _, ok = ff.pendingTxsSubs.Delete(id); !ok {
+		return false
 	}
+	ff.pendingTxsStores.Delete(id)
+	return true
 }
 
 func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
-	id, f := ff.logsSubs.insertLogsFilter(out)
+	id, f := ff.logsSubs.insertLogsFilter(NewChanSub(out))
 	f.addrs = map[common.Address]int{}
 	if len(crit.Addresses) == 0 {
 		f.allAddrs = 1
@@ -450,12 +404,7 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 	isDeleted := ff.logsSubs.removeLogsFilter(id)
 	// if any filters in the aggregate need all addresses or all topics then the request to the central
 	// log subscription needs to honour this
-	ff.logsSubs.logsFilterLock.Lock()
-	lfr := &remote.LogsFilterRequest{
-		AllAddresses: ff.logsSubs.aggLogsFilter.allAddrs >= 1,
-		AllTopics:    ff.logsSubs.aggLogsFilter.allTopics >= 1,
-	}
-	ff.logsSubs.logsFilterLock.Unlock()
+	lfr := ff.logsSubs.createFilterRequest()
 
 	addresses, topics := ff.logsSubs.getAggMaps()
 
@@ -479,31 +428,26 @@ func (ff *Filters) UnsubscribeLogs(id LogsSubID) bool {
 }
 
 func (ff *Filters) deleteLogStore(id LogsSubID) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
-	delete(ff.logsStores, id)
+	ff.logsStores.Delete(id)
 }
 
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-
 	switch event.Type {
 	case remote.Event_HEADER:
 		payload := event.Data
 		var header types.Header
 		if len(payload) == 0 {
 			return
-
 		}
 		err := rlp.Decode(bytes.NewReader(payload), &header)
 		if err != nil {
 			// ignoring what we can't unmarshal
 			log.Warn("OnNewEvent rpc filters (header), unprocessable payload", "err", err)
 		} else {
-			for _, v := range ff.headsSubs {
+			ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
 				v.Send(&header)
-			}
+				return nil
+			})
 		}
 	case remote.Event_NEW_SNAPSHOT:
 		ff.onNewSnapshot()
@@ -538,9 +482,6 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 }
 
 func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
-	ff.mu.RLock()
-	defer ff.mu.RUnlock()
-
 	txs := make([]types.Transaction, len(reply.RplTxs))
 	for i, rlpTx := range reply.RplTxs {
 		var decodeErr error
@@ -555,9 +496,10 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 			break
 		}
 	}
-	for _, v := range ff.pendingTxsSubs {
+	ff.pendingTxsSubs.Range(func(k PendingTxsSubID, v Sub[[]types.Transaction]) error {
 		v.Send(txs)
-	}
+		return nil
+	})
 }
 
 func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
@@ -565,76 +507,69 @@ func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 }
 
 func (ff *Filters) AddLogs(id LogsSubID, logs *types.Log) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
-	st, ok := ff.logsStores[id]
-	if !ok {
-		st = make([]*types.Log, 0)
-	}
-	st = append(st, logs)
-	ff.logsStores[id] = st
+	ff.logsStores.DoAndStore(id, func(st []*types.Log, ok bool) []*types.Log {
+		if !ok {
+			st = make([]*types.Log, 0)
+		}
+		st = append(st, logs)
+		return st
+	})
 }
 
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
 	res := make([]*types.Log, 0)
-	st, ok := ff.logsStores[id]
-	if !ok {
-		return res, false
-	}
-	res = append(res, st...)
-	st = make([]*types.Log, 0)
-	ff.logsStores[id] = st
-	return res, true
+	_, exist := ff.logsStores.Do(id, func(l []*types.Log, ok bool) ([]*types.Log, bool) {
+		if !ok {
+			return res, false
+		}
+		res = append(res, l...)
+		return []*types.Log{}, true
+	})
+	return res, exist
 }
 
 func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
-	st, ok := ff.pendingHeadsStores[id]
-	if !ok {
-		st = make([]*types.Header, 0)
-	}
-	st = append(st, block)
-	ff.pendingHeadsStores[id] = st
+	ff.pendingHeadsStores.DoAndStore(id, func(st []*types.Header, ok bool) []*types.Header {
+		if !ok {
+			st = make([]*types.Header, 0)
+		}
+		st = append(st, block)
+		return st
+	})
 }
 
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
 	res := make([]*types.Header, 0)
-	st, ok := ff.pendingHeadsStores[id]
-	if !ok {
-		return res, false
-	}
-	res = append(res, st...)
-	st = make([]*types.Header, 0)
-	ff.pendingHeadsStores[id] = st
-	return res, true
+	_, exist := ff.pendingHeadsStores.Do(id, func(st []*types.Header, ok bool) ([]*types.Header, bool) {
+		if !ok {
+			return res, false
+		}
+		res = append(res, st...)
+		st = make([]*types.Header, 0)
+		return st, true
+	})
+	return res, exist
 }
 
 func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
-	st, ok := ff.pendingTxsStores[id]
-	if !ok {
-		st = make([][]types.Transaction, 0)
-	}
-	st = append(st, txs)
-	ff.pendingTxsStores[id] = st
+	ff.pendingTxsStores.DoAndStore(id, func(st [][]types.Transaction, ok bool) [][]types.Transaction {
+		if !ok {
+			st = make([][]types.Transaction, 0)
+		}
+		st = append(st, txs)
+		return st
+	})
 }
 
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	ff.storeMu.Lock()
-	defer ff.storeMu.Unlock()
 	res := make([][]types.Transaction, 0)
-	st, ok := ff.pendingTxsStores[id]
-	if !ok {
-		return res, false
-	}
-	res = append(res, st...)
-	st = make([][]types.Transaction, 0)
-	ff.pendingTxsStores[id] = st
-	return res, true
+	_, exists := ff.pendingTxsStores.Do(id, func(st [][]types.Transaction, ok bool) ([][]types.Transaction, bool) {
+		if !ok {
+			return res, false
+		}
+		res = append(res, st...)
+		st = make([][]types.Transaction, 0)
+		return st, true
+	})
+	return res, exists
 }

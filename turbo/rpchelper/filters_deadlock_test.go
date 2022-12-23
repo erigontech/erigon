@@ -19,7 +19,7 @@ func TestFiltersDeadlock_Test(t *testing.T) {
 		Addresses: nil,
 		Topics:    [][]common.Hash{},
 	}
-	subCount := 2
+	subCount := 20
 	logCount := 100
 	type sub struct {
 		id rpchelper.LogsSubID

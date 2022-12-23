@@ -37,9 +37,6 @@ func (l *LogsFilter) Send(lg *types2.Log) {
 func (l *LogsFilter) Close() {
 	l.sender.Close()
 }
-func (l *LogsFilter) Recv() (res *types2.Log, done bool) {
-	return l.sender.Recv()
-}
 
 func NewLogsFilterAggregator() *LogsFilterAggregator {
 	return &LogsFilterAggregator{
@@ -52,19 +49,10 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
-	a.logsFilterLock.RLock()
-	defer a.logsFilterLock.RUnlock()
-	return &remote.LogsFilterRequest{
-		AllAddresses: a.aggLogsFilter.allAddrs >= 1,
-		AllTopics:    a.aggLogsFilter.allTopics >= 1,
-	}
-}
-
-func (a *LogsFilterAggregator) insertLogsFilter(sender chan *types2.Log) (LogsSubID, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSubID, *LogsFilter) {
 	filterId := a.nextFilterId
 	a.nextFilterId++
-	filter := &LogsFilter{addrs: map[common.Address]int{}, topics: map[common.Hash]int{}, sender: NewChanSub(sender)}
+	filter := &LogsFilter{addrs: map[common.Address]int{}, topics: map[common.Hash]int{}, sender: sender}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter
 }
@@ -74,15 +62,21 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 	if !ok {
 		return false
 	}
-	for {
-		if _, ok := filter.Recv(); !ok {
-			if filter, ok = a.logsFilters.Delete(filterId); !ok {
-				return false
-			}
-			a.subtractLogFilters(filter)
-			filter.Close()
-			return true
-		}
+	filter.Close()
+	filter, ok = a.logsFilters.Delete(filterId)
+	if !ok {
+		return false
+	}
+	a.subtractLogFilters(filter)
+	return true
+}
+
+func (a *LogsFilterAggregator) createFilterRequest() *remote.LogsFilterRequest {
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
+	return &remote.LogsFilterRequest{
+		AllAddresses: a.aggLogsFilter.allAddrs >= 1,
+		AllTopics:    a.aggLogsFilter.allTopics >= 1,
 	}
 }
 
