@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"io"
 	"math/big"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -89,21 +88,20 @@ func (l *JSONLogger) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope 
 }
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
-		Time    time.Duration       `json:"time"`
 		Err     string              `json:"error,omitempty"`
 	}
 	var errMsg string
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(startGas - endGas), t, errMsg})
+	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
 }
 
-func (l *JSONLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

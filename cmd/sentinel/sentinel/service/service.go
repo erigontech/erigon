@@ -56,7 +56,7 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 }
 
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
-	retryReqInterval := time.NewTicker(10 * time.Millisecond)
+	retryReqInterval := time.NewTicker(20 * time.Millisecond)
 	defer retryReqInterval.Stop()
 	doneCh := make(chan *sentinelrpc.ResponseData)
 	// Try finding the data to our peers
@@ -94,12 +94,6 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 			return resp, nil
 		}
 	}
-	/*
-		&sentinelrpc.ResponseData{
-					Data:  respData,
-					Error: foundErrReq,
-				}*/
-
 }
 
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {

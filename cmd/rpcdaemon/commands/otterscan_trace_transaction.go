@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"math/big"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -96,7 +95,7 @@ func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to 
 	t.captureStartOrEnter(typ, from, to, precompile, input, value)
 }
 
-func (t *TransactionTracer) CaptureExit(output []byte, startGas, endGas uint64, d time.Duration, err error) {
+func (t *TransactionTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	t.depth--
 }
 
