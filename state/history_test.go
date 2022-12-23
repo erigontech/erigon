@@ -43,7 +43,7 @@ func testDbAndHistory(tb testing.TB) (string, kv.RwDB, *History) {
 	indexTable := "Index"
 	valsTable := "Vals"
 	settingsTable := "Settings"
-	db := mdbx.NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:    kv.TableCfgItem{Flags: kv.DupSort},

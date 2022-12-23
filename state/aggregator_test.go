@@ -24,7 +24,7 @@ func testDbAndAggregator(t *testing.T, prefixLen int, aggStep uint64) (string, k
 	path := t.TempDir()
 	t.Cleanup(func() { os.RemoveAll(path) })
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).Path(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	t.Cleanup(db.Close)
@@ -259,7 +259,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 
-	newDb, err := mdbx.NewMDBX(log.New()).Path(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	newDb, err := mdbx.NewMDBX(log.New()).InMem(filepath.Join(path, "db4")).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).Open()
 	require.NoError(t, err)

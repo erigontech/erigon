@@ -43,7 +43,7 @@ func testDbAndInvertedIndex(t *testing.T, aggStep uint64) (string, kv.RwDB, *Inv
 	logger := log.New()
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:  kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable: kv.TableCfgItem{Flags: kv.DupSort},

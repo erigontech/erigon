@@ -19,7 +19,7 @@ func testDbAndAggregatorBench(b *testing.B, prefixLen int, aggStep uint64) (stri
 	path := b.TempDir()
 	b.Cleanup(func() { os.RemoveAll(path) })
 	logger := log.New()
-	db := mdbx.NewMDBX(logger).Path(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbx.NewMDBX(logger).InMem(path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.ChaindataTablesCfg
 	}).MustOpen()
 	b.Cleanup(db.Close)
