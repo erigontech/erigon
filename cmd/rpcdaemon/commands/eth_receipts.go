@@ -156,7 +156,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	addrBitmap := roaring.FastOr(rx...)
-	fmt.Printf("dbg topics:  %d\n", addrBitmap.ToArray())
 
 	if len(rx) > 0 {
 		blockNumbers.And(addrBitmap)
@@ -278,7 +277,6 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
-	fmt.Printf("dbg getLogsV3\n")
 
 	var fromTxNum, toTxNum uint64
 	var err error
@@ -312,13 +310,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("dbg addrBitmap0:  %x, %d, %d\n", addr.Bytes(), fromTxNum, toTxNum)
 		for it.HasNext() {
 			n, err := it.NextBatch()
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("dbg addrBitma1:  %x, %d\n", addr.Bytes(), n)
 			bitmapForORing.AddMany(n)
 		}
 		if addrBitmap == nil {
@@ -328,13 +324,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		addrBitmap = roaring64.Or(addrBitmap, &bitmapForORing)
 	}
 
-	fmt.Printf("dbg addrBitmap:  %d\n", addrBitmap.ToArray())
-
 	if addrBitmap != nil {
 		txNumbers.And(addrBitmap)
 	}
-
-	fmt.Printf("dbg txNumbers:  %d\n", txNumbers.ToArray())
 
 	if txNumbers.GetCardinality() == 0 {
 		return logs, nil
@@ -371,7 +363,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
-	var logIndex uint
 	for iter.HasNext() {
 		txNum := iter.Next()
 
@@ -384,7 +375,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 		}
-		fmt.Printf("dbg0: found blockNum %d -> %d\n", txNum, blockNum)
 		if !ok {
 			return nil, nil
 		}
@@ -409,7 +399,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
-			logIndex = 0
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -418,7 +407,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("dbg1: found tx %t, blockNum=%d, txIndex=%d\n", txn != nil, blockNum, txIndex)
 		if txn == nil {
 			continue
 		}
@@ -442,7 +430,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		rawLogs := ibs.GetLogs(txHash)
 
-		fmt.Printf("dbg2: logs %x -> %d\n", txHash, rawLogs)
+		fmt.Printf("tx: %d\n", txIndex)
+		logIndex := uint(txIndex)
 		for _, log := range rawLogs {
 			log.Index = logIndex
 			logIndex++
@@ -481,13 +470,11 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("dbg topics:  %x\n", topic.Bytes())
 			for it.HasNext() {
 				n, err := it.NextBatch()
 				if err != nil {
 					return nil, err
 				}
-				fmt.Printf("dbg topics:  %d\n", n)
 				bitmapForORing.AddMany(n)
 			}
 		}
