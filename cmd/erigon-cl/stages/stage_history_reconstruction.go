@@ -89,7 +89,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return false, err
 		}
 		// will arbitratly stop at slot 5.1M for testing reasons
-		return slot == 5300000, nil
+		return slot == 0, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
