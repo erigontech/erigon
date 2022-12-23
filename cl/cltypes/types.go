@@ -172,6 +172,37 @@ type BeaconBodyBellatrix struct {
 }
 
 /*
+ * Block body for Consensus Layer to be stored internally (payload and attestations are stored separatedly).
+ */
+type BeaconBlockBellatrixForStorage struct {
+	// Non-body fields
+	Signature     [96]byte `ssz-size:"96"`
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	// Body fields
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
+	SyncAggregate     *SyncAggregate
+	// EL Metadatas
+	Eth1Number    uint64
+	Eth1BlockHash [32]byte `ssz-size:"32"`
+}
+
+/*
+ * AttestationsForStorage is the SSZ format for attestations.
+ */
+type AttestationsForStorage struct {
+	Attestations []*Attestation `ssz-max:"128"`
+}
+
+/*
  * Bellatrix block structure.
  */
 type BeaconBlockBellatrix struct {
