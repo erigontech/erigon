@@ -139,9 +139,7 @@ type Cursor struct {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.Iter[uint64], err error) {
-	fmt.Printf("temp.IndexRange: %t\n", tx.hitoryV3)
-
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.ValStream[uint64], err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopic:
@@ -178,6 +176,6 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		if err != nil {
 			return nil, err
 		}
-		return kv.IterFromArray(bm.ToArray()), nil
+		return kv.StreamArray(bm.ToArray()), nil
 	}
 }

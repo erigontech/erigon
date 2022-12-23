@@ -554,7 +554,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				n, err := it.NextBatch()
+				n, err := it.NextValues()
 				if err != nil {
 					return err
 				}
@@ -568,7 +568,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				n, err := it.NextBatch()
+				n, err := it.NextValues()
 				if err != nil {
 					return err
 				}

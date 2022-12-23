@@ -312,7 +312,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 		defer it.Close()
 		for it.HasNext() {
-			n, err := it.NextBatch()
+			n, err := it.NextValues()
 			if err != nil {
 				return nil, err
 			}
@@ -473,7 +473,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			}
 			defer it.Close()
 			for it.HasNext() {
-				n, err := it.NextBatch()
+				n, err := it.NextValues()
 				if err != nil {
 					return nil, err
 				}
