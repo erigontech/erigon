@@ -363,7 +363,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
-	var logIndex uint
 	for iter.HasNext() {
 		txNum := iter.Next()
 
@@ -400,7 +399,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
-			logIndex = 0
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -431,6 +429,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		rawLogs := ibs.GetLogs(txHash)
+
+		//TODO: logIndex within the block! no way to calc it now
+		logIndex := uint(0)
 		for _, log := range rawLogs {
 			log.Index = logIndex
 			logIndex++
