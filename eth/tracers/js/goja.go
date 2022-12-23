@@ -28,6 +28,8 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	jsassets "github.com/ledgerwatch/erigon/eth/tracers/js/internal/tracers"
@@ -222,9 +224,9 @@ func (t *jsTracer) CaptureTxEnd(restGas uint64) {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) {
+func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
-	db := &dbObj{ibs: env.IntraBlockState, vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
+	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
 	if create {
 		t.ctx["type"] = t.vm.ToValue("CREATE")
@@ -235,7 +237,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	t.ctx["to"] = t.vm.ToValue(to.Bytes())
 	t.ctx["input"] = t.vm.ToValue(input)
 	t.ctx["gas"] = t.vm.ToValue(gas)
-	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice)
+	t.ctx["gasPrice"] = t.vm.ToValue(env.TxContext().GasPrice.ToBig())
 	valueBig, err := t.toBig(t.vm, value.String())
 	if err != nil {
 		t.err = err
@@ -244,7 +246,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	t.ctx["value"] = valueBig
 	t.ctx["block"] = t.vm.ToValue(env.Context().BlockNumber)
 	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Random != nil)
+	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
@@ -294,7 +296,7 @@ func (t *jsTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *jsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, input []byte, gas uint64, value *big.Int) {
+func (t *jsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if !t.traceFrame {
 		return
 	}
@@ -622,7 +624,7 @@ func (m *memoryObj) setupObject() *goja.Object {
 }
 
 type stackObj struct {
-	stack *vm.Stack
+	stack *stack.Stack
 	vm    *goja.Runtime
 	toBig toBigFn
 }
@@ -643,14 +645,14 @@ func (s *stackObj) Peek(idx int) goja.Value {
 
 // peek returns the nth-from-the-top element of the stack.
 func (s *stackObj) peek(idx int) (*big.Int, error) {
-	if len(s.stack.Data()) <= idx || idx < 0 {
-		return nil, fmt.Errorf("tracer accessed out of bound stack: size %d, index %d", len(s.stack.Data()), idx)
+	if len(s.stack.Data) <= idx || idx < 0 {
+		return nil, fmt.Errorf("tracer accessed out of bound stack: size %d, index %d", len(s.stack.Data), idx)
 	}
 	return s.stack.Back(idx).ToBig(), nil
 }
 
 func (s *stackObj) Length() int {
-	return len(s.stack.Data())
+	return len(s.stack.Data)
 }
 
 func (s *stackObj) setupObject() *goja.Object {
@@ -661,7 +663,7 @@ func (s *stackObj) setupObject() *goja.Object {
 }
 
 type dbObj struct {
-	ibs     vm.IntraBlockState
+	ibs     evmtypes.IntraBlockState
 	vm      *goja.Runtime
 	toBig   toBigFn
 	toBuf   toBufFn
@@ -723,8 +725,9 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		return nil
 	}
 	hash := common.BytesToHash(h)
-	state := do.ibs.GetState(addr, hash).Bytes()
-	res, err := do.toBuf(do.vm, state)
+	var outValue uint256.Int
+	do.ibs.GetState(addr, &hash, &outValue)
+	res, err := do.toBuf(do.vm, outValue.Bytes())
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
