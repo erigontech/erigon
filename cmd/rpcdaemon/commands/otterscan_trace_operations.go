@@ -38,19 +38,15 @@ func NewOperationsTracer(ctx context.Context) *OperationsTracer {
 	}
 }
 
-func (t *OperationsTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, calltype vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	if depth == 0 {
-		return
-	}
-
-	if calltype == vm.CALLT && value.Uint64() != 0 {
+func (t *OperationsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if typ == vm.CALL && value.Uint64() != 0 {
 		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return
 	}
-	if calltype == vm.CREATET {
+	if typ == vm.CREATE {
 		t.Results = append(t.Results, &InternalOperation{OP_CREATE, from, to, (*hexutil.Big)(value.ToBig())})
 	}
-	if calltype == vm.CREATE2T {
+	if typ == vm.CREATE2 {
 		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value.ToBig())})
 	}
 }

@@ -19,6 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 var stateBuckets = []string{
@@ -37,6 +39,19 @@ var stateBuckets = []string{
 	kv.StorageHistory,
 	kv.TxLookup,
 	kv.ContractTEVMCode,
+}
+
+var cmdWarmup = &cobra.Command{
+	Use: "warmup",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := common2.RootContext()
+		err := doWarmup(ctx, chaindata, bucket)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
 }
 
 var cmdCompareBucket = &cobra.Command{
@@ -110,6 +125,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
+	withDataDir(cmdWarmup)
+	withBucket(cmdWarmup)
+
+	rootCmd.AddCommand(cmdWarmup)
+
 	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
@@ -127,6 +147,48 @@ func init() {
 	withBucket(cmdFToMdbx)
 
 	rootCmd.AddCommand(cmdFToMdbx)
+}
+
+func doWarmup(ctx context.Context, chaindata string, bucket string) error {
+	const ThreadsLimit = 5_000
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).Readonly().MustOpen()
+	defer db.Close()
+
+	var total uint64
+	db.View(ctx, func(tx kv.Tx) error {
+		c, _ := tx.Cursor(bucket)
+		total, _ = c.Count()
+		return nil
+	})
+	progress := atomic.NewInt64(0)
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(ThreadsLimit)
+	for i := 0; i < 256; i++ {
+		for j := 0; j < 256; j++ {
+			i := i
+			j := j
+			g.Go(func() error {
+				return db.View(ctx, func(tx kv.Tx) error {
+					return tx.ForPrefix(bucket, []byte{byte(i), byte(j)}, func(k, v []byte) error {
+						progress.Inc()
+
+						select {
+						case <-logEvery.C:
+							log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
+						default:
+						}
+						return nil
+					})
+				})
+			})
+		}
+	}
+	g.Wait()
+	return nil
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {

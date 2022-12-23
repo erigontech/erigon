@@ -10,13 +10,14 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -180,7 +181,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		var txIndex uint
 		var blockLogs []*types.Log
 
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
+		err := tx.ForPrefix(kv.Log, common2.EncodeTs(blockNumber), func(k, v []byte) error {
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
 				return fmt.Errorf("receipt unmarshal failed:  %w", err)
@@ -312,7 +313,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 		var bitmapForORing roaring64.Bitmap
 		it := ac.LogAddrIterator(addr.Bytes(), fromTxNum, toTxNum, tx)
 		for it.HasNext() {
-			bitmapForORing.Add(it.Next())
+			n, err := it.NextBatch()
+			if err != nil {
+				return nil, err
+			}
+			bitmapForORing.AddMany(n)
 		}
 		if addrBitmap == nil {
 			addrBitmap = &bitmapForORing
@@ -334,7 +339,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.Tx, begin, end uint64, 
 	var signer *types.Signer
 	var rules *params.Rules
 	var skipAnalysis bool
-	stateReader := state.NewHistoryReader22(ac)
+	stateReader := state.NewHistoryReaderV3(ac)
 	stateReader.SetTx(tx)
 	ibs := state.New(stateReader)
 
@@ -459,9 +464,21 @@ func getTopicsBitmapV3(ac *libstate.Aggregator22Context, tx kv.Tx, topics [][]co
 	for _, sub := range topics {
 		var bitmapForORing roaring64.Bitmap
 		for _, topic := range sub {
-			it := ac.LogTopicIterator(topic.Bytes(), from, to, tx)
-			for it.HasNext() {
-				bitmapForORing.Add(it.Next())
+			if ttx, casted := tx.(kv.TemporalTx); casted {
+				it, err := ttx.InvertedIndexRange(temporal.LogTopic, topic.Bytes(), from, to)
+				if err != nil {
+					return nil, err
+				}
+				for it.HasNext() {
+					n, err := it.NextBatch()
+					if err != nil {
+						return nil, err
+					}
+					bitmapForORing.AddMany(n)
+				}
+			} else {
+				it := ac.LogTopicIterator(topic.Bytes(), from, to, tx)
+				bitmapForORing.Or(it.ToBitamp())
 			}
 		}
 

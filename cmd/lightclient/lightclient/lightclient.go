@@ -15,9 +15,12 @@ package lightclient
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -189,9 +192,11 @@ func (l *LightClient) Start() {
 			defer tx.Rollback()
 
 			if l.verbose {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				log.Info("[LightClient] Validated Chain Segments",
 					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", lastValidated.AttestedHeader.Slot)
+					"to", lastValidated.AttestedHeader.Slot, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 		}
 		l.importBlockIfPossible()

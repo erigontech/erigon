@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -78,7 +79,11 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "history v3 idx steps: %.02f\n\n", rawdbhelpers.IdxStepsCountV3(tx))
+	h3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx))
 
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {

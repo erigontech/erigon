@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
@@ -207,7 +208,7 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 	if historyV3 != nil {
 		return *historyV3
 	}
-	enabled, err := rawdb.HistoryV3.Enabled(tx)
+	enabled, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		log.Warn("HisoryV2Enabled: read", "err", err)
 		return false

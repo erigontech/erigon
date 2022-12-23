@@ -12,8 +12,18 @@ import (
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
-func ConsensusStages(ctx context.Context, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg) []*stagedsync.Stage {
+func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg) []*stagedsync.Stage {
 	return []*stagedsync.Stage{
+		{
+			ID:          stages.BeaconHistoryReconstruction,
+			Description: "Download beacon blocks backwards.",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageHistoryReconstruction(historyReconstruction, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
+				return nil
+			},
+		},
 		{
 			ID:          stages.BeaconBlocks,
 			Description: "Download beacon blocks forward.",
@@ -50,6 +60,7 @@ var ConsensusPruneOrder = stagedsync.PruneOrder{
 func NewConsensusStagedSync(ctx context.Context,
 	db kv.RwDB,
 	forwardDownloader *network.ForwardBeaconDownloader,
+	backwardDownloader *network.BackwardBeaconDownloader,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
 	state *state.BeaconState,
@@ -59,6 +70,7 @@ func NewConsensusStagedSync(ctx context.Context,
 	return stagedsync.New(
 		ConsensusStages(
 			ctx,
+			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, state),
 			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state),
 			StageBeaconState(db, genesisCfg, beaconCfg, state, triggerExecution, clearEth1Data),
 		),

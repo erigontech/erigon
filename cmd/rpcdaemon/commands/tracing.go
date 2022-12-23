@@ -414,6 +414,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			stream.WriteNil()
 			return err
 		}
+		_ = st.FinalizeTx(rules, state.NewNoopWriter())
 
 	}
 
@@ -449,6 +450,8 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 				stream.WriteNil()
 				return err
 			}
+
+			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
 			if txn_index < len(bundle.Transactions)-1 {
 				stream.WriteMore()
