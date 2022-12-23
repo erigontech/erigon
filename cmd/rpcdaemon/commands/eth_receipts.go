@@ -299,6 +299,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
+	fmt.Printf("dbg topics:  %d\n", topicsBitmap.ToArray())
+
 	if topicsBitmap != nil {
 		txNumbers.And(topicsBitmap)
 	}
@@ -324,9 +326,13 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		addrBitmap = roaring64.Or(addrBitmap, &bitmapForORing)
 	}
 
+	fmt.Printf("dbg addrBitmap:  %d\n", addrBitmap.ToArray())
+
 	if addrBitmap != nil {
 		txNumbers.And(addrBitmap)
 	}
+
+	fmt.Printf("dbg txNumbers:  %d\n", txNumbers.ToArray())
 
 	if txNumbers.GetCardinality() == 0 {
 		return logs, nil
@@ -376,6 +382,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 		}
+		fmt.Printf("dbg0: found blockNum %d -> %d\n", txNum, blockNum)
 		if !ok {
 			return nil, nil
 		}
@@ -409,6 +416,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("dbg1: found tx %t, blockNum=%d, txIndex=%d\n", txn != nil, blockNum, txIndex)
 		if txn == nil {
 			continue
 		}
@@ -431,6 +439,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		rawLogs := ibs.GetLogs(txHash)
+
+		fmt.Printf("dbg2: logs %x -> %d\n", txHash, rawLogs)
 		for _, log := range rawLogs {
 			log.Index = logIndex
 			logIndex++
