@@ -21,13 +21,20 @@ import (
 	"go.uber.org/zap/buffer"
 )
 
+// BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
-	ctx           context.Context
-	sentinel      sentinel.SentinelClient
-	beaconConfig  *clparams.BeaconChainConfig
+	// ctx is the context for the RPC client.
+	ctx context.Context
+	// sentinel is a client for sending and receiving messages to and from a beacon chain node.
+	sentinel sentinel.SentinelClient
+	// beaconConfig is the configuration for the beacon chain.
+	beaconConfig *clparams.BeaconChainConfig
+	// genesisConfig is the configuration for the genesis block of the beacon chain.
 	genesisConfig *clparams.GenesisConfig
 }
 
+// NewBeaconRpcP2P creates a new BeaconRpcP2P struct and returns a pointer to it.
+// It takes a context, a sentinel.Sent
 func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *BeaconRpcP2P {
 	return &BeaconRpcP2P{
 		ctx:           ctx,
@@ -37,6 +44,8 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient, beac
 	}
 }
 
+// SendLightClientFinalityUpdateReqV1 sends a request for a LightClientFinalityUpdate message to a beacon chain node.
+// It returns a LightClientFinalityUpdate struct or an error if one occurred.
 func (b *BeaconRpcP2P) SendLightClientFinaltyUpdateReqV1() (*cltypes.LightClientFinalityUpdate, error) {
 	responsePacket := &cltypes.LightClientFinalityUpdate{}
 
@@ -57,6 +66,8 @@ func (b *BeaconRpcP2P) SendLightClientFinaltyUpdateReqV1() (*cltypes.LightClient
 	return responsePacket, nil
 }
 
+// SendLightClientOptimisticUpdateReqV1 sends a request for a LightClientOptimisticUpdate message to a beacon chain node.
+// It returns a LightClientOptimisticUpdate struct or an error if one occurred.
 func (b *BeaconRpcP2P) SendLightClientOptimisticUpdateReqV1() (*cltypes.LightClientOptimisticUpdate, error) {
 	responsePacket := &cltypes.LightClientOptimisticUpdate{}
 
@@ -77,6 +88,8 @@ func (b *BeaconRpcP2P) SendLightClientOptimisticUpdateReqV1() (*cltypes.LightCli
 	return responsePacket, nil
 }
 
+// SendLightClientBootstrapReqV1 sends a request for a LightClientBootstrap message to a beacon chain node.
+// It returns a LightClientBootstrap struct or an error if one occurred.
 func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root common.Hash) (*cltypes.LightClientBootstrap, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &cltypes.SingleRoot{Root: root}); err != nil {
@@ -101,6 +114,7 @@ func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root common.Hash) (*cltypes
 	return responsePacket, nil
 }
 
+// SendLightClientUpdatesReqV1 retrieves one lightclient update.
 func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.LightClientUpdate, error) {
 	// This is approximately one day worth of data, we dont need to receive more than 1.
 	req := &cltypes.LightClientUpdatesByRangeRequest{
@@ -232,6 +246,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 	return responsePacket, nil
 }
 
+// SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]cltypes.ObjectSSZ, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
@@ -247,6 +262,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]cltype
 	return b.sendBlocksRequest(communication.BeaconBlocksByRangeProtocolV2, data, count)
 }
 
+// SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]cltypes.ObjectSSZ, error) {
 	var req cltypes.BeaconBlocksByRootRequest = roots
 	var buffer buffer.Buffer
@@ -257,6 +273,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]cltypes.Ob
 	return b.sendBlocksRequest(communication.BeaconBlocksByRootProtocolV2, data, uint64(len(roots)))
 }
 
+// Peers retrieves peer count.
 func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	amount, err := b.sentinel.GetPeers(b.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
