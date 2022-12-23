@@ -44,8 +44,6 @@ func TestGeneratedDebugApi(t *testing.T) {
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)
 	}
-	// Remove time because it is non-deterministic
-	delete(result.([]interface{})[0].(map[string]interface{})["result"].(map[string]interface{}), "time")
 	expectedJSON := `
 	[
 		{

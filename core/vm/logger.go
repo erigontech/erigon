@@ -25,7 +25,6 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -115,10 +114,10 @@ type EVMLogger interface {
 	CaptureTxEnd(restGas uint64)
 	// Top call frame
 	CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
-	CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error)
+	CaptureEnd(output []byte, usedGas uint64, err error)
 	// Rest of the frames
 	CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte)
-	CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error)
+	CaptureExit(output []byte, usedGas uint64, err error)
 	// Opcode level
 	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
@@ -258,7 +257,7 @@ func (l *StructLogger) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scop
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	l.output = output
 	l.err = err
 	if l.cfg.Debug {
@@ -270,7 +269,7 @@ func (l *StructLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time
 }
 
 // CaptureExit is called after the internal call finishes to finalize the tracing.
-func (l *StructLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (l *StructLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
@@ -463,17 +462,17 @@ func (t *mdLogger) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *S
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }
 
-func (t *mdLogger) captureEndOrExit(output []byte, startGas, endGas uint64, err error) {
+func (t *mdLogger) captureEndOrExit(output []byte, usedGas uint64, err error) {
 	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
-		output, startGas-endGas, err)
+		output, usedGas, err)
 }
 
-func (t *mdLogger) CaptureEnd(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
-	t.captureEndOrExit(output, startGas, endGas, err)
+func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+	t.captureEndOrExit(output, usedGas, err)
 }
 
-func (t *mdLogger) CaptureExit(output []byte, startGas, endGas uint64, tm time.Duration, err error) {
-	t.captureEndOrExit(output, startGas, endGas, err)
+func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+	t.captureEndOrExit(output, usedGas, err)
 }
 
 func (t *mdLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

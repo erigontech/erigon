@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+const maxMessageSize = 437323800
+
 type ServerConfig struct {
 	Network string
 	Addr    string
@@ -76,7 +78,7 @@ WaitingLoop:
 		}
 	}
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds))
+	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)))
 	if err != nil {
 		return nil, err
 	}
