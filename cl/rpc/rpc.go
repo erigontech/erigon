@@ -3,6 +3,7 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -174,8 +175,52 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 			}
 			bytesRead += n
 		}
-		// TODO: Support Phase0 and Altair too
-		responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
+		// Fork digests
+		respForkDigest := binary.BigEndian.Uint32(forkDigest)
+		if respForkDigest == 0 {
+			return nil, fmt.Errorf("null fork digest")
+		}
+		var phase0ForkDigest, altairForkDigest, bellatrixForkDigest [4]byte
+		if b.beaconConfig.GenesisForkVersion != nil {
+			phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
+				utils.BytesToBytes4(b.beaconConfig.GenesisForkVersion),
+				b.genesisConfig.GenesisValidatorRoot,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if b.beaconConfig.AltairForkVersion != nil {
+			altairForkDigest, err = fork.ComputeForkDigestForVersion(
+				utils.BytesToBytes4(b.beaconConfig.AltairForkVersion),
+				b.genesisConfig.GenesisValidatorRoot,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if b.beaconConfig.BellatrixForkVersion != nil {
+			bellatrixForkDigest, err = fork.ComputeForkDigestForVersion(
+				utils.BytesToBytes4(b.beaconConfig.BellatrixForkVersion),
+				b.genesisConfig.GenesisValidatorRoot,
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		switch respForkDigest {
+		case utils.Bytes4ToUint32(phase0ForkDigest):
+			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockPhase0{})
+		case utils.Bytes4ToUint32(altairForkDigest):
+			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockAltair{})
+		case utils.Bytes4ToUint32(bellatrixForkDigest):
+			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
+		default:
+			return nil, fmt.Errorf("received invalid fork digest")
+		}
 
 		if err := responsePacket[i].UnmarshalSSZ(raw); err != nil {
 			return nil, fmt.Errorf("unmarshalling: %w", err)
