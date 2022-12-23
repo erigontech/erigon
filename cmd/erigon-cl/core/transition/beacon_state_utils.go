@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -119,6 +120,45 @@ func GetEpochAtSlot(slot uint64) uint64 {
 	return slot / SLOTS_PER_EPOCH
 }
 
+func ComputeDomain(domainType [4]byte, forkVersion [4]byte, genisisValidatorsRoot [32]byte) ([32]byte, error) {
+	domain := [32]byte{}
+	forkData := &cltypes.ForkData{
+		CurrentVersion:        forkVersion,
+		GenesisValidatorsRoot: genisisValidatorsRoot,
+	}
+	forkDataRoot, err := forkData.HashTreeRoot()
+	if err != nil {
+		return domain, fmt.Errorf("unable to hash fork data: %v", err)
+	}
+	copy(domain[:4], domainType[:])
+	copy(domain[4:], forkDataRoot[:])
+	return domain, nil
+}
+
+func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([32]byte, error) {
+	if epoch == 0 {
+		epoch = GetEpochAtSlot(state.Slot())
+	}
+	var forkVersion [4]byte
+	if epoch < state.Fork().Epoch {
+		forkVersion = state.Fork().PreviousVersion
+	} else {
+		forkVersion = state.Fork().CurrentVersion
+	}
+	return ComputeDomain(domainType, forkVersion, state.GenesisValidatorsRoot())
+}
+
+func ComputeSigningRootEpoch(epoch uint64, domain [32]byte) ([32]byte, error) {
+	b := make([]byte, 32)
+	binary.LittleEndian.PutUint64(b, epoch)
+	hash := utils.Keccak256(b)
+	sd := &cltypes.SigningData{
+		Root:   hash,
+		Domain: domain[:],
+	}
+	return sd.HashTreeRoot()
+}
+
 func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
 	epoch := GetEpochAtSlot(state.Slot())
 
@@ -180,5 +220,37 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBell
 	if proposer.Slashed {
 		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
 	}
+	return nil
+}
+
+func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBodyBellatrix) error {
+	epoch := GetEpochAtSlot(state.Slot())
+	propInd, err := GetBeaconProposerIndex(state)
+	if err != nil {
+		return fmt.Errorf("unable to get proposer index: %v", err)
+	}
+	proposer := state.ValidatorAt(int(propInd))
+	domain, err := GetDomain(state, clparams.MainnetBeaconConfig.DomainRandao, epoch)
+	if err != nil {
+		return fmt.Errorf("unable to get domain: %v", err)
+	}
+	signingRoot, err := ComputeSigningRootEpoch(epoch, domain)
+	if err != nil {
+		return fmt.Errorf("unable to compute signing root: %v", err)
+	}
+	valid, err := bls.Verify(body.RandaoReveal[:], signingRoot[:], proposer.PublicKey[:])
+	if err != nil {
+		return fmt.Errorf("unable to verify public key: %x, with signing root: %x, and signature: %x, %v", proposer.PublicKey[:], signingRoot[:], body.RandaoReveal[:], err)
+	}
+	if !valid {
+		return fmt.Errorf("invalid signature: public key: %x, signing root: %x, signature: %x", proposer.PublicKey[:], signingRoot[:], body.RandaoReveal[:])
+	}
+	randaoMixes := GetRandaoMixes(state, epoch)
+	randaoHash := utils.Keccak256(body.RandaoReveal[:])
+	mix := [32]byte{}
+	for i := range mix {
+		mix[i] = randaoMixes[i] ^ randaoHash[i]
+	}
+	state.RandaoMixes()[epoch%EPOCHS_PER_HISTORICAL_VECTOR] = mix
 	return nil
 }
