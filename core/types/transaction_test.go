@@ -544,6 +544,41 @@ func TestTransactionCoding(t *testing.T) {
 	}
 }
 
+func TestUnsupportedTxType(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("could not generate key: %v", err)
+	}
+	signer := LatestSignerForChainID(common.Big1)
+	txdata := &AccessListTx{
+		ChainID: uint256.NewInt(1),
+		LegacyTx: LegacyTx{
+			CommonTx: CommonTx{
+				Nonce: 0x01,
+				Gas:   123457,
+			},
+			GasPrice: uint256.NewInt(10),
+		},
+		AccessList: AccessList{},
+	}
+	tx, err := SignNewTx(key, *signer, txdata)
+	if err != nil {
+		t.Fatalf("could not sign transaction: %v", err)
+	}
+
+	var buf bytes.Buffer
+	if err = tx.MarshalBinary(&buf); err != nil {
+		t.Fatalf("encoding failed: %v", err)
+	}
+	// Change the first byte to emulate a non-supported tx type
+	b := buf.Bytes()
+	b[0] = 0x0F
+	_, err = UnmarshalTransactionFromBinary(b)
+	if err != ErrTxTypeNotSupported {
+		t.Fatalf("expected ErrTxTypeNotSupported, got: %v", err)
+	}
+}
+
 func encodeDecodeJSON(tx Transaction) (Transaction, error) {
 	data, err := json.Marshal(tx)
 	if err != nil {

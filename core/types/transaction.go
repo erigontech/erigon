@@ -195,8 +195,11 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 		}
 		return t, nil
 	default:
-		// Tx is type legacy which is RLP encoded
-		return DecodeTransaction(data)
+		if data[0] >= 0x80 {
+			// Tx is type legacy which is RLP encoded
+			return DecodeTransaction(data)
+		}
+		return nil, ErrTxTypeNotSupported
 	}
 }
 
