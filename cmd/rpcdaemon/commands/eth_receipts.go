@@ -156,6 +156,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	addrBitmap := roaring.FastOr(rx...)
+	fmt.Printf("dbg topics:  %d\n", addrBitmap.ToArray())
 
 	if len(rx) > 0 {
 		blockNumbers.And(addrBitmap)
@@ -255,7 +256,6 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			if err != nil {
 				return nil, err
 			}
-			fmt.Printf("dbg topics:  %x, %d\n", topic.Bytes(), m.ToArray())
 			if bitmapForORing == nil {
 				bitmapForORing = m
 				continue
