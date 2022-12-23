@@ -312,7 +312,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("dbg addrBitmap0:  %x\n", addr.Bytes())
+		fmt.Printf("dbg addrBitmap0:  %x, %d, %d\n", addr.Bytes(), fromTxNum, toTxNum)
 		for it.HasNext() {
 			n, err := it.NextBatch()
 			if err != nil {
