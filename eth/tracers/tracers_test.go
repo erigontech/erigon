@@ -181,7 +181,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
-	tracer, err := New("prestateTracer", new(Context))
+	tracer, err := New("prestateTracer", new(Context), json.RawMessage{})
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
