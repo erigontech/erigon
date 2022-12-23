@@ -277,6 +277,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
+	fmt.Printf("dbg getLogsV3\n")
 
 	var fromTxNum, toTxNum uint64
 	var err error
