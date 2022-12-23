@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
@@ -38,6 +39,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	if err = stream.Flush(); err != nil {
 		t.Fatalf("error flusing: %v", err)
 	}
+	fmt.Printf("buf: %s\n", buf.Bytes())
 	var result interface{}
 	if err = json.Unmarshal(buf.Bytes(), &result); err != nil {
 		t.Fatalf("parsing result: %v", err)

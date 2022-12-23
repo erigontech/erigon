@@ -104,12 +104,12 @@ func (s *StructLog) ErrorString() string {
 	return ""
 }
 
-// Tracer is used to collect execution traces from an EVM transaction
+// EVMLogger is used to collect execution traces from an EVM transaction
 // execution. CaptureState is called for each step of the VM with the
 // current VM state.
 // Note that reference types are actual VM data structures; make copies
 // if you need to retain them beyond the current call.
-type Tracer interface {
+type EVMLogger interface {
 	// Transaction level
 	CaptureTxStart(gasLimit uint64)
 	CaptureTxEnd(restGas uint64)
@@ -131,7 +131,7 @@ type Tracer interface {
 // FlushableTracer is a Tracer extension whose accumulated traces has to be
 // flushed once the tracing is completed.
 type FlushableTracer interface {
-	Tracer
+	EVMLogger
 	Flush(tx types.Transaction)
 }
 

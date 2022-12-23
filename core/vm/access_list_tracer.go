@@ -105,7 +105,7 @@ func (al accessList) accessList() types.AccessList {
 	return acl
 }
 
-var _ Tracer = (*AccessListTracer)(nil)
+var _ EVMLogger = (*AccessListTracer)(nil)
 
 // AccessListTracer is a tracer that accumulates touched accounts and storage
 // slots into an internal set.
