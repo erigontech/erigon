@@ -105,8 +105,6 @@ func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSS
 	r := bytes.NewReader(data)
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)
-		// TODO(issues/5884): assert the fork digest matches the expectation for
-		// a specific configuration.
 		if _, err := r.Read(forkDigest); err != nil {
 			if err == io.EOF {
 				return n, nil

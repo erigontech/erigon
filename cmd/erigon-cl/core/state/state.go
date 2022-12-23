@@ -1,21 +1,12 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
-
-type StateVersion int
-
-// We do not care about Phase0 and Altair because they are both pre-merge.
-const (
-	Phase0Version    StateVersion = 0
-	AltairVersion    StateVersion = 1
-	BellatrixVersion StateVersion = 2
-	CapellaVersion   StateVersion = 3 // Unimplemented!
-)
 
 type BeaconState struct {
 	// State fields
@@ -45,7 +36,7 @@ type BeaconState struct {
 	nextSyncCommittee            *cltypes.SyncCommittee
 	latestExecutionPayloadHeader *cltypes.ExecutionHeader
 	// Internals
-	version       StateVersion            // State version
+	version       clparams.StateVersion   // State version
 	leaves        [][32]byte              // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 }
@@ -80,7 +71,7 @@ func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
 		// Bellatrix only
 		latestExecutionPayloadHeader: state.LatestExecutionPayloadHeader,
 		// Internals
-		version:       BellatrixVersion,
+		version:       clparams.BellatrixVersion,
 		leaves:        make([][32]byte, BellatrixLeavesSize),
 		touchedLeaves: map[StateLeafIndex]bool{},
 		// TODO: Make proper hasher
