@@ -139,7 +139,7 @@ type Cursor struct {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.ValStream[uint64], err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopic:
