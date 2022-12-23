@@ -255,6 +255,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 			if err != nil {
 				return nil, err
 			}
+			fmt.Printf("dbg topics:  %x, %d\n", topic.Bytes(), m.ToArray())
 			if bitmapForORing == nil {
 				bitmapForORing = m
 				continue
@@ -299,8 +300,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("dbg topics:  %d\n", topicsBitmap.ToArray())
 
 	if topicsBitmap != nil {
 		txNumbers.And(topicsBitmap)
@@ -480,11 +479,13 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
+			fmt.Printf("dbg topics:  %x\n", topic.Bytes())
 			for it.HasNext() {
 				n, err := it.NextBatch()
 				if err != nil {
 					return nil, err
 				}
+				fmt.Printf("dbg topics:  %d\n", n)
 				bitmapForORing.AddMany(n)
 			}
 		}
