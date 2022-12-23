@@ -2,6 +2,7 @@ package transactions
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -20,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -44,6 +47,24 @@ func DoCall(
 			return state, block.Header(), nil
 		}
 	*/
+	num := rpc.LatestBlockNumber
+	latestBlockNumber, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &num}, tx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	pruneAmount, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	latestPrunedBlockNumber := latestBlockNumber - pruneAmount.CallTraces.ToValue()
+	if latestPrunedBlockNumber >= header.Number.Uint64() {
+		return &core.ExecutionResult{
+			ReturnData: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", header.Number.Uint64(), latestBlockNumber)),
+			Err:        errors.New("block pruned"),
+		}, nil
+	}
 
 	state := state.New(stateReader)
 

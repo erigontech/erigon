@@ -931,8 +931,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	if latestBlockNumber-pruneAmount.CallTraces.ToValue() >= blockNumber {
-		return nil, fmt.Errorf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestBlockNumber-pruneAmount.CallTraces.ToValue())
+	latestPrunedBlock := latestBlockNumber - pruneAmount.CallTraces.ToValue()
+
+	if latestPrunedBlock >= blockNumber {
+		return &TraceCallResult{Output: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestBlockNumber))}, nil
 	}
 
 	block, err := api.blockWithSenders(tx, hash, blockNumber)
