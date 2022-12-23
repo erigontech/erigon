@@ -502,7 +502,7 @@ Loop:
 
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
-		log.Error("writing plain state version", "err", err)
+		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	if !useExternalTx {
