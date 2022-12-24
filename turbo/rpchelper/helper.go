@@ -120,7 +120,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, agg *state
 	}
 	aggCtx := agg.MakeContext()
 	aggCtx.SetTx(tx)
-	r := state.NewHistoryReader22(aggCtx)
+	r := state.NewHistoryReaderV3(aggCtx)
 	r.SetTx(tx)
 	minTxNum, err := rawdb.TxNums.Min(tx, blockNumber)
 	if err != nil {
