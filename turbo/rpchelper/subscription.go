@@ -57,9 +57,9 @@ func (s *chan_sub[T]) Close() {
 	case s.closed <- struct{}{}:
 		// but it is not possible for multiple goroutines to get to this point
 		// drain the channel
-	//for range s.ch {
-	//}
-	//close(s.ch)
+		for range s.ch {
+		}
+		close(s.ch)
 	default:
 	}
 }
