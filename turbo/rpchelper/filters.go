@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"sync"
@@ -446,27 +447,31 @@ func (ff *Filters) deleteLogStore(id LogsSubID) {
 	ff.logsStores.Delete(id)
 }
 
+// OnNewEvent is called when there is a new Event from the remote
 func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
+	err := ff.onNewEvent(event)
+	if err != nil {
+		log.Warn("OnNewEvent Filters", "event", event.Type, "err", err)
+	}
+}
+
+func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
 	switch event.Type {
 	case remote.Event_HEADER:
-		payload := event.Data
-		var header types.Header
-		if len(payload) == 0 {
-			return
-		}
-		err := rlp.Decode(bytes.NewReader(payload), &header)
-		if err != nil {
-			// ignoring what we can't unmarshal
-			log.Warn("OnNewEvent rpc filters (header), unprocessable payload", "err", err)
-		} else {
-			ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
-				v.Send(&header)
-				return nil
-			})
-		}
+		return ff.onNewHeader(event)
 	case remote.Event_NEW_SNAPSHOT:
 		ff.onNewSnapshot()
-	//case remote.Event_PENDING_LOGS:
+		return nil
+	case remote.Event_PENDING_LOGS:
+		return ff.onPendingLog(event)
+	case remote.Event_PENDING_BLOCK:
+		return ff.onPendingBlock(event)
+	default:
+		return fmt.Errorf("unsupported event type")
+	}
+}
+
+func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
 	//	payload := event.Data
 	//	var logs types.Logs
 	//	err := rlp.Decode(bytes.NewReader(payload), &logs)
@@ -478,7 +483,9 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	//			v <- logs
 	//		}
 	//	}
-	//case remote.Event_PENDING_BLOCK:
+	return nil
+}
+func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
 	//	payload := event.Data
 	//	var block types.Block
 	//	err := rlp.Decode(bytes.NewReader(payload), &block)
@@ -490,10 +497,23 @@ func (ff *Filters) OnNewEvent(event *remote.SubscribeReply) {
 	//			v <- &block
 	//		}
 	//	}
-	default:
-		log.Warn("OnNewEvent rpc filters: unsupported event type", "type", event.Type)
-		return
+	return nil
+}
+
+func (ff *Filters) onNewHeader(event *remote.SubscribeReply) error {
+	payload := event.Data
+	var header types.Header
+	if len(payload) == 0 {
+		return nil
 	}
+	err := rlp.Decode(bytes.NewReader(payload), &header)
+	if err != nil {
+		return fmt.Errorf("unprocessable payload: %w", err)
+	}
+	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
+		v.Send(&header)
+		return nil
+	})
 }
 
 func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
@@ -517,6 +537,7 @@ func (ff *Filters) OnNewTx(reply *txpool.OnAddReply) {
 	})
 }
 
+// OnNewLogs is called when there is a new log
 func (ff *Filters) OnNewLogs(reply *remote.SubscribeLogsReply) {
 	ff.logsSubs.distributeLog(reply)
 }
