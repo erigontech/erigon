@@ -436,10 +436,6 @@ func ExecV3(ctx context.Context,
 		}()
 	}
 
-	if !parallel {
-		execWorkers[0].ResetTx(applyTx)
-	}
-
 	if block < blockSnapshots.BlocksAvailable() {
 		agg.KeepInDB(0)
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
@@ -559,17 +555,19 @@ Loop:
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
 				}
-				if parallel {
+			}
+
+			if parallel {
+				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
 						rs.AddWork(txTask)
 					}
+				} else {
+					rs.AddWork(txTask)
 				}
-			} else if parallel {
-				rs.AddWork(txTask)
-			}
-			if !parallel {
+			} else {
 				count++
-				execWorkers[0].RunTxTask(txTask)
+				applyWorker.RunTxTask(txTask)
 				if err := func() error {
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
@@ -722,9 +720,10 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			// immediately retry once
 			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
+				return txTask.Error
 				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				rs.AddWork(txTask)
-				continue
+				//rs.AddWork(txTask)
+				//continue
 			}
 		}
 
