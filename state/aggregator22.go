@@ -1256,6 +1256,7 @@ func (a *Aggregator22) MakeContext() *Aggregator22Context {
 	}
 }
 func (ac *Aggregator22Context) SetTx(tx kv.Tx) { ac.tx = tx }
+func (ac *Aggregator22Context) Close()         {}
 
 // BackgroundResult - used only indicate that some work is done
 // no much reason to pass exact results by this object, just get latest state when need

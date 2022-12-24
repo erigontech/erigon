@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/log/v3"
@@ -162,18 +163,14 @@ func TestRemoteKvVersion(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	ctx := context.Background()
-	logger := log.New()
-	f := func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return defaultBuckets
-	}
-	writeDB := mdbx.NewMDBX(logger).InMem("").WithTableCfg(f).MustOpen()
+	writeDB := mdbx.NewMDBX(log.New()).InMem("").MustOpen()
 	defer writeDB.Close()
 	conn := bufconn.Listen(1024 * 1024)
 	grpcServer := grpc.NewServer()
 	go func() {
 		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil))
 		if err := grpcServer.Serve(conn); err != nil {
-			logger.Error("private RPC server fail", "err", err)
+			log.Error("private RPC server fail", "err", err)
 		}
 	}()
 	v := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
@@ -183,7 +180,7 @@ func TestRemoteKvVersion(t *testing.T) {
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
 	assert.NoError(t, err)
-	a, err := remotedb.NewRemote(v1, logger, remote.NewKVClient(cc)).Open()
+	a, err := remotedb.NewRemote(v1, log.New(), remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -191,7 +188,7 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Minor versions
 	v2 := v
 	v2.Minor++
-	a, err = remotedb.NewRemote(v2, logger, remote.NewKVClient(cc)).Open()
+	a, err = remotedb.NewRemote(v2, log.New(), remote.NewKVClient(cc)).Open()
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -199,11 +196,75 @@ func TestRemoteKvVersion(t *testing.T) {
 	// Different Patch versions
 	v3 := v
 	v3.Patch++
-	a, err = remotedb.NewRemote(v3, logger, remote.NewKVClient(cc)).Open()
-	if err != nil {
-		t.Fatalf("%v", err)
-	}
+	a, err = remotedb.NewRemote(v3, log.New(), remote.NewKVClient(cc)).Open()
+	require.NoError(t, err)
 	require.True(t, a.EnsureVersionCompatibility())
+}
+
+func TestRemoteKvStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fix me on win please")
+	}
+	require, ctx, writeDB := require.New(t), context.Background(), memdb.NewTestDB(t)
+	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
+	go func() {
+		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil))
+		if err := grpcServer.Serve(conn); err != nil {
+			log.Error("private RPC server fail", "err", err)
+		}
+	}()
+
+	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
+	require.NoError(err)
+	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), remote.NewKVClient(cc)).Open()
+	require.NoError(err)
+	require.True(db.EnsureVersionCompatibility())
+
+	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
+		wc, err := tx.RwCursorDupSort(kv.PlainState)
+		require.NoError(err)
+		require.NoError(wc.Append([]byte{1}, []byte{1}))
+		require.NoError(wc.Append([]byte{1}, []byte{2}))
+		require.NoError(wc.Append([]byte{2}, []byte{1}))
+		require.NoError(wc.Append([]byte{3}, []byte{1}))
+		return nil
+	}))
+
+	require.NoError(db.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.PlainState)
+		require.NoError(err)
+
+		k, v, err := c.First()
+		require.NoError(err)
+		require.Equal([]byte{1}, k)
+		require.Equal([]byte{1}, v)
+
+		// it must be possible to Stream and manipulate cursors in same time
+		cnt := 0
+		require.NoError(tx.ForEach(kv.PlainState, nil, func(_, _ []byte) error {
+			if cnt == 0 {
+				k, v, err = c.Next()
+				require.NoError(err)
+				require.Equal([]byte{1}, k)
+				require.Equal([]byte{2}, v)
+			}
+			cnt++
+			return nil
+		}))
+		require.Equal(4, cnt)
+
+		// remote Tx must provide Snapshots-Isolation-Level: new updates are not visible for old readers
+		require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
+			require.NoError(tx.Put(kv.PlainState, []byte{4}, []byte{1}))
+			return nil
+		}))
+
+		k, v, err = c.Last()
+		require.NoError(err)
+		require.Equal([]byte{3}, k)
+		require.Equal([]byte{1}, v)
+		return nil
+	}))
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {

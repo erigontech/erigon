@@ -23,7 +23,7 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 )
 
-//Naming:
+//Variables Naming:
 //  ts - TimeStamp
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
@@ -31,6 +31,13 @@ import (
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
+
+//Methods Naming:
+// Get: exact match of criterias
+// Range: [from, to)
+// Each: [from, INF)
+// Prefix: Has(k, prefix)
+// Amount: [from, INF) AND maximum N records
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
@@ -378,8 +385,9 @@ type TemporalRoDb interface {
 }
 type TemporalTx interface {
 	Tx
-	HistoryGetNoState(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
-	InvertedIndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps Iter[uint64], err error)
+	// HistoryGet 1 record from the History. History doesn't store current value - use `DomainGet()` instead.
+	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps UnaryStream[uint64], err error)
 }
 
 type TemporalRwDB interface {
@@ -387,28 +395,39 @@ type TemporalRwDB interface {
 	TemporalRoDb
 }
 
-// Iter - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
+// Stream - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
 // Grpc Server send batch(array) of values. Client can process one-by-one by .Next() method, or use more performant .NextBatch()
 // Iter is very limited - client has no way to terminate it (but client can cancel whole read transaction)
 // Tx does 1-1 match to "grpc-stream". During 1 TX - can be created many `Iter`, `Cursor`.
-type Iter[T any] interface {
-	Next() (T, error)
-	NextBatch() ([]T, error)
+//
+// No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
+//
+// K, V are valid only until next .Next() call
+type Stream[K, V any] interface {
+	Next() (K, V, error)
 	HasNext() bool
-	Close()
+}
+type UnaryStream[V any] interface {
+	Next() (V, error)
+	NextBatch() ([]V, error)
+	HasNext() bool
 }
 
-type ArrIter[T any] struct {
-	arr []T
+type ArrStream[V any] struct {
+	arr []V
 	i   int
 }
 
-func IterFromArray[T any](arr []T) Iter[T]     { return &ArrIter[T]{arr: arr} }
-func (it *ArrIter[T]) NextBatch() ([]T, error) { return it.arr[it.i:], nil }
-func (it *ArrIter[T]) HasNext() bool           { return it.i < len(it.arr) }
-func (it *ArrIter[T]) Close()                  {}
-func (it *ArrIter[T]) Next() (T, error) {
+func StreamArray[V any](arr []V) UnaryStream[V] { return &ArrStream[V]{arr: arr} }
+func (it *ArrStream[V]) HasNext() bool          { return it.i < len(it.arr) }
+func (it *ArrStream[V]) Close()                 {}
+func (it *ArrStream[V]) Next() (V, error) {
 	v := it.arr[it.i]
 	it.i++
+	return v, nil
+}
+func (it *ArrStream[V]) NextBatch() ([]V, error) {
+	v := it.arr[it.i:]
+	it.i = len(it.arr)
 	return v, nil
 }

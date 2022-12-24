@@ -108,10 +108,10 @@ func (sii *ScanIteratorInc) HasNext() bool {
 	return sii.hasNext
 }
 
-func (si *ScanIteratorInc) Next() uint64 {
+func (si *ScanIteratorInc) Next() (uint64, error) {
 	n := si.nextTxNum
 	si.advance()
-	return n
+	return n, nil
 }
 
 func (hs *HistoryStep) iterateTxs() *ScanIteratorInc {
@@ -197,8 +197,8 @@ func (hii *HistoryIteratorInc) HasNext() bool {
 	return hii.hasNext
 }
 
-func (hii *HistoryIteratorInc) Next() ([]byte, []byte) {
+func (hii *HistoryIteratorInc) Next() ([]byte, []byte, error) {
 	k, v := hii.nextKey, hii.nextVal
 	hii.advance()
-	return k, v
+	return k, v, nil
 }

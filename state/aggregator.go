@@ -654,7 +654,6 @@ func (a *Aggregator) deleteFiles(outs SelectedStaticFiles) error {
 	}
 	return nil
 }
-
 func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
 	return ac.accounts.Get(addr, nil, roTx)
 }
@@ -1035,6 +1034,7 @@ func (a *Aggregator) MakeContext() *AggregatorContext {
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
 }
+func (ac *AggregatorContext) Close() {}
 
 func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []byte) {
 	balance = new(uint256.Int)

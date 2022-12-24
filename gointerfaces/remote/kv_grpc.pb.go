@@ -35,6 +35,9 @@ type KVClient interface {
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
+	// Temporal methods
+	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
+	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error)
 }
 
 type kVClient struct {
@@ -126,6 +129,47 @@ func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...
 	return out, nil
 }
 
+func (c *kVClient) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
+	out := new(HistoryGetReply)
+	err := c.cc.Invoke(ctx, "/remote.KV/HistoryGet", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/IndexRange", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kVIndexRangeClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type KV_IndexRangeClient interface {
+	Recv() (*IndexRangeReply, error)
+	grpc.ClientStream
+}
+
+type kVIndexRangeClient struct {
+	grpc.ClientStream
+}
+
+func (x *kVIndexRangeClient) Recv() (*IndexRangeReply, error) {
+	m := new(IndexRangeReply)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // KVServer is the server API for KV service.
 // All implementations must embed UnimplementedKVServer
 // for forward compatibility
@@ -141,6 +185,9 @@ type KVServer interface {
 	StateChanges(*StateChangeRequest, KV_StateChangesServer) error
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
+	// Temporal methods
+	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
+	IndexRange(*IndexRangeReq, KV_IndexRangeServer) error
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -159,6 +206,12 @@ func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesSe
 }
 func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
+}
+func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HistoryGet not implemented")
+}
+func (UnimplementedKVServer) IndexRange(*IndexRangeReq, KV_IndexRangeServer) error {
+	return status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -256,6 +309,45 @@ func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_HistoryGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistoryGetReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).HistoryGet(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.KV/HistoryGet",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).HistoryGet(ctx, req.(*HistoryGetReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_IndexRange_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(IndexRangeReq)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KVServer).IndexRange(m, &kVIndexRangeServer{stream})
+}
+
+type KV_IndexRangeServer interface {
+	Send(*IndexRangeReply) error
+	grpc.ServerStream
+}
+
+type kVIndexRangeServer struct {
+	grpc.ServerStream
+}
+
+func (x *kVIndexRangeServer) Send(m *IndexRangeReply) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // KV_ServiceDesc is the grpc.ServiceDesc for KV service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -271,6 +363,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Snapshots",
 			Handler:    _KV_Snapshots_Handler,
 		},
+		{
+			MethodName: "HistoryGet",
+			Handler:    _KV_HistoryGet_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -282,6 +378,11 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StateChanges",
 			Handler:       _KV_StateChanges_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "IndexRange",
+			Handler:       _KV_IndexRange_Handler,
 			ServerStreams: true,
 		},
 	},

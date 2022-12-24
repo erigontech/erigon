@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"runtime"
 
 	"github.com/ledgerwatch/log/v3"
@@ -43,7 +45,7 @@ type remoteTx struct {
 	db                 *RemoteKV
 	statelessCursors   map[string]kv.Cursor
 	cursors            []*remoteCursor
-	id                 uint64
+	viewID, id         uint64
 	streamingRequested bool
 }
 
@@ -155,7 +157,7 @@ func (db *RemoteKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		streamCancelFn()
 		return nil, err
 	}
-	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, id: msg.TxID}, nil
+	return &remoteTx{ctx: ctx, db: db, stream: stream, streamCancelFn: streamCancelFn, viewID: msg.ViewID, id: msg.TxID}, nil
 }
 
 func (db *RemoteKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -182,7 +184,7 @@ func (db *RemoteKV) UpdateAsync(ctx context.Context, f func(tx kv.RwTx) error) (
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
-func (tx *remoteTx) ViewID() uint64  { return tx.id }
+func (tx *remoteTx) ViewID() uint64  { return tx.viewID }
 func (tx *remoteTx) CollectMetrics() {}
 func (tx *remoteTx) IncrementSequence(bucket string, amount uint64) (uint64, error) {
 	panic("not implemented yet")
@@ -600,3 +602,69 @@ func (c *remoteCursorDupSort) NextNoDup() ([]byte, []byte, error) { return c.nex
 func (c *remoteCursorDupSort) PrevDup() ([]byte, []byte, error)   { return c.prevDup() }
 func (c *remoteCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return c.prevNoDup() }
 func (c *remoteCursorDupSort) LastDup() ([]byte, error)           { return c.lastDup() }
+
+// Temporal Methods
+func (tx *remoteTx) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, ok bool, err error) {
+	reply, err := tx.db.remoteKV.HistoryGet(tx.ctx, &remote.HistoryGetReq{TxID: tx.id, Name: string(name), K: k, Ts: ts})
+	if err != nil {
+		return nil, false, err
+	}
+	return reply.V, reply.Ok, nil
+}
+
+func (tx *remoteTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
+	//TODO: maybe add ctx.WithCancel
+	stream, err := tx.db.remoteKV.IndexRange(tx.ctx, &remote.IndexRangeReq{TxID: tx.id, Name: string(name), K: k, FromTs: fromTs, ToTs: toTs})
+	if err != nil {
+		return nil, err
+	}
+	it := &grpc2UnaryStream[*remote.IndexRangeReply, uint64]{stream: stream, unwrap: func(msg *remote.IndexRangeReply) []uint64 { return msg.Timestamps }}
+	return it, nil
+}
+
+type grpcStream[Msg any] interface {
+	Recv() (Msg, error)
+	CloseSend() error
+}
+
+type grpc2UnaryStream[Msg any, Res any] struct {
+	stream  grpcStream[Msg]
+	unwrap  func(Msg) []Res
+	lastErr error
+	last    []Res
+	i       int
+}
+
+func (it *grpc2UnaryStream[Msg, Res]) NextBatch() ([]Res, error) {
+	v := it.last[it.i:]
+	it.i = len(it.last)
+	return v, nil
+}
+func (it *grpc2UnaryStream[Msg, Res]) HasNext() bool {
+	if it.lastErr != nil {
+		return true
+	}
+	if it.i < len(it.last) {
+		return true
+	}
+
+	it.i = 0
+	msg, err := it.stream.Recv()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return false
+		}
+		it.lastErr = err
+		return true
+	}
+	it.last = it.unwrap(msg)
+	return len(it.last) > 0
+}
+func (it *grpc2UnaryStream[Msg, Res]) Close() {
+	//_ = it.stream.CloseSend()
+}
+func (it *grpc2UnaryStream[Msg, Res]) Next() (Res, error) {
+	v := it.last[it.i]
+	it.i++
+	return v, nil
+}

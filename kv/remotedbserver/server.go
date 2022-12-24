@@ -26,12 +26,27 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
+	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+// MaxTxTTL - kv interface provide high-consistancy guaranties: Serializable Isolations Level https://en.wikipedia.org/wiki/Isolation_(database_systems)
+// But it comes with cost: DB will start grow if run too long read transactions (hours)
+// We decided limit TTL of transaction to `MaxTxTTL`
+//
+// It means you sill have `Serializable` if tx living < `MaxTxTTL`
+// You start have Read Committed Level if tx living > `MaxTxTTL`
+//
+// It's done by `renew` method: after `renew` call reader will see all changes committed after last `renew` call.
+//
+// Erigon has much Historical data - which is immutable: reading of historical data for hours still gives you consistant data.
 const MaxTxTTL = 60 * time.Second
 
 // KvServiceAPIVersion - use it to track changes in API
@@ -53,14 +68,31 @@ type KvServer struct {
 	blockSnapshots     Snapsthots
 	historySnapshots   Snapsthots
 	ctx                context.Context
+
+	//v3 fields
+	txIdGen    atomic.Uint64
+	txsMapLock *sync.RWMutex
+	txs        map[uint64]*threadSafeTx
+
+	trace bool
+}
+
+type threadSafeTx struct {
+	kv.Tx
+	sync.Mutex
 }
 
 type Snapsthots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, kv kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots) *KvServer {
-	return &KvServer{kv: kv, stateChangeStreams: newStateChangeStreams(), ctx: ctx, blockSnapshots: snapshots, historySnapshots: historySnapshots}
+func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots) *KvServer {
+	return &KvServer{
+		trace: false,
+		kv:    db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
+		blockSnapshots: snapshots, historySnapshots: historySnapshots,
+		txs: map[uint64]*threadSafeTx{}, txsMapLock: &sync.RWMutex{},
+	}
 }
 
 // Version returns the service-side interface version number
@@ -81,17 +113,104 @@ func (s *KvServer) Version(context.Context, *emptypb.Empty) (*types.VersionReply
 	return dbSchemaVersion, nil
 }
 
+func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
+	if s.trace {
+		log.Info(fmt.Sprintf("[kv_server] begin %d %s\n", id, dbg.Stack()))
+	}
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
+	tx, errBegin := s.kv.BeginRo(ctx)
+	if errBegin != nil {
+		return 0, errBegin
+	}
+	id = s.txIdGen.Inc()
+	s.txs[id] = &threadSafeTx{Tx: tx}
+	return id, nil
+}
+
+// renew - rollback and begin tx without changing it's `id`
+func (s *KvServer) renew(ctx context.Context, id uint64) (err error) {
+	if s.trace {
+		log.Info(fmt.Sprintf("[kv_server] renew %d %s\n", id, dbg.Stack()[:2]))
+	}
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
+	tx, ok := s.txs[id]
+	if ok {
+		tx.Lock()
+		defer tx.Unlock()
+		tx.Rollback()
+	}
+	newTx, errBegin := s.kv.BeginRo(ctx)
+	if errBegin != nil {
+		return err
+	}
+	s.txs[id] = &threadSafeTx{Tx: newTx}
+	return nil
+}
+
+func (s *KvServer) rollback(id uint64) {
+	if s.trace {
+		log.Info(fmt.Sprintf("[kv_server] rollback %d %s\n", id, dbg.Stack()[:2]))
+	}
+	s.txsMapLock.Lock()
+	defer s.txsMapLock.Unlock()
+	tx, ok := s.txs[id]
+	if ok {
+		tx.Lock()
+		defer tx.Unlock()
+		tx.Rollback()
+		delete(s.txs, id)
+	}
+}
+
+// with - provides exclusive access to `tx` object. Use it if you need open Cursor or run another method of `tx` object.
+// it's ok to use same `kv.RoTx` from different goroutines, but such use must be guarded by `with` method.
+//
+//	!Important: client may open multiple Cursors and multiple Streams on same `tx` in same time
+//	it means server must do limited amount of work inside `with` method (periodically release `tx` for other streams)
+//	long-living server-side streams must read limited-portion of data inside `with`, send this portion to
+//	client, portion of data it to client, then read next portion in another `with` call.
+//	It will allow cooperative access to `tx` object
+func (s *KvServer) with(id uint64, f func(kv.Tx) error) error {
+	s.txsMapLock.RLock()
+	tx, ok := s.txs[id]
+	s.txsMapLock.RUnlock()
+	if !ok {
+		return fmt.Errorf("txn %d already rollback", id)
+	}
+
+	if s.trace {
+		log.Info(fmt.Sprintf("[kv_server] with %d try lock %s\n", id, dbg.Stack()[:2]))
+	}
+	tx.Lock()
+	if s.trace {
+		log.Info(fmt.Sprintf("[kv_server] with %d can lock %s\n", id, dbg.Stack()[:2]))
+	}
+	defer func() {
+		tx.Unlock()
+		if s.trace {
+			log.Info(fmt.Sprintf("[kv_server] with %d unlock %s\n", id, dbg.Stack()[:2]))
+		}
+	}()
+	return f(tx.Tx)
+}
+
 func (s *KvServer) Tx(stream remote.KV_TxServer) error {
-	tx, errBegin := s.kv.BeginRo(stream.Context())
+	id, errBegin := s.begin(stream.Context())
 	if errBegin != nil {
 		return fmt.Errorf("server-side error: %w", errBegin)
 	}
-	rollback := func() {
-		tx.Rollback()
-	}
-	defer rollback()
+	defer s.rollback(id)
 
-	if err := stream.Send(&remote.Pair{TxID: tx.ViewID()}); err != nil {
+	var viewID uint64
+	if err := s.with(id, func(tx kv.Tx) error {
+		viewID = tx.ViewID()
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := stream.Send(&remote.Pair{ViewID: viewID, TxID: id}); err != nil {
 		return fmt.Errorf("server-side error: %w", err)
 	}
 
@@ -129,35 +248,37 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 				c.v = bytesCopy(v)
 			}
 
-			tx.Rollback()
-			tx, errBegin = s.kv.BeginRo(stream.Context())
-			if errBegin != nil {
-				return fmt.Errorf("server-side error, BeginRo: %w", errBegin)
+			if err := s.renew(stream.Context(), id); err != nil {
+				return err
 			}
-
-			for _, c := range cursors { // restore all cursors position
-				var err error
-				c.c, err = tx.Cursor(c.bucket)
-				if err != nil {
-					return err
-				}
-				switch casted := c.c.(type) {
-				case kv.CursorDupSort:
-					v, err := casted.SeekBothRange(c.k, c.v)
+			if err := s.with(id, func(tx kv.Tx) error {
+				for _, c := range cursors { // restore all cursors position
+					var err error
+					c.c, err = tx.Cursor(c.bucket)
 					if err != nil {
-						return fmt.Errorf("server-side error: %w", err)
+						return err
 					}
-					if v == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
-						_, _, err = casted.Next()
+					switch casted := c.c.(type) {
+					case kv.CursorDupSort:
+						v, err := casted.SeekBothRange(c.k, c.v)
 						if err != nil {
 							return fmt.Errorf("server-side error: %w", err)
 						}
-					}
-				case kv.Cursor:
-					if _, _, err := c.c.Seek(c.k); err != nil {
-						return fmt.Errorf("server-side error: %w", err)
+						if v == nil { // it may happen that key where we stopped disappeared after transaction reopen, then just move to next key
+							_, _, err = casted.Next()
+							if err != nil {
+								return fmt.Errorf("server-side error: %w", err)
+							}
+						}
+					case kv.Cursor:
+						if _, _, err := c.c.Seek(c.k); err != nil {
+							return fmt.Errorf("server-side error: %w", err)
+						}
 					}
 				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		}
 
@@ -173,8 +294,13 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		case remote.Op_OPEN:
 			CursorID++
 			var err error
-			c, err = tx.Cursor(in.BucketName)
-			if err != nil {
+			if err := s.with(id, func(tx kv.Tx) error {
+				c, err = tx.Cursor(in.BucketName)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 			cursors[CursorID] = &CursorInfo{
@@ -188,8 +314,13 @@ func (s *KvServer) Tx(stream remote.KV_TxServer) error {
 		case remote.Op_OPEN_DUP_SORT:
 			CursorID++
 			var err error
-			c, err = tx.CursorDupSort(in.BucketName)
-			if err != nil {
+			if err := s.with(id, func(tx kv.Tx) error {
+				c, err = tx.CursorDupSort(in.BucketName)
+				if err != nil {
+					return err
+				}
+				return nil
+			}); err != nil {
 				return err
 			}
 			cursors[CursorID] = &CursorInfo{
@@ -364,4 +495,52 @@ func (s *StateChangePubSub) remove(id uint) {
 	}
 	close(ch)
 	delete(s.chans, id)
+}
+
+// Temporal methods
+func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
+	reply = &remote.HistoryGetReply{}
+	if err := s.with(req.TxID, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.V, reply.Ok, err = ttx.HistoryGet(kv.History(req.Name), req.K, req.Ts)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
+func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexRangeServer) error {
+	const step = 4096 // make sure `s.with` has limited time
+	for from := req.FromTs; from < req.ToTs; from += step {
+		to := cmp.Min(req.ToTs, from+step)
+		if err := s.with(req.TxID, func(tx kv.Tx) error {
+			ttx, ok := tx.(kv.TemporalTx)
+			if !ok {
+				return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+			}
+			it, err := ttx.IndexRange(kv.InvertedIdx(req.Name), req.K, from, to)
+			if err != nil {
+				return err
+			}
+			for it.HasNext() {
+				batch, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				if err := stream.Send(&remote.IndexRangeReply{Timestamps: slices.Clone(batch)}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

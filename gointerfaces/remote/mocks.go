@@ -22,6 +22,12 @@ var _ KVClient = &KVClientMock{}
 //
 //		// make and configure a mocked KVClient
 //		mockedKVClient := &KVClientMock{
+//			HistoryGetFunc: func(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
+//				panic("mock out the HistoryGet method")
+//			},
+//			IndexRangeFunc: func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error) {
+//				panic("mock out the IndexRange method")
+//			},
 //			SnapshotsFunc: func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error) {
 //				panic("mock out the Snapshots method")
 //			},
@@ -41,6 +47,12 @@ var _ KVClient = &KVClientMock{}
 //
 //	}
 type KVClientMock struct {
+	// HistoryGetFunc mocks the HistoryGet method.
+	HistoryGetFunc func(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
+
+	// IndexRangeFunc mocks the IndexRange method.
+	IndexRangeFunc func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error)
+
 	// SnapshotsFunc mocks the Snapshots method.
 	SnapshotsFunc func(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
 
@@ -55,6 +67,24 @@ type KVClientMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// HistoryGet holds details about calls to the HistoryGet method.
+		HistoryGet []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *HistoryGetReq
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
+		// IndexRange holds details about calls to the IndexRange method.
+		IndexRange []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *IndexRangeReq
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
 		// Snapshots holds details about calls to the Snapshots method.
 		Snapshots []struct {
 			// Ctx is the ctx argument value.
@@ -90,10 +120,100 @@ type KVClientMock struct {
 			Opts []grpc.CallOption
 		}
 	}
+	lockHistoryGet   sync.RWMutex
+	lockIndexRange   sync.RWMutex
 	lockSnapshots    sync.RWMutex
 	lockStateChanges sync.RWMutex
 	lockTx           sync.RWMutex
 	lockVersion      sync.RWMutex
+}
+
+// HistoryGet calls HistoryGetFunc.
+func (mock *KVClientMock) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *HistoryGetReq
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockHistoryGet.Lock()
+	mock.calls.HistoryGet = append(mock.calls.HistoryGet, callInfo)
+	mock.lockHistoryGet.Unlock()
+	if mock.HistoryGetFunc == nil {
+		var (
+			historyGetReplyOut *HistoryGetReply
+			errOut             error
+		)
+		return historyGetReplyOut, errOut
+	}
+	return mock.HistoryGetFunc(ctx, in, opts...)
+}
+
+// HistoryGetCalls gets all the calls that were made to HistoryGet.
+// Check the length with:
+//
+//	len(mockedKVClient.HistoryGetCalls())
+func (mock *KVClientMock) HistoryGetCalls() []struct {
+	Ctx  context.Context
+	In   *HistoryGetReq
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *HistoryGetReq
+		Opts []grpc.CallOption
+	}
+	mock.lockHistoryGet.RLock()
+	calls = mock.calls.HistoryGet
+	mock.lockHistoryGet.RUnlock()
+	return calls
+}
+
+// IndexRange calls IndexRangeFunc.
+func (mock *KVClientMock) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *IndexRangeReq
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockIndexRange.Lock()
+	mock.calls.IndexRange = append(mock.calls.IndexRange, callInfo)
+	mock.lockIndexRange.Unlock()
+	if mock.IndexRangeFunc == nil {
+		var (
+			kV_IndexRangeClientOut KV_IndexRangeClient
+			errOut                 error
+		)
+		return kV_IndexRangeClientOut, errOut
+	}
+	return mock.IndexRangeFunc(ctx, in, opts...)
+}
+
+// IndexRangeCalls gets all the calls that were made to IndexRange.
+// Check the length with:
+//
+//	len(mockedKVClient.IndexRangeCalls())
+func (mock *KVClientMock) IndexRangeCalls() []struct {
+	Ctx  context.Context
+	In   *IndexRangeReq
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *IndexRangeReq
+		Opts []grpc.CallOption
+	}
+	mock.lockIndexRange.RLock()
+	calls = mock.calls.IndexRange
+	mock.lockIndexRange.RUnlock()
+	return calls
 }
 
 // Snapshots calls SnapshotsFunc.
