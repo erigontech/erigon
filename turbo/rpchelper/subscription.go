@@ -71,28 +71,28 @@ func NewSyncMap[K comparable, T any]() *SyncMap[K, T] {
 }
 
 type SyncMap[K comparable, T any] struct {
-	m map[K]T
-	sync.RWMutex
+	m  map[K]T
+	mu sync.RWMutex
 }
 
 func (m *SyncMap[K, T]) Get(k K) (res T, ok bool) {
-	m.RLock()
-	defer m.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	res, ok = m.m[k]
 	return res, ok
 }
 
 func (m *SyncMap[K, T]) Put(k K, v T) (T, bool) {
-	m.Lock()
-	defer m.Unlock()
-	_, ok := m.m[k]
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, ok := m.m[k]
 	m.m[k] = v
-	return m.m[k], ok
+	return old, ok
 }
 
 func (m *SyncMap[K, T]) Do(k K, fn func(T, bool) (T, bool)) (after T, ok bool) {
-	m.Lock()
-	defer m.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	val, ok := m.m[k]
 	nv, save := fn(val, ok)
 	if save {
@@ -109,8 +109,8 @@ func (m *SyncMap[K, T]) DoAndStore(k K, fn func(t T, ok bool) T) (after T, ok bo
 }
 
 func (m *SyncMap[K, T]) Range(fn func(k K, v T) error) error {
-	m.RLock()
-	defer m.RUnlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	for k, v := range m.m {
 		if err := fn(k, v); err != nil {
 			return err
@@ -121,8 +121,8 @@ func (m *SyncMap[K, T]) Range(fn func(k K, v T) error) error {
 
 func (m *SyncMap[K, T]) Delete(k K) (T, bool) {
 	var t T
-	m.Lock()
-	defer m.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	val, ok := m.m[k]
 	if !ok {
 		return t, false
