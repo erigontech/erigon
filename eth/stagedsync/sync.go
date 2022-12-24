@@ -245,14 +245,37 @@ func (s *Sync) RunForward(db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwin
 	return nil
 }
 
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) (err error) {
+	var badBlockUnwind bool
 	for !s.IsDone() {
-		badBlockUnwind, err := s.RunUnwind(db, tx, firstCycle)
-		if err != nil {
+		if firstCycle {
+			badBlockUnwind, err = s.RunUnwind(db, tx, firstCycle)
+			if err != nil {
+				return err
+			}
+			err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			badBlockUnwind, err = s.RunUnwind(db, tx, firstCycle)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
-		if err != nil {
+		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
+			err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}

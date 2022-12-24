@@ -144,67 +144,22 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 	}
 	canRunCycleInOneTransaction := !initialCycle
 
-	var tx kv.RwTx // on this variable will run sync cycle.
-Unwind:
-	var badBlockUnwind bool
-	if sync.HasUnwind() {
-		if canRunCycleInOneTransaction {
-			// -- Process new blocks + commit(no_sync)
-			tx, err = db.BeginRwAsync(ctx)
-			if err != nil {
-				return headBlockHash, err
-			}
-			defer tx.Rollback()
-		}
-		badBlockUnwind, err = sync.RunUnwind(db, tx, initialCycle)
-		if err != nil {
-			return headBlockHash, err
-		}
-		if canRunCycleInOneTransaction {
-			if err = tx.Commit(); err != nil {
-				return headBlockHash, err
-			}
-		}
-	}
-
-	if canRunCycleInOneTransaction {
-		// -- Process new blocks + commit(no_sync)
-		tx, err = db.BeginRwAsync(ctx)
-		if err != nil {
-			return headBlockHash, err
-		}
-		defer tx.Rollback()
-	}
-
 	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
-		stateVersion, err := rawdb.GetStateVersion(tx)
-		if err != nil {
-			log.Error("problem reading plain state version", "err", err)
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			stateVersion, err := rawdb.GetStateVersion(tx)
+			if err != nil {
+				log.Error("problem reading plain state version", "err", err)
+			}
+			notifications.Accumulator.Reset(stateVersion)
+			return nil
+		}); err != nil {
+			return headBlockHash, err
 		}
-		notifications.Accumulator.Reset(stateVersion)
 	}
 
-	err = sync.RunForward(db, tx, initialCycle, badBlockUnwind, false /* quiet */)
+	err = sync.Run(db, nil, initialCycle, false /* quiet */)
 	if err != nil {
 		return headBlockHash, err
-	}
-
-	logCtx := sync.PrintTimings()
-	var tableSizes []interface{}
-	var commitTime time.Duration
-	if canRunCycleInOneTransaction {
-		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
-		commitStart := time.Now()
-		errTx := tx.Commit()
-		if errTx != nil {
-			return headBlockHash, errTx
-		}
-		commitTime = time.Since(commitStart)
-	}
-
-	//TODO: we need test for StateStream to ensure we sending correct
-	if sync.HasUnwind() {
-		goto Unwind
 	}
 
 	// -- send notifications START
@@ -235,15 +190,15 @@ Unwind:
 		}
 		notifications.Accumulator.SetStateID(plainStateVersion)
 
-		if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
-			log.Info("Commit cycle", "in", commitTime)
-		}
-		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-			log.Info("Timings (slower than 50ms)", logCtx...)
-			if len(tableSizes) > 0 {
-				log.Info("Tables", tableSizes...)
-			}
-		}
+		//if canRunCycleInOneTransaction && (head != finishProgressBefore || commitTime > 500*time.Millisecond) {
+		//	log.Info("Commit cycle", "in", commitTime)
+		//}
+		//if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+		//	log.Info("Timings (slower than 50ms)", logCtx...)
+		//	if len(tableSizes) > 0 {
+		//		log.Info("Tables", tableSizes...)
+		//	}
+		//}
 
 		if headTd != nil && headHeader != nil {
 			headTd256, overflow := uint256.FromBig(headTd)
