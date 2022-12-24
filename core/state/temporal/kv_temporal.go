@@ -92,7 +92,7 @@ func (tx *Tx) Rollback() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-
+	tx.agg.Close()
 	tx.Tx.Rollback()
 }
 
