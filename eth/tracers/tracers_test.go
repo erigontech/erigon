@@ -39,6 +39,7 @@ import (
 	// Force-load native and js packages, to trigger registration
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
 
 func TestPrestateTracerCreate2(t *testing.T) {

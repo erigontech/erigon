@@ -85,16 +85,14 @@ type callTracerTest struct {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracerLegacy(t *testing.T) {
-	testCallTracer("callTracer", "call_tracer_legacy", t)
+	testCallTracer("callTracerLegacy", "call_tracer_legacy", t)
 }
 
 func TestCallTracerNative(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	testCallTracer("callTracer", "call_tracer", t)
 }
 
 func TestCallTracerNativeWithLog(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	testCallTracer("callTracer", "call_tracer_withLog", t)
 }
 
