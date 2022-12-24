@@ -286,6 +286,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	if config.HistoryV3 {
 		backend.chainDB = temporal.New(backend.chainDB, agg)
+		chainKv = backend.chainDB
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
