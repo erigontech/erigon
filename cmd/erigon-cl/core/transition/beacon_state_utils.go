@@ -121,21 +121,6 @@ func GetEpochAtSlot(slot uint64) uint64 {
 	return slot / SLOTS_PER_EPOCH
 }
 
-func ComputeDomain(domainType [4]byte, forkVersion [4]byte, genisisValidatorsRoot [32]byte) ([32]byte, error) {
-	domain := [32]byte{}
-	forkData := &cltypes.ForkData{
-		CurrentVersion:        forkVersion,
-		GenesisValidatorsRoot: genisisValidatorsRoot,
-	}
-	forkDataRoot, err := forkData.HashTreeRoot()
-	if err != nil {
-		return domain, fmt.Errorf("unable to hash fork data: %v", err)
-	}
-	copy(domain[:4], domainType[:])
-	copy(domain[4:], forkDataRoot[:])
-	return domain, nil
-}
-
 func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([]byte, error) {
 	if epoch == 0 {
 		epoch = GetEpochAtSlot(state.Slot())
