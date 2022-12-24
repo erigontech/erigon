@@ -7,9 +7,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlockBellatrix, validate bool) error {
-	currentBlock := block.Block
-	s.processSlots(currentBlock.Slot)
+func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, validate bool) error {
+	currentBlock := block.Block()
+	s.processSlots(currentBlock.Slot())
 	if validate {
 		valid, err := s.verifyBlockSignature(block)
 		if err != nil {
@@ -25,7 +25,7 @@ func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlockBellat
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)
 		}
-		if expectedStateRoot != currentBlock.StateRoot {
+		if expectedStateRoot != currentBlock.StateRoot() {
 			return fmt.Errorf("expected state root differs from received state root")
 		}
 	}
@@ -73,11 +73,12 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 	return nil
 }
 
-func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
-	proposer := s.state.ValidatorAt(int(block.Block.ProposerIndex))
-	sigRoot, err := block.Block.Body.HashTreeRoot()
+func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock) (bool, error) {
+	proposer := s.state.ValidatorAt(int(block.Block().ProposerIndex()))
+	sigRoot, err := block.Block().Body().HashTreeRoot()
 	if err != nil {
 		return false, err
 	}
-	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
+	sig := block.Signature()
+	return bls.Verify(sig[:], sigRoot[:], proposer.PublicKey[:])
 }

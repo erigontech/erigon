@@ -24,7 +24,7 @@ type StageHistoryReconstructionCfg struct {
 	state      *state.BeaconState
 }
 
-const RecEnabled = false
+const RecEnabled = true
 const DestinationSlot = 5400000
 const logIntervalTime = 30 * time.Second
 
@@ -109,6 +109,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				}
 				log.Info("[History Reconstruction Phase] Backwards downloading phase",
 					"progress", currProgress,
+					"remaining", currProgress-DestinationSlot,
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount,
 				)
