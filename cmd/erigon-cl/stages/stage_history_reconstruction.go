@@ -25,7 +25,7 @@ type StageHistoryReconstructionCfg struct {
 }
 
 const RecEnabled = true
-const DestinationSlot = 5400000
+const DestinationSlot = 0
 const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageHistoryReconstructionCfg {

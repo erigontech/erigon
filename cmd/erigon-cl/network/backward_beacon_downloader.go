@@ -82,6 +82,10 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 func (b *BackwardBeaconDownloader) RequestMore() {
 	count := uint64(64)
 	start := b.slotToDownload - count + 1
+	// Overflow? round to 0.
+	if start > b.slotToDownload {
+		start = 0
+	}
 	responses, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
 	if err != nil {
 		fmt.Println(err)
