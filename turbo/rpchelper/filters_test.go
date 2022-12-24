@@ -34,6 +34,26 @@ var (
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
 
+func TestFilters_GenerateSubscriptionID(t *testing.T) {
+	sz := 1000
+	subs := make(chan SubscriptionID, sz)
+	for i := 0; i < sz; i++ {
+		go func() {
+			subs <- generateSubscriptionID()
+		}()
+	}
+	set := map[SubscriptionID]struct{}{}
+	for i := 0; i < sz; i++ {
+		v := <-subs
+		_, ok := set[v]
+		if ok {
+			t.Errorf("SubscriptionID Confict: %s", v)
+			return
+		}
+		set[v] = struct{}{}
+	}
+}
+
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	f := New(context.TODO(), nil, nil, nil, func() {})
 

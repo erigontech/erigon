@@ -471,6 +471,7 @@ func (ff *Filters) onNewEvent(event *remote.SubscribeReply) error {
 	}
 }
 
+// TODO: implement?
 func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
 	//	payload := event.Data
 	//	var logs types.Logs
@@ -485,6 +486,8 @@ func (ff *Filters) onPendingLog(event *remote.SubscribeReply) error {
 	//	}
 	return nil
 }
+
+// TODO: implement?
 func (ff *Filters) onPendingBlock(event *remote.SubscribeReply) error {
 	//	payload := event.Data
 	//	var block types.Block
