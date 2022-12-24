@@ -464,10 +464,10 @@ Loop:
 			if err = batch.Commit(); err != nil {
 				return err
 			}
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}

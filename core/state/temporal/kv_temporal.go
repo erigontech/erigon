@@ -96,6 +96,13 @@ func (tx *Tx) Rollback() {
 	tx.Tx.Rollback()
 }
 
+func (tx *Tx) Commit() error {
+	for _, closer := range tx.resourcesToClose {
+		closer.Close()
+	}
+	return tx.Tx.Commit()
+}
+
 const (
 	Accounts kv.History = "accounts"
 	Storage  kv.History = "storage"
@@ -153,16 +160,19 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		switch name {
 		case LogTopic:
 			t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
 			return t, nil
 		case LogAddr:
-			fmt.Printf("temp.IndexRange2: %t\n", tx.hitoryV3)
 			t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
 			return t, nil
 		case TracesFrom:
 			t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
 			return t, nil
 		case TracesTo:
 			t := tx.agg.TraceToIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
 			return t, nil
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
