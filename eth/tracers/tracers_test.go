@@ -175,6 +175,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Difficulty:  big.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
+	context.BaseFee = uint256.NewInt(0)
 	alloc := core.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
@@ -191,7 +192,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	_, tx := memdb.NewTestTx(t)
-	rules := &params.Rules{}
+	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
@@ -199,7 +200,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
-	evm := vm.NewEVM(context, txContext, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: tracer})
 
 	msg, err := txn.AsMessage(*signer, nil, rules)
 	if err != nil {
@@ -269,7 +270,7 @@ func TestCallTracer(t *testing.T) {
 			}
 
 			_, tx := memdb.NewTestTx(t)
-			rules := &params.Rules{}
+			rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
 			statedb, err := tests.MakePreState(rules, tx, test.Genesis.Alloc, uint64(test.Context.Number))
 			require.NoError(t, err)
 
@@ -285,7 +286,7 @@ func TestCallTracer(t *testing.T) {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
 			st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(txn.GetGas()))
-			if _, err = st.TransitionDb(false, false); err != nil {
+			if _, err = st.TransitionDb(true, false); err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
 			// Retrieve the trace result and compare against the etalon
