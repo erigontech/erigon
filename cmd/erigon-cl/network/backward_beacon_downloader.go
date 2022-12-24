@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/common"
@@ -19,7 +18,7 @@ type BackwardBeaconDownloader struct {
 	ctx            context.Context
 	slotToDownload uint64
 	expectedRoot   common.Hash
-	sentinel       sentinel.SentinelClient // Sentinel
+	rpc            *rpc.BeaconRpcP2P
 	onNewBlock     OnNewBlock
 	segments       []*cltypes.BeaconBlockBellatrix
 	finished       bool
@@ -27,10 +26,10 @@ type BackwardBeaconDownloader struct {
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, sentinel sentinel.SentinelClient) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
-		ctx:      ctx,
-		sentinel: sentinel,
+		ctx: ctx,
+		rpc: rpc,
 	}
 }
 
@@ -72,13 +71,7 @@ func (b *BackwardBeaconDownloader) Progress() uint64 {
 
 // Peers returns the current number of peers connected to the BackwardBeaconDownloader.
 func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
-	peerCount, err := b.sentinel.GetPeers(b.ctx, &sentinel.EmptyMessage{})
-	if err != nil {
-		return 0, err
-	}
-	// The GetPeers method returns a value of type sentinel.PeerCount
-	// which contains a field called Amount that holds the number of peers.
-	return peerCount.Amount, nil
+	return b.rpc.Peers()
 }
 
 // RequestMore downloads a range of blocks in a backward manner.
@@ -89,12 +82,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 func (b *BackwardBeaconDownloader) RequestMore() {
 	count := uint64(64)
 	start := b.slotToDownload - count + 1
-	responses, err := rpc.SendBeaconBlocksByRangeReq(
-		b.ctx,
-		start,
-		count,
-		b.sentinel,
-	)
+	responses, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
 	if err != nil {
 		fmt.Println(err)
 		return

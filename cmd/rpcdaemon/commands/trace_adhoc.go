@@ -479,7 +479,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
@@ -494,7 +494,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 				ot.lastOffStack.Ex.Push = []string{}
 			}
 			if ot.lastMemLen > 0 && memory != nil {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
