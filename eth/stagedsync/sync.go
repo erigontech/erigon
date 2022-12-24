@@ -215,7 +215,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx, firstCycle bool) (badBlockUnwin
 	return badBlockUnwind, nil
 }
 
-func (s *Sync) RunForward(db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind, quiet bool) error {
+func (s *Sync) runForward(db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind, quiet bool) error {
 	for s.currentStage < uint(len(s.stages)) && s.unwindPoint == nil {
 		stage := s.stages[s.currentStage]
 
@@ -246,6 +246,9 @@ func (s *Sync) RunForward(db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwin
 }
 
 func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) (err error) {
+	s.prevUnwindPoint = nil
+	s.timings = s.timings[:0]
+
 	var badBlockUnwind bool
 	for !s.IsDone() {
 		if firstCycle {
@@ -253,7 +256,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) (err err
 			if err != nil {
 				return err
 			}
-			err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
+			err = s.runForward(db, tx, firstCycle, badBlockUnwind, quiet)
 			if err != nil {
 				return err
 			}
@@ -270,7 +273,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) (err err
 			return err
 		}
 		if err = db.Update(context.Background(), func(tx kv.RwTx) error {
-			err = s.RunForward(db, tx, firstCycle, badBlockUnwind, quiet)
+			err = s.runForward(db, tx, firstCycle, badBlockUnwind, quiet)
 			if err != nil {
 				return err
 			}
@@ -288,7 +291,6 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) (err err
 	return nil
 }
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
-	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue

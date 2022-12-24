@@ -231,6 +231,10 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
 			return err
 		}
+
+		if tableSizes := stagedsync.PrintTables(db, tx); len(tableSizes) > 0 {
+			log.Info("Tables", tableSizes...)
+		}
 		commitStart = time.Now()
 		return nil
 	}); err != nil {
@@ -240,12 +244,9 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 	if canRunCycleInOneTransaction && commitTime > 500*time.Millisecond {
 		log.Info("Commit cycle", "in", commitTime)
 	}
-	//if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-	//	log.Info("Timings (slower than 50ms)", logCtx...)
-	//	if len(tableSizes) > 0 {
-	//		log.Info("Tables", tableSizes...)
-	//	}
-	//}
+	if logCtx := sync.PrintTimings(); len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+		log.Info("Timings (slower than 50ms)", logCtx...)
+	}
 	return headBlockHash, nil
 }
 
