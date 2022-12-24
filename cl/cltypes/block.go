@@ -54,6 +54,11 @@ func (b *SignedBeaconBlock) Signature() [96]byte {
 	return b.signature
 }
 
+// Signature returns signature.
+func (b *SignedBeaconBlock) SetSignature(signature [96]byte) {
+	b.signature = signature
+}
+
 // Block returns beacon block.
 func (b *SignedBeaconBlock) Block() *BeaconBlock {
 	return b.block
@@ -69,9 +74,19 @@ func (b *BeaconBlock) Slot() uint64 {
 	return b.slot
 }
 
+// SetSlot set beacon block slot.
+func (b *BeaconBlock) SetSlot(slot uint64) {
+	b.slot = slot
+}
+
 // ProposerIndex returns the proposer index.
 func (b *BeaconBlock) ProposerIndex() uint64 {
 	return b.proposerIndex
+}
+
+// SetProposerIndex set beacon block proposer index.
+func (b *BeaconBlock) SetProposerIndex(index uint64) {
+	b.proposerIndex = index
 }
 
 // ParentRoot returns the parent root.
@@ -79,9 +94,19 @@ func (b *BeaconBlock) ParentRoot() common.Hash {
 	return b.parentRoot
 }
 
+// SetParentRoot returns the parent root.
+func (b *BeaconBlock) SetParentRoot(root common.Hash) {
+	b.parentRoot = root
+}
+
 // StateRoot returns the state root.
 func (b *BeaconBlock) StateRoot() common.Hash {
 	return b.stateRoot
+}
+
+// SetStateRoot returns the parent root.
+func (b *BeaconBlock) SetStateRoot(root common.Hash) {
+	b.stateRoot = root
 }
 
 // Version returns beacon block version.
@@ -391,69 +416,97 @@ func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
 	case *SignedBeaconBlockPhase0:
 		return &SignedBeaconBlock{
 			signature: block.Signature,
-			block: &BeaconBlock{
-				slot:          block.Block.Slot,
-				proposerIndex: block.Block.ProposerIndex,
-				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.StateRoot,
-				body: &BeaconBody{
-					randaoReveal:      block.Block.Body.RandaoReveal,
-					eth1Data:          block.Block.Body.Eth1Data,
-					graffiti:          block.Block.Body.Graffiti,
-					proposerSlashings: block.Block.Body.ProposerSlashings,
-					attesterSlashings: block.Block.Body.AttesterSlashings,
-					attestations:      block.Block.Body.Attestations,
-					deposits:          block.Block.Body.Deposits,
-					voluntaryExits:    block.Block.Body.VoluntaryExits,
-					version:           clparams.Phase0Version,
-				},
-			},
+			block:     NewBeaconBlock(block.Block),
 		}
 	case *SignedBeaconBlockAltair:
 		return &SignedBeaconBlock{
 			signature: block.Signature,
-			block: &BeaconBlock{
-				slot:          block.Block.Slot,
-				proposerIndex: block.Block.ProposerIndex,
-				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.StateRoot,
-				body: &BeaconBody{
-					randaoReveal:      block.Block.Body.RandaoReveal,
-					eth1Data:          block.Block.Body.Eth1Data,
-					graffiti:          block.Block.Body.Graffiti,
-					proposerSlashings: block.Block.Body.ProposerSlashings,
-					attesterSlashings: block.Block.Body.AttesterSlashings,
-					attestations:      block.Block.Body.Attestations,
-					deposits:          block.Block.Body.Deposits,
-					voluntaryExits:    block.Block.Body.VoluntaryExits,
-					syncAggregate:     block.Block.Body.SyncAggregate,
-					version:           clparams.AltairVersion,
-				},
-			},
+			block:     NewBeaconBlock(block.Block),
 		}
 	case *SignedBeaconBlockBellatrix:
 		return &SignedBeaconBlock{
 			signature: block.Signature,
-			block: &BeaconBlock{
-				slot:          block.Block.Slot,
-				proposerIndex: block.Block.ProposerIndex,
-				parentRoot:    block.Block.ParentRoot,
-				stateRoot:     block.Block.StateRoot,
-				body: &BeaconBody{
-					randaoReveal:      block.Block.Body.RandaoReveal,
-					eth1Data:          block.Block.Body.Eth1Data,
-					graffiti:          block.Block.Body.Graffiti,
-					proposerSlashings: block.Block.Body.ProposerSlashings,
-					attesterSlashings: block.Block.Body.AttesterSlashings,
-					attestations:      block.Block.Body.Attestations,
-					deposits:          block.Block.Body.Deposits,
-					voluntaryExits:    block.Block.Body.VoluntaryExits,
-					syncAggregate:     block.Block.Body.SyncAggregate,
-					executionPayload:  block.Block.Body.ExecutionPayload,
-					version:           clparams.BellatrixVersion,
-				},
-			},
+			block:     NewBeaconBlock(block.Block),
 		}
+	default:
+		panic("unimplemented")
+	}
+}
+
+func NewBeaconBlock(obj ObjectSSZ) *BeaconBlock {
+	switch block := obj.(type) {
+	case *BeaconBlockPhase0:
+		return &BeaconBlock{
+			slot:          block.Slot,
+			proposerIndex: block.ProposerIndex,
+			parentRoot:    block.ParentRoot,
+			stateRoot:     block.StateRoot,
+			body:          NewBeaconBody(block.Body),
+		}
+
+	case *BeaconBlockAltair:
+		return &BeaconBlock{
+			slot:          block.Slot,
+			proposerIndex: block.ProposerIndex,
+			parentRoot:    block.ParentRoot,
+			stateRoot:     block.StateRoot,
+			body:          NewBeaconBody(block.Body),
+		}
+	case *BeaconBlockBellatrix:
+		return &BeaconBlock{
+			slot:          block.Slot,
+			proposerIndex: block.ProposerIndex,
+			parentRoot:    block.ParentRoot,
+			stateRoot:     block.StateRoot,
+			body:          NewBeaconBody(block.Body),
+		}
+	default:
+		panic("unimplemented!")
+	}
+}
+
+func NewBeaconBody(obj ObjectSSZ) *BeaconBody {
+	switch body := obj.(type) {
+	case *BeaconBodyPhase0:
+		return &BeaconBody{
+			randaoReveal:      body.RandaoReveal,
+			eth1Data:          body.Eth1Data,
+			graffiti:          body.Graffiti,
+			proposerSlashings: body.ProposerSlashings,
+			attesterSlashings: body.AttesterSlashings,
+			attestations:      body.Attestations,
+			deposits:          body.Deposits,
+			voluntaryExits:    body.VoluntaryExits,
+			version:           clparams.Phase0Version,
+		}
+	case *BeaconBodyAltair:
+		return &BeaconBody{
+			randaoReveal:      body.RandaoReveal,
+			eth1Data:          body.Eth1Data,
+			graffiti:          body.Graffiti,
+			proposerSlashings: body.ProposerSlashings,
+			attesterSlashings: body.AttesterSlashings,
+			attestations:      body.Attestations,
+			deposits:          body.Deposits,
+			voluntaryExits:    body.VoluntaryExits,
+			syncAggregate:     body.SyncAggregate,
+			version:           clparams.AltairVersion,
+		}
+	case *BeaconBodyBellatrix:
+		return &BeaconBody{
+			randaoReveal:      body.RandaoReveal,
+			eth1Data:          body.Eth1Data,
+			graffiti:          body.Graffiti,
+			proposerSlashings: body.ProposerSlashings,
+			attesterSlashings: body.AttesterSlashings,
+			attestations:      body.Attestations,
+			deposits:          body.Deposits,
+			voluntaryExits:    body.VoluntaryExits,
+			syncAggregate:     body.SyncAggregate,
+			executionPayload:  body.ExecutionPayload,
+			version:           clparams.BellatrixVersion,
+		}
+
 	default:
 		panic("unimplemented")
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func getTestState(t *testing.T) *state.BeaconState {
@@ -27,14 +28,14 @@ func getTestState(t *testing.T) *state.BeaconState {
 	})
 }
 
-func getTestBlock(t *testing.T) *cltypes.BeaconBlockBellatrix {
+func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 	header, err := hex.DecodeString("56bdd539e5c03fe53cff0f4af01d459c30f88818a2541339000c1f2a329e84bc")
 	if err != nil {
 		t.Fatalf("unable to decode test header: %v", err)
 	}
 	headerArr := [32]byte{}
 	copy(headerArr[:], header)
-	return &cltypes.BeaconBlockBellatrix{
+	return cltypes.NewBeaconBlock(&cltypes.BeaconBlockBellatrix{
 		Slot:          19,
 		ProposerIndex: 1947,
 		ParentRoot:    headerArr,
@@ -49,7 +50,7 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlockBellatrix {
 				BaseFeePerGas: make([]byte, 32),
 			},
 		},
-	}
+	})
 }
 
 func TestComputeShuffledIndex(t *testing.T) {
@@ -236,27 +237,27 @@ func TestProcessBlockHeader(t *testing.T) {
 	testBlock := getTestBlock(t)
 
 	badBlockSlot := getTestBlock(t)
-	badBlockSlot.Slot = testStateSuccess.Slot() + 1
+	badBlockSlot.SetSlot(0)
 
 	badLatestSlot := getTestState(t)
-	badLatestSlot.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: testBlock.Slot})
+	badLatestSlot.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: testBlock.Slot()})
 
 	badProposerInd := getTestBlock(t)
-	badProposerInd.ProposerIndex += 1
+	badProposerInd.SetProposerIndex(0)
 
 	badParentRoot := getTestBlock(t)
-	badParentRoot.ParentRoot[0] += 1
+	badParentRoot.SetParentRoot(common.Hash{})
 
 	badBlockBodyHash := getTestBlock(t)
-	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
+	badBlockBodyHash.Body().SetAttestations(append(badBlockBodyHash.Body().Attestations(), &cltypes.Attestation{}))
 
 	badStateSlashed := getTestState(t)
-	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex)).Slashed = true
+	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex())).Slashed = true
 
 	testCases := []struct {
 		description string
 		state       *state.BeaconState
-		block       *cltypes.BeaconBlockBellatrix
+		block       *cltypes.BeaconBlock
 		wantErr     bool
 	}{
 		{
