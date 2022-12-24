@@ -188,6 +188,7 @@ type RwDB interface {
 	RoDB
 
 	Update(ctx context.Context, f func(tx RwTx) error) error
+	UpdateAsync(ctx context.Context, f func(tx RwTx) error) error
 
 	BeginRw(ctx context.Context) (RwTx, error)
 	BeginRwAsync(ctx context.Context) (RwTx, error)

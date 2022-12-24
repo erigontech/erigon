@@ -669,6 +669,27 @@ func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) 
 	return f(tx)
 }
 
+func (db *MdbxKV) UpdateAsync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
+	if db.closed.Load() {
+		return fmt.Errorf("db closed")
+	}
+
+	tx, err := db.BeginRwAsync(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	err = f(tx)
+	if err != nil {
+		return err
+	}
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (db *MdbxKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	if db.closed.Load() {
 		return fmt.Errorf("db closed")

@@ -50,6 +50,10 @@ func (t *TemporaryMdbx) Update(ctx context.Context, f func(kv.RwTx) error) error
 	return t.db.Update(ctx, f)
 }
 
+func (t *TemporaryMdbx) UpdateAsync(ctx context.Context, f func(kv.RwTx) error) error {
+	return t.db.UpdateAsync(ctx, f)
+}
+
 func (t *TemporaryMdbx) BeginRw(ctx context.Context) (kv.RwTx, error) {
 	return t.db.BeginRw(ctx)
 }

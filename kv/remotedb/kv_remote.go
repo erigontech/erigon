@@ -178,6 +178,9 @@ func (db *RemoteKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error
 func (db *RemoteKV) Update(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
+func (db *RemoteKV) UpdateAsync(ctx context.Context, f func(tx kv.RwTx) error) (err error) {
+	return fmt.Errorf("remote db provider doesn't support .Update method")
+}
 
 func (tx *remoteTx) ViewID() uint64  { return tx.id }
 func (tx *remoteTx) CollectMetrics() {}
