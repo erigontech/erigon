@@ -364,7 +364,7 @@ func TestProcessRandao(t *testing.T) {
 	testCases := []struct {
 		description string
 		state       *state.BeaconState
-		body        *cltypes.BeaconBodyBellatrix
+		body        *cltypes.BeaconBody
 		wantErr     bool
 	}{
 		{

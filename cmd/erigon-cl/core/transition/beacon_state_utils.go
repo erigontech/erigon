@@ -209,7 +209,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) er
 	return nil
 }
 
-func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBodyBellatrix) error {
+func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBody) error {
 	epoch := GetEpochAtSlot(state.Slot())
 	propInd, err := GetBeaconProposerIndex(state)
 	if err != nil {
