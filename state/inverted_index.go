@@ -38,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -184,39 +185,27 @@ func (ii *InvertedIndex) missedIdxFiles() (l []*filesItem) {
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
 	missedFiles := ii.missedIdxFiles()
-	errs := make(chan error, len(missedFiles))
-	wg := sync.WaitGroup{}
+	g, ctx := errgroup.WithContext(ctx)
 	for _, item := range missedFiles {
-		if err := sem.Acquire(ctx, 1); err != nil {
-			errs <- err
-			break
-		}
-		wg.Add(1)
-		go func(item *filesItem) {
+		item := item
+		g.Go(func() error {
+			if err := sem.Acquire(ctx, 1); err != nil {
+				return err
+			}
 			defer sem.Release(1)
-			defer wg.Done()
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
 			idxPath := filepath.Join(ii.dir, fName)
 			log.Info("[snapshots] build idx", "file", fName)
 			_, err := buildIndex(ctx, item.decompressor, idxPath, ii.tmpdir, item.decompressor.Count()/2, false)
 			if err != nil {
-				errs <- err
+				return err
 			}
-		}(item)
+			return nil
+		})
 	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	var lastError error
-	for err := range errs {
-		if err != nil {
-			lastError = err
-		}
-	}
-	if lastError != nil {
-		return lastError
+	if err := g.Wait(); err != nil {
+		return err
 	}
 	return ii.openFiles()
 }

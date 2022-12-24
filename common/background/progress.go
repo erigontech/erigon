@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/google/btree"
+	btree2 "github.com/tidwall/btree"
 	"go.uber.org/atomic"
 )
 
@@ -24,13 +24,13 @@ func (p *Progress) percent() int {
 
 // ProgressSet - tracks multiple background job progress
 type ProgressSet struct {
-	b    *btree.BTreeG[*Progress]
+	list *btree2.Map[int, *Progress]
 	i    int
 	lock sync.RWMutex
 }
 
 func NewProgressSet() *ProgressSet {
-	return &ProgressSet{b: btree.NewG(4, func(i, j *Progress) bool { return i.i < j.i })}
+	return &ProgressSet{list: btree2.NewMap[int, *Progress](128)}
 }
 
 func (s *ProgressSet) Add(p *Progress) {
@@ -38,13 +38,13 @@ func (s *ProgressSet) Add(p *Progress) {
 	defer s.lock.Unlock()
 	s.i++
 	p.i = s.i
-	s.b.ReplaceOrInsert(p)
+	s.list.Set(p.i, p)
 }
 
 func (s *ProgressSet) Delete(p *Progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.b.Delete(p)
+	s.list.Delete(p.i)
 }
 
 func (s *ProgressSet) String() string {
@@ -52,10 +52,10 @@ func (s *ProgressSet) String() string {
 	defer s.lock.RUnlock()
 	var sb strings.Builder
 	var i int
-	s.b.Ascend(func(p *Progress) bool {
+	s.list.Scan(func(_ int, p *Progress) bool {
 		sb.WriteString(fmt.Sprintf("%s=%d%%", p.Name.Load(), p.percent()))
 		i++
-		if i != s.b.Len() {
+		if i != s.list.Len() {
 			sb.WriteString(", ")
 		}
 		return true

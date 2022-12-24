@@ -23,13 +23,13 @@ import (
 	math2 "math"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -146,68 +146,29 @@ func (a *Aggregator22) closeFiles() {
 }
 
 func (a *Aggregator22) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) error {
-	wg := sync.WaitGroup{}
-	errs := make(chan error, 7)
+	g, ctx := errgroup.WithContext(ctx)
 	if a.accounts != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.accounts.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.accounts.BuildMissedIndices(ctx, sem) })
 	}
 	if a.storage != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.storage.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.storage.BuildMissedIndices(ctx, sem) })
 	}
 	if a.code != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.code.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.code.BuildMissedIndices(ctx, sem) })
 	}
 	if a.logAddrs != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.logAddrs.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.logAddrs.BuildMissedIndices(ctx, sem) })
 	}
 	if a.logTopics != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.logTopics.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.logTopics.BuildMissedIndices(ctx, sem) })
 	}
 	if a.tracesFrom != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.tracesFrom.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.tracesFrom.BuildMissedIndices(ctx, sem) })
 	}
 	if a.tracesTo != nil {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.tracesTo.BuildMissedIndices(ctx, sem)
-		}()
+		g.Go(func() error { return a.tracesTo.BuildMissedIndices(ctx, sem) })
 	}
-	go func() {
-		wg.Wait()
-		close(errs)
-	}()
-	var lastError error
-	for err := range errs {
-		if err != nil {
-			lastError = err
-		}
-	}
-	return lastError
+	return g.Wait()
 }
 
 func (a *Aggregator22) SetLogPrefix(v string) { a.logPrefix = v }
