@@ -292,10 +292,11 @@ func (ff *Filters) HandlePendingLogs(reply *txpool.OnPendingLogsReply) {
 	})
 }
 
-func (ff *Filters) SubscribeNewHeads(out chan *types.Header) HeadsSubID {
+func (ff *Filters) SubscribeNewHeads(size int) (<-chan *types.Header, HeadsSubID) {
 	id := HeadsSubID(generateSubscriptionID())
-	ff.headsSubs.Put(id, NewChanSub(out))
-	return id
+	sub := newChanSub[*types.Header](size)
+	ff.headsSubs.Put(id, sub)
+	return sub.ch, id
 }
 
 func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
@@ -304,37 +305,50 @@ func (ff *Filters) UnsubscribeHeads(id HeadsSubID) bool {
 		return false
 	}
 	ch.Close()
-	if ch, ok = ff.headsSubs.Delete(id); !ok {
+	if _, ok = ff.headsSubs.Delete(id); !ok {
 		return false
 	}
 	ff.pendingHeadsStores.Delete(id)
 	return true
 }
 
-func (ff *Filters) SubscribePendingLogs(c chan types.Logs) PendingLogsSubID {
+func (ff *Filters) SubscribePendingLogs(size int) (<-chan types.Logs, PendingLogsSubID) {
 	id := PendingLogsSubID(generateSubscriptionID())
-	ff.pendingLogsSubs.Put(id, NewChanSub(c))
-	return id
+	sub := newChanSub[types.Logs](size)
+	ff.pendingLogsSubs.Put(id, sub)
+	return sub.ch, id
 }
 
 func (ff *Filters) UnsubscribePendingLogs(id PendingLogsSubID) {
+	ch, ok := ff.pendingLogsSubs.Get(id)
+	if !ok {
+		return
+	}
+	ch.Close()
 	ff.pendingLogsSubs.Delete(id)
 }
 
-func (ff *Filters) SubscribePendingBlock(f chan *types.Block) PendingBlockSubID {
+func (ff *Filters) SubscribePendingBlock(size int) (<-chan *types.Block, PendingBlockSubID) {
 	id := PendingBlockSubID(generateSubscriptionID())
-	ff.pendingBlockSubs.Put(id, NewChanSub(f))
-	return id
+	sub := newChanSub[*types.Block](size)
+	ff.pendingBlockSubs.Put(id, sub)
+	return sub.ch, id
 }
 
 func (ff *Filters) UnsubscribePendingBlock(id PendingBlockSubID) {
+	ch, ok := ff.pendingBlockSubs.Get(id)
+	if !ok {
+		return
+	}
+	ch.Close()
 	ff.pendingBlockSubs.Delete(id)
 }
 
-func (ff *Filters) SubscribePendingTxs(out chan []types.Transaction) PendingTxsSubID {
+func (ff *Filters) SubscribePendingTxs(size int) (<-chan []types.Transaction, PendingTxsSubID) {
 	id := PendingTxsSubID(generateSubscriptionID())
-	ff.pendingTxsSubs.Put(id, NewChanSub(out))
-	return id
+	sub := newChanSub[[]types.Transaction](size)
+	ff.pendingTxsSubs.Put(id, sub)
+	return sub.ch, id
 }
 
 func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
@@ -350,8 +364,9 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 	return true
 }
 
-func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteria) LogsSubID {
-	id, f := ff.logsSubs.insertLogsFilter(NewChanSub(out))
+func (ff *Filters) SubscribeLogs(size int, crit filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
+	sub := newChanSub[*types.Log](size)
+	id, f := ff.logsSubs.insertLogsFilter(sub)
 	f.addrs = map[common.Address]int{}
 	if len(crit.Addresses) == 0 {
 		f.allAddrs = 1
@@ -391,7 +406,7 @@ func (ff *Filters) SubscribeLogs(out chan *types.Log, crit filters.FilterCriteri
 		}
 	}
 
-	return id
+	return sub.ch, id
 }
 
 func (ff *Filters) loadLogsRequester() any {
