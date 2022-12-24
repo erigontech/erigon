@@ -94,7 +94,7 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 				return
 			}
 			// is this new block root equal to the expected root?
-			blockRoot, err := segment.Block().HashTreeRoot()
+			blockRoot, err := segment.Block.HashTreeRoot()
 			if err != nil {
 				log.Debug("Could not compute block root while processing packet", "err", err)
 				continue
@@ -110,8 +110,8 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 				continue
 			}
 			// set expected root to the segment parent root
-			b.expectedRoot = segment.Block().ParentRoot()
-			b.slotToDownload = segment.Block().Slot() - 1 // update slot (might be inexact but whatever)
+			b.expectedRoot = segment.Block.ParentRoot
+			b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 		}
 	}
 }

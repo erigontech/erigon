@@ -237,22 +237,22 @@ func TestProcessBlockHeader(t *testing.T) {
 	testBlock := getTestBlock(t)
 
 	badBlockSlot := getTestBlock(t)
-	badBlockSlot.SetSlot(0)
+	badBlockSlot.Slot = 0
 
 	badLatestSlot := getTestState(t)
-	badLatestSlot.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: testBlock.Slot()})
+	badLatestSlot.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: testBlock.Slot})
 
 	badProposerInd := getTestBlock(t)
-	badProposerInd.SetProposerIndex(0)
+	badProposerInd.ProposerIndex = 0
 
 	badParentRoot := getTestBlock(t)
-	badParentRoot.SetParentRoot(common.Hash{})
+	badParentRoot.ParentRoot = common.Hash{}
 
 	badBlockBodyHash := getTestBlock(t)
-	badBlockBodyHash.Body().SetAttestations(append(badBlockBodyHash.Body().Attestations(), &cltypes.Attestation{}))
+	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
 
 	badStateSlashed := getTestState(t)
-	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex())).Slashed = true
+	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex)).Slashed = true
 
 	testCases := []struct {
 		description string

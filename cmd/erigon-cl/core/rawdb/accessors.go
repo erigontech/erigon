@@ -162,13 +162,13 @@ func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
 
 func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {
 	var (
-		block     = signedBlock.Block()
-		blockBody = block.Body()
+		block     = signedBlock.Block
+		blockBody = block.Body
 		//payload   = blockBody.ExecutionPayload
 	)
 
 	// database key is is [slot + body root]
-	key := EncodeNumber(block.Slot())
+	key := EncodeNumber(block.Slot)
 	value, err := signedBlock.EncodeForStorage()
 	if err != nil {
 		return err
@@ -177,7 +177,7 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 		return err
 	}*/
 
-	if err := WriteAttestations(tx, block.Slot(), blockBody.Attestations()); err != nil {
+	if err := WriteAttestations(tx, block.Slot, blockBody.Attestations); err != nil {
 		return err
 	}
 	// Finally write the beacon block
@@ -201,7 +201,7 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error
 	if err != nil {
 		return nil, err
 	}
-	signedBlock.Block().Body().SetAttestations(attestations)
+	signedBlock.Block.Body.Attestations = attestations
 	return signedBlock, err
 	/*
 		// Process payload

@@ -302,7 +302,7 @@ func TestProcessSlots(t *testing.T) {
 
 func TestVerifyBlockSignature(t *testing.T) {
 	badSigBlock := getTestBeaconBlock()
-	badSigBlock.SetSignature(badSignature)
+	badSigBlock.Signature = badSignature
 	testCases := []struct {
 		description string
 		state       *state.BeaconState
@@ -357,11 +357,11 @@ func TestVerifyBlockSignature(t *testing.T) {
 
 func TestTransitionState(t *testing.T) {
 	slot2 := getTestBeaconBlock()
-	slot2.Block().SetSlot(2)
+	slot2.Block.Slot = 2
 	badSigBlock := getTestBeaconBlock()
-	badSigBlock.SetSignature(badSignature)
+	badSigBlock.Signature = badSignature
 	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block().SetStateRoot(common.Hash{})
+	badStateRootBlock.Block.StateRoot = common.Hash{}
 	testCases := []struct {
 		description   string
 		prevState     *state.BeaconState
