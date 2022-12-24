@@ -532,15 +532,11 @@ func (ff *Filters) AddLogs(id LogsSubID, logs *types.Log) {
 }
 
 func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
-	res := make([]*types.Log, 0)
-	_, exist := ff.logsStores.Do(id, func(l []*types.Log, ok bool) ([]*types.Log, bool) {
-		if !ok {
-			return res, false
-		}
-		res = append(res, l...)
-		return []*types.Log{}, true
-	})
-	return res, exist
+	res, ok := ff.logsStores.Delete(id)
+	if !ok {
+		return res, false
+	}
+	return res, true
 }
 
 func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
@@ -554,16 +550,11 @@ func (ff *Filters) AddPendingBlock(id HeadsSubID, block *types.Header) {
 }
 
 func (ff *Filters) ReadPendingBlocks(id HeadsSubID) ([]*types.Header, bool) {
-	res := make([]*types.Header, 0)
-	_, exist := ff.pendingHeadsStores.Do(id, func(st []*types.Header, ok bool) ([]*types.Header, bool) {
-		if !ok {
-			return res, false
-		}
-		res = append(res, st...)
-		st = make([]*types.Header, 0)
-		return st, true
-	})
-	return res, exist
+	res, ok := ff.pendingHeadsStores.Delete(id)
+	if !ok {
+		return res, false
+	}
+	return res, true
 }
 
 func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
@@ -577,14 +568,9 @@ func (ff *Filters) AddPendingTxs(id PendingTxsSubID, txs []types.Transaction) {
 }
 
 func (ff *Filters) ReadPendingTxs(id PendingTxsSubID) ([][]types.Transaction, bool) {
-	res := make([][]types.Transaction, 0)
-	_, exists := ff.pendingTxsStores.Do(id, func(st [][]types.Transaction, ok bool) ([][]types.Transaction, bool) {
-		if !ok {
-			return res, false
-		}
-		res = append(res, st...)
-		st = make([][]types.Transaction, 0)
-		return st, true
-	})
-	return res, exists
+	res, ok := ff.pendingTxsStores.Delete(id)
+	if !ok {
+		return res, false
+	}
+	return res, true
 }
