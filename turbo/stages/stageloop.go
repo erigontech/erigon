@@ -226,10 +226,26 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 	// -- send notifications END
 
 	// -- Prune+commit(sync)
-	if err := db.Update(ctx, func(tx kv.RwTx) error { return sync.RunPrune(db, tx, initialCycle) }); err != nil {
+	var commitStart time.Time
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		if err := sync.RunPrune(db, tx, initialCycle); err != nil {
+			return err
+		}
+		commitStart = time.Now()
+		return nil
+	}); err != nil {
 		return headBlockHash, err
 	}
-
+	commitTime := time.Since(commitStart)
+	if canRunCycleInOneTransaction && commitTime > 500*time.Millisecond {
+		log.Info("Commit cycle", "in", commitTime)
+	}
+	//if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+	//	log.Info("Timings (slower than 50ms)", logCtx...)
+	//	if len(tableSizes) > 0 {
+	//		log.Info("Tables", tableSizes...)
+	//	}
+	//}
 	return headBlockHash, nil
 }
 
