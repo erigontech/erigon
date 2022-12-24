@@ -8,6 +8,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -135,7 +136,7 @@ func ComputeDomain(domainType [4]byte, forkVersion [4]byte, genisisValidatorsRoo
 	return domain, nil
 }
 
-func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([32]byte, error) {
+func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([]byte, error) {
 	if epoch == 0 {
 		epoch = GetEpochAtSlot(state.Slot())
 	}
@@ -145,16 +146,16 @@ func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([32]
 	} else {
 		forkVersion = state.Fork().CurrentVersion
 	}
-	return ComputeDomain(domainType, forkVersion, state.GenesisValidatorsRoot())
+	return fork.ComputeDomain(domainType[:], forkVersion, state.GenesisValidatorsRoot())
 }
 
-func ComputeSigningRootEpoch(epoch uint64, domain [32]byte) ([32]byte, error) {
+func ComputeSigningRootEpoch(epoch uint64, domain []byte) ([32]byte, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
 	hash := utils.Keccak256(b)
 	sd := &cltypes.SigningData{
 		Root:   hash,
-		Domain: domain[:],
+		Domain: domain,
 	}
 	return sd.HashTreeRoot()
 }
