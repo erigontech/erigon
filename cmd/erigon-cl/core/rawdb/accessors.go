@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -295,7 +296,7 @@ func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error 
 }
 
 func EncodeBeaconBlockForStorage(block *cltypes.SignedBeaconBlockBellatrix) ([]byte, error) {
-	out, err := (&cltypes.BeaconBlockBellatrixForStorage{
+	out, err := (&cltypes.BeaconBlockForStorage{
 		Signature:         block.Signature,
 		Slot:              block.Block.Slot,
 		ProposerIndex:     block.Block.ProposerIndex,
@@ -311,6 +312,7 @@ func EncodeBeaconBlockForStorage(block *cltypes.SignedBeaconBlockBellatrix) ([]b
 		SyncAggregate:     block.Block.Body.SyncAggregate,
 		Eth1Number:        block.Block.Body.ExecutionPayload.BlockNumber,
 		Eth1BlockHash:     block.Block.Body.ExecutionPayload.BlockHash,
+		Version:           uint8(clparams.BellatrixVersion),
 	}).MarshalSSZ()
 	if err != nil {
 		return nil, err
@@ -319,7 +321,7 @@ func EncodeBeaconBlockForStorage(block *cltypes.SignedBeaconBlockBellatrix) ([]b
 }
 
 func DecodeBeaconBlockForStorage(data []byte) (*cltypes.SignedBeaconBlockBellatrix, uint64, common.Hash, error) {
-	tmpStorageBlock := &cltypes.BeaconBlockBellatrixForStorage{}
+	tmpStorageBlock := &cltypes.BeaconBlockForStorage{}
 	data, err := utils.DecompressSnappy(data)
 	if err != nil {
 		return nil, 0, common.Hash{}, err
