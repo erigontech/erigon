@@ -132,29 +132,25 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 		}
 	}() // avoid crash because Erigon's core does many things
 
+	canRunCycleInOneTransaction := !initialCycle
 	var finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return headBlockHash, err
-	}
-	canRunCycleInOneTransaction := !initialCycle
 
-	if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
-		if err := db.View(ctx, func(tx kv.Tx) error {
+		if notifications != nil && notifications.Accumulator != nil && canRunCycleInOneTransaction {
 			stateVersion, err := rawdb.GetStateVersion(tx)
 			if err != nil {
 				log.Error("problem reading plain state version", "err", err)
 			}
 			notifications.Accumulator.Reset(stateVersion)
-			return nil
-		}); err != nil {
-			return headBlockHash, err
 		}
+
+		return nil
+	}); err != nil {
+		return headBlockHash, err
 	}
 
 	err = sync.Run(db, nil, initialCycle, false /* quiet */)
