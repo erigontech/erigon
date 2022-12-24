@@ -336,9 +336,11 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		Deposits:          b.block.body.deposits,
 		VoluntaryExits:    b.block.body.voluntaryExits,
 		SyncAggregate:     b.block.body.syncAggregate,
-		Eth1Number:        b.block.body.executionPayload.BlockNumber,
-		Eth1BlockHash:     b.block.body.executionPayload.BlockHash,
 		Version:           uint8(b.Version()),
+	}
+	if b.Version() >= clparams.BellatrixVersion {
+		storageObject.Eth1Number = b.block.body.executionPayload.BlockNumber
+		storageObject.Eth1BlockHash = b.block.body.executionPayload.BlockHash
 	}
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {
