@@ -84,7 +84,16 @@ type Tx struct {
 	accChangesC, storageChangesC kv.CursorDupSort
 
 	//HistoryV3 fields
-	hitoryV3 bool
+	hitoryV3         bool
+	resourcesToClose []kv.Closer
+}
+
+func (tx *Tx) Rollback() {
+	for _, closer := range tx.resourcesToClose {
+		closer.Close()
+	}
+
+	tx.Tx.Rollback()
 }
 
 const (
