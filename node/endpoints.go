@@ -17,10 +17,13 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"net"
 	"net/http"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/log/v3"
@@ -48,7 +51,7 @@ func StartHTTPEndpoint(endpoint string, timeouts rpccfg.HTTPTimeouts, handler ht
 	}
 	go func() {
 		serveErr := httpSrv.Serve(listener)
-		if serveErr != nil {
+		if serveErr != nil && !errors.Is(serveErr, context.Canceled) && !errors.Is(serveErr, libcommon.ErrStopped) {
 			log.Warn("Failed to serve http endpoint", "err", serveErr)
 		}
 	}()
