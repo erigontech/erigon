@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -57,17 +59,36 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	if err != nil {
 		return err
 	}
+	// ETL collectors for attestations + beacon blocks
+	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer beaconBlocksCollector.Close()
+	attestationsCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer attestationsCollector.Close()
+
 	log.Info("[History Reconstruction Phase] Reconstructing", "from", cfg.state.LatestBlockHeader().Slot, "to", DestinationSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(cfg.state.LatestBlockHeader().Slot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlockBellatrix) (finished bool, err error) {
-		/*if err := rawdb.WriteBeaconBlock(tx, blk); err != nil {
+		// Collect attestations
+		encodedAttestations, err := rawdb.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
+		if err != nil {
 			return false, err
-		}*/
+		}
+		if err := attestationsCollector.Collect(rawdb.EncodeNumber(blk.Block.Slot), encodedAttestations); err != nil {
+			return false, err
+		}
+		// Collect beacon blocks
+		encodedBeaconBlock, err := rawdb.EncodeBeaconBlockForStorage(blk)
+		if err != nil {
+			return false, err
+		}
+		if err := beaconBlocksCollector.Collect(rawdb.EncodeNumber(blk.Block.Slot), encodedBeaconBlock); err != nil {
+			return false, err
+		}
 		// will arbitratly stop at slot 5.1M for testing reasons
-		return blk.Block.Slot == 5100000, nil
+		return blk.Block.Slot <= 5300000, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -101,6 +122,13 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		cfg.downloader.RequestMore()
 	}
 	close(finishCh)
+	log.Info("History collection phase")
+	if err := attestationsCollector.Load(tx, kv.Attestetations, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+		return err
+	}
+	if err := beaconBlocksCollector.Load(tx, kv.BeaconBlocks, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+		return err
+	}
 	if err := s.Update(tx, 1); err != nil {
 		return err
 	}

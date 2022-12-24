@@ -1,19 +1,12 @@
 package state
 
 import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
-
-type StateVersion int
-
-// We do not care about Phase0 and Altair because they are both pre-merge.
-const (
-	BellatrixVersion StateVersion = 0
-	CapellaVersion   StateVersion = 1 // Unimplemented!
-)
 
 type BeaconState struct {
 	// State fields
@@ -43,7 +36,7 @@ type BeaconState struct {
 	nextSyncCommittee            *cltypes.SyncCommittee
 	latestExecutionPayloadHeader *cltypes.ExecutionHeader
 	// Internals
-	version       StateVersion            // State version
+	version       clparams.StateVersion   // State version
 	leaves        [][32]byte              // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 }
@@ -51,33 +44,34 @@ type BeaconState struct {
 // FromBellatrixState initialize the beacon state as a bellatrix state.
 func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
 	return &BeaconState{
-		genesisTime:                  state.GenesisTime,
-		genesisValidatorsRoot:        state.GenesisValidatorsRoot,
-		slot:                         state.Slot,
-		fork:                         state.Fork,
-		latestBlockHeader:            state.LatestBlockHeader,
-		blockRoots:                   state.BlockRoots,
-		stateRoots:                   state.StateRoots,
-		historicalRoots:              state.HistoricalRoots,
-		eth1Data:                     state.Eth1Data,
-		eth1DataVotes:                state.Eth1DataVotes,
-		eth1DepositIndex:             state.Eth1DepositIndex,
-		validators:                   state.Validators,
-		balances:                     state.Balances,
-		randaoMixes:                  state.RandaoMixes,
-		slashings:                    state.Slashings,
-		previousEpochParticipation:   state.PreviousEpochParticipation,
-		currentEpochParticipation:    state.CurrentEpochParticipation,
-		justificationBits:            state.JustificationBits,
-		previousJustifiedCheckpoint:  state.PreviousJustifiedCheckpoint,
-		currentJustifiedCheckpoint:   state.CurrentJustifiedCheckpoint,
-		finalizedCheckpoint:          state.FinalizedCheckpoint,
-		inactivityScores:             state.InactivityScores,
-		currentSyncCommittee:         state.CurrentSyncCommittee,
-		nextSyncCommittee:            state.NextSyncCommittee,
+		genesisTime:                 state.GenesisTime,
+		genesisValidatorsRoot:       state.GenesisValidatorsRoot,
+		slot:                        state.Slot,
+		fork:                        state.Fork,
+		latestBlockHeader:           state.LatestBlockHeader,
+		blockRoots:                  state.BlockRoots,
+		stateRoots:                  state.StateRoots,
+		historicalRoots:             state.HistoricalRoots,
+		eth1Data:                    state.Eth1Data,
+		eth1DataVotes:               state.Eth1DataVotes,
+		eth1DepositIndex:            state.Eth1DepositIndex,
+		validators:                  state.Validators,
+		balances:                    state.Balances,
+		randaoMixes:                 state.RandaoMixes,
+		slashings:                   state.Slashings,
+		previousEpochParticipation:  state.PreviousEpochParticipation,
+		currentEpochParticipation:   state.CurrentEpochParticipation,
+		justificationBits:           state.JustificationBits,
+		previousJustifiedCheckpoint: state.PreviousJustifiedCheckpoint,
+		currentJustifiedCheckpoint:  state.CurrentJustifiedCheckpoint,
+		finalizedCheckpoint:         state.FinalizedCheckpoint,
+		inactivityScores:            state.InactivityScores,
+		currentSyncCommittee:        state.CurrentSyncCommittee,
+		nextSyncCommittee:           state.NextSyncCommittee,
+		// Bellatrix only
 		latestExecutionPayloadHeader: state.LatestExecutionPayloadHeader,
 		// Internals
-		version:       BellatrixVersion,
+		version:       clparams.BellatrixVersion,
 		leaves:        make([][32]byte, BellatrixLeavesSize),
 		touchedLeaves: map[StateLeafIndex]bool{},
 		// TODO: Make proper hasher

@@ -151,7 +151,7 @@ func executeBlock(
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
+	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
 		return vm.NewStructLogger(&vm.LogConfig{}), nil
 	}
 
