@@ -60,7 +60,7 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 
 func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.ObjectSSZ) error {
 	// Read varint for length of message.
-	encodedLn, _, err := readUvarint(r)
+	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
@@ -82,7 +82,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.ObjectSSZ) error {
 	return nil
 }
 
-func readUvarint(r io.Reader) (x, n uint64, err error) {
+func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	currByte := make([]byte, 1)
 	for shift := uint(0); shift < 64; shift += 7 {
 		_, err := r.Read(currByte)
@@ -101,48 +101,6 @@ func readUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZBeaconBlock(data []byte, count uint64, list []cltypes.ObjectSSZ) (n int, err error) {
-	r := bytes.NewReader(data)
-	for i := 0; i < int(count); i++ {
-		forkDigest := make([]byte, 4)
-		// TODO(issues/5884): assert the fork digest matches the expectation for
-		// a specific configuration.
-		if _, err := r.Read(forkDigest); err != nil {
-			if err == io.EOF {
-				return n, nil
-			}
-			return 0, err
-		}
-
-		// Read varint for length of message.
-		encodedLn, _, err := readUvarint(r)
-		if err != nil {
-			return 0, fmt.Errorf("unable to read varint from message prefix: %v", err)
-		}
-
-		// Read bytes using snappy into a new raw buffer of side encodedLn.
-		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
-		bytesRead := 0
-		for bytesRead < int(encodedLn) {
-			n, err := sr.Read(raw[bytesRead:])
-			if err != nil {
-				return 0, fmt.Errorf("read error: %w", err)
-			}
-			bytesRead += n
-		}
-
-		if err := list[i].UnmarshalSSZ(raw); err != nil {
-			return 0, fmt.Errorf("unmarshalling: %w", err)
-		}
-
-		n++
-		// TODO(issues/5884): figure out why there is this extra byte.
-		r.ReadByte()
-	}
-	return n, nil
-}
-
 func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 	objSize := list[0].SizeSSZ()
 
@@ -155,7 +113,7 @@ func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
 	}
 
 	// Read varint for length of message.
-	encodedLn, bytesCount, err := readUvarint(r)
+	encodedLn, bytesCount, err := ReadUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
