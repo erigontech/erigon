@@ -2,6 +2,7 @@ package historyv2read
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,13 +16,14 @@ const DefaultIncarnation = uint64(1)
 func GetAsOfV3(tx kv.TemporalTx, storage bool, key []byte, timestamp uint64, histV3 bool) (v []byte, err error) {
 	var ok bool
 	if storage {
-		v, ok, err = tx.HistoryGetNoState(temporal.Storage, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.Storage, key, timestamp)
 	} else {
-		v, ok, err = tx.HistoryGetNoState(temporal.Accounts, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.Accounts, key, timestamp)
 	}
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("GetAsOfV3: %x, %d\n", key, timestamp)
 	if !ok {
 		return tx.GetOne(kv.PlainState, key)
 	}
