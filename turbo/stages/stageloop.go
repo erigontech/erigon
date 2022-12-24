@@ -107,7 +107,7 @@ func StageLoop(
 			continue
 		}
 
-		initialCycle = cycle > 20
+		initialCycle = cycle > 100
 		hd.EnableRequestChaining()
 
 		if loopMinTime != 0 {
