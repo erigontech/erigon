@@ -24,8 +24,8 @@ type StageHistoryReconstructionCfg struct {
 	state      *state.BeaconState
 }
 
-const RecEnabled = true
-const DestinationSlot = 5100000
+const RecEnabled = false
+const DestinationSlot = 5400000
 const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageHistoryReconstructionCfg {
@@ -89,7 +89,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return false, err
 		}
 		// will arbitratly stop at slot 5.1M for testing reasons
-		return slot == 0, nil
+		return slot == DestinationSlot, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -139,6 +139,5 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return err
 		}
 	}
-	panic("stop")
 	return nil
 }

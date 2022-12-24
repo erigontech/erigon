@@ -24,8 +24,6 @@ type StageBeaconsBlockCfg struct {
 	state      *state.BeaconState
 }
 
-const maxOptimisticDistance = 8
-
 func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageBeaconsBlockCfg {
 	return StageBeaconsBlockCfg{
@@ -70,7 +68,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	cfg.downloader.SetProcessFunction(func(
 		highestSlotProcessed uint64,
 		highestRootProcessed common.Hash,
-		newBlocks []*cltypes.SignedBeaconBlockBellatrix) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+		newBlocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
 		// Setup
 		newHighestSlotProcessed = highestSlotProcessed
 		newHighestBlockRootProcessed = highestRootProcessed
@@ -81,9 +79,9 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		// Retrieve last blocks to do reverse soft checks
 		var lastRootInSegment common.Hash
 		lastBlockInSegment := newBlocks[len(newBlocks)-1]
-		lastSlotInSegment := lastBlockInSegment.Block.Slot
-		lastRootInSegment, err = lastBlockInSegment.Block.HashTreeRoot()
-		parentRoot := lastBlockInSegment.Block.ParentRoot
+		lastSlotInSegment := lastBlockInSegment.Block().Slot()
+		lastRootInSegment, err = lastBlockInSegment.Block().HashTreeRoot()
+		parentRoot := lastBlockInSegment.Block().ParentRoot()
 
 		if err != nil {
 			return
@@ -91,7 +89,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 
 		for i := len(newBlocks) - 2; i >= 0; i-- {
 			var blockRoot common.Hash
-			blockRoot, err = newBlocks[i].Block.HashTreeRoot()
+			blockRoot, err = newBlocks[i].Block().HashTreeRoot()
 			if err != nil {
 				return
 			}
@@ -100,7 +98,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 				return
 			}
 			// Update the parent root.
-			parentRoot = newBlocks[i].Block.ParentRoot
+			parentRoot = newBlocks[i].Block().ParentRoot()
 			if parentRoot == highestRootProcessed {
 				// We found a connection point? interrupt cycle and move on.
 				newBlocks = newBlocks[i:]
