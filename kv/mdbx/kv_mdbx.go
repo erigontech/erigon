@@ -304,9 +304,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			env.Close()
 			return nil, err
 		}
-		if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
-			return nil, err
-		}
+	}
+	if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
+		return nil, err
 	}
 
 	if opts.roTxsLimiter == nil {
