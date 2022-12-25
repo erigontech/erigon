@@ -243,10 +243,7 @@ type Config struct {
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	// FORK_NEXT_VALUE (see EIP-3675) block override
-	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
-
-	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
+	OverrideShanghaiTime *big.Int `toml:",omitempty"`
 }
 
 type Sync struct {

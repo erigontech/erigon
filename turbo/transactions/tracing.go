@@ -3,6 +3,7 @@ package transactions
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -134,7 +135,7 @@ func TraceTx(
 ) error {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
-		tracer vm.Tracer
+		tracer vm.EVMLogger
 		err    error
 	)
 	var streaming bool
@@ -151,7 +152,7 @@ func TraceTx(
 		// Construct the JavaScript tracer to execute with
 		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
 			TxHash: txCtx.TxHash,
-		}); err != nil {
+		}, json.RawMessage("{}")); err != nil {
 			stream.WriteNil()
 			return err
 		}
@@ -159,7 +160,7 @@ func TraceTx(
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 		go func() {
 			<-deadlineCtx.Done()
-			tracer.(*tracers.Tracer).Stop(errors.New("execution timeout"))
+			tracer.(tracers.Tracer).Stop(errors.New("execution timeout"))
 		}()
 		defer cancel()
 		streaming = false
@@ -210,7 +211,7 @@ func TraceTx(
 		stream.WriteString(returnVal)
 		stream.WriteObjectEnd()
 	} else {
-		if r, err1 := tracer.(*tracers.Tracer).GetResult(); err1 == nil {
+		if r, err1 := tracer.(tracers.Tracer).GetResult(); err1 == nil {
 			stream.Write(r)
 		} else {
 			return err1
@@ -398,10 +399,10 @@ func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint6
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *JsonStreamLogger) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (l *JsonStreamLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {

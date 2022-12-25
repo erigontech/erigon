@@ -3,7 +3,6 @@ package calltracer
 import (
 	"encoding/binary"
 	"sort"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -53,9 +52,9 @@ func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sc
 }
 func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (ct *CallTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
-func (ct *CallTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
 	ct.froms[from] = struct{}{}

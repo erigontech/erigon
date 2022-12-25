@@ -2,52 +2,81 @@ package temporal
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/state/historyv2read"
-	"github.com/ledgerwatch/erigon/ethdb"
 )
 
-//Naming:
+//Variables Naming:
 //  ts - TimeStamp
 //  tx - Database Transaction
+//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
 //  RoTx - Read-Only Database Transaction
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
 
+//Methods Naming:
+// Get: exact match of criterias
+// Range: [from, to)
+// Each: [from, INF)
+// Prefix: Has(k, prefix)
+// Amount: [from, INF) AND maximum N records
+
 type DB struct {
-	kv       kv.RoDB
+	kv.RwDB
 	agg      *state.Aggregator22
 	hitoryV3 bool
 }
 
-func New(kv kv.RoDB, agg *state.Aggregator22) *DB {
-	return &DB{kv: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv)}
+func New(kv kv.RwDB, agg *state.Aggregator22) *DB {
+	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv)}
 }
-func (db *DB) BeginTemporalRo(ctx context.Context) (*Tx, error) {
-	kvTx, err := db.kv.BeginRo(ctx)
+func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	kvTx, err := db.RwDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{kv: kvTx, agg: db.agg.MakeContext()}
+	tx := &Tx{Tx: kvTx, hitoryV3: db.hitoryV3}
 	if db.hitoryV3 {
-
+		tx.agg = db.agg.MakeContext()
+		tx.agg.SetTx(kvTx)
 	} else {
-		tx.accHistoryC, _ = tx.kv.Cursor(kv.AccountsHistory)
-		tx.storageHistoryC, _ = tx.kv.Cursor(kv.StorageHistory)
-		tx.accChangesC, _ = tx.kv.CursorDupSort(kv.AccountChangeSet)
-		tx.storageChangesC, _ = tx.kv.CursorDupSort(kv.StorageChangeSet)
+		tx.accHistoryC, _ = tx.Cursor(kv.AccountsHistory)
+		tx.storageHistoryC, _ = tx.Cursor(kv.StorageHistory)
+		tx.accChangesC, _ = tx.CursorDupSort(kv.AccountChangeSet)
+		tx.storageChangesC, _ = tx.CursorDupSort(kv.StorageChangeSet)
 	}
 	return tx, nil
 }
+func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
+
+// TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
+func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	return db.BeginTemporalRo(ctx)
+}
+func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
 
 type Tx struct {
-	kv  kv.Tx
+	kv.Tx
 	agg *state.Aggregator22Context
 
 	//HistoryV2 fields
@@ -55,27 +84,39 @@ type Tx struct {
 	accChangesC, storageChangesC kv.CursorDupSort
 
 	//HistoryV3 fields
-	hitoryV3 bool
+	hitoryV3         bool
+	resourcesToClose []kv.Closer
 }
 
-type History string
+func (tx *Tx) Rollback() {
+	for _, closer := range tx.resourcesToClose {
+		closer.Close()
+	}
+	tx.agg.Close()
+	tx.Tx.Rollback()
+}
+
+func (tx *Tx) Commit() error {
+	for _, closer := range tx.resourcesToClose {
+		closer.Close()
+	}
+	return tx.Tx.Commit()
+}
 
 const (
-	Accounts History = "accounts"
-	Storage  History = "storage"
-	Code     History = "code"
+	Accounts kv.History = "accounts"
+	Storage  kv.History = "storage"
+	Code     kv.History = "code"
 )
-
-type InvertedIdx string
 
 const (
-	LogTopic   InvertedIdx = "LogTopic"
-	LogAddr    InvertedIdx = "LogAddr"
-	TracesFrom InvertedIdx = "TracesFrom"
-	TracesTo   InvertedIdx = "TracesTo"
+	LogTopic   kv.InvertedIdx = "LogTopic"
+	LogAddr    kv.InvertedIdx = "LogAddr"
+	TracesFrom kv.InvertedIdx = "TracesFrom"
+	TracesTo   kv.InvertedIdx = "TracesTo"
 )
 
-func (tx *Tx) GetNoState(name History, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case Accounts:
@@ -90,23 +131,14 @@ func (tx *Tx) GetNoState(name History, key []byte, ts uint64) (v []byte, ok bool
 	} else {
 		switch name {
 		case Accounts:
-			v, err = historyv2read.FindByHistory(tx.kv, tx.accHistoryC, tx.accChangesC, false, key, ts)
+			return historyv2.FindByHistory(tx.accHistoryC, tx.accChangesC, false, key, ts)
 		case Storage:
-			v, err = historyv2read.FindByHistory(tx.kv, tx.storageHistoryC, tx.storageChangesC, true, key, ts)
+			return historyv2.FindByHistory(tx.storageHistoryC, tx.storageChangesC, true, key, ts)
 		case Code:
 			panic("not implemented")
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-		// `nil`-value means "key was created"
-		if err != nil {
-			if errors.Is(err, ethdb.ErrKeyNotFound) {
-				return nil, false, nil
-			} else {
-				return nil, false, err
-			}
-		}
-		return v, true, nil
 	}
 }
 
@@ -122,28 +154,47 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-type It interface {
-	Next() uint64
-	HasNext() bool
-	Close()
-}
-
 // [fromTs, toTs)
-func (tx *Tx) InvertedIndexRange(name InvertedIdx, key []byte, fromTs, toTs uint64) (it It, err error) {
-	switch name {
-	case LogTopic:
-		t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case LogAddr:
-		t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case TracesFrom:
-		t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	case TracesTo:
-		t := tx.agg.TraceToIterator(key, fromTs, toTs, tx.kv)
-		return &t, nil
-	default:
-		panic(fmt.Sprintf("unexpected: %s", name))
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
+	if tx.hitoryV3 {
+		switch name {
+		case LogTopic:
+			t := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
+			return t, nil
+		case LogAddr:
+			t := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
+			return t, nil
+		case TracesFrom:
+			t := tx.agg.TraceFromIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
+			return t, nil
+		case TracesTo:
+			t := tx.agg.TraceToIterator(key, fromTs, toTs, tx)
+			tx.resourcesToClose = append(tx.resourcesToClose, t)
+			return t, nil
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
+	} else {
+		var table string
+		switch name {
+		case LogTopic:
+			table = kv.LogTopicIndex
+		case LogAddr:
+			table = kv.LogAddressIdx
+		case TracesFrom:
+			table = kv.TracesFromIdx
+		case TracesTo:
+			table = kv.TracesToIdx
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
+		bm, err := bitmapdb.Get64(tx, table, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+		return kv.StreamArray(bm.ToArray()), nil
 	}
 }

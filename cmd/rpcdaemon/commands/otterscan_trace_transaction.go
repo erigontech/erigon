@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"math/big"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -57,7 +56,9 @@ func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.A
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
-	_value.Set(value.ToBig())
+	if value != nil {
+		_value.Set(value.ToBig())
+	}
 	if typ == vm.CALL {
 		t.Results = append(t.Results, &TraceEntry{"CALL", t.depth, from, to, (*hexutil.Big)(_value), inputCopy})
 		return
@@ -94,7 +95,7 @@ func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to 
 	t.captureStartOrEnter(typ, from, to, precompile, input, value)
 }
 
-func (t *TransactionTracer) CaptureExit(output []byte, startGas, endGas uint64, d time.Duration, err error) {
+func (t *TransactionTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	t.depth--
 }
 

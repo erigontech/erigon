@@ -67,7 +67,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	var (
-		tracer   vm.Tracer
+		tracer   vm.EVMLogger
 		debugger *vm.StructLogger
 	)
 	switch {
@@ -105,7 +105,7 @@ func stateTestCmd(ctx *cli.Context) error {
 func aggregateResultsFromStateTests(
 	ctx *cli.Context,
 	stateTests map[string]tests.StateTest,
-	tracer vm.Tracer,
+	tracer vm.EVMLogger,
 	debugger *vm.StructLogger,
 ) ([]StatetestResult, error) {
 	// Iterate over all the stateTests, run them and aggregate the results

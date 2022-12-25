@@ -151,7 +151,7 @@ func executeBlock(
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
+	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
 		return vm.NewStructLogger(&vm.LogConfig{}), nil
 	}
 
@@ -464,10 +464,10 @@ Loop:
 			if err = batch.Commit(); err != nil {
 				return err
 			}
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}
@@ -502,7 +502,7 @@ Loop:
 
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
-		log.Error("writing plain state version", "err", err)
+		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	if !useExternalTx {

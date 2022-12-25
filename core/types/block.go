@@ -535,10 +535,10 @@ type RawBody struct {
 }
 
 type BodyForStorage struct {
-	BaseTxId uint64
-	TxAmount uint32
-	Uncles   []*Header
-	// TODO(yperbasis): withdrawals
+	BaseTxId    uint64
+	TxAmount    uint32
+	Uncles      []*Header
+	Withdrawals []*Withdrawal
 }
 
 // Block represents an entire block in the Ethereum blockchain.
@@ -735,6 +735,159 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 			break
 		}
 		rb.Withdrawals = append(rb.Withdrawals, &withdrawal)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Withdrawals
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+
+	return s.ListEnd()
+}
+
+func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen int) {
+
+	payloadSize++
+
+	baseTxIdLen := 1 + rlp.IntLenExcludingHead(bfs.BaseTxId)
+	txAmountLen := 1 + rlp.IntLenExcludingHead(uint64(bfs.TxAmount))
+
+	payloadSize += baseTxIdLen
+	payloadSize += txAmountLen
+
+	// size of Uncles
+	for _, uncle := range bfs.Uncles {
+		unclesLen++
+		uncleLen := uncle.EncodingSize()
+		if uncleLen >= 56 {
+			unclesLen += bitsToBytes(bits.Len(uint(uncleLen)))
+		}
+		unclesLen += uncleLen
+	}
+	if unclesLen >= 56 {
+		payloadSize += bitsToBytes(bits.Len(uint(unclesLen)))
+	}
+	payloadSize += unclesLen
+
+	// size of Withdrawals
+	if bfs.Withdrawals != nil {
+		payloadSize++
+		for _, withdrawal := range bfs.Withdrawals {
+			withdrawalsLen++
+			withdrawalLen := withdrawal.EncodingSize()
+			if withdrawalLen >= 56 {
+				withdrawalLen += bitsToBytes(bits.Len(uint(withdrawalLen)))
+			}
+			withdrawalsLen += withdrawalLen
+		}
+		if withdrawalsLen >= 56 {
+			payloadSize += bitsToBytes(bits.Len(uint(withdrawalsLen)))
+		}
+		payloadSize += withdrawalsLen
+	}
+
+	return payloadSize, unclesLen, withdrawalsLen
+}
+
+func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
+	payloadSize, unclesLen, withdrawalsLen := bfs.payloadSize()
+	var b [33]byte
+
+	// prefix
+	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
+		return err
+	}
+
+	// encode BaseTxId
+	if err := rlp.Encode(w, bfs.BaseTxId); err != nil {
+		return err
+	}
+
+	// encode TxAmount
+	if err := rlp.Encode(w, bfs.TxAmount); err != nil {
+		return err
+	}
+
+	// encode Uncles
+	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+		return err
+	}
+	for _, uncle := range bfs.Uncles {
+		if err := uncle.EncodeRLP(w); err != nil {
+			return err
+		}
+	}
+	// encode Withdrawals
+	// nil if pre-shanghai, empty slice if shanghai and no withdrawals in block, otherwise non-empty
+	if bfs.Withdrawals != nil {
+		if err := EncodeStructSizePrefix(withdrawalsLen, w, b[:]); err != nil {
+			return err
+		}
+		for _, withdrawal := range bfs.Withdrawals {
+			if err := withdrawal.EncodeRLP(w); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
+	_, err := s.List()
+	if err != nil {
+		return err
+	}
+
+	// decode BaseTxId
+	if err = s.Decode(&bfs.BaseTxId); err != nil {
+		return err
+	}
+
+	// decode TxAmount
+	if err = s.Decode(&bfs.TxAmount); err != nil {
+		return err
+	}
+
+	// decode Uncles
+	if _, err = s.List(); err != nil {
+		return err
+	}
+	for err == nil {
+		var uncle Header
+		if err = uncle.DecodeRLP(s); err != nil {
+			break
+		}
+		bfs.Uncles = append(bfs.Uncles, &uncle)
+	}
+	if !errors.Is(err, rlp.EOL) {
+		return err
+	}
+	// end of Uncles
+	if err = s.ListEnd(); err != nil {
+		return err
+	}
+
+	// decode Withdrawals
+	if _, err = s.List(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			// pre-shanghai block
+			bfs.Withdrawals = nil
+			return s.ListEnd()
+		}
+		return fmt.Errorf("read Withdrawals: %w", err)
+	}
+	for err == nil {
+		var withdrawal Withdrawal
+		if err = withdrawal.DecodeRLP(s); err != nil {
+			// shanghai block with no withdrawals
+			if len(bfs.Withdrawals) == 0 {
+				bfs.Withdrawals = []*Withdrawal{}
+			}
+			break
+		}
+		bfs.Withdrawals = append(bfs.Withdrawals, &withdrawal)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err

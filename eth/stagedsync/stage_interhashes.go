@@ -399,7 +399,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 					deletedAccounts = append(deletedAccounts, newK)
 				} else {
 					var newAccount accounts.Account
-					if err = accounts.Deserialise2(&newAccount, v); err != nil {
+					if err = accounts.DeserialiseV3(&newAccount, v); err != nil {
 						return err
 					}
 					if newAccount.Incarnation > oldInc {

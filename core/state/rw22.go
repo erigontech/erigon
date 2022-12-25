@@ -232,7 +232,7 @@ func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := accounts.Serialise2(original)
+			prev := accounts.SerialiseV3(original)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
@@ -346,7 +346,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			enc0 = accounts.Serialise2(&a)
+			enc0 = accounts.SerialiseV3(&a)
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
@@ -444,7 +444,7 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var acc accounts.Account
-				if err := accounts.Deserialise2(&acc, v); err != nil {
+				if err := accounts.DeserialiseV3(&acc, v); err != nil {
 					return fmt.Errorf("%w, %x", err, v)
 				}
 				currentInc = acc.Incarnation
@@ -614,7 +614,7 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 	var prev []byte
 	if original.Initialised {
-		prev = accounts.Serialise2(original)
+		prev = accounts.SerialiseV3(original)
 	}
 	w.accountPrevs[string(addressBytes)] = prev
 	return nil
