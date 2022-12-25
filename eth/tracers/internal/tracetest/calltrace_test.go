@@ -145,7 +145,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
 				_, dbTx    = memdb.NewTestTx(t)
-				rules      = &params.Rules{}
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			)
 			if test.Genesis.BaseFee != nil {
@@ -277,7 +277,6 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 // Tx to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {
