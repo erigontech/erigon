@@ -39,6 +39,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+
+	// Force-load native and js packages, to trigger registration
+	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
 
 type callContext struct {
