@@ -276,6 +276,10 @@ type Tx interface {
 	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
 	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 
+	// Range [from, to)
+	// Range(from, nil) means [from, EndOfTable)
+	// Range(nil, to) means [StartOfTable, to)
+	// PrefixScan can be implemented as `Range(Table, prefix, dbutils.NextSubtree(prefix))`
 	Range(table string, fromPrefix, toPrefix []byte) (Pairs, error)
 
 	DBSize() (uint64, error)
@@ -400,7 +404,7 @@ type TemporalRwDB interface {
 }
 
 // Stream - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
-//   - K, V are valid only until next .Next() call
+//   - K, V are valid only until next .Next() call (TODO: extend it to whole Tx lifetime?)
 //   - No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
 //   - automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
 //     check in loops on stream. Stream has very limited API - user has no way to
@@ -415,22 +419,3 @@ type UnaryStream[V any] interface {
 	HasNext() bool
 }
 type Pairs Stream[[]byte, []byte]
-
-type ArrStream[V any] struct {
-	arr []V
-	i   int
-}
-
-func StreamArray[V any](arr []V) UnaryStream[V] { return &ArrStream[V]{arr: arr} }
-func (it *ArrStream[V]) HasNext() bool          { return it.i < len(it.arr) }
-func (it *ArrStream[V]) Close()                 {}
-func (it *ArrStream[V]) Next() (V, error) {
-	v := it.arr[it.i]
-	it.i++
-	return v, nil
-}
-func (it *ArrStream[V]) NextBatch() ([]V, error) {
-	v := it.arr[it.i:]
-	it.i = len(it.arr)
-	return v, nil
-}
