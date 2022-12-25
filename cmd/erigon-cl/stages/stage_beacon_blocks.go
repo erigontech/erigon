@@ -24,8 +24,6 @@ type StageBeaconsBlockCfg struct {
 	state      *state.BeaconState
 }
 
-const maxOptimisticDistance = 8
-
 func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageBeaconsBlockCfg {
 	return StageBeaconsBlockCfg{
@@ -70,7 +68,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	cfg.downloader.SetProcessFunction(func(
 		highestSlotProcessed uint64,
 		highestRootProcessed common.Hash,
-		newBlocks []*cltypes.SignedBeaconBlockBellatrix) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+		newBlocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
 		// Setup
 		newHighestSlotProcessed = highestSlotProcessed
 		newHighestBlockRootProcessed = highestRootProcessed

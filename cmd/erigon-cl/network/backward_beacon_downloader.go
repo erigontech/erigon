@@ -12,7 +12,7 @@ import (
 )
 
 // Whether the reverse downloader arrived at expected height or condition.
-type OnNewBlock func(blk *cltypes.SignedBeaconBlockBellatrix) (finished bool, err error)
+type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 
 type BackwardBeaconDownloader struct {
 	ctx            context.Context
@@ -82,6 +82,10 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 func (b *BackwardBeaconDownloader) RequestMore() {
 	count := uint64(64)
 	start := b.slotToDownload - count + 1
+	// Overflow? round to 0.
+	if start > b.slotToDownload {
+		start = 0
+	}
 	responses, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
 	if err != nil {
 		fmt.Println(err)
@@ -89,7 +93,7 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 	}
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
-		if segment, ok := responses[i].(*cltypes.SignedBeaconBlockBellatrix); ok {
+		if segment, ok := responses[i].(*cltypes.SignedBeaconBlock); ok {
 			if b.finished {
 				return
 			}
@@ -106,7 +110,7 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 			// Yes? then go for the callback.
 			b.finished, err = b.onNewBlock(segment)
 			if err != nil {
-				log.Debug("Found error while processing packet", "err", err)
+				log.Warn("Found error while processing packet", "err", err)
 				continue
 			}
 			// set expected root to the segment parent root

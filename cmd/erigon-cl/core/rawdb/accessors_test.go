@@ -18,10 +18,11 @@ func TestBytes2(t *testing.T) {
 }
 
 func TestBeaconBlock(t *testing.T) {
-	signedBeaconBlock := &cltypes.SignedBeaconBlockBellatrix{}
-	require.NoError(t, signedBeaconBlock.UnmarshalSSZ(rawdb.SSZTestBeaconBlock))
-
+	signedBeaconBlockRaw := &cltypes.SignedBeaconBlockBellatrix{}
+	require.NoError(t, signedBeaconBlockRaw.UnmarshalSSZ(rawdb.SSZTestBeaconBlock))
 	_, tx := memdb.NewTestTx(t)
+
+	signedBeaconBlock := cltypes.NewSignedBeaconBlock(signedBeaconBlockRaw)
 
 	require.NoError(t, rawdb.WriteBeaconBlock(tx, signedBeaconBlock))
 	newBlock, err := rawdb.ReadBeaconBlock(tx, signedBeaconBlock.Block.Slot)
