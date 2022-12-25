@@ -145,11 +145,7 @@ func LengthFromBytes2(buf []byte) int {
 }
 
 func WriteAttestations(tx kv.RwTx, slot uint64, attestations []*cltypes.Attestation) error {
-	attestationsEncoded, err := EncodeAttestationsForStorage(attestations)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.Attestetations, EncodeNumber(slot), attestationsEncoded)
+	return tx.Put(kv.Attestetations, EncodeNumber(slot), cltypes.EncodeAttestationsForStorage(attestations))
 }
 
 func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
@@ -157,7 +153,7 @@ func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DecodeAttestationForStorage(attestationsEncoded)
+	return cltypes.DecodeAttestationsForStorage(attestationsEncoded)
 }
 
 func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {
@@ -297,26 +293,4 @@ func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error 
 	})
 
 	return err
-}
-
-func EncodeAttestationsForStorage(attestantions []*cltypes.Attestation) ([]byte, error) {
-	out, err := (&cltypes.AttestationsForStorage{
-		Attestations: attestantions,
-	}).MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return utils.CompressSnappy(out), nil
-}
-
-func DecodeAttestationForStorage(data []byte) ([]*cltypes.Attestation, error) {
-	tmpStorageAtt := &cltypes.AttestationsForStorage{}
-	data, err := utils.DecompressSnappy(data)
-	if err != nil {
-		return nil, err
-	}
-	if err := tmpStorageAtt.UnmarshalSSZ(data); err != nil {
-		return nil, err
-	}
-	return tmpStorageAtt.Attestations, nil
 }
