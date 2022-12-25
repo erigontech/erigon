@@ -31,12 +31,14 @@ import (
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
+//  Cursor - low-level mdbx-tide api to walk over Table
+//  Stream - high-level simplified api for iteration over Table, InvertedIndex, History, Domain, ...
 
 //Methods Naming:
 // Get: exact match of criterias
-// Range: [from, to)
-// Each: [from, INF)
-// Prefix: Has(k, prefix)
+// Range: [from, to). Range(from, nil) means [from, EndOfTable). Range(nil, to) means [StartOfTable, to).
+// Each: Range(from, nil)
+// Prefix: `Range(Table, prefix, dbutils.NextSubtree(prefix))`
 // Amount: [from, INF) AND maximum N records
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
@@ -105,7 +107,7 @@ func (l Label) String() string {
 
 type Has interface {
 	// Has indicates whether a key exists in the database.
-	Has(bucket string, key []byte) (bool, error)
+	Has(table string, key []byte) (bool, error)
 }
 type GetPut interface {
 	Getter
@@ -115,16 +117,16 @@ type Getter interface {
 	Has
 
 	// GetOne references a readonly section of memory that must not be accessed after txn has terminated
-	GetOne(bucket string, key []byte) (val []byte, err error)
+	GetOne(table string, key []byte) (val []byte, err error)
 
 	// ForEach iterates over entries with keys greater or equal to fromPrefix.
 	// walker is called for each eligible entry.
 	// If walker returns an error:
 	//   - implementations of local db - stop
 	//   - implementations of remote db - do not handle this error and may finish (send all entries to client) before error happen.
-	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
-	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // Putter wraps the database write operations.
@@ -211,9 +213,9 @@ type StatelessReadTx interface {
 	// Can be called for a read transaction to retrieve the current sequence value, and the increment must be zero.
 	// Sequence changes become visible outside the current write transaction after it is committed, and discarded on abort.
 	// Starts from 0.
-	ReadSequence(bucket string) (uint64, error)
+	ReadSequence(table string) (uint64, error)
 
-	BucketSize(bucket string) (uint64, error)
+	BucketSize(table string) (uint64, error)
 }
 
 type StatelessWriteTx interface {
@@ -239,9 +241,9 @@ type StatelessWriteTx interface {
 		}
 		// use id
 	*/
-	IncrementSequence(bucket string, amount uint64) (uint64, error)
-	Append(bucket string, k, v []byte) error
-	AppendDup(bucket string, k, v []byte) error
+	IncrementSequence(table string, amount uint64) (uint64, error)
+	Append(table string, k, v []byte) error
+	AppendDup(table string, k, v []byte) error
 }
 
 type StatelessRwTx interface {
@@ -267,12 +269,14 @@ type Tx interface {
 	//
 	// Cursor, also provides a grain of magic - it can use a declarative configuration - and automatically break
 	// long keys into DupSort key/values. See docs for `bucket.go:TableCfgItem`
-	Cursor(bucket string) (Cursor, error)
-	CursorDupSort(bucket string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
+	Cursor(table string) (Cursor, error)
+	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error
-	ForAmount(bucket string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+
+	Range(table string, fromPrefix, toPrefix []byte) (Pairs, error)
 
 	DBSize() (uint64, error)
 }
@@ -288,8 +292,8 @@ type RwTx interface {
 	StatelessWriteTx
 	BucketMigrator
 
-	RwCursor(bucket string) (RwCursor, error)
-	RwCursorDupSort(bucket string) (RwCursorDupSort, error)
+	RwCursor(table string) (RwCursor, error)
+	RwCursorDupSort(table string) (RwCursorDupSort, error)
 
 	// CollectMetrics - does collect all DB-related and Tx-related metrics
 	// this method exists only in RwTx to avoid concurrency
@@ -396,13 +400,11 @@ type TemporalRwDB interface {
 }
 
 // Stream - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
-// Grpc Server send batch(array) of values. Client can process one-by-one by .Next() method, or use more performant .NextBatch()
-// Iter is very limited - client has no way to terminate it (but client can cancel whole read transaction)
-// Tx does 1-1 match to "grpc-stream". During 1 TX - can be created many `Iter`, `Cursor`.
-//
-// No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
-//
-// K, V are valid only until next .Next() call
+//   - K, V are valid only until next .Next() call
+//   - No `Close` method: all streams produced by TemporalTx will be closed inside `tx.Rollback()` (by casting to `kv.Closer`)
+//   - automatically checks cancelation of `ctx` passed to `db.Begin(ctx)`, can skip this
+//     check in loops on stream. Stream has very limited API - user has no way to
+//     terminate it - but user can specify more strict conditions when creating stream (then server knows better when to stop)
 type Stream[K, V any] interface {
 	Next() (K, V, error)
 	HasNext() bool
@@ -412,6 +414,7 @@ type UnaryStream[V any] interface {
 	NextBatch() ([]V, error)
 	HasNext() bool
 }
+type Pairs Stream[[]byte, []byte]
 
 type ArrStream[V any] struct {
 	arr []V

@@ -45,6 +45,7 @@ type remoteTx struct {
 	db                 *RemoteKV
 	statelessCursors   map[string]kv.Cursor
 	cursors            []*remoteCursor
+	streams            []kv.Closer
 	viewID, id         uint64
 	streamingRequested bool
 }
@@ -203,6 +204,9 @@ func (tx *remoteTx) Rollback() {
 	// don't close opened cursors - just close stream, server will cleanup everything well
 	tx.closeGrpcStream()
 	tx.db.roTxsLimiter.Release(1)
+	for _, c := range tx.streams {
+		c.Close()
+	}
 }
 func (tx *remoteTx) DBSize() (uint64, error) { panic("not implemented") }
 
@@ -285,6 +289,55 @@ func (tx *remoteTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, w
 		amount--
 	}
 	return nil
+}
+
+// TODO: implement by server-side stream
+func (tx *remoteTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
+	s, err := tx.newStreamCursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s.toPrefix = toPrefix
+	s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
+	return s, nil
+}
+func (tx *remoteTx) newStreamCursor(table string) (*cursor2stream, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s := &cursor2stream{c: c, ctx: tx.ctx}
+	tx.streams = append(tx.streams, s)
+	return s, nil
+}
+
+type cursor2stream struct {
+	c            kv.Cursor
+	nextK, nextV []byte
+	nextErr      error
+	toPrefix     []byte
+	ctx          context.Context
+}
+
+func (s *cursor2stream) Close() { s.c.Close() }
+func (s *cursor2stream) HasNext() bool {
+	if s.toPrefix == nil {
+		return s.nextK != nil
+	}
+	if s.nextK == nil {
+		return false
+	}
+	return bytes.Compare(s.nextK, s.toPrefix) < 0
+}
+func (s *cursor2stream) Next() ([]byte, []byte, error) {
+	k, v, err := s.nextK, s.nextV, s.nextErr
+	select {
+	case <-s.ctx.Done():
+		return nil, nil, s.ctx.Err()
+	default:
+	}
+	s.nextK, s.nextV, s.nextErr = s.c.Next()
+	return k, v, err
 }
 
 func (tx *remoteTx) GetOne(bucket string, k []byte) (val []byte, err error) {
