@@ -39,6 +39,7 @@ import (
 	// Force-load native and js packages, to trigger registration
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
 
 func TestPrestateTracerCreate2(t *testing.T) {
@@ -98,9 +99,9 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it
-	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage{})
+	tracer, err := tracers.New("prestateTracer", new(tracers.Context), json.RawMessage("{}"))
 	if err != nil {
-		t.Fatalf("failed to create call tracer: %v", err)
+		t.Fatalf("failed to prestate tracer: %v", err)
 	}
 	evm := vm.NewEVM(context, txContext, statedb, params.AllProtocolChanges, vm.Config{Debug: true, Tracer: tracer})
 

@@ -39,6 +39,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
+
+	// Force-load native and js packages, to trigger registration
+	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
 
 type callContext struct {
@@ -85,16 +89,14 @@ type callTracerTest struct {
 // Iterates over all the input-output datasets in the tracer test harness and
 // runs the JavaScript tracers against them.
 func TestCallTracerLegacy(t *testing.T) {
-	testCallTracer("callTracer", "call_tracer_legacy", t)
+	testCallTracer("callTracerLegacy", "call_tracer_legacy", t)
 }
 
 func TestCallTracerNative(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	testCallTracer("callTracer", "call_tracer", t)
 }
 
 func TestCallTracerNativeWithLog(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	testCallTracer("callTracer", "call_tracer_withLog", t)
 }
 
@@ -143,7 +145,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
 				_, dbTx    = memdb.NewTestTx(t)
-				rules      = &params.Rules{}
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
 				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			)
 			if test.Genesis.BaseFee != nil {
@@ -275,7 +277,6 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 // Tx to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	t.Skip("native callTracer not enabled yet")
 	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {

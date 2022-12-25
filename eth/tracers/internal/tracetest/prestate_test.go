@@ -55,16 +55,14 @@ type testcase struct {
 }
 
 func TestPrestateTracerLegacy(t *testing.T) {
-	testPrestateDiffTracer("prestateTracer", "prestate_tracer_legacy", t)
+	testPrestateDiffTracer("prestateTracerLegacy", "prestate_tracer_legacy", t)
 }
 
 func TestPrestateTracer(t *testing.T) {
-	t.Skip("native prestateTracer not enabled yet")
 	testPrestateDiffTracer("prestateTracer", "prestate_tracer", t)
 }
 
 func TestPrestateWithDiffModeTracer(t *testing.T) {
-	t.Skip("native prestateTracer not enabled yet")
 	testPrestateDiffTracer("prestateTracer", "prestate_tracer_with_diff_mode", t)
 }
 
@@ -100,7 +98,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 				origin, _ = signer.Sender(tx)
 				txContext = evmtypes.TxContext{
 					Origin:   origin,
-					GasPrice: tx.GetPrice(),
+					GasPrice: tx.GetFeeCap(),
 				}
 				context = evmtypes.BlockContext{
 					CanTransfer: core.CanTransfer,
@@ -123,7 +121,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
 			evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
-			msg, err := tx.AsMessage(*signer, test.Genesis.BaseFee, rules)
+			msg, err := tx.AsMessage(*signer, nil, rules) // BaseFee is set to nil and not to contet.BaseFee, to match the output to go-ethereum tests
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
