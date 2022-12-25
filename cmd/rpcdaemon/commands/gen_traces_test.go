@@ -58,7 +58,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 					"gas": "0x595a",
 					"gasUsed": "0x16",
 					"input": "0x0100",
-					"output": "0x010000",
+					"output": "0x0100",
 					"to": "0x00000000000000000000000000000000000000ff",
 					"type": "CALL",
 					"value": "0x0"
@@ -68,7 +68,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 				"gas": "0x6525",
 				"gasUsed": "0xa7b",
 				"input": "0x000100",
-				"output": "0x01000100",
+				"output": "0x0100",
 				"to": "0x00000000000000000000000000000000000001ff",
 				"type": "CALL",
 				"value": "0x0"
@@ -80,7 +80,6 @@ func TestGeneratedDebugApi(t *testing.T) {
 					"gas": "0x584a",
 					"gasUsed": "0x10",
 					"input": "0x",
-					"output": "0x00",
 					"to": "0x00000000000000000000000000000000000000ff",
 					"type": "CALL",
 					"value": "0x0"
@@ -90,7 +89,6 @@ func TestGeneratedDebugApi(t *testing.T) {
 				"gas": "0x5a4c",
 				"gasUsed": "0xb1",
 				"input": "0x00",
-				"output": "0x0100",
 				"to": "0x00000000000000000000000000000000000001ff",
 				"type": "CALL",
 				"value": "0x0"
@@ -100,7 +98,6 @@ func TestGeneratedDebugApi(t *testing.T) {
 			"gas": "0x7120",
 			"gasUsed": "0x684c",
 			"input": "0x01000100",
-			"output": "0x",
 			"to": "0x00000000000000000000000000000000000002ff",
 			"type": "CALL",
 			"value": "0x0"
