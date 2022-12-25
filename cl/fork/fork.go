@@ -134,11 +134,11 @@ func GetLastFork(
 func ComputeDomain(
 	domainType []byte,
 	currentVersion [4]byte,
-	genesisConfig *clparams.GenesisConfig,
+	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
 	forkDataRoot, err := (&cltypes.ForkData{
 		CurrentVersion:        currentVersion,
-		GenesisValidatorsRoot: genesisConfig.GenesisValidatorRoot,
+		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}).HashTreeRoot()
 	if err != nil {
 		return nil, err
