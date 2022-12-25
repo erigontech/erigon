@@ -462,6 +462,9 @@ func ExecV3(ctx context.Context,
 			return h
 		}
 	}
+	if !parallel {
+		applyWorker.ResetTx(applyTx)
+	}
 
 	var b *types.Block
 	var blockNum uint64
