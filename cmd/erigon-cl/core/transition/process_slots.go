@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlockBellatrix, validate bool) error {
+func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, validate bool) error {
 	currentBlock := block.Block
 	s.processSlots(currentBlock.Slot)
 	if validate {
@@ -73,11 +73,12 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 	return nil
 }
 
-func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlockBellatrix) (bool, error) {
+func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock) (bool, error) {
 	proposer := s.state.ValidatorAt(int(block.Block.ProposerIndex))
 	sigRoot, err := block.Block.Body.HashTreeRoot()
 	if err != nil {
 		return false, err
 	}
-	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
+	sig := block.Signature
+	return bls.Verify(sig[:], sigRoot[:], proposer.PublicKey[:])
 }

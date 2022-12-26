@@ -170,7 +170,7 @@ func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
 	return ComputeProposerIndex(state, indices, seedArray)
 }
 
-func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBellatrix) error {
+func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) error {
 	if block.Slot != state.Slot() {
 		return fmt.Errorf("state slot: %d, not equal to block slot: %d", state.Slot(), block.Slot)
 	}
@@ -209,7 +209,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBell
 	return nil
 }
 
-func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBodyBellatrix) error {
+func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBody) error {
 	epoch := GetEpochAtSlot(state.Slot())
 	propInd, err := GetBeaconProposerIndex(state)
 	if err != nil {
