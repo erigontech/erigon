@@ -150,7 +150,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
-				return nil, err
+				return erigonLogs, err
 			}
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {

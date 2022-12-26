@@ -186,7 +186,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		for it.HasNext() {
 			k, v, err := it.Next()
 			if err != nil {
-				return nil, err
+				return logs, err
 			}
 
 			var logs types.Logs
