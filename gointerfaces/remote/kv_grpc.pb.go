@@ -36,6 +36,7 @@ type KVClient interface {
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
 	// Temporal methods
+	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_RangeClient, error)
 	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
 	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error)
 }
@@ -129,6 +130,38 @@ func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...
 	return out, nil
 }
 
+func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_RangeClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/Range", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kVRangeClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type KV_RangeClient interface {
+	Recv() (*Pairs, error)
+	grpc.ClientStream
+}
+
+type kVRangeClient struct {
+	grpc.ClientStream
+}
+
+func (x *kVRangeClient) Recv() (*Pairs, error) {
+	m := new(Pairs)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 func (c *kVClient) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
 	out := new(HistoryGetReply)
 	err := c.cc.Invoke(ctx, "/remote.KV/HistoryGet", in, out, opts...)
@@ -139,7 +172,7 @@ func (c *kVClient) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...gr
 }
 
 func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/IndexRange", opts...)
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[3], "/remote.KV/IndexRange", opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +219,7 @@ type KVServer interface {
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
 	// Temporal methods
+	Range(*RangeReq, KV_RangeServer) error
 	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
 	IndexRange(*IndexRangeReq, KV_IndexRangeServer) error
 	mustEmbedUnimplementedKVServer()
@@ -206,6 +240,9 @@ func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesSe
 }
 func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
+}
+func (UnimplementedKVServer) Range(*RangeReq, KV_RangeServer) error {
+	return status.Errorf(codes.Unimplemented, "method Range not implemented")
 }
 func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HistoryGet not implemented")
@@ -309,6 +346,27 @@ func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_Range_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(RangeReq)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(KVServer).Range(m, &kVRangeServer{stream})
+}
+
+type KV_RangeServer interface {
+	Send(*Pairs) error
+	grpc.ServerStream
+}
+
+type kVRangeServer struct {
+	grpc.ServerStream
+}
+
+func (x *kVRangeServer) Send(m *Pairs) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 func _KV_HistoryGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HistoryGetReq)
 	if err := dec(in); err != nil {
@@ -378,6 +436,11 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "StateChanges",
 			Handler:       _KV_StateChanges_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Range",
+			Handler:       _KV_Range_Handler,
 			ServerStreams: true,
 		},
 		{

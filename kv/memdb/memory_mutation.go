@@ -205,6 +205,13 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 	return nil
 }
 
+func (m *MemoryMutation) Prefix(table string, prefix []byte) (kv.Pairs, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return m.Range(table, prefix, nil)
+	}
+	return m.Range(table, prefix, nextPrefix)
+}
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
 	panic("please implement me")
 }

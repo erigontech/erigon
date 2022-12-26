@@ -265,6 +265,27 @@ func TestRemoteKvStream(t *testing.T) {
 		require.Equal([]byte{1}, v)
 		return nil
 	}))
+
+	err = db.View(ctx, func(tx kv.Tx) error {
+		cntRange := func(from, to []byte) (i int) {
+			it, err := tx.Range(kv.PlainState, from, to)
+			require.NoError(err)
+			for it.HasNext() {
+				_, _, err = it.Next()
+				require.NoError(err)
+				i++
+			}
+			return i
+		}
+
+		require.Equal(2, cntRange([]byte{2}, []byte{4}))
+		require.Equal(4, cntRange(nil, []byte{4}))
+		require.Equal(3, cntRange([]byte{2}, nil))
+		require.Equal(5, cntRange(nil, nil))
+		return nil
+	})
+	require.NoError(err)
+
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {

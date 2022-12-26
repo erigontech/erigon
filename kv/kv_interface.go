@@ -38,7 +38,7 @@ import (
 // Get: exact match of criterias
 // Range: [from, to). Range(from, nil) means [from, EndOfTable). Range(nil, to) means [StartOfTable, to).
 // Each: Range(from, nil)
-// Prefix: `Range(Table, prefix, dbutils.NextSubtree(prefix))`
+// Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 // Amount: [from, INF) AND maximum N records
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
@@ -279,8 +279,9 @@ type Tx interface {
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to) means [StartOfTable, to)
-	// PrefixScan can be implemented as `Range(Table, prefix, dbutils.NextSubtree(prefix))`
+	// PrefixScan can be implemented as `Range(Table, prefix, kv.NextSubtree(prefix))`
 	Range(table string, fromPrefix, toPrefix []byte) (Pairs, error)
+	Prefix(table string, prefix []byte) (Pairs, error)
 
 	DBSize() (uint64, error)
 }

@@ -1625,12 +1625,16 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	if err := tx.ForEach(kv.RecentLocalTransaction, nil, func(k, v []byte) error {
-		//fmt.Printf("is local restored from db: %x\n", k)
-		p.isLocalLRU.Add(string(v), struct{}{})
-		return nil
-	}); err != nil {
+	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil)
+	if err != nil {
 		return err
+	}
+	for it.HasNext() {
+		_, v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		p.isLocalLRU.Add(string(v), struct{}{})
 	}
 
 	txs := types.TxSlots{}
@@ -1638,15 +1642,23 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	parseCtx.WithSender(false)
 
 	i := 0
-	if err := tx.ForEach(kv.PoolTransaction, nil, func(k, v []byte) error {
+	it, err = tx.Range(kv.PoolTransaction, nil, nil)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
 		addr, txRlp := v[:20], v[20:]
 		txn := &types.TxSlot{}
 
-		_, err := parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, nil)
+		_, err = parseCtx.ParseTransaction(txRlp, 0, txn, nil, false /* hasEnvelope */, nil)
 		if err != nil {
 			err = fmt.Errorf("err: %w, rlp: %x", err, txRlp)
 			log.Warn("[txpool] fromDB: parseTransaction", "err", err)
-			return nil
+			continue
 		}
 		txn.Rlp = nil // means that we don't need store it in db anymore
 
@@ -1663,9 +1675,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		txs.IsLocal[i] = isLocalTx
 		copy(txs.Senders.At(i), addr)
 		i++
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	var pendingBaseFee uint64

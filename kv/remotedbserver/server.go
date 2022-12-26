@@ -17,6 +17,7 @@
 package remotedbserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -505,7 +506,7 @@ func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (r
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.HistoryGet(kv.History(req.Name), req.K, req.Ts)
+		reply.V, reply.Ok, err = ttx.HistoryGet(kv.History(req.Table), req.K, req.Ts)
 		if err != nil {
 			return err
 		}
@@ -524,7 +525,7 @@ func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexR
 			if !ok {
 				return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 			}
-			it, err := ttx.IndexRange(kv.InvertedIdx(req.Name), req.K, from, to)
+			it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, from, to)
 			if err != nil {
 				return err
 			}
@@ -540,6 +541,58 @@ func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexR
 			return nil
 		}); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (s *KvServer) Range(req *remote.RangeReq, stream remote.KV_RangeServer) error {
+	if req.ToPrefix != nil && bytes.Compare(req.FromPrefix, req.ToPrefix) >= 0 {
+		return fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", req.FromPrefix, req.ToPrefix)
+	}
+	var k, v []byte
+
+	if req.FromPrefix == nil {
+		req.FromPrefix = []byte{}
+	}
+	const step = 1024 // make sure `s.with` has limited time
+	for from := req.FromPrefix; from != nil; from = k {
+		if req.ToPrefix != nil && bytes.Compare(from, req.ToPrefix) >= 0 {
+			break
+		}
+		resp := &remote.Pairs{}
+		if err := s.with(req.TxID, func(tx kv.Tx) error {
+			c, err := tx.Cursor(req.Table)
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			i := 0
+			for k, v, err = c.Seek(from); k != nil; k, v, err = c.Next() {
+				if err != nil {
+					return err
+				}
+				if req.ToPrefix != nil && bytes.Compare(k, req.ToPrefix) >= 0 {
+					break
+				}
+
+				resp.Keys = append(resp.Keys, k)
+				resp.Values = append(resp.Values, v)
+
+				i++
+				if i > step {
+					break
+				}
+			}
+			k = common.Copy(k)
+			return nil
+		}); err != nil {
+			return err
+		}
+		if len(resp.Keys) > 0 {
+			if err := stream.Send(resp); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
