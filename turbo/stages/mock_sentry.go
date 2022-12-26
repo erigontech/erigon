@@ -575,6 +575,9 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	for i := n; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
 		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
