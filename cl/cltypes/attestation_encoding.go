@@ -22,8 +22,16 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 	for _, attestation := range attestations {
 		// Encode attestation metadata
 		// Also we need to keep track of aggregation bits size manually.
-		encoded = append(encoded, encodeNumber(uint64(len(attestation.AggregationBits)))...)
-		encoded = append(encoded, attestation.AggregationBits...)
+		encoded = append(encoded, byte(len(attestation.AggregationBits)))
+		// Encoding of aggregation bits: save first byte and prefix repetition
+		encoded = append(encoded, attestation.AggregationBits[0])
+		rep := byte(0)
+		for int(rep) < len(attestation.AggregationBits) && attestation.AggregationBits[rep] == attestation.AggregationBits[0] {
+			rep++
+		}
+		encoded = append(encoded, rep)
+		encoded = append(encoded, attestation.AggregationBits[rep:]...)
+		// Encode signature
 		encoded = append(encoded, attestation.Signature[:]...)
 		// Encode attestation body
 		var bestEncoding []byte
@@ -62,18 +70,15 @@ func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 		nil, // Full diff
 	}
 	var attestations []*Attestation
-	var n int
 	// current position is how much we read.
 	pos := 0
 	for pos != len(buf) {
-		// Figure out how long are aggragation bits
-		bitsLength := decodeNumber(buf[pos:])
-		pos += 4
+		n, aggrBits := rebuildAggregationBits(buf[pos:])
+		pos += n
 		// Decode aggrefation bits
 		attestation := &Attestation{
-			AggregationBits: common.CopyBytes(buf[pos : pos+int(bitsLength)]),
+			AggregationBits: aggrBits,
 		}
-		pos += int(bitsLength)
 		// Decode signature
 		copy(attestation.Signature[:], buf[pos:])
 		pos += 96
@@ -89,7 +94,7 @@ func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 		pos += n
 		// decode attester index
 		attestation.Data.Index = decodeNumber(buf[pos:])
-		pos += 4
+		pos += 3
 		attestations = append(attestations, attestation)
 	}
 	return attestations, nil
@@ -98,11 +103,13 @@ func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 func encodeNumber(x uint64) []byte {
 	b := make([]byte, 4)
 	binary.BigEndian.PutUint32(b, uint32(x))
-	return b
+	return b[1:]
 }
 
 func decodeNumber(b []byte) uint64 {
-	return uint64(binary.BigEndian.Uint32(b[:4]))
+	tmp := make([]byte, 4)
+	copy(tmp[1:], b[:3])
+	return uint64(binary.BigEndian.Uint32(tmp))
 }
 
 // EncodeAttestationsDataForStorage encodes attestation data and compress everything by defaultData.
@@ -163,7 +170,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 		data.Slot = defaultData.Slot
 	} else {
 		data.Slot = decodeNumber(buf[n:])
-		n += 4
+		n += 3
 	}
 
 	if fieldSet&2 > 0 {
@@ -177,7 +184,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 		data.Source.Epoch = defaultData.Source.Epoch
 	} else {
 		data.Source.Epoch = decodeNumber(buf[n:])
-		n += 4
+		n += 3
 	}
 
 	if fieldSet&8 > 0 {
@@ -191,7 +198,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 		data.Target.Epoch = defaultData.Target.Epoch
 	} else {
 		data.Target.Epoch = decodeNumber(buf[n:])
-		n += 4
+		n += 3
 	}
 
 	if fieldSet&32 > 0 {
@@ -201,4 +208,16 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 		n += 32
 	}
 	return
+}
+
+func rebuildAggregationBits(buf []byte) (int, []byte) {
+	bitsLen := int(buf[0])
+	firstByte := buf[1]
+	rep := int(buf[2])
+	ret := make([]byte, bitsLen)
+	for i := 0; i < rep; i++ {
+		ret[i] = firstByte
+	}
+	copy(ret[rep:], buf[3:])
+	return 3 + (bitsLen - rep), ret
 }
