@@ -945,10 +945,23 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 
 	prefix := make([]byte, 8)
 	binary.BigEndian.PutUint64(prefix, blockNum)
-	if err := db.ForPrefix(kv.Log, prefix, func(k, v []byte) error {
+
+	it, err := db.Prefix(kv.Log, prefix)
+	if err != nil {
+		log.Error("logs fetching failed", "err", err)
+		return nil
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			log.Error("logs fetching failed", "err", err)
+			return nil
+		}
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return fmt.Errorf("receipt unmarshal failed:  %w", err)
+			err = fmt.Errorf("receipt unmarshal failed:  %w", err)
+			log.Error("logs fetching failed", "err", err)
+			return nil
 		}
 
 		txIndex := int(binary.BigEndian.Uint32(k[8:]))
@@ -957,11 +970,6 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		if txIndex < len(receipts) {
 			receipts[txIndex].Logs = logs
 		}
-
-		return nil
-	}); err != nil {
-		log.Error("logs fetching failed", "err", err)
-		return nil
 	}
 
 	return receipts
