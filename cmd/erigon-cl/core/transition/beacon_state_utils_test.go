@@ -415,3 +415,80 @@ func TestProcessRandao(t *testing.T) {
 		})
 	}
 }
+
+func TestProcessEth1Data(t *testing.T) {
+	Eth1DataA := &cltypes.Eth1Data{
+		Root:         [32]byte{1, 2, 3},
+		DepositCount: 42,
+		BlockHash:    [32]byte{4, 5, 6},
+	}
+	eth1dataAHash, err := Eth1DataA.HashTreeRoot()
+	if err != nil {
+		t.Fatalf("unable to hash expected eth1data: %v", err)
+	}
+	Eth1DataB := &cltypes.Eth1Data{
+		Root:         [32]byte{3, 2, 1},
+		DepositCount: 43,
+		BlockHash:    [32]byte{6, 5, 4},
+	}
+	eth1dataBHash, err := Eth1DataB.HashTreeRoot()
+	if err != nil {
+		t.Fatalf("unable to hash expected eth1data: %v", err)
+	}
+	successState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
+		Eth1DataVotes: []*cltypes.Eth1Data{},
+		Eth1Data:      Eth1DataB,
+	})
+	// Fill all votes.
+	for i := 0; i < int(EPOCHS_PER_ETH1_VOTING_PERIOD)*int(SLOTS_PER_EPOCH)-1; i++ {
+		successState.SetEth1DataVotes(append(successState.Eth1DataVotes(), Eth1DataA))
+	}
+	successBody := &cltypes.BeaconBody{
+		Eth1Data: Eth1DataA,
+	}
+
+	noUpdateState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
+		Eth1DataVotes: []*cltypes.Eth1Data{},
+		Eth1Data:      Eth1DataB,
+	})
+
+	testCases := []struct {
+		description  string
+		state        *state.BeaconState
+		body         *cltypes.BeaconBody
+		expectedHash [32]byte
+	}{
+		{
+			description:  "success_update",
+			state:        successState,
+			body:         successBody,
+			expectedHash: eth1dataAHash,
+		},
+		{
+			description:  "success_no_update",
+			state:        noUpdateState,
+			body:         successBody,
+			expectedHash: eth1dataBHash,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			err := ProcessEth1Data(tc.state, tc.body)
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			gotEth1Data := tc.state.Eth1Data()
+			gotHash, err := gotEth1Data.HashTreeRoot()
+			if err != nil {
+				t.Fatalf("unable to hash output eth1data: %v", err)
+			}
+			for i := 0; i < len(tc.expectedHash); i++ {
+				if gotHash[i] != tc.expectedHash[i] {
+					t.Errorf("unexpected output byte: got %x, want %x", gotHash[i], tc.expectedHash[i])
+				}
+			}
+		})
+	}
+
+}
