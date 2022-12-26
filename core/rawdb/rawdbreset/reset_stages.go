@@ -277,14 +277,17 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
 		go func(perfix []byte) {
 			defer wg.Done()
 			if err := db.View(ctx, func(tx kv.Tx) error {
-				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
+				it, err := tx.Prefix(bucket, prefix)
+				if err != nil {
+					return err
+				}
+				for it.HasNext() {
+					_, _, err = it.Next()
+					if err != nil {
+						return err
 					}
-					return nil
-				})
+				}
+				return nil
 			}); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					log.Warn("warmup", "err", err)
