@@ -1488,10 +1488,10 @@ func (b *Block) HashCheck() error {
 	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
 		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
 	}
-	if (b.Withdrawals() == nil) != (b.WithdrawalsHash() == nil) {
-		return fmt.Errorf("inconsistent withdrawals presence: body %t, header: %t", b.Withdrawals() != nil, b.WithdrawalsHash() != nil)
-	}
-	if b.Withdrawals() == nil {
+	if b.WithdrawalsHash() == nil {
+		if b.Withdrawals() != nil {
+			return errors.New("header missing WithdrawalsHash")
+		}
 		return nil
 	}
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
