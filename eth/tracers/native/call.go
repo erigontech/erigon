@@ -239,17 +239,6 @@ func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	}
 }
 
-func (t *callTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (t *callTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *callTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {

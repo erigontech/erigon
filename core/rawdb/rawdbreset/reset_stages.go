@@ -2,7 +2,6 @@ package rawdbreset
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -209,8 +208,8 @@ var Tables = map[stages.SyncStage][]string{
 	stages.Finish:              {},
 }
 
-func WarmupTable(ctx context.Context, db kv.RwDB, bucket string) {
-	const ThreadsLimit = 5_000
+func WarmupTable(ctx context.Context, db kv.RoDB, bucket string) {
+	const ThreadsLimit = 1024
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
 		c, _ := tx.Cursor(bucket)
@@ -230,16 +229,22 @@ func WarmupTable(ctx context.Context, db kv.RwDB, bucket string) {
 			j := j
 			g.Go(func() error {
 				return db.View(ctx, func(tx kv.Tx) error {
-					return tx.ForPrefix(bucket, []byte{byte(i), byte(j)}, func(k, v []byte) error {
-						progress.Inc()
-
+					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, _, err = it.Next()
+						if err != nil {
+							return err
+						}
 						select {
 						case <-logEvery.C:
 							log.Info(fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
 						}
-						return nil
-					})
+					}
+					return nil
 				})
 			})
 		}
@@ -271,27 +276,11 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 
 func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
 	wg := sync.WaitGroup{}
-	for i := 0; i < 256; i++ {
-		prefix := []byte{byte(i)}
-		wg.Add(1)
-		go func(perfix []byte) {
-			defer wg.Done()
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
-					return nil
-				})
-			}); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					log.Warn("warmup", "err", err)
-				}
-			}
-		}(prefix)
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		WarmupTable(ctx, db, bucket)
+	}()
 	return func() { wg.Wait() }
 }
 

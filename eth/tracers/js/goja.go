@@ -513,16 +513,6 @@ func (t *jsTracer) setTypeConverters() error {
 	return nil
 }
 
-func (t *jsTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *jsTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-func (t *jsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {}
-
 type opObj struct {
 	vm *goja.Runtime
 	op vm.OpCode

@@ -173,16 +173,27 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 			j := j
 			g.Go(func() error {
 				return db.View(ctx, func(tx kv.Tx) error {
-					return tx.ForPrefix(bucket, []byte{byte(i), byte(j)}, func(k, v []byte) error {
+					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, v, err := it.Next()
+						if len(v) > 0 {
+							_ = v[len(v)-1]
+						}
 						progress.Inc()
+						if err != nil {
+							return err
+						}
 
 						select {
 						case <-logEvery.C:
 							log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
 						default:
 						}
-						return nil
-					})
+					}
+					return nil
 				})
 			})
 		}

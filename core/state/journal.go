@@ -105,9 +105,9 @@ type (
 		account *common.Address
 		prev    *stateObject
 	}
-	suicideChange struct {
+	selfdestructChange struct {
 		account     *common.Address
-		prev        bool // whether account had already suicided
+		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
@@ -180,15 +180,15 @@ func (ch resetObjectChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch suicideChange) revert(s *IntraBlockState) {
+func (ch selfdestructChange) revert(s *IntraBlockState) {
 	obj := s.getStateObject(*ch.account)
 	if obj != nil {
-		obj.suicided = ch.prev
+		obj.selfdestructed = ch.prev
 		obj.setBalance(&ch.prevbalance)
 	}
 }
 
-func (ch suicideChange) dirtied() *common.Address {
+func (ch selfdestructChange) dirtied() *common.Address {
 	return ch.account
 }
 

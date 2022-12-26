@@ -313,6 +313,21 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
+	} else if typ == vm.SELFDESTRUCT {
+		trace := &ParityTrace{}
+		trace.Type = SUICIDE
+		action := &SuicideTraceAction{}
+		action.Address = from
+		action.RefundAddress = to
+		action.Balance.ToInt().Set(value.ToBig())
+		trace.Action = action
+		topTrace := ot.traceStack[len(ot.traceStack)-1]
+		traceIdx := topTrace.Subtraces
+		ot.traceAddr = append(ot.traceAddr, traceIdx)
+		topTrace.Subtraces++
+		trace.TraceAddress = make([]int, len(ot.traceAddr))
+		copy(trace.TraceAddress, ot.traceAddr)
+		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	} else {
 		action := CallTraceAction{}
 		switch typ {
@@ -566,31 +581,6 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 }
 
 func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
-}
-
-func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	trace := &ParityTrace{}
-	trace.Type = SUICIDE
-	action := &SuicideTraceAction{}
-	action.Address = from
-	action.RefundAddress = to
-	action.Balance.ToInt().Set(value.ToBig())
-	trace.Action = action
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	traceIdx := topTrace.Subtraces
-	ot.traceAddr = append(ot.traceAddr, traceIdx)
-	topTrace.Subtraces++
-	trace.TraceAddress = make([]int, len(ot.traceAddr))
-	copy(trace.TraceAddress, ot.traceAddr)
-	ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
-	ot.r.Trace = append(ot.r.Trace, trace)
-}
-
-func (ot *OeTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ot *OeTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
 }
 
 // Implements core/state/StateWriter to provide state diffs
