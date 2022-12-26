@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
@@ -28,6 +29,29 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )
+
+type dummyContractRef struct {
+	calledForEach bool
+}
+
+func (dummyContractRef) ReturnGas(*big.Int)          {}
+func (dummyContractRef) Address() common.Address     { return common.Address{} }
+func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
+func (dummyContractRef) SetCode(common.Hash, []byte) {}
+func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
+	d.calledForEach = true
+}
+func (d *dummyContractRef) SubBalance(amount *big.Int) {}
+func (d *dummyContractRef) AddBalance(amount *big.Int) {}
+func (d *dummyContractRef) SetBalance(*big.Int)        {}
+func (d *dummyContractRef) SetNonce(uint64)            {}
+func (d *dummyContractRef) Balance() *big.Int          { return new(big.Int) }
+
+type dummyStatedb struct {
+	state.IntraBlockState
+}
+
+func (*dummyStatedb) GetRefund() uint64 { return 1337 }
 
 func TestStoreCapture(t *testing.T) {
 	var (
