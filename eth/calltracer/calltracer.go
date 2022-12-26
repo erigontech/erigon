@@ -27,6 +27,7 @@ func NewCallTracer() *CallTracer {
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
 
+// CaptureStart and CaptureEnter also capture SELFDESTRUCT opcode invocations
 func (ct *CallTracer) captureStartOrEnter(from, to common.Address, create bool, code []byte) {
 	ct.froms[from] = struct{}{}
 
@@ -55,16 +56,6 @@ func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sc
 func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
-}
-func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	ct.froms[from] = struct{}{}
-	ct.tos[to] = false
-}
-func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
 }
 
 func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {

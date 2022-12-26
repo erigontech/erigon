@@ -864,7 +864,7 @@ func opStop(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	return nil, errStopToken
 }
 
-func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	if interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
@@ -877,10 +877,9 @@ func opSuicide(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 			interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, balance, nil /* code */)
 			interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
 		}
-		interpreter.evm.Config().Tracer.CaptureSelfDestruct(callerAddr, beneficiaryAddr, balance)
 	}
 	interpreter.evm.IntraBlockState().AddBalance(beneficiaryAddr, balance)
-	interpreter.evm.IntraBlockState().Suicide(callerAddr)
+	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
 	return nil, errStopToken
 }
 

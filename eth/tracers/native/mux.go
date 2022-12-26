@@ -113,17 +113,6 @@ func (t *muxTracer) CaptureTxEnd(restGas uint64) {
 	}
 }
 
-func (t *muxTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (t *muxTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *muxTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
 // GetResult returns an empty json object.
 func (t *muxTracer) GetResult() (json.RawMessage, error) {
 	resObject := make(map[string]json.RawMessage)
