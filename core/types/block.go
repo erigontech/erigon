@@ -1480,6 +1480,26 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
+// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+func (b *Block) HashCheck() error {
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
+		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
+	}
+	if (b.Withdrawals() == nil) != (b.WithdrawalsHash() == nil) {
+		return fmt.Errorf("inconsistent withdrawals presence: body %t, header: %t", b.Withdrawals() != nil, b.WithdrawalsHash() != nil)
+	}
+	if b.Withdrawals() == nil {
+		return nil
+	}
+	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
+		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
+	}
+	return nil
+}
+
 type writeCounter common.StorageSize
 
 func (c *writeCounter) Write(b []byte) (int, error) {

@@ -476,6 +476,10 @@ func handleNewPayload(
 	headerHash := block.Hash()
 
 	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
+	if err := block.HashCheck(); err != nil {
+		return nil, err
+	}
+
 	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
