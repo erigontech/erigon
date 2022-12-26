@@ -310,7 +310,7 @@ func (t *jsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Ad
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
 	if value != nil {
-		t.frame.value = new(big.Int).SetBytes(value.Bytes())
+		t.frame.value = value.ToBig()
 	}
 
 	if _, err := t.enter(t.obj, t.frameValue); err != nil {
@@ -513,16 +513,6 @@ func (t *jsTracer) setTypeConverters() error {
 	return nil
 }
 
-func (t *jsTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *jsTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
-func (t *jsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {}
-
 type opObj struct {
 	vm *goja.Runtime
 	op vm.OpCode
@@ -676,7 +666,7 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		return nil
 	}
 	addr := common.BytesToAddress(a)
-	value := do.ibs.GetBalance(addr)
+	value := do.ibs.GetBalance(addr).ToBig()
 	res, err := do.toBig(do.vm, value.String())
 	if err != nil {
 		do.vm.Interrupt(err)
@@ -726,7 +716,7 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 	hash := common.BytesToHash(h)
 	var outValue uint256.Int
 	do.ibs.GetState(addr, &hash, &outValue)
-	res, err := do.toBuf(do.vm, outValue.Bytes())
+	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil

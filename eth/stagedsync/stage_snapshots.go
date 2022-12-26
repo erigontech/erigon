@@ -267,6 +267,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				}
 				toBlock = cmp.Max(toBlock, progress)
 
+				_ = tx.ClearBucket(kv.MaxTxNum)
 				if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
 				}

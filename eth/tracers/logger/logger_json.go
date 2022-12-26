@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package logger
 
 import (
 	"encoding/json"
@@ -24,12 +24,13 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 type JSONLogger struct {
 	encoder *json.Encoder
 	cfg     *LogConfig
-	env     *EVM
+	env     *vm.EVM
 }
 
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
@@ -46,15 +47,15 @@ func (l *JSONLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (l *JSONLogger) CaptureTxEnd(restGas uint64) {}
 
-func (l *JSONLogger) CaptureStart(env *EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
-func (l *JSONLogger) CaptureEnter(typ OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JSONLogger) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState outputs state information on the logger.
-func (l *JSONLogger) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error) {
+func (l *JSONLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 	memory := scope.Memory
 	stack := scope.Stack
 
@@ -84,7 +85,7 @@ func (l *JSONLogger) CaptureState(pc uint64, op OpCode, gas, cost uint64, scope 
 }
 
 // CaptureFault outputs state information on the logger.
-func (l *JSONLogger) CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error) {
+func (l *JSONLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
 // CaptureEnd is triggered at end of execution.
@@ -102,15 +103,4 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
 func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
-}
-
-func (l *JSONLogger) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (l *JSONLogger) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (l *JSONLogger) CaptureAccountWrite(account common.Address) error {
-	return nil
 }
