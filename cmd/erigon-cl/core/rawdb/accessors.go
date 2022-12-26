@@ -160,7 +160,7 @@ func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
 	return DecodeAttestationForStorage(attestationsEncoded)
 }
 
-func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatrix) error {
+func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {
 	var (
 		block     = signedBlock.Block
 		blockBody = block.Body
@@ -169,11 +169,10 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 
 	// database key is is [slot + body root]
 	key := EncodeNumber(block.Slot)
-	value, err := EncodeBeaconBlockForStorage(signedBlock)
+	value, err := signedBlock.EncodeForStorage()
 	if err != nil {
 		return err
 	}
-
 	/*if err := WriteExecutionPayload(tx, payload); err != nil {
 		return err
 	}*/
@@ -185,18 +184,24 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 	return tx.Put(kv.BeaconBlocks, key, value)
 }
 
-func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatrix, error) {
+func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
 	if err != nil {
 		return nil, err
 	}
-	signedBlock, _, _, err := DecodeBeaconBlockForStorage(encodedBeaconBlock)
+	if len(encodedBeaconBlock) == 0 {
+		return nil, nil
+	}
+	signedBlock, _, _, err := cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("A")
 
-	signedBlock.Block.Body.Attestations, err = ReadAttestations(tx, slot)
+	attestations, err := ReadAttestations(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	signedBlock.Block.Body.Attestations = attestations
 	return signedBlock, err
 	/*
 		// Process payload
@@ -292,61 +297,6 @@ func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error 
 	})
 
 	return err
-}
-
-func EncodeBeaconBlockForStorage(block *cltypes.SignedBeaconBlockBellatrix) ([]byte, error) {
-	out, err := (&cltypes.BeaconBlockBellatrixForStorage{
-		Signature:         block.Signature,
-		Slot:              block.Block.Slot,
-		ProposerIndex:     block.Block.ProposerIndex,
-		ParentRoot:        block.Block.ParentRoot,
-		StateRoot:         block.Block.StateRoot,
-		RandaoReveal:      block.Block.Body.RandaoReveal,
-		Eth1Data:          block.Block.Body.Eth1Data,
-		Graffiti:          block.Block.Body.Graffiti,
-		ProposerSlashings: block.Block.Body.ProposerSlashings,
-		AttesterSlashings: block.Block.Body.AttesterSlashings,
-		Deposits:          block.Block.Body.Deposits,
-		VoluntaryExits:    block.Block.Body.VoluntaryExits,
-		SyncAggregate:     block.Block.Body.SyncAggregate,
-		Eth1Number:        block.Block.Body.ExecutionPayload.BlockNumber,
-		Eth1BlockHash:     block.Block.Body.ExecutionPayload.BlockHash,
-	}).MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return utils.CompressSnappy(out), nil
-}
-
-func DecodeBeaconBlockForStorage(data []byte) (*cltypes.SignedBeaconBlockBellatrix, uint64, common.Hash, error) {
-	tmpStorageBlock := &cltypes.BeaconBlockBellatrixForStorage{}
-	data, err := utils.DecompressSnappy(data)
-	if err != nil {
-		return nil, 0, common.Hash{}, err
-	}
-
-	if err := tmpStorageBlock.UnmarshalSSZ(data); err != nil {
-		return nil, 0, common.Hash{}, err
-	}
-	return &cltypes.SignedBeaconBlockBellatrix{
-		Signature: tmpStorageBlock.Signature,
-		Block: &cltypes.BeaconBlockBellatrix{
-			Slot:          tmpStorageBlock.Slot,
-			ProposerIndex: tmpStorageBlock.ProposerIndex,
-			StateRoot:     tmpStorageBlock.StateRoot,
-			ParentRoot:    tmpStorageBlock.ParentRoot,
-			Body: &cltypes.BeaconBodyBellatrix{
-				RandaoReveal:      tmpStorageBlock.RandaoReveal,
-				Eth1Data:          tmpStorageBlock.Eth1Data,
-				Graffiti:          tmpStorageBlock.Graffiti,
-				ProposerSlashings: tmpStorageBlock.ProposerSlashings,
-				AttesterSlashings: tmpStorageBlock.AttesterSlashings,
-				Deposits:          tmpStorageBlock.Deposits,
-				VoluntaryExits:    tmpStorageBlock.VoluntaryExits,
-				SyncAggregate:     tmpStorageBlock.SyncAggregate,
-			},
-		},
-	}, tmpStorageBlock.Eth1Number, tmpStorageBlock.Eth1BlockHash, nil
 }
 
 func EncodeAttestationsForStorage(attestantions []*cltypes.Attestation) ([]byte, error) {

@@ -56,6 +56,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+
+	// Force-load native and js packages, to trigger registration
+	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
+	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
 
 var rootCmd = &cobra.Command{

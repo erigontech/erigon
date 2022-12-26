@@ -207,7 +207,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideMergeNetsplitBlock, config.OverrideTerminalTotalDifficulty)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime)
 		if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -286,6 +286,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	if config.HistoryV3 {
 		backend.chainDB = temporal.New(backend.chainDB, agg)
+		chainKv = backend.chainDB
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)

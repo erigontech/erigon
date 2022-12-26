@@ -28,11 +28,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -218,7 +218,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	}
 
 	traceStart := func() {
-		vmConfig.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+		vmConfig.Tracer = logger.NewStructLogger(&logger.LogConfig{})
 		vmConfig.Debug = true
 	}
 	traceStop := func(id int) {
@@ -231,7 +231,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 		encoder := json.NewEncoder(w)
 		encoder.SetIndent(" ", " ")
-		for _, l := range vm.FormatLogs(vmConfig.Tracer.(*vm.StructLogger).StructLogs()) {
+		for _, l := range logger.FormatLogs(vmConfig.Tracer.(*logger.StructLogger).StructLogs()) {
 			if err2 := encoder.Encode(l); err2 != nil {
 				panic(err2)
 			}
