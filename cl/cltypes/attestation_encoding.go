@@ -3,7 +3,6 @@ package cltypes
 import (
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -51,7 +50,7 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 		// Encode attester index
 		encoded = append(encoded, encodeNumber(attestation.Data.Index)...)
 	}
-	return utils.CompressSnappy(encoded)
+	return encoded
 }
 
 func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
@@ -59,10 +58,6 @@ func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 		return nil, nil
 	}
 
-	buf, err := utils.DecompressSnappy(buf)
-	if err != nil {
-		return nil, err
-	}
 	referencedAttestations := []*AttestationData{
 		nil, // Full diff
 	}
