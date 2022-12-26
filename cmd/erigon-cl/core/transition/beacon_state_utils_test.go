@@ -490,5 +490,4 @@ func TestProcessEth1Data(t *testing.T) {
 			}
 		})
 	}
-
 }
