@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	math2 "math"
 	"os"
 	"runtime"
 	"sort"
@@ -305,9 +304,9 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, err
 		}
 	}
-	if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
-		return nil, err
-	}
+	//if err := env.SetOption(mdbx.OptSyncBytes, uint64(math2.MaxUint64)); err != nil {
+	//	return nil, err
+	//}
 
 	if opts.roTxsLimiter == nil {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 8)
