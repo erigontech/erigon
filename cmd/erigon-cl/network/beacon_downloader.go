@@ -14,7 +14,7 @@ import (
 type ProcessFn func(
 	highestSlotProcessed uint64,
 	highestBlockRootProcessed common.Hash,
-	blocks []*cltypes.SignedBeaconBlockBellatrix) (
+	blocks []*cltypes.SignedBeaconBlock) (
 	newHighestSlotProcessed uint64,
 	newHighestBlockRootProcessed common.Hash,
 	err error)
@@ -29,14 +29,14 @@ type ForwardBeaconDownloader struct {
 	isDownloading             bool // Should be set to true to set the blocks to download
 	limitSegmentsLength       int  // Limit how many blocks we store in the downloader without processing
 
-	segments []*cltypes.SignedBeaconBlockBellatrix // Unprocessed downloaded segments
+	segments []*cltypes.SignedBeaconBlock // Unprocessed downloaded segments
 	mu       sync.Mutex
 }
 
 func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
 		ctx:           ctx,
-		segments:      []*cltypes.SignedBeaconBlockBellatrix{},
+		segments:      []*cltypes.SignedBeaconBlock{},
 		rpc:           rpc,
 		isDownloading: false,
 	}
@@ -46,7 +46,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *For
 func (f *ForwardBeaconDownloader) ReceiveGossip(obj cltypes.ObjectSSZ) {
 	signedBlock := obj.(*cltypes.SignedBeaconBlockBellatrix)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		f.addSegment(signedBlock)
+		f.addSegment(cltypes.NewSignedBeaconBlock(obj))
 	}
 }
 
@@ -100,7 +100,7 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() common.Hash {
 }
 
 // addSegment process new block segment.
-func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBellatrix) {
+func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
 	// Skip if it is not downloading or limit was reached
 	if !f.isDownloading || len(f.segments) >= f.limitSegmentsLength {
 		return
@@ -112,14 +112,14 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBel
 }
 
 func (f *ForwardBeaconDownloader) RequestMore() {
-	count := uint64(10)
+	count := uint64(64)
 
 	responses, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
 	if err != nil {
 		return
 	}
 	for _, response := range responses {
-		if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
+		if segment, ok := response.(*cltypes.SignedBeaconBlock); ok {
 			f.addSegment(segment)
 		}
 	}

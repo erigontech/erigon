@@ -157,8 +157,6 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	compress.SetDecompressionTableCondensity(9)
-
 	preloadFileAsync(f)
 
 	decompressor, err := compress.NewDecompressor(f)

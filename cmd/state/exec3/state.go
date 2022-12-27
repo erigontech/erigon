@@ -197,7 +197,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 				getHashFn := core.GetHashFn(header, rw.getHeader)
 				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 			}
-			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 			vmenv = rw.evm
 		}
 		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)

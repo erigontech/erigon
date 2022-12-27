@@ -846,7 +846,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
-	if reset {
+	if warmup {
 		return reset2.Warmup(ctx, db, stages.LogIndex)
 	}
 	if reset {

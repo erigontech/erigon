@@ -198,13 +198,6 @@ type BeaconBlockForStorage struct {
 }
 
 /*
- * AttestationsForStorage is the SSZ format for attestations.
- */
-type AttestationsForStorage struct {
-	Attestations []*Attestation `ssz-max:"128"`
-}
-
-/*
  * Bellatrix block structure.
  */
 type BeaconBlockBellatrix struct {

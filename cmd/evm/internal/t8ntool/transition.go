@@ -44,6 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
@@ -109,7 +110,7 @@ func Main(ctx *cli.Context) error {
 	}
 	if ctx.Bool(TraceFlag.Name) {
 		// Configure the EVM logger
-		logConfig := &vm.LogConfig{
+		logConfig := &logger.LogConfig{
 			DisableStack:      ctx.Bool(TraceDisableStackFlag.Name),
 			DisableMemory:     ctx.Bool(TraceDisableMemoryFlag.Name),
 			DisableReturnData: ctx.Bool(TraceDisableReturnDataFlag.Name),
@@ -131,7 +132,7 @@ func Main(ctx *cli.Context) error {
 				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
 			}
 			prevFile = traceFile
-			return vm.NewJSONLogger(logConfig, traceFile), nil
+			return logger.NewJSONLogger(logConfig, traceFile), nil
 		}
 	} else {
 		getTracer = func(txIndex int, txHash common.Hash) (tracer vm.EVMLogger, err error) {

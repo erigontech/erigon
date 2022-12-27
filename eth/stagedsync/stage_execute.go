@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -152,7 +153,7 @@ func executeBlock(
 	}
 
 	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
-		return vm.NewStructLogger(&vm.LogConfig{}), nil
+		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
 	callTracer := calltracer.NewCallTracer()

@@ -83,6 +83,11 @@ func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.A
 		t.Results = append(t.Results, &TraceEntry{"CREATE2", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
 		return
 	}
+
+	if typ == vm.SELFDESTRUCT {
+		last := t.Results[len(t.Results)-1]
+		t.Results = append(t.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
+	}
 }
 
 func (t *TransactionTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
@@ -97,9 +102,4 @@ func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to 
 
 func (t *TransactionTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	t.depth--
-}
-
-func (l *TransactionTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	last := l.Results[len(l.Results)-1]
-	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
 }

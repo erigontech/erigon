@@ -224,25 +224,28 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 				return nil, err
 			}
 		}
+		var responseChunk cltypes.ObjectSSZ
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockPhase0{})
+			responseChunk = &cltypes.SignedBeaconBlockPhase0{}
 		case utils.Bytes4ToUint32(altairForkDigest):
-			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockAltair{})
+			responseChunk = &cltypes.SignedBeaconBlockAltair{}
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			responsePacket = append(responsePacket, &cltypes.SignedBeaconBlockBellatrix{})
+			responseChunk = &cltypes.SignedBeaconBlockBellatrix{}
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}
 
-		if err := responsePacket[i].UnmarshalSSZ(raw); err != nil {
+		if err := responseChunk.UnmarshalSSZ(raw); err != nil {
 			return nil, fmt.Errorf("unmarshalling: %w", err)
 		}
 
+		responsePacket = append(responsePacket, cltypes.NewSignedBeaconBlock(responseChunk))
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
+
 	return responsePacket, nil
 }
 

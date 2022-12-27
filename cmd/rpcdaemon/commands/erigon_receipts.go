@@ -143,10 +143,18 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, common2.EncodeTs(blockNumber), func(k, v []byte) error {
+		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return erigonLogs, err
+			}
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+				return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
 			for _, log := range logs {
 				log.Index = logIndex
@@ -154,18 +162,13 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			}
 			filtered := logs.Filter(addrMap, crit.Topics)
 			if len(filtered) == 0 {
-				return nil
+				continue
 			}
 			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for _, log := range filtered {
 				log.TxIndex = txIndex
 			}
 			blockLogs = append(blockLogs, filtered...)
-
-			return nil
-		})
-		if err != nil {
-			return erigonLogs, err
 		}
 		if len(blockLogs) == 0 {
 			continue
@@ -304,10 +307,18 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, common2.EncodeTs(blockNumber), func(k, v []byte) error {
+		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return erigonLogs, err
+			}
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+				return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
 			for _, log := range logs {
 				log.Index = logIndex
@@ -320,7 +331,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				filtered = logs.Filter(addrMap, crit.Topics)
 			}
 			if len(filtered) == 0 {
-				return nil
+				continue
 			}
 			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for i := range filtered {
@@ -332,12 +343,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			}
 			blockCount++
 			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-				return nil
+				continue
 			}
-			return nil
-		})
-		if err != nil {
-			return erigonLogs, err
 		}
 		if len(blockLogs) == 0 {
 			continue
