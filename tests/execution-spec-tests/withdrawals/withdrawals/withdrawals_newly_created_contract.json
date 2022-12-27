@@ -1,8 +1,8 @@
 {
     "000_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-955c423d",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-955c423d"
+            "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
         },
         "blocks": [
             {
@@ -78,8 +78,8 @@
     },
     "001_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-955c423d",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-955c423d"
+            "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
         },
         "blocks": [
             {
