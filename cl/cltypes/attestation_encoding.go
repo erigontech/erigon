@@ -8,6 +8,11 @@ import (
 
 const maxAttestationSize = 2276
 
+var commonAggregationBytes = map[byte]struct{}{
+	0x00: struct{}{},
+	0xff: struct{}{},
+}
+
 func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 	if len(attestations) == 0 {
 		return nil
@@ -110,7 +115,9 @@ func EncodeAttestationDataForStorage(data *AttestationData, defaultData *Attesta
 	var ret []byte
 	// Encode in slot
 	if defaultData == nil || data.Slot != defaultData.Slot {
-		ret = append(ret, encodeNumber(data.Slot)...)
+		slotBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(slotBytes, uint32(data.Slot))
+		ret = append(ret, slotBytes...)
 	} else {
 		fieldSet = 1
 	}
@@ -161,8 +168,8 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 	if fieldSet&1 > 0 {
 		data.Slot = defaultData.Slot
 	} else {
-		data.Slot = decodeNumber(buf[n:])
-		n += 3
+		data.Slot = uint64(binary.BigEndian.Uint32(buf[n:]))
+		n += 4
 	}
 
 	if fieldSet&2 > 0 {
@@ -203,25 +210,46 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 }
 
 func encodeAggregationBits(bits []byte) (encoded []byte) {
-	// Encoding of aggregation bits: save first byte and prefix repetition
-	encoded = append(encoded, byte(len(bits)), bits[0])
-	rep := byte(0)
-	for int(rep) < len(bits) && bits[rep] == bits[0] {
-		rep++
+	i := 0
+	encoded = append(encoded, byte(len(bits)))
+	for i < len(bits) {
+		_, isCommon := commonAggregationBytes[bits[i]]
+		if isCommon {
+			importantByte := bits[i]
+			encoded = append(encoded, importantByte)
+			count := 0
+			for i < len(bits) && bits[i] == importantByte {
+				count++
+				i++
+			}
+			encoded = append(encoded, byte(count))
+			continue
+		}
+		encoded = append(encoded, bits[i])
+		i++
 	}
-	encoded = append(encoded, rep)
-	encoded = append(encoded, bits[rep:]...)
 	return
 }
 
-func rebuildAggregationBits(buf []byte) (int, []byte) {
-	bitsLen := int(buf[0])
-	firstByte := buf[1]
-	rep := int(buf[2])
-	ret := make([]byte, bitsLen)
-	for i := 0; i < rep; i++ {
-		ret[i] = firstByte
+func rebuildAggregationBits(buf []byte) (n int, ret []byte) {
+	i := 0
+	bitsLength := int(buf[0])
+	n = 1
+	for i < bitsLength {
+		currByte := buf[n]
+		_, isCommon := commonAggregationBytes[currByte]
+		n++
+		if isCommon {
+			count := int(buf[n])
+			n++
+			for j := 0; j < count; j++ {
+				ret = append(ret, currByte)
+				i++
+			}
+			continue
+		}
+		ret = append(ret, currByte)
+		i++
 	}
-	copy(ret[rep:], buf[3:])
-	return 3 + (bitsLen - rep), ret
+	return
 }
