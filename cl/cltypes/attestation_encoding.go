@@ -3,7 +3,6 @@ package cltypes
 import (
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -23,14 +22,7 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 	for _, attestation := range attestations {
 		// Encode attestation metadata
 		// Also we need to keep track of aggregation bits size manually.
-		// Encoding of aggregation bits: save first byte and prefix repetition
-		encoded = append(encoded, byte(len(attestation.AggregationBits)), attestation.AggregationBits[0])
-		rep := byte(0)
-		for int(rep) < len(attestation.AggregationBits) && attestation.AggregationBits[rep] == attestation.AggregationBits[0] {
-			rep++
-		}
-		encoded = append(encoded, rep)
-		encoded = append(encoded, attestation.AggregationBits[rep:]...)
+		encoded = append(encoded, encodeAggregationBits(attestation.AggregationBits)...)
 		// Encode signature
 		encoded = append(encoded, attestation.Signature[:]...)
 		// Encode attestation body
@@ -58,18 +50,12 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 		// Encode attester index
 		encoded = append(encoded, encodeNumber(attestation.Data.Index)...)
 	}
-	return utils.CompressSnappy(encoded)
+	return encoded
 }
 
 func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 	if len(buf) == 0 {
 		return nil, nil
-	}
-
-	var err error
-	buf, err = utils.DecompressSnappy(buf)
-	if err != nil {
-		return nil, err
 	}
 
 	referencedAttestations := []*AttestationData{
@@ -213,6 +199,18 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 		data.Target.Root = common.BytesToHash(buf[n : n+32])
 		n += 32
 	}
+	return
+}
+
+func encodeAggregationBits(bits []byte) (encoded []byte) {
+	// Encoding of aggregation bits: save first byte and prefix repetition
+	encoded = append(encoded, byte(len(bits)), bits[0])
+	rep := byte(0)
+	for int(rep) < len(bits) && bits[rep] == bits[0] {
+		rep++
+	}
+	encoded = append(encoded, rep)
+	encoded = append(encoded, bits[rep:]...)
 	return
 }
 
