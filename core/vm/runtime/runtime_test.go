@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -507,7 +508,7 @@ func TestEip2929Cases(t *testing.T) {
 		Execute(code, nil, &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
-				Tracer:    vm.NewMarkdownLogger(nil, os.Stdout),
+				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
 				ExtraEips: []int{2929},
 			},
 		}, 0)

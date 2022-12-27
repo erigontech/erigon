@@ -33,14 +33,3 @@ func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 
 func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
-
-func (t *DefaultTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (t *DefaultTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *DefaultTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}

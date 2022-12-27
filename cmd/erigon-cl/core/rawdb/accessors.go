@@ -6,7 +6,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -146,11 +145,7 @@ func LengthFromBytes2(buf []byte) int {
 }
 
 func WriteAttestations(tx kv.RwTx, slot uint64, attestations []*cltypes.Attestation) error {
-	attestationsEncoded, err := EncodeAttestationsForStorage(attestations)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.Attestetations, EncodeNumber(slot), attestationsEncoded)
+	return tx.Put(kv.Attestetations, EncodeNumber(slot), cltypes.EncodeAttestationsForStorage(attestations))
 }
 
 func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
@@ -158,10 +153,10 @@ func ReadAttestations(tx kv.RwTx, slot uint64) ([]*cltypes.Attestation, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DecodeAttestationForStorage(attestationsEncoded)
+	return cltypes.DecodeAttestationsForStorage(attestationsEncoded)
 }
 
-func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatrix) error {
+func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error {
 	var (
 		block     = signedBlock.Block
 		blockBody = block.Body
@@ -170,11 +165,10 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 
 	// database key is is [slot + body root]
 	key := EncodeNumber(block.Slot)
-	value, err := EncodeBeaconBlockForStorage(signedBlock)
+	value, err := signedBlock.EncodeForStorage()
 	if err != nil {
 		return err
 	}
-
 	/*if err := WriteExecutionPayload(tx, payload); err != nil {
 		return err
 	}*/
@@ -186,18 +180,24 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlockBellatri
 	return tx.Put(kv.BeaconBlocks, key, value)
 }
 
-func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlockBellatrix, error) {
+func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
 	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
 	if err != nil {
 		return nil, err
 	}
-	signedBlock, _, _, err := DecodeBeaconBlockForStorage(encodedBeaconBlock)
+	if len(encodedBeaconBlock) == 0 {
+		return nil, nil
+	}
+	signedBlock, _, _, err := cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println("A")
 
-	signedBlock.Block.Body.Attestations, err = ReadAttestations(tx, slot)
+	attestations, err := ReadAttestations(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	signedBlock.Block.Body.Attestations = attestations
 	return signedBlock, err
 	/*
 		// Process payload
@@ -293,82 +293,4 @@ func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error 
 	})
 
 	return err
-}
-
-func EncodeBeaconBlockForStorage(block *cltypes.SignedBeaconBlockBellatrix) ([]byte, error) {
-	out, err := (&cltypes.BeaconBlockForStorage{
-		Signature:         block.Signature,
-		Slot:              block.Block.Slot,
-		ProposerIndex:     block.Block.ProposerIndex,
-		ParentRoot:        block.Block.ParentRoot,
-		StateRoot:         block.Block.StateRoot,
-		RandaoReveal:      block.Block.Body.RandaoReveal,
-		Eth1Data:          block.Block.Body.Eth1Data,
-		Graffiti:          block.Block.Body.Graffiti,
-		ProposerSlashings: block.Block.Body.ProposerSlashings,
-		AttesterSlashings: block.Block.Body.AttesterSlashings,
-		Deposits:          block.Block.Body.Deposits,
-		VoluntaryExits:    block.Block.Body.VoluntaryExits,
-		SyncAggregate:     block.Block.Body.SyncAggregate,
-		Eth1Number:        block.Block.Body.ExecutionPayload.BlockNumber,
-		Eth1BlockHash:     block.Block.Body.ExecutionPayload.BlockHash,
-		Version:           uint8(clparams.BellatrixVersion),
-	}).MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return utils.CompressSnappy(out), nil
-}
-
-func DecodeBeaconBlockForStorage(data []byte) (*cltypes.SignedBeaconBlockBellatrix, uint64, common.Hash, error) {
-	tmpStorageBlock := &cltypes.BeaconBlockForStorage{}
-	data, err := utils.DecompressSnappy(data)
-	if err != nil {
-		return nil, 0, common.Hash{}, err
-	}
-
-	if err := tmpStorageBlock.UnmarshalSSZ(data); err != nil {
-		return nil, 0, common.Hash{}, err
-	}
-	return &cltypes.SignedBeaconBlockBellatrix{
-		Signature: tmpStorageBlock.Signature,
-		Block: &cltypes.BeaconBlockBellatrix{
-			Slot:          tmpStorageBlock.Slot,
-			ProposerIndex: tmpStorageBlock.ProposerIndex,
-			StateRoot:     tmpStorageBlock.StateRoot,
-			ParentRoot:    tmpStorageBlock.ParentRoot,
-			Body: &cltypes.BeaconBodyBellatrix{
-				RandaoReveal:      tmpStorageBlock.RandaoReveal,
-				Eth1Data:          tmpStorageBlock.Eth1Data,
-				Graffiti:          tmpStorageBlock.Graffiti,
-				ProposerSlashings: tmpStorageBlock.ProposerSlashings,
-				AttesterSlashings: tmpStorageBlock.AttesterSlashings,
-				Deposits:          tmpStorageBlock.Deposits,
-				VoluntaryExits:    tmpStorageBlock.VoluntaryExits,
-				SyncAggregate:     tmpStorageBlock.SyncAggregate,
-			},
-		},
-	}, tmpStorageBlock.Eth1Number, tmpStorageBlock.Eth1BlockHash, nil
-}
-
-func EncodeAttestationsForStorage(attestantions []*cltypes.Attestation) ([]byte, error) {
-	out, err := (&cltypes.AttestationsForStorage{
-		Attestations: attestantions,
-	}).MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return utils.CompressSnappy(out), nil
-}
-
-func DecodeAttestationForStorage(data []byte) ([]*cltypes.Attestation, error) {
-	tmpStorageAtt := &cltypes.AttestationsForStorage{}
-	data, err := utils.DecompressSnappy(data)
-	if err != nil {
-		return nil, err
-	}
-	if err := tmpStorageAtt.UnmarshalSSZ(data); err != nil {
-		return nil, err
-	}
-	return tmpStorageAtt.Attestations, nil
 }

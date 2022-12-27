@@ -67,17 +67,6 @@ func (*noopTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (*noopTracer) CaptureTxEnd(restGas uint64) {}
 
-func (*noopTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (*noopTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (*noopTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
 // GetResult returns an empty json object.
 func (t *noopTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage(`{}`), nil

@@ -111,17 +111,6 @@ func (t *fourByteTracer) CaptureEnter(op vm.OpCode, from common.Address, to comm
 	t.store(input[0:4], len(input)-4)
 }
 
-func (t *fourByteTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (t *fourByteTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *fourByteTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
-
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *fourByteTracer) GetResult() (json.RawMessage, error) {
