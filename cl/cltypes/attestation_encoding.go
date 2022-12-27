@@ -23,9 +23,8 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 	for _, attestation := range attestations {
 		// Encode attestation metadata
 		// Also we need to keep track of aggregation bits size manually.
-		encoded = append(encoded, byte(len(attestation.AggregationBits)))
 		// Encoding of aggregation bits: save first byte and prefix repetition
-		encoded = append(encoded, attestation.AggregationBits[0])
+		encoded = append(encoded, byte(len(attestation.AggregationBits)), attestation.AggregationBits[0])
 		rep := byte(0)
 		for int(rep) < len(attestation.AggregationBits) && attestation.AggregationBits[rep] == attestation.AggregationBits[0] {
 			rep++
@@ -59,8 +58,7 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 		// Encode attester index
 		encoded = append(encoded, encodeNumber(attestation.Data.Index)...)
 	}
-
-	return utils.CompressZstd(encoded)
+	return utils.CompressSnappy(encoded)
 }
 
 func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
@@ -69,7 +67,7 @@ func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
 	}
 
 	var err error
-	buf, err = utils.DecompressZstd(buf)
+	buf, err = utils.DecompressSnappy(buf)
 	if err != nil {
 		return nil, err
 	}
