@@ -342,7 +342,7 @@ func (p *Parlia) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	// Don't waste time checking blocks from the future
 	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+		return fmt.Errorf("header %d, time %d, now %d, %w", header.Number.Uint64(), header.Time, time.Now().Unix(), consensus.ErrFutureBlock)
 	}
 	// Check that the extra-data contains the vanity, validators and signature.
 	if len(header.Extra) < extraVanity {
@@ -549,7 +549,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					// new snapshot
 					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
 					if verify && snap.Number%checkpointInterval == 0 {
-						log.Warn("save", "num", snap.Number, "len(headers)", len(headers))
+						log.Warn("save2", "num", snap.Number, "len(headers)", len(headers))
 						if err = snap.store(p.db); err != nil {
 							return nil, err
 						}
