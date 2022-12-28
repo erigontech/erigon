@@ -548,13 +548,6 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					}
 					// new snapshot
 					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-					if verify && snap.Number%checkpointInterval == 0 {
-						log.Warn("save2", "num", snap.Number, "len(headers)", len(headers))
-						if err = snap.store(p.db); err != nil {
-							return nil, err
-						}
-						//log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
-					}
 					break
 				}
 			}
@@ -599,9 +592,12 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if verify && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		if err = snap.store(p.db); err != nil {
-			return nil, err
+	if verify && snap.Number%checkpointInterval == 0 {
+		fromHeadersSnapshots := (p.snapshots != nil && number <= p.snapshots.BlocksAvailable())
+		if len(headers) > 0 || fromHeadersSnapshots {
+			if err = snap.store(p.db); err != nil {
+				return nil, err
+			}
 		}
 		//log.Trace("Stored snapshot to disk", "number", snap.Number, "hash", snap.Hash)
 	}
