@@ -306,6 +306,7 @@ Loop:
 			log.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
+		// TODO(yperbasis): withdrawals
 
 		reqMap := make(map[uint64]*BodyRequest)
 		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
@@ -391,20 +392,7 @@ func (bd *BodyDownload) PrintPeerMap() {
 }
 
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
-	if hash := types.CalcUncleHash(block.Uncles()); hash != block.UncleHash() {
-		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", block.UncleHash())
-		return
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != block.TxHash() {
-		log.Warn("Propagated block has invalid body", "have", hash, "exp", block.TxHash())
-		return
-	}
 	bd.prefetchedBlocks.Add(block)
-}
-
-func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
-	bd.AddToPrefetch(block)
-	return nil
 }
 
 // GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies

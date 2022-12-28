@@ -173,16 +173,27 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 			j := j
 			g.Go(func() error {
 				return db.View(ctx, func(tx kv.Tx) error {
-					return tx.ForPrefix(bucket, []byte{byte(i), byte(j)}, func(k, v []byte) error {
+					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, v, err := it.Next()
+						if len(v) > 0 {
+							_ = v[len(v)-1]
+						}
 						progress.Inc()
+						if err != nil {
+							return err
+						}
 
 						select {
 						case <-logEvery.C:
 							log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
 						default:
 						}
-						return nil
-					})
+					}
+					return nil
 				})
 			})
 		}
@@ -432,6 +443,8 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	var total uint64
 	for name, b := range src.AllBuckets() {
@@ -439,7 +452,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			continue
 		}
 
-		rawdbreset.WarmupTable(ctx, src, name)
+		rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
 		_ = dstTx.ClearBucket(name)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
@@ -473,8 +486,9 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-commitEvery.C:
+			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k))
+			case <-commitEvery.C:
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}

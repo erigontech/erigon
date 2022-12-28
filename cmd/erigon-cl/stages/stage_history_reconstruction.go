@@ -73,10 +73,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		slot := blk.Block.Slot
 		// Collect attestations
-		encodedAttestations, err := rawdb.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
-		if err != nil {
-			return false, err
-		}
+		encodedAttestations := cltypes.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
 		if err := attestationsCollector.Collect(rawdb.EncodeNumber(slot), encodedAttestations); err != nil {
 			return false, err
 		}
