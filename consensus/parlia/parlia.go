@@ -548,6 +548,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					}
 					// new snapshot
 					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+					if err := snap.store(p.db); err != nil {
+						return nil, err
+					}
 					fmt.Printf("parlia break: %d\n", number)
 					break
 				}
