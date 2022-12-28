@@ -19,7 +19,6 @@ package parlia
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,6 +26,7 @@ import (
 	"math/big"
 	"sort"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -82,18 +82,9 @@ func (s validatorsAscending) Len() int           { return len(s) }
 func (s validatorsAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
 func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-const NumberLength = 8
-
-// EncodeBlockNumber encodes a block number as big endian uint64
-func EncodeBlockNumber(number uint64) []byte {
-	enc := make([]byte, NumberLength)
-	binary.BigEndian.PutUint64(enc, number)
-	return enc
-}
-
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
 func SnapshotFullKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+	return append(common2.EncodeTs(number), hash.Bytes()...)
 }
 
 var ErrNoSnapsnot = fmt.Errorf("no parlia snapshot")
