@@ -229,7 +229,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 
-				if engine != nil { // consensus may have own database, let's fill it
+				if engine != nil {
+					// consensus may have own database, let's fill it
+					// different consensuses may have some conditions for validators snapshots
 					need := (blockNum-1)%100*1000 == 0 || (blockNum+1)%100*1000 == 0 ||
 						(blockNum)%(100*1024) == 0 || (blockNum+1)%(100*1024) == 0
 					if need {
