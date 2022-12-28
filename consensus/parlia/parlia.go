@@ -535,25 +535,22 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				}
 			}
 		}
-		if (verify && number%p.config.Epoch == 0) || number == 0 {
-			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
-				// Headers included into the snapshots have to be trusted as checkpoints
-				checkpoint := chain.GetHeader(hash, number)
-				if checkpoint != nil {
-					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
-					// get validators from headers
-					validators, err := ParseValidators(validatorBytes)
-					if err != nil {
-						return nil, err
-					}
-					// new snapshot
-					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-					if err := snap.store(p.db); err != nil {
-						return nil, err
-					}
-					fmt.Printf("parlia break: %d\n", number)
-					break
+		if number == 0 {
+			// Headers included into the snapshots have to be trusted as checkpoints
+			checkpoint := chain.GetHeader(hash, number)
+			if checkpoint != nil {
+				validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
+				// get validators from headers
+				validators, err := ParseValidators(validatorBytes)
+				if err != nil {
+					return nil, err
 				}
+				// new snapshot
+				snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+				if err := snap.store(p.db); err != nil {
+					return nil, err
+				}
+				break
 			}
 		}
 
