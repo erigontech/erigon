@@ -517,6 +517,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		defer p.snapLock.Unlock()
 		doLog = true
 	}
+	log.Warn("parlia load 1", "is nil", snap == nil)
 
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
@@ -524,6 +525,8 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			snap = s.(*Snapshot)
 			break
 		}
+
+		log.Warn("parlia load 2", "number", number, "checkpointInterval", checkpointInterval)
 
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
@@ -533,6 +536,8 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				if !verify || snap != nil {
 					break
 				}
+			} else {
+				log.Warn("parlia load sn", "err", err)
 			}
 		}
 		if (verify && number%p.config.Epoch == 0) || number == 0 {

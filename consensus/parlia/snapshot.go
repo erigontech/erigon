@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 
@@ -102,12 +103,16 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 		return nil, err
 	}
 	defer tx.Rollback()
+	log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
+
 	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
+		panic(err)
 		return nil, err
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
+		panic(err)
 		return nil, err
 	}
 	snap.config = config
@@ -122,6 +127,7 @@ func (s *Snapshot) store(db kv.RwDB) error {
 		return err
 	}
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
+		log.Warn("parlia save", "num", s.Number, "h", s.Hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(s.Number, s.Hash)))
 		return tx.Put(kv.ParliaSnapshot, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
