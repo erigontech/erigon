@@ -1,8 +1,10 @@
 package ethconsensusconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"fmt"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -57,6 +59,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			}
 		}
 	case *params.ParliaConfig:
+		fmt.Printf("parlia dbs: %d\n", len(chainDb))
 		if chainConfig.Parlia != nil {
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
