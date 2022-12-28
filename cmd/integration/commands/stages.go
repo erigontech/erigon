@@ -1168,7 +1168,6 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
-	logger := log.New()
 	dirs, historyV3, pm := datadir.New(datadirCli), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
@@ -1202,7 +1201,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	allSn, agg := allSnapshots(db)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine := initConsensusEngine(chainConfig, logger, allSn, cfg.Dirs.DataDir, db)
+	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
 
 	br := getBlockReader(db)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -1283,25 +1282,27 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots, datadir string, db kv.RwDB) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
+	logger := log.New()
+	snapshots, _ := allSnapshots(db)
 	config := ethconfig.Defaults
 
 	switch {
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
 	case chainConfig.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
 	case chainConfig.Parlia != nil:
 		// Apply special hacks for BSC params
 		params.ApplyBinanceSmartChainParams()
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, true /* readonly */, db)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, db.ReadOnly(), db)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}
