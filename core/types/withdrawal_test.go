@@ -18,5 +18,7 @@ func TestWithdrawalsHash(t *testing.T) {
 	}
 	withdrawals := Withdrawals([]*Withdrawal{w})
 	hash := DeriveSha(withdrawals)
+	// The only trie node is short (its RLP < 32 bytes).
+	// Its Keccak should be returned, not the node itself.
 	assert.Equal(t, common.HexToHash("82cc6fbe74c41496b382fcdf25216c5af7bdbb5a3929e8f2e61bd6445ab66436"), hash)
 }

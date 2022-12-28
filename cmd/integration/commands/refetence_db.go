@@ -443,6 +443,8 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	var total uint64
 	for name, b := range src.AllBuckets() {
@@ -450,7 +452,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			continue
 		}
 
-		rawdbreset.WarmupTable(ctx, src, name)
+		rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
 		_ = dstTx.ClearBucket(name)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
@@ -484,8 +486,9 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-commitEvery.C:
+			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k))
+			case <-commitEvery.C:
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}
