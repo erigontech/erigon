@@ -598,12 +598,29 @@ func (hb *HashBuilder) RootHash() (common.Hash, error) {
 
 func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
-	copy(hash[:], hb.topHash())
+	top := hb.topHash()
+	if len(top) == 33 {
+		copy(hash[:], top[1:])
+	} else {
+		hb.sha.Reset()
+		if _, err := hb.sha.Write(top); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Read(hash[:]); err != nil {
+			panic(err)
+		}
+	}
 	return hash
 }
 
 func (hb *HashBuilder) topHash() []byte {
-	return hb.hashStack[len(hb.hashStack)-hashStackStride+1:]
+	pos := len(hb.hashStack) - hashStackStride
+	len := hb.hashStack[pos] - 0x80
+	if len > 32 {
+		// node itself (RLP list), not its hash
+		len = hb.hashStack[pos] - 0xc0
+	}
+	return hb.hashStack[pos : pos+1+int(len)]
 }
 
 func (hb *HashBuilder) printTopHashes(prefix []byte, _, children uint16) {
