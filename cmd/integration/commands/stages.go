@@ -473,6 +473,9 @@ func stageSnapshots(db kv.RwDB, ctx context.Context) error {
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
 	sn, _ := allSnapshots(db)
 	br := getBlockReader(db)
+	engine, _, _, _, _ := newSync(ctx, db, nil)
+	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
 			log.Info("This command only works with --unwind or --reset options")
@@ -480,7 +483,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, br, dirs.Tmp); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
 			return nil

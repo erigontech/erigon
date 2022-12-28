@@ -246,9 +246,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			header, err := blockReader.HeaderByNumber(ctx, tx, blocksAvailable)
-			if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
-				return err
+			if engine != nil {
+				header, err := blockReader.HeaderByNumber(ctx, tx, blocksAvailable)
+				if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
+					return err
+				}
 			}
 
 		case stages.Bodies:
