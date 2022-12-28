@@ -161,7 +161,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "000_merged": {
+    "000_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -210,7 +210,7 @@
             "hash": "0xe3c84688fa32c20955c535c7d25b5b4b196079e40a9c47c9cb1edb5e58b3dce5"
         },
         "lastblockhash": "0x2a6b6c017a4478f35c9e4498d2cf7df2bd37c6c13ce5e56fba2dd4109d5a418c",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0x1000000000000000000000000000000000000000": {
                 "nonce": "0x0",

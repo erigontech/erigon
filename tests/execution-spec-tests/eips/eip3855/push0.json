@@ -1,5 +1,5 @@
 {
-    "000_push0_key_sstore_shanghai+3855": {
+    "000_push0_key_sstore_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -50,7 +50,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0xe8b1d3fc71e0e25b76f9778f78afc6320ec648ccf70965690901a5313e8418f1",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -83,7 +83,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "001_push0_fill_stack_shanghai+3855": {
+    "001_push0_fill_stack_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -134,7 +134,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x629b7b872becccdaf9dca9f20e5666128b3fd1062a3650c94dea9d03f7ab3665",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -167,7 +167,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "002_push0_stack_overflow_shanghai+3855": {
+    "002_push0_stack_overflow_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -218,7 +218,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x10d21977aacb5b6bb9eefdfa38ab1814b7852dc330c8dfaf1b35cb7343150d82",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -248,7 +248,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "003_push0_storage_overwrite_shanghai+3855": {
+    "003_push0_storage_overwrite_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -299,7 +299,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x006150d1f0bf1e7ecf03c82b54ac613623e51b73abf5687bef348433e7abb936",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -335,7 +335,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "004_push0_during_staticcall_shanghai+3855": {
+    "004_push0_during_staticcall_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -386,7 +386,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x5517f2a44029bddaa6dea10cd3cb56735a9908a3a413c63a71d58ab10d33e128",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -430,7 +430,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "005_push0_before_jumpdest_shanghai+3855": {
+    "005_push0_before_jumpdest_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -481,7 +481,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x359d0d8b42ef6586c3a2ed7e28a512f64af70026a45d6aa1f22927f84c561147",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -514,7 +514,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "006_push0_gas_cost_shanghai+3855": {
+    "006_push0_gas_cost_shanghai": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -565,7 +565,7 @@
             "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"
         },
         "lastblockhash": "0x9ef4d8433b18acb473560bb30203a11cc84e24dabd569096b0a21f7283b0e01b",
-        "network": "Shanghai+3855",
+        "network": "Shanghai",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",

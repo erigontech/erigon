@@ -1,5 +1,5 @@
 {
-    "000_warm_coinbase_opcode_extcodesize_merged": {
+    "000_warm_coinbase_opcode_extcodesize_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -48,7 +48,7 @@
             "hash": "0x83127ea5c50f228409080fec9f7a3a673011f3bbd7a62596a360774b3cc6e1c8"
         },
         "lastblockhash": "0xf68b01a03380e9e96069a11506cdceac2f56e7aac94a9a22e17246e9b77bab8e",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -81,7 +81,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "001_warm_coinbase_opcode_extcodecopy_merged": {
+    "001_warm_coinbase_opcode_extcodecopy_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -130,7 +130,7 @@
             "hash": "0xf3da6e7c3bd61be2f9742cdc80347faba13d0994f1fdf3ee6c339b02a482ee74"
         },
         "lastblockhash": "0xa4961b5451ac3bcd81060720b41eeaf187d5ae542698c201b04e732b99ec01be",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -163,7 +163,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "002_warm_coinbase_opcode_extcodehash_merged": {
+    "002_warm_coinbase_opcode_extcodehash_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -212,7 +212,7 @@
             "hash": "0x72428c9915f51699b4cf27a597ad8a1a4e2f9d9ec53da73b53ecb6849bc74960"
         },
         "lastblockhash": "0xddeed38be3f9cc27298355ec9626d6b1b36bf1a64afc159d4f9e9352b2f68d0d",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -245,7 +245,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "003_warm_coinbase_opcode_balance_merged": {
+    "003_warm_coinbase_opcode_balance_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -294,7 +294,7 @@
             "hash": "0x4924ec7cf8d71c374dd007615831b3cfb4fbba0aefea52f16f1f2eb5ed55c6df"
         },
         "lastblockhash": "0x696556dfa9607846658e359185012f32520ceb1a63ffd78fe0793b24f5b176dc",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -327,7 +327,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "004_warm_coinbase_opcode_call_merged": {
+    "004_warm_coinbase_opcode_call_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -376,7 +376,7 @@
             "hash": "0xfda985df625db6fadf22c443c51cdc3d8418f9bf881f9e66b838e97b883a49b3"
         },
         "lastblockhash": "0xf4b7e00b13a1587fd463582e7f1093bd301461779220209b201ed506e3cc0a48",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -409,7 +409,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "005_warm_coinbase_opcode_callcode_merged": {
+    "005_warm_coinbase_opcode_callcode_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -458,7 +458,7 @@
             "hash": "0xba3503a082b78113bc1c7761547e887ec8c4b90d58fb0ff8531fd420fda67cbf"
         },
         "lastblockhash": "0x07e4776fb48b5716897fb4012821c2b16cd672a1dfbccc3bfa4e029a26903158",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -491,7 +491,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "006_warm_coinbase_opcode_delegatecall_merged": {
+    "006_warm_coinbase_opcode_delegatecall_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -540,7 +540,7 @@
             "hash": "0x47a68bd910fb35fe3995ad861b56afa930e45bb529d0f824e95cad7d28c9358f"
         },
         "lastblockhash": "0x00b8fee7bbd33e5981f7a72774657401fddb9eca4859a8af64bc727e1c0f8aa4",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
@@ -573,7 +573,7 @@
         },
         "sealEngine": "NoProof"
     },
-    "007_warm_coinbase_opcode_staticcall_merged": {
+    "007_warm_coinbase_opcode_staticcall_merge": {
         "_info": {
             "filling-transition-tool": "evm version 1.11.0-unstable-f7ab681b-20221221",
             "filling-block-build-tool": "evm version 1.11.0-unstable-f7ab681b-20221221"
@@ -622,7 +622,7 @@
             "hash": "0xf5ea1b1336479d30e9cf673240cbd094a855422e10f0a60cf551a377a7be566e"
         },
         "lastblockhash": "0x749634ee8aec9de658d8f2acdd680fa0c4138905158abc4a9550eacd7340a50f",
-        "network": "Merged",
+        "network": "Merge",
         "pre": {
             "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b": {
                 "nonce": "0x0",
