@@ -418,12 +418,22 @@ const (
 	PlainContractR = "PlainContractR" // temporary table for PlainContract reconstitution
 	PlainContractD = "PlainContractD" // temporary table for PlainContract reconstitution, deletes
 
-	// Erigon-CL
+	// Erigon-CL Objects
+
+	// [slot] => [Beacon state]
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
 	// [slot] => [attestation list (ssz)]
 	Attestetations = "Attestetations"
+
+	// Erigon-CL indexing
+
+	// [Slot] => [Root (block root/state root/eth1 root)]
+	SlotRootIndex = "SlotRootIndex"
+	// [Root (block root/state root/eth1 root)] => Slot
+	RootSlotIndex = "RootSlotIndex"
+
 	// LightClientStore => LightClientStore object
 	// LightClientFinalityUpdate => latest finality update
 	// LightClientOptimisticUpdate => latest optimistic update
@@ -575,6 +585,8 @@ var ChaindataTables = []string{
 	// Beacon stuff
 	BeaconState,
 	BeaconBlocks,
+	SlotRootIndex,
+	RootSlotIndex,
 	Attestetations,
 	LightClient,
 	LightClientUpdates,
