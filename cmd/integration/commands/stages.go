@@ -1285,27 +1285,27 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
+func initConsensusEngine(cc *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
 	l := log.New()
 	snapshots, _ := allSnapshots(db)
 	config := ethconfig.Defaults
 
 	switch {
-	case chainConfig.Clique != nil:
+	case cc.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case chainConfig.Aura != nil:
+		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
+	case cc.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case chainConfig.Parlia != nil:
+		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
+	case cc.Parlia != nil:
 		// Apply special hacks for BSC params
 		params.ApplyBinanceSmartChainParams()
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case chainConfig.Bor != nil:
+		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
+	case cc.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, db.ReadOnly(), db)
+		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, db.ReadOnly(), db)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}
