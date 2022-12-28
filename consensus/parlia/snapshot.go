@@ -27,7 +27,6 @@ import (
 	"math/big"
 	"sort"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -111,22 +110,10 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	}
 
 	if len(blob) == 0 {
-		fmt.Printf("search: %d, %x\n", num, hash.Bytes())
-		c, _ := tx.Cursor(kv.ParliaSnapshot)
-		k, _, _ := c.Seek(common2.EncodeTs(num))
-		if len(k) > 0 {
-			fmt.Printf("next: %d, %x\n", binary.BigEndian.Uint64(k), k[8:])
-		}
-		k, _, _ = c.Prev()
-		if len(k) > 0 {
-			fmt.Printf("prev: %d, %x\n", binary.BigEndian.Uint64(k), k[8:])
-		}
 		return nil, fmt.Errorf("empty value in db")
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
-		log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
-		fmt.Printf("json: %s\n", blob)
 		return nil, err
 	}
 	snap.config = config
@@ -141,7 +128,6 @@ func (s *Snapshot) store(db kv.RwDB) error {
 		return err
 	}
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		log.Warn("parlia save", "num", s.Number, "h", s.Hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(s.Number, s.Hash)))
 		return tx.Put(kv.ParliaSnapshot, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
