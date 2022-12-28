@@ -236,7 +236,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					need := false
 					switch engine.(type) {
 					case *parlia.Parlia:
-						need = (blockNum-1)%(100*1024) == 0
+						need = (blockNum-1)%(100*parlia.CheckpointInterval) == 0
 					}
 					if need {
 						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {

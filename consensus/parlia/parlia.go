@@ -47,7 +47,7 @@ const (
 	inMemorySnapshots  = 128  // Number of recent snapshots to keep in memory
 	inMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-	checkpointInterval = 1024        // Number of blocks after which to save the snapshot to the database
+	CheckpointInterval = 1024        // Number of blocks after which to save the snapshot to the database
 	defaultEpochLength = uint64(100) // Default number of blocks of checkpoint to update validatorSet from contract
 
 	extraVanity      = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
@@ -526,7 +526,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 
 		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
+		if number%CheckpointInterval == 0 {
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
@@ -594,7 +594,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if verify && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	if verify && snap.Number%CheckpointInterval == 0 && len(headers) > 0 {
 		if err = snap.store(p.db); err != nil {
 			return nil, err
 		}
