@@ -249,12 +249,14 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 			if engine != nil {
-				header, err := blockReader.HeaderByNumber(ctx, tx, blocksAvailable)
-				if err != nil {
-					return err
-				}
-				if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
-					return err
+				for i := uint64(0); i < blocksAvailable; i += 100_000 {
+					header, err := blockReader.HeaderByNumber(ctx, tx, blocksAvailable)
+					if err != nil {
+						return err
+					}
+					if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
+						return err
+					}
 				}
 			}
 
