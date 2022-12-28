@@ -258,6 +258,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						return err
 					}
 				}
+				for i := uint64(0); i < blocksAvailable; i += 100 * 1024 {
+					header, err := blockReader.HeaderByNumber(ctx, tx, i)
+					if err != nil {
+						return err
+					}
+					if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
+						return err
+					}
+				}
 			}
 
 		case stages.Bodies:
