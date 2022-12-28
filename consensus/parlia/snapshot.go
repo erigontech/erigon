@@ -26,16 +26,14 @@ import (
 	"math/big"
 	"sort"
 
+	lru "github.com/hashicorp/golang-lru"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
-	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Snapshot is the state of the validatorSet at a given point.

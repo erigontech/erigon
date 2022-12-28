@@ -233,7 +233,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if engine != nil {
 					// consensus may have own database, let's fill it
 					// different consensuses may have some conditions for validators snapshots
-					need := true
+					need := false
 					switch engine.(type) {
 					case *parlia.Parlia:
 						need = (blockNum-1)%(100*1024) == 0

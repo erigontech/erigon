@@ -39,7 +39,6 @@ func (p *Parlia) blockTimeVerifyForRamanujanFork(snap *Snapshot, header, parent 
 	if p.chainConfig.IsRamanujan(header.Number.Uint64()) {
 		if header.Time < parent.Time+p.config.Period+backOffTime(snap, header.Coinbase) {
 			return fmt.Errorf("header %d, time %d, now %d, period: %d, backof: %d, %w", header.Number.Uint64(), header.Time, time.Now().Unix(), p.config.Period, backOffTime(snap, header.Coinbase), consensus.ErrFutureBlock)
-			//return consensus.ErrFutureBlock
 		}
 	}
 	return nil
