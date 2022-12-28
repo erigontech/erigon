@@ -211,8 +211,8 @@ var Tables = map[stages.SyncStage][]string{
 	stages.Finish:              {},
 }
 
-func WarmupTable(ctx context.Context, db kv.RoDB, bucket string) {
-	const ThreadsLimit = 1024
+func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
+	const ThreadsLimit = 256
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
 		c, _ := tx.Cursor(bucket)
@@ -243,7 +243,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string) {
 						}
 						select {
 						case <-logEvery.C:
-							log.Info(fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
 						}
 					}
@@ -254,10 +254,10 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string) {
 	}
 	_ = g.Wait()
 }
-func Warmup(ctx context.Context, db kv.RwDB, stList ...stages.SyncStage) error {
+func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {
-			WarmupTable(ctx, db, tbl)
+			WarmupTable(ctx, db, tbl, lvl)
 		}
 	}
 	return nil
@@ -282,7 +282,7 @@ func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		WarmupTable(ctx, db, bucket)
+		WarmupTable(ctx, db, bucket, log.LvlInfo)
 	}()
 	return func() { wg.Wait() }
 }
