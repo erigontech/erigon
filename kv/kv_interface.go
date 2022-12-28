@@ -148,7 +148,7 @@ type Closer interface {
 // RoDB - Read-only version of KV.
 type RoDB interface {
 	Closer
-
+	ReadOnly() bool
 	View(ctx context.Context, f func(tx Tx) error) error
 
 	// BeginRo - creates transaction

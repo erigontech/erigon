@@ -46,6 +46,7 @@ func NewTemporaryMdbx() (kv.RwDB, error) {
 	}, nil
 }
 
+func (t *TemporaryMdbx) ReadOnly() bool { return t.db.ReadOnly() }
 func (t *TemporaryMdbx) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	return t.db.Update(ctx, f)
 }

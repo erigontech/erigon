@@ -144,6 +144,7 @@ func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts {
 	return opts
 }
 
+func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
 func (opts MdbxOpts) Readonly() MdbxOpts {
 	opts.flags = opts.flags | mdbx.Readonly
 	return opts
@@ -389,12 +390,13 @@ type MdbxKV struct {
 }
 
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
+func (db *MdbxKV) ReadOnly() bool   { return db.opts.HasFlag(mdbx.Readonly) }
 
 // openDBIs - first trying to open existing DBI's in RO transaction
 // otherwise re-try by RW transaction
 // it allow open DB from another process - even if main process holding long RW transaction
 func (db *MdbxKV) openDBIs(buckets []string) error {
-	if db.opts.flags&mdbx.Readonly != 0 {
+	if db.ReadOnly() {
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			for _, name := range buckets {
 				if db.buckets[name].IsDeprecated {
@@ -805,7 +807,7 @@ func (tx *MdbxTx) CreateBucket(name string) error {
 
 	var flags = tx.db.buckets[name].Flags
 	var nativeFlags uint
-	if tx.db.opts.flags&mdbx.Readonly == 0 {
+	if !tx.db.ReadOnly() {
 		nativeFlags |= mdbx.Create
 	}
 
