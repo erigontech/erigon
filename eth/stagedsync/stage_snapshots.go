@@ -230,7 +230,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				}
 
 				if engine != nil { // consensus may have own database, let's fill it
-					need := (blockNum)%1_000_000 == 0
+					need := (blockNum)%100_000 == 0
 					//|| (blockNum-1)%1_000_000 == 0 || (blockNum+1)%1_000_000 == 0 ||
 					//(blockNum)%(1000*1024) == 0 || (blockNum-1)%(1000*1024) == 0 || (blockNum+1)%(1000*1024) == 0
 					if need {
