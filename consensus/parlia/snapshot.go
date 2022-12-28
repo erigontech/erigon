@@ -109,6 +109,11 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 		panic(err)
 		return nil, err
 	}
+	if len(blob) == 0 {
+		log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
+		fmt.Printf("json: %s\n", blob)
+		return nil, fmt.Errorf("empty value in db")
+	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
 		log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
