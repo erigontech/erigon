@@ -503,7 +503,6 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 
 // snapshot retrieves the authorization snapshot at a given point in time.
 func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash common.Hash, parents []*types.Header, verify bool) (*Snapshot, error) {
-	log.Warn("snap check", "n", number)
 	// Search for a snapshot in memory or on disk for checkpoints
 	var (
 		headers []*types.Header

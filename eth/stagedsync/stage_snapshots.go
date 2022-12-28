@@ -239,7 +239,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						need = (blockNum-1)%(100*1024) == 0
 					}
 					if need {
-						log.Warn("verify", "h", blockNum)
 						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
 							return err
 						}
