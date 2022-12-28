@@ -181,14 +181,7 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 }
 
 func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
-	if err != nil {
-		return nil, err
-	}
-	if len(encodedBeaconBlock) == 0 {
-		return nil, nil
-	}
-	signedBlock, _, _, err := cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
+	signedBlock, _, _, _, err := ReadBeaconBlockForStorage(tx, slot)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +243,18 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error
 		return signedBeaconBlock, nil*/
 }
 
-// WriteExecutionPayload Writes Execution Payload in EL format
+func ReadBeaconBlockForStorage(tx kv.Getter, slot uint64) (block *cltypes.SignedBeaconBlock, eth1Number uint64, eth1Hash common.Hash, eth2Hash common.Hash, err error) {
+	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
+	if err != nil {
+		return nil, 0, common.Hash{}, common.Hash{}, err
+	}
+	if len(encodedBeaconBlock) == 0 {
+		return nil, 0, common.Hash{}, common.Hash{}, nil
+	}
+	return cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
+}
+
+// WriteExecutionPayload Writes Execution Payload in EL format.. [Will be removed soonish]
 func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error {
 	header := &types.Header{
 		ParentHash:  common.BytesToHash(payload.ParentHash[:]),

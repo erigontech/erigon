@@ -190,9 +190,10 @@ type BeaconBlockForStorage struct {
 	Deposits          []*Deposit             `ssz-max:"16"`
 	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 	SyncAggregate     *SyncAggregate
-	// EL Metadatas
+	// Metadatas
 	Eth1Number    uint64
 	Eth1BlockHash [32]byte `ssz-size:"32"`
+	Eth2BlockRoot [32]byte `ssz-size:"32"`
 	// Version type
 	Version uint8
 }

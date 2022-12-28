@@ -22,19 +22,21 @@ type StageHistoryReconstructionCfg struct {
 	beaconCfg  *clparams.BeaconChainConfig
 	downloader *network.BackwardBeaconDownloader
 	state      *state.BeaconState
+	tmpdir     string
 }
 
-const RecEnabled = true
+const RecEnabled = false
 const DestinationSlot = 0
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, tmpdir string) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		db:         db,
 		genesisCfg: genesisCfg,
 		beaconCfg:  beaconCfg,
 		downloader: downloader,
 		state:      state,
+		tmpdir:     tmpdir,
 	}
 }
 
@@ -60,9 +62,9 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		return err
 	}
 	// ETL collectors for attestations + beacon blocks
-	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer beaconBlocksCollector.Close()
-	attestationsCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	attestationsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer attestationsCollector.Close()
 
 	log.Info("[History Reconstruction Phase] Reconstructing", "from", cfg.state.LatestBlockHeader().Slot, "to", DestinationSlot)

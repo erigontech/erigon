@@ -48,7 +48,6 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, _ *stagedsync.StageState, tx
 		}
 		defer tx.Rollback()
 	}
-	// For now just collect the blocks downloaded in an array
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {
 		return err
