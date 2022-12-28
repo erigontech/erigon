@@ -3,7 +3,6 @@ package parlia
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -518,16 +517,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		defer p.snapLock.Unlock()
 		doLog = true
 	}
-	log.Warn("parlia load 1", "is nil", snap == nil)
 
-	var lastSnInDB uint64
-	p.db.View(context.Background(), func(tx kv.Tx) error {
-		k, _ := kv.LastKey(tx, kv.ParliaSnapshot)
-		if len(k) > 0 {
-			lastSnInDB = binary.BigEndian.Uint64(k)
-		}
-		return nil
-	})
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := p.recentSnaps.Get(hash); ok {
@@ -536,7 +526,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 
 		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 && number <= lastSnInDB {
+		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
