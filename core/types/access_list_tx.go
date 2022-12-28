@@ -576,3 +576,5 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
+
+func (tx *AccessListTx) DataHashes() []common.Hash { return nil }

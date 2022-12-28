@@ -95,4 +95,8 @@ var (
 	// ErrSenderNoEOA is returned if the sender of a transaction is a contract.
 	// See EIP-3607: Reject transactions from senders with deployed code.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
+
+	// ErrInternalFailure is returned when an unexpected internal error condition
+	// prevents execution.
+	ErrInternalFailure = errors.New("internal failure")
 )

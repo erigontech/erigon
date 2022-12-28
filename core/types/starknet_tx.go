@@ -472,3 +472,5 @@ func (tx StarknetTransaction) EncodingSize() int {
 	envelopeSize += 2
 	return envelopeSize
 }
+
+func (tx StarknetTransaction) DataHashes() []common.Hash { return nil }

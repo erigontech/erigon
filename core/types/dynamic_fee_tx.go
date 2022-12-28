@@ -483,3 +483,5 @@ func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address,
 		FeeCap: gasFeeCap,
 	}
 }
+
+func (tx *DynamicFeeTransaction) DataHashes() []common.Hash { return nil }

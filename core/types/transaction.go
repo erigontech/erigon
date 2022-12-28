@@ -90,6 +90,9 @@ type Transaction interface {
 	SetSender(common.Address)
 	IsContractDeploy() bool
 	IsStarkNet() bool
+
+	// eip-4844. DataHashes returns the blob versioned hashes of the transaction.
+	DataHashes() []common.Hash
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete

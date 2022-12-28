@@ -465,3 +465,5 @@ func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
+
+func (tx *LegacyTx) DataHashes() []common.Hash { return nil }

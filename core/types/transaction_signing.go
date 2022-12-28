@@ -44,8 +44,12 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	// case config.IsSharding(blockNumber):
-	// signer.
+	case config.IsSharding(blockNumber):
+		signer.protected = true
+		signer.accesslist = true
+		signer.dynamicfee = true
+		signer.chainID.Set(&chainId)
+		signer.chainIDMul.Mul(&chainId, u256.Num2)
 	case config.IsLondon(blockNumber):
 		// All transaction types are still supported
 		signer.protected = true
@@ -94,6 +98,9 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
+		if config.ShardingForkBlock != nil {
+			// TODO make a research on this
+		}
 		if config.LondonBlock != nil {
 			signer.dynamicfee = true
 		}

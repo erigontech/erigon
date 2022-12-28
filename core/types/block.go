@@ -99,6 +99,9 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+
+	// ExcessDataGas was added by EIP-4844 and is ignored in legacy headers.
+	ExcessDataGas *big.Int `json:"excessDataGas" rlp:"optional"`
 }
 
 func bitsToBytes(bitLen int) (byteLen int) {

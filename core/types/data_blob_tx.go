@@ -487,7 +487,7 @@ func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
 }
 
 func (stx *SignedBlobTx) GetDataHashes() []common.Hash {
-	return []common.Hash(stx.Message.BlobVersionedHashes)
+	return stx.Message.BlobVersionedHashes
 }
 
 // TODO
@@ -556,6 +556,14 @@ func (tx *SignedBlobTx) GetAccessList() AccessList {
 	return AccessList(tx.Message.AccessList)
 }
 
+// func (stx SignedBlobTx) BlobVersionedHashes() []common.Hash {
+// 	blobTx, ok := stx.inner.(*SignedBlobTx)
+// 	if !ok {
+// 		return nil
+// 	}
+// 	return blobTx.Message.BlobVersionedHashes
+// }
+
 func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:            stx.GetNonce(),
@@ -567,7 +575,9 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 		data:             stx.Message.Data,
 		accessList:       stx.GetAccessList(),
 		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
-		checkNonce:       true,
+		// make sure following field isn't required in other tx types
+		dataHashes: stx.Message.BlobVersionedHashes,
+		checkNonce: true,
 	}
 
 	if baseFee != nil {
@@ -693,3 +703,5 @@ func (stx *SignedBlobTx) FixedLength() uint64 {
 func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 	return stx.Message.BlobVersionedHashes
 }
+
+func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.GetDataHashes() }

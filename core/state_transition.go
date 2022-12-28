@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -27,6 +28,7 @@ import (
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -263,6 +265,16 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
+	dgval := new(big.Int)
+	var dataGasUsed uint64
+	if st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
+		dataGasUsed = st.dataGasUsed()
+		if st.evm.Context().ExcessDataGas == nil {
+			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil. Time: %v", ErrInternalFailure, st.evm.Context().Time)
+		}
+		dgval.Mul(misc.GetDataGasPrice(st.evm.Context().ExcessDataGas), new(big.Int).SetUint64(dataGasUsed))
+	}
+
 	balanceCheck := mgval
 	if st.gasFeeCap != nil {
 		balanceCheck = st.sharedBuyGasBalance.SetUint64(st.msg.Gas())
@@ -528,4 +540,8 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 // gasUsed returns the amount of gas used up by the state transition.
 func (st *StateTransition) gasUsed() uint64 {
 	return st.initialGas - st.gas
+}
+
+func (st *StateTransition) dataGasUsed() uint64 {
+	return uint64(len(st.msg.DataHashes())) * params.DataGasPerBlob
 }
