@@ -212,6 +212,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			// for now easier just store them in db
 			td := big.NewInt(0)
 			blockNumBytes := make([]byte, 8)
+			chainReader := &ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}
 			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
@@ -225,6 +226,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
 				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
+				}
+
+				if engine != nil {
+					// consensus may have own database, let's fill it
+					if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
+						return err
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -246,27 +254,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
-			}
-
-			if engine != nil { // consensus may have own database, let's fill it
-				for i := uint64(0); i < blocksAvailable; i += 100_000 {
-					header, err := blockReader.HeaderByNumber(ctx, tx, i)
-					if err != nil {
-						return err
-					}
-					if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
-						return err
-					}
-				}
-				for i := uint64(0); i < blocksAvailable; i += 100 * 1024 {
-					header, err := blockReader.HeaderByNumber(ctx, tx, i)
-					if err != nil {
-						return err
-					}
-					if err := engine.VerifyHeader(&ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}, header, true /* seal */); err != nil {
-						return err
-					}
-				}
 			}
 
 		case stages.Bodies:
