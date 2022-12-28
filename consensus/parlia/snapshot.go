@@ -112,7 +112,7 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
-		panic(err)
+		fmt.Printf("json: %s\n", blob)
 		return nil, err
 	}
 	snap.config = config
