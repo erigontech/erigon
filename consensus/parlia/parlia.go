@@ -543,8 +543,6 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				if !verify || snap != nil {
 					break
 				}
-			} else {
-				log.Warn("parlia load sn", "err", err)
 			}
 		}
 		if (verify && number%p.config.Epoch == 0) || number == 0 {
