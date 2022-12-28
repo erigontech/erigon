@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -232,8 +233,11 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if engine != nil {
 					// consensus may have own database, let's fill it
 					// different consensuses may have some conditions for validators snapshots
-
-					need := (blockNum-1)%(100*1024) == 0
+					need := true
+					switch engine.(type) {
+					case *parlia.Parlia:
+						need = (blockNum-1)%(100*1024) == 0
+					}
 					if need {
 						log.Warn("verify", "h", blockNum)
 						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
