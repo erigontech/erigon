@@ -228,7 +228,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					return err
 				}
 
-				if engine != nil && (blockNum%100_000 == 0 || blockNum%(100*1024) == 0) { // consensus may have own database, let's fill it
+				if engine != nil && ((blockNum-1)%100_000 == 0 || (blockNum-1)%(100*1024) == 0) { // consensus may have own database, let's fill it
 					if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
 						return err
 					}
