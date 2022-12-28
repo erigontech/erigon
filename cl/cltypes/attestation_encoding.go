@@ -8,9 +8,9 @@ import (
 
 const maxAttestationSize = 2276
 
-var commonAggregationBytes = map[byte]struct{}{
-	0x00: struct{}{},
-	0xff: struct{}{},
+var commonAggregationBytes = map[byte]bool{
+	0x00: true,
+	0xff: true,
 }
 
 func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
@@ -23,7 +23,6 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 	}
 	// Pre-allocate some memory.
 	encoded := make([]byte, 0, maxAttestationSize*len(attestations)+1)
-
 	for _, attestation := range attestations {
 		// Encode attestation metadata
 		// Also we need to keep track of aggregation bits size manually.
