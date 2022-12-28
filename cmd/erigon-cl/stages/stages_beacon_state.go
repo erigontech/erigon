@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -38,7 +39,7 @@ func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
 }
 
 // SpawnStageBeaconForward spawn the beacon forward stage
-func SpawnStageBeaconState(cfg StageBeaconStateCfg, _ *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
 	useExternalTx := tx != nil
 	var err error
 	if !useExternalTx {
@@ -92,7 +93,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, _ *stagedsync.StageState, tx
 	latestBlockHeader.Slot = endSlot
 	cfg.state.SetLatestBlockHeader(latestBlockHeader)
 
-	log.Info("[BeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
+	log.Info(fmt.Sprintf("[%s] Finished transitioning state", s.LogPrefix()), "from", fromSlot, "to", endSlot)
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
