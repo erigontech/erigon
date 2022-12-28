@@ -211,6 +211,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
 			td := big.NewInt(0)
+			blockNumBytes := make([]byte, 8)
 			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
@@ -221,7 +222,8 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 					return err
 				}
-				if err := h2n.Collect(blockHash[:], libcommon.EncodeTs(blockNum)); err != nil {
+				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
 				}
 				select {
