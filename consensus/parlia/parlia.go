@@ -526,8 +526,6 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			break
 		}
 
-		log.Warn("parlia load 2", "number", number, "checkpointInterval", checkpointInterval)
-
 		// If an on-disk checkpoint snapshot can be found, use that
 		if number%checkpointInterval == 0 {
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {

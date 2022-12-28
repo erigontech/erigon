@@ -103,7 +103,6 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 		return nil, err
 	}
 	defer tx.Rollback()
-	log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
 
 	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
@@ -112,6 +111,7 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
+		log.Warn("parlia load sn", "num", num, "h", hash.Bytes(), "key", fmt.Sprintf("%x", SnapshotFullKey(num, hash)))
 		fmt.Printf("json: %s\n", blob)
 		return nil, err
 	}
