@@ -27,6 +27,7 @@ import (
 	"math/big"
 	"sort"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -106,10 +107,20 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 
 	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
-		panic(err)
 		return nil, err
 	}
+
 	if len(blob) == 0 {
+		fmt.Printf("search: %d, %x\n", num, hash.Bytes())
+		c, _ := tx.Cursor(kv.ParliaSnapshot)
+		k, _, _ := c.Seek(common2.EncodeTs(num))
+		if len(k) > 0 {
+			fmt.Printf("next: %d, %x\n", binary.BigEndian.Uint64(k), k[8:])
+		}
+		k, _, _ = c.Prev()
+		if len(k) > 0 {
+			fmt.Printf("prev: %d, %x\n", binary.BigEndian.Uint64(k), k[8:])
+		}
 		return nil, fmt.Errorf("empty value in db")
 	}
 	snap := new(Snapshot)
