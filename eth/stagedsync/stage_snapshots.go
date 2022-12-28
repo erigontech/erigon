@@ -232,7 +232,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if engine != nil {
 					// consensus may have own database, let's fill it
 					// different consensuses may have some conditions for validators snapshots
-					need := (blockNum)%(100*1024) == 0
+					need := (blockNum-1)%(100*1024) == 0
 					if need {
 						log.Warn("verify", "h", blockNum)
 						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
