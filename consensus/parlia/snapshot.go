@@ -104,7 +104,6 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	if len(blob) == 0 {
 		return nil, ErrNoSnapsnot
 	}
-	log.Warn("load", "n", num)
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
