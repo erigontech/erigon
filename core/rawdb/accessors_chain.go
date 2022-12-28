@@ -91,6 +91,7 @@ func IsCanonicalHash(db kv.Getter, hash common.Hash) (bool, error) {
 
 // ReadHeaderNumber returns the header number assigned to a hash.
 func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
+	log.Warn("ReadHeaderNumber %s\n", dbg.Stack())
 	data, err := db.GetOne(kv.HeaderNumber, hash.Bytes())
 	if err != nil {
 		log.Error("ReadHeaderNumber failed", "err", err)
