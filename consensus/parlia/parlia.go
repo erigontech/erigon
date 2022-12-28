@@ -548,7 +548,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 					}
 					// new snapshot
 					if number == 0 {
-						for v := range validators {
+						for _, v := range validators {
 							fmt.Printf("v: %x\n", v)
 						}
 					}
