@@ -96,6 +96,8 @@ func SnapshotFullKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
+var ErrNoSnapsnot = fmt.Errorf("no parlia snapshot")
+
 // loadSnapshot loads an existing snapshot from the database.
 func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
@@ -103,14 +105,13 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
 	}
 
 	if len(blob) == 0 {
-		return nil, fmt.Errorf("empty value in db")
+		return nil, ErrNoSnapsnot
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
