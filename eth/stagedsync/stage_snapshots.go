@@ -248,9 +248,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				return err
 			}
 
-			if engine != nil {
+			if engine != nil { // consensus may have own database, let's fill it
 				for i := uint64(0); i < blocksAvailable; i += 100_000 {
-					header, err := blockReader.HeaderByNumber(ctx, tx, blocksAvailable)
+					header, err := blockReader.HeaderByNumber(ctx, tx, i)
 					if err != nil {
 						return err
 					}
