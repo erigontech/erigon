@@ -593,7 +593,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 
 	// If we've generated a new checkpoint snapshot, save to disk
 	if verify && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
-		log.Warn("create snap", "num", snap.Number, "every", checkpointInterval, "len(headers) ", len(headers))
+		log.Warn("create snap", "num", snap.Number, "every", checkpointInterval, "len(headers) ", len(headers), "db is nil", p.db == nil, "snap is nil", snap == nil)
 		if err = snap.store(p.db); err != nil {
 			return nil, err
 		}
