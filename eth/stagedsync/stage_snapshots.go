@@ -73,6 +73,7 @@ func StageSnapshotsCfg(
 		dbEventNotifier:    dbEventNotifier,
 		historyV3:          historyV3,
 		agg:                agg,
+		engine:             engine,
 	}
 }
 
@@ -213,6 +214,16 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			td := big.NewInt(0)
 			blockNumBytes := make([]byte, 8)
 			chainReader := &ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}
+			if engine != nil {
+				genesisHeader := rawdb.ReadHeaderByNumber(tx, 0)
+				if genesisHeader == nil {
+					return fmt.Errorf("genesis not found")
+				}
+				if err := engine.VerifyHeader(chainReader, genesisHeader, true /* seal */); err != nil {
+					return err
+				}
+
+			}
 			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
