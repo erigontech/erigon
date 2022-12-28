@@ -59,7 +59,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			}
 		}
 	case *params.ParliaConfig:
-		fmt.Printf("parlia dbs: %d\n", len(chainDb))
+		fmt.Printf("parlia dbs: %d, %s\n", len(chainDb), consensusCfg.DBPath)
 		if chainConfig.Parlia != nil {
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
