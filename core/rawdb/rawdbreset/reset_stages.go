@@ -209,7 +209,7 @@ var Tables = map[stages.SyncStage][]string{
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string) {
-	const ThreadsLimit = 1024
+	const ThreadsLimit = 512
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
 		c, _ := tx.Cursor(bucket)
