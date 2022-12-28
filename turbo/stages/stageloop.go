@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -389,6 +390,7 @@ func NewStagedSync(ctx context.Context,
 	snapshots *snapshotsync.RoSnapshots,
 	agg *state.Aggregator22,
 	forkValidator *engineapi.ForkValidator,
+	engine consensus.Engine,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
 	var blockReader services.FullBlockReader
@@ -405,7 +407,7 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		stagedsync.DefaultStages(ctx, cfg.Prune,
-			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
+			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, engine, cfg.HistoryV3, agg),
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
