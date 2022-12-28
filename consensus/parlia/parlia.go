@@ -475,7 +475,7 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	if _, ok := snap.Validators[signer]; !ok {
-		return fmt.Errorf("parlia.verifySeal: %w", errUnauthorizedValidator)
+		return fmt.Errorf("parlia.verifySeal: headerNum=%d, %w", header.Number.Uint64(), errUnauthorizedValidator)
 	}
 
 	for seen, recent := range snap.Recents {

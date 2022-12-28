@@ -1119,7 +1119,6 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 
 }
 func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
-	log.Warn("GetHeaderByHash")
 	if cr.blockReader != nil {
 		number := rawdb.ReadHeaderNumber(cr.tx, hash)
 		if number == nil {
