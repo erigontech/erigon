@@ -204,7 +204,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 		}
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollector("Snapshots", dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
+			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 			defer h2n.Close()
 			h2n.LogLvl(log.LvlDebug)
 
