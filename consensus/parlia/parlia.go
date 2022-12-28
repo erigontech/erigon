@@ -543,6 +543,9 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
 				// Headers included into the snapshots have to be trusted as checkpoints
 				checkpoint := chain.GetHeader(hash, number)
+				b := bytes.NewBuffer(nil)
+				checkpoint.EncodeRLP(b)
+				fmt.Printf("rlp: %d: %x\n", number, b.Bytes())
 				if checkpoint != nil {
 					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
 					// get validators from headers
