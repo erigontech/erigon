@@ -535,6 +535,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				}
 			}
 		}
+		log.Warn("Parlia", "n", number)
 		if (verify && number%p.config.Epoch == 0) || number == 0 {
 			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
 				// Headers included into the snapshots have to be trusted as checkpoints
@@ -553,6 +554,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 						}
 					}
 					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+					fmt.Printf("parlia break: %d\n", number)
 					break
 				}
 			}

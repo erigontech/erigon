@@ -240,13 +240,13 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				}
 
 				if engine != nil { // consensus may have own database, let's fill it
-					//need := (blockNum)%1_000_000 == 0 || (blockNum-1)%1_000_000 == 0 || (blockNum+1)%1_000_000 == 0 ||
-					//	(blockNum)%(1000*1024) == 0 || (blockNum-1)%(1000*1024) == 0 || (blockNum+1)%(1000*1024) == 0
-					//if need {
-					if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
-						return err
+					need := (blockNum)%1_000_000 == 0 || (blockNum-1)%1_000_000 == 0 || (blockNum+1)%1_000_000 == 0 ||
+						(blockNum)%(1000*1024) == 0 || (blockNum-1)%(1000*1024) == 0 || (blockNum+1)%(1000*1024) == 0
+					if need {
+						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
+							return err
+						}
 					}
-					//}
 				}
 				select {
 				case <-ctx.Done():
