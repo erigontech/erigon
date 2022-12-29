@@ -65,6 +65,7 @@ type Transaction interface {
 	Cost() *uint256.Int
 	GetDataHashes() []common.Hash
 	GetGas() uint64
+	GetDataGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *common.Address
@@ -530,6 +531,7 @@ func (m Message) FeeCap() *uint256.Int   { return &m.feeCap }
 func (m Message) Tip() *uint256.Int      { return &m.tip }
 func (m Message) Value() *uint256.Int    { return &m.amount }
 func (m Message) Gas() uint64            { return m.gasLimit }
+func (m Message) DataGas() uint64        { return params.DataGasPerBlob * uint64(len(m.dataHashes)) }
 func (m Message) MaxFeePerDataGas() *uint256.Int {
 	return &m.maxFeePerDataGas
 }

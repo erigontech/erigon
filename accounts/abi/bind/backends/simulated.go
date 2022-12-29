@@ -163,7 +163,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(params.MaxDataGasPerBlock)
 	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
 	b.pendingState = state.New(b.pendingReader)
 }
@@ -671,7 +671,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
-	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
+	gasPool := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
 }
@@ -779,6 +779,7 @@ func (m callMsg) GasPrice() *uint256.Int         { return m.CallMsg.GasPrice }
 func (m callMsg) FeeCap() *uint256.Int           { return m.CallMsg.FeeCap }
 func (m callMsg) Tip() *uint256.Int              { return m.CallMsg.Tip }
 func (m callMsg) Gas() uint64                    { return m.CallMsg.Gas }
+func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) Value() *uint256.Int            { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                   { return m.CallMsg.Data }

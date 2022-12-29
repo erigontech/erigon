@@ -182,7 +182,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			}
 		}
 		txHash := txTask.Tx.Hash()
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddDataGas(txTask.Tx.GetDataGas())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)

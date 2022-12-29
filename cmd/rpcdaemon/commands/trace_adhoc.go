@@ -995,7 +995,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas())
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 	var execResult *core.ExecutionResult
 	ibs.Prepare(common.Hash{}, common.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
@@ -1211,7 +1211,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		var execResult *core.ExecutionResult
 		// Clone the state cache before applying the changes, clone is discarded
 		var cloneReader state.StateReader
