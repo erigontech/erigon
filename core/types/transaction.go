@@ -523,7 +523,8 @@ func (m Message) IsFree() bool { return m.isFree }
 func (m *Message) SetIsFree(isFree bool) {
 	m.isFree = isFree
 }
-func (m Message) DataHashes() []common.Hash { return m.dataHashes }
+func (m Message) DataHashes() []common.Hash      { return m.dataHashes }
+func (m Message) MaxFeePerDataGas() *uint256.Int { return &m.maxFeePerDataGas }
 
 type TxWrapData interface {
 	copy() TxWrapData

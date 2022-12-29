@@ -96,6 +96,10 @@ var (
 	// See EIP-3607: Reject transactions from senders with deployed code.
 	ErrSenderNoEOA = errors.New("sender not an eoa")
 
+	// ErrMaxFeePerDataGas is returned if the transaction specified a
+	// max_fee_per_data_gas that is below the current data gas price.
+	ErrMaxFeePerDataGas = errors.New("max fee per data gas too low")
+
 	// ErrInternalFailure is returned when an unexpected internal error condition
 	// prevents execution.
 	ErrInternalFailure = errors.New("internal failure")

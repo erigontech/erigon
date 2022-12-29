@@ -320,6 +320,8 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		}
 
 		fields["transactions"] = transactions
+
+		fields["withdrawals"] = block.Withdrawals()
 	}
 	uncles := block.Uncles()
 	uncleHashes := make([]common.Hash, len(uncles))

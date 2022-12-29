@@ -108,6 +108,18 @@ func bitsToBytes(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
 }
 
+// SetExcessDataGas sets the excess_data_gas field in the header
+func (h *Header) SetExcessDataGas(v *big.Int) {
+	h.ExcessDataGas = new(big.Int)
+	if v != nil {
+		h.ExcessDataGas.Set(v)
+	}
+	if h.WithdrawalsHash == nil {
+		// leaving this nil would result in a buggy encoding
+		h.WithdrawalsHash = &EmptyRootHash
+	}
+}
+
 func (h *Header) EncodingSize() int {
 	encodingSize := 33 /* ParentHash */ + 33 /* UncleHash */ + 21 /* Coinbase */ + 33 /* Root */ + 33 /* TxHash */ +
 		33 /* ReceiptHash */ + 259 /* Bloom */

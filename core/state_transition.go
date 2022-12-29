@@ -85,6 +85,7 @@ type Message interface {
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
 	Tip() *uint256.Int
+	MaxFeePerDataGas() *uint256.Int
 	Gas() uint64
 	Value() *uint256.Int
 
@@ -356,6 +357,16 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
+
+	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
+		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
+		if dataGasPrice.Cmp(st.msg.MaxFeePerDataGas().ToBig()) > 0 {
+			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",
+				ErrMaxFeePerDataGas,
+				st.msg.From().Hex(), st.msg.MaxFeePerDataGas(), dataGasPrice, st.evm.Context().ExcessDataGas)
+		}
+	}
+
 	return st.buyGas(gasBailout)
 }
 

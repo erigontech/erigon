@@ -74,10 +74,11 @@ type Genesis struct {
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
-	ParentHash common.Hash `json:"parentHash"`
-	BaseFee    *big.Int    `json:"baseFeePerGas"`
+	Number        uint64      `json:"number"`
+	GasUsed       uint64      `json:"gasUsed"`
+	ParentHash    common.Hash `json:"parentHash"`
+	BaseFee       *big.Int    `json:"baseFeePerGas"`
+	ExcessDataGas *big.Int    `json:"excessDataGas"`
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
@@ -353,11 +354,19 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	if g.Difficulty == nil {
 		head.Difficulty = params.GenesisDifficulty
 	}
-	if g.Config != nil && (g.Config.IsLondon(0)) {
-		if g.BaseFee != nil {
-			head.BaseFee = g.BaseFee
-		} else {
-			head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+	if g.Config != nil {
+		if g.Config.IsLondon(0) {
+			if g.BaseFee != nil {
+				head.BaseFee = g.BaseFee
+			} else {
+				head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
+			}
+		}
+		if g.Config.IsShanghai(g.Timestamp) {
+			head.WithdrawalsHash = &types.EmptyRootHash
+		}
+		if g.Config.IsSharding(g.Timestamp) {
+			head.SetExcessDataGas(g.ExcessDataGas)
 		}
 	}
 
