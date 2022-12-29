@@ -40,13 +40,3 @@ func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
-func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	ct.froms[from] = struct{}{}
-	ct.tos[to] = struct{}{}
-}
-func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}

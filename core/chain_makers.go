@@ -390,18 +390,28 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", b.header.Number)
-				if err := tx.ForEach(kv.HashedAccounts, nil, func(k, v []byte) error {
+				it, err := tx.Range(kv.HashedAccounts, nil, nil)
+				if err != nil {
+					return nil, nil, err
+				}
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						return nil, nil, err
+					}
 					fmt.Printf("%x: %x\n", k, v)
-					return nil
-				}); err != nil {
-					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
 				fmt.Printf("..................\n")
-				if err := tx.ForEach(kv.HashedStorage, nil, func(k, v []byte) error {
+				it, err = tx.Range(kv.HashedStorage, nil, nil)
+				if err != nil {
+					return nil, nil, err
+				}
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						return nil, nil, err
+					}
 					fmt.Printf("%x: %x\n", k, v)
-					return nil
-				}); err != nil {
-					return nil, nil, fmt.Errorf("print state: %w", err)
 				}
 				fmt.Printf("===============================\n")
 			}

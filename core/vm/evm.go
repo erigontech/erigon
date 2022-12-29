@@ -18,7 +18,6 @@ package vm
 
 import (
 	"sync/atomic"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -177,26 +176,30 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 	if !isPrecompile {
 		code = evm.intraBlockState.GetCode(addr)
 	}
-	// Capture the tracer start/end events in debug mode
-	if evm.config.Debug {
-		if evm.depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, value, code)
-			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
-			}(gas, time.Now())
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, value, code)
-			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
-			}(gas, time.Now())
-		}
-	}
 
 	snapshot := evm.intraBlockState.Snapshot()
 
 	if typ == CALL {
 		if !evm.intraBlockState.Exist(addr) {
 			if !isPrecompile && evm.chainRules.IsSpuriousDragon && value.IsZero() {
+				if evm.config.Debug {
+					v := value
+					if typ == STATICCALL {
+						v = nil
+					}
+					// Calling a non existing account, don't do anything, but ping the tracer
+					if evm.depth == 0 {
+						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
+						defer func(startGas uint64) { // Lazy evaluation of the parameters
+							evm.config.Tracer.CaptureEnd(ret, 0, err)
+						}(gas)
+					} else {
+						evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
+						defer func(startGas uint64) { // Lazy evaluation of the parameters
+							evm.config.Tracer.CaptureExit(ret, 0, err)
+						}(gas)
+					}
+				}
 				return nil, gas, nil
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
@@ -208,6 +211,23 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
 		evm.intraBlockState.AddBalance(addr, u256.Num0)
+	}
+	if evm.config.Debug {
+		v := value
+		if typ == STATICCALL {
+			v = nil
+		}
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
+			defer func(startGas uint64) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
+			}(gas)
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
+			defer func(startGas uint64) { // Lazy evaluation of the parameters
+				evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
+			}(gas)
+		}
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
@@ -320,19 +340,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.config.HasEip3860(evm.chainRules) && len(codeAndHash.code) > params.MaxInitCodeSize {
 		return nil, address, gas, ErrMaxInitCodeSizeExceeded
 	}
-	if evm.config.Debug {
-		if evm.depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
-			}(gas, time.Now())
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-			defer func(startGas uint64, startTime time.Time) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
-			}(gas, time.Now())
-		}
-	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
@@ -363,6 +370,14 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+
+	if evm.config.Debug {
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+		}
+	}
 
 	if evm.config.NoRecursion && evm.depth > 0 {
 		return nil, address, gas, nil
@@ -401,10 +416,17 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			contract.UseGas(contract.Gas)
 		}
 	}
-	gas = contract.Gas // For the CaptureEnd to work corrently with gasUsed
 	// Assign err if contract code size exceeds the max while the err is still empty.
 	if maxCodeSizeExceeded && err == nil {
 		err = ErrMaxCodeSizeExceeded
+	}
+
+	if evm.config.Debug {
+		if evm.depth == 0 {
+			evm.config.Tracer.CaptureEnd(ret, gas-contract.Gas, err)
+		} else {
+			evm.config.Tracer.CaptureExit(ret, gas-contract.Gas, err)
+		}
 	}
 
 	return ret, address, contract.Gas, err

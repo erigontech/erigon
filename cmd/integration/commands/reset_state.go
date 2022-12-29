@@ -26,7 +26,10 @@ var cmdResetState = &cobra.Command{
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
-		sn, _ := allSnapshots(db)
+		sn, agg := allSnapshots(ctx, db)
+		defer sn.Close()
+		defer agg.Close()
+
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
@@ -39,7 +42,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		sn, _ = allSnapshots(db)
+		sn, _ = allSnapshots(ctx, db)
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
@@ -83,7 +86,11 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx))
+	lastK, lastV, err := rawdb.Last(tx, kv.MaxTxNum)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV))
 
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
@@ -96,24 +103,27 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
+		firstNonGenesisHeader, err := rawdb.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		if firstNonGenesis != nil {
-			fmt.Fprintf(w, "first header in db: %d\n", binary.BigEndian.Uint64(firstNonGenesis))
-		} else {
-			fmt.Fprintf(w, "no headers in db\n")
-		}
-		firstNonGenesis, err = rawdb.SecondKey(tx, kv.BlockBody)
+		lastHeaders, err := rawdb.LastKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		if firstNonGenesis != nil {
-			fmt.Fprintf(w, "first body in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
-		} else {
-			fmt.Fprintf(w, "no bodies in db\n\n")
+		firstNonGenesisBody, err := rawdb.SecondKey(tx, kv.BlockBody)
+		if err != nil {
+			return err
 		}
+		lastBody, err := rawdb.LastKey(tx, kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		fstHeader := u64or0(firstNonGenesisHeader)
+		lstHeader := u64or0(lastHeaders)
+		fstBody := u64or0(firstNonGenesisBody)
+		lstBody := u64or0(lastBody)
+		fmt.Fprintf(w, "in db: first header %d, last header %d, first body %d, last body %d\n", fstHeader, lstHeader, fstBody, lstBody)
 	}
 
 	fmt.Fprintf(w, "--\n")
@@ -140,4 +150,10 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	//	return nil
 	//})
 	return nil
+}
+func u64or0(in []byte) (v uint64) {
+	if len(in) > 0 {
+		v = binary.BigEndian.Uint64(in)
+	}
+	return v
 }

@@ -286,6 +286,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	if config.HistoryV3 {
 		backend.chainDB = temporal.New(backend.chainDB, agg)
+		chainKv = backend.chainDB
 	}
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
@@ -609,9 +610,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
 					log.Error("add mined block to header downloader", "err", err)
 				}
-				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
-					log.Error("add mined block to body downloader", "err", err)
-				}
+				backend.sentriesClient.Bd.AddToPrefetch(b)
 
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
@@ -961,7 +960,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	}
 
 	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
+	agg, err := libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1038,13 +1037,13 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
-	s.chainDB.Close()
 	if s.txPool2DB != nil {
 		s.txPool2DB.Close()
 	}
 	if s.agg != nil {
 		s.agg.Close()
 	}
+	s.chainDB.Close()
 	return nil
 }
 

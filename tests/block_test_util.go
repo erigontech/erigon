@@ -26,6 +26,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -293,6 +295,14 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		}
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
+		}
+		for loc, val := range acct.Storage {
+			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
+			val2 := uint256.NewInt(0)
+			statedb.GetState(addr, &loc, val2)
+			if !val1.Eq(val2) {
+				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
+			}
 		}
 	}
 	return nil

@@ -177,14 +177,6 @@ func (*AccessListTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
-func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-func (*AccessListTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (*AccessListTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
-}
 
 // AccessList returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessList() types.AccessList {

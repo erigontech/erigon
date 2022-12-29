@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -59,7 +60,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Starting sync from checkpoint.")
-
+	tmpdir := "/tmp"
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
@@ -69,13 +70,14 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 
 	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	downloader := network.NewForwardBeaconDownloader(ctx, s)
-	bdownloader := network.NewBackwardBeaconDownloader(ctx, s)
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisCfg)
+	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
+	bdownloader := network.NewBackwardBeaconDownloader(ctx, beaconRpc)
 
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir)
 	if err != nil {
 		return err
 	}

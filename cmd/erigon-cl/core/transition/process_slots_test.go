@@ -57,8 +57,8 @@ func getEmptyState() *state.BeaconState {
 	return state.FromBellatrixState(bellatrixState)
 }
 
-func getEmptyBlock() *cltypes.SignedBeaconBlockBellatrix {
-	return &cltypes.SignedBeaconBlockBellatrix{
+func getEmptyBlock() *cltypes.SignedBeaconBlock {
+	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
 		Block: &cltypes.BeaconBlockBellatrix{
 			Body: &cltypes.BeaconBodyBellatrix{
 				Eth1Data:         &cltypes.Eth1Data{},
@@ -66,11 +66,11 @@ func getEmptyBlock() *cltypes.SignedBeaconBlockBellatrix {
 				ExecutionPayload: &cltypes.ExecutionPayload{},
 			},
 		},
-	}
+	})
 }
 
-func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
-	return &cltypes.SignedBeaconBlockBellatrix{
+func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
+	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
 		Block: &cltypes.BeaconBlockBellatrix{
 			ProposerIndex: 0,
 			Body: &cltypes.BeaconBodyBellatrix{
@@ -87,7 +87,7 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlockBellatrix {
 			StateRoot: testStateRoot,
 		},
 		Signature: testSignature,
-	}
+	})
 }
 
 func getTestBeaconState() *state.BeaconState {
@@ -306,7 +306,7 @@ func TestVerifyBlockSignature(t *testing.T) {
 	testCases := []struct {
 		description string
 		state       *state.BeaconState
-		block       *cltypes.SignedBeaconBlockBellatrix
+		block       *cltypes.SignedBeaconBlock
 		wantValid   bool
 		wantErr     bool
 	}{
@@ -361,11 +361,11 @@ func TestTransitionState(t *testing.T) {
 	badSigBlock := getTestBeaconBlock()
 	badSigBlock.Signature = badSignature
 	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block.StateRoot = [32]byte{}
+	badStateRootBlock.Block.StateRoot = common.Hash{}
 	testCases := []struct {
 		description   string
 		prevState     *state.BeaconState
-		block         *cltypes.SignedBeaconBlockBellatrix
+		block         *cltypes.SignedBeaconBlock
 		expectedState *state.BeaconState
 		wantErr       bool
 	}{

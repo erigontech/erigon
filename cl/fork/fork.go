@@ -47,7 +47,7 @@ func ComputeForkDigest(
 		break
 	}
 
-	return computeForkDigest(currentForkVersion, genesisConfig.GenesisValidatorRoot)
+	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
 type fork struct {
@@ -65,7 +65,7 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 	return
 }
 
-func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
+func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
 	data := cltypes.ForkData{
 		CurrentVersion:        currentVersion,
 		GenesisValidatorsRoot: genesisValidatorsRoot,
@@ -134,11 +134,11 @@ func GetLastFork(
 func ComputeDomain(
 	domainType []byte,
 	currentVersion [4]byte,
-	genesisConfig *clparams.GenesisConfig,
+	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
 	forkDataRoot, err := (&cltypes.ForkData{
 		CurrentVersion:        currentVersion,
-		GenesisValidatorsRoot: genesisConfig.GenesisValidatorRoot,
+		GenesisValidatorsRoot: genesisValidatorsRoot,
 	}).HashTreeRoot()
 	if err != nil {
 		return nil, err
