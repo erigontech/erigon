@@ -67,7 +67,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 	}
 
-	signer := types.MakeSigner(cc, *blockNum)
+	signer := types.MakeSigner(cc, *blockNum, 0)
 	from, err := txn.Sender(*signer)
 	if err != nil {
 		return common.Hash{}, err

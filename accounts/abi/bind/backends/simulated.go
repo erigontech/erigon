@@ -681,8 +681,14 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Get the last block
+	block, err := b.BlockByHash(ctx, b.pendingBlock.ParentHash())
+	if err != nil {
+		return fmt.Errorf("could not fetch parent")
+	}
+
 	// Check transaction validity.
-	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), block.Time())
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)

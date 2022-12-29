@@ -390,7 +390,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 			lastBlockNum = blockNum
 			blockHash = header.Hash()
-			signer = types.MakeSigner(chainConfig, blockNum)
+			signer = types.MakeSigner(chainConfig, blockNum, 0)
 			rules = chainConfig.Rules(blockNum, header.Time)
 			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
 

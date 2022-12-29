@@ -613,7 +613,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			if txs.Len() == 0 {
 				continue
 			}
-			signer := types.MakeSigner(chainConfig, i)
+			signer := types.MakeSigner(chainConfig, i, 0)
 			for j := 0; j < txs.Len(); j++ {
 				from, err := signer.Sender(txs[j])
 				if err != nil {

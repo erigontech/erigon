@@ -33,7 +33,7 @@ import (
 var ErrInvalidChainId = errors.New("invalid chain id for signer")
 
 // MakeSigner returns a Signer based on the given chain config and block number.
-func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
+func MakeSigner(config *params.ChainConfig, blockNumber uint64, time uint64) *Signer {
 	var signer Signer
 	var chainId uint256.Int
 	if config.ChainID != nil {
@@ -44,7 +44,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsSharding(blockNumber):
+	case config.IsSharding(time):
 		signer.protected = true
 		signer.accesslist = true
 		signer.dynamicfee = true

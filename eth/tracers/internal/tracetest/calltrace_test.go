@@ -129,7 +129,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			// Configure a blockchain with the given prestate
 			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
+				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), 0)
 				origin, _ = signer.Sender(tx)
 				txContext = evmtypes.TxContext{
 					Origin:   origin,
@@ -230,7 +230,7 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
-	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
+	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), 0)
 	rules := &params.Rules{}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {

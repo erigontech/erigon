@@ -50,7 +50,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
 		}
 		txn := block.Transactions()[txIndex]
-		signer := types.MakeSigner(cfg, block.NumberU64())
+		signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.Time()))
 		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
 		txCtx := core.NewEVMTxContext(msg)
@@ -70,7 +70,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64())
+	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 
 	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
