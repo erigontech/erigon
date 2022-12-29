@@ -124,9 +124,7 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
-	fmt.Printf("finalize1: %d\n", header.Number.Uint64())
 	if !IsPoSHeader(header) {
-		fmt.Printf("finalize2: %d\n", header.Number.Uint64())
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
 	}
 	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
@@ -135,7 +133,6 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 		}
 	}
 	for _, w := range withdrawals {
-		fmt.Printf("finalize3: %d, %x, %d\n", header.Number.Uint64(), w.Address, w.Amount.Uint64())
 		state.AddBalance(w.Address, &w.Amount)
 	}
 	return txs, r, nil
