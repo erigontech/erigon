@@ -228,7 +228,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err := rebuildIndices("Indexing", ctx, chainDB, cfg, dirs, from, sem); err != nil {
 		log.Error("Error", "err", err)
 	}
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
+	agg, err := libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
 	if err != nil {
 		return err
 	}
@@ -358,7 +358,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	br := snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs.Tmp, snapshots, db, nil, nil)
 
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+	agg, err := libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 	if err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func doSnapshotCommand(cliCtx *cli.Context) error {
 			return err
 		}
 
-		agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		agg, err := libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			return err
 		}
