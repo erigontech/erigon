@@ -98,7 +98,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	if !hasEOFMagic(b) {
 		return fmt.Errorf("invalid magic")
 	}
-	if check(b, offsetVersion, eof1Version) {
+	if !isEOFVersion1(b) {
 		return fmt.Errorf("invalid eof version")
 	}
 
@@ -225,7 +225,6 @@ func check(b []byte, idx int, want byte) bool {
 func sum(list []int) (s int) {
 	for _, n := range list {
 		s += n
-
 	}
 	return
 }
