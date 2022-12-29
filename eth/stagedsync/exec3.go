@@ -108,6 +108,8 @@ func ExecV3(ctx context.Context,
 	logger log.Logger,
 	maxBlockNum uint64,
 ) (err error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	batchSize, chainDb := cfg.batchSize, cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
@@ -656,7 +658,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(ctx, chainDb); err != nil {
+			if err := agg.BuildFilesInBackground(chainDb); err != nil {
 				return err
 			}
 		}
@@ -681,7 +683,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(ctx, chainDb); err != nil {
+		if err := agg.BuildFilesInBackground(chainDb); err != nil {
 			return err
 		}
 	}

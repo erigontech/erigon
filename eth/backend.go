@@ -960,7 +960,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	}
 
 	dir.MustExist(dirs.SnapHistory)
-	agg, err := libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
+	agg, err := libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, s.chainDB)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1037,13 +1037,13 @@ func (s *Ethereum) Stop() error {
 	for _, sentryServer := range s.sentryServers {
 		sentryServer.Close()
 	}
-	s.chainDB.Close()
 	if s.txPool2DB != nil {
 		s.txPool2DB.Close()
 	}
 	if s.agg != nil {
 		s.agg.Close()
 	}
+	s.chainDB.Close()
 	return nil
 }
 
