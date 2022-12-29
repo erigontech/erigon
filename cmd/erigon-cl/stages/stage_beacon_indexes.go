@@ -90,6 +90,15 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		default:
 		}
 	}
+	if err := rootToSlotCollector.Load(tx, kv.RootSlotIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := slotToRootCollector.Load(tx, kv.SlotRootIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := s.Update(tx, endSlot); err != nil {
+		return err
+	}
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
