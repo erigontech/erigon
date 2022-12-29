@@ -110,9 +110,6 @@ func ExecV3(ctx context.Context,
 ) (err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer func(t time.Time) {
-		fmt.Printf("exec3.go:111: %s, %d->%d\n", time.Since(t), execStage.BlockNumber, maxBlockNum)
-	}(time.Now())
 
 	batchSize, chainDb := cfg.batchSize, cfg.db
 	blockReader := cfg.blockReader
