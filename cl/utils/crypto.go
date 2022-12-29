@@ -25,7 +25,7 @@ var hasherPool = sync.Pool{
 	},
 }
 
-func Keccak256(data []byte) [32]byte {
+func Keccak256(data []byte, extras ...[]byte) [32]byte {
 	h, ok := hasherPool.Get().(hash.Hash)
 	if !ok {
 		h = sha256.New()
@@ -36,6 +36,9 @@ func Keccak256(data []byte) [32]byte {
 	var b [32]byte
 
 	h.Write(data)
+	for _, extra := range extras {
+		h.Write(extra)
+	}
 	h.Sum(b[:0])
 
 	return b

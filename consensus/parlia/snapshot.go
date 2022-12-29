@@ -201,9 +201,13 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := snap.Validators[validator]; !ok {
-			return nil, errUnauthorizedValidator
-		}
+		// Disabling this validation due to issues with BEP-131 looks like is breaks the property that used to allow Erigon to sync Parlia without knowning the contract state
+		// Further investigation is required
+		/*
+			if _, ok := snap.Validators[validator]; !ok {
+				return nil, errUnauthorizedValidator
+			}
+		*/
 		for _, recent := range snap.Recents {
 			if recent == validator {
 				return nil, errRecentlySigned

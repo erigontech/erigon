@@ -87,7 +87,7 @@ func toProgram(code []byte) *Program {
 		op := OpCode(code[pc])
 		stmt.opcode = op
 		stmt.operation = jt[op]
-		stmt.ends = stmt.operation == nil || stmt.operation.halts || stmt.operation.reverts
+		stmt.ends = stmt.operation == nil
 		//fmt.Printf("%v %v %v", pc, stmt.opcode, stmt.operation.valid)
 
 		if op.IsPush() {

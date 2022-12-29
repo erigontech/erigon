@@ -98,7 +98,7 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 	signer.chainID.Set(chainId)
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
-		if config.ShardingForkBlock != nil {
+		if config.ShardingForkTime != nil {
 			// TODO make a research on this
 		}
 		if config.LondonBlock != nil {

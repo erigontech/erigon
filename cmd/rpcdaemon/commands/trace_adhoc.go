@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -16,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -234,11 +234,15 @@ type OeTracer struct {
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
+
+func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
+
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
-		if depth > 0 {
+		if deep {
 			var vmT *VmTrace
 			if len(ot.vmOpStack) > 0 {
 				vmT = ot.vmOpStack[len(ot.vmOpStack)-1].Sub
@@ -265,7 +269,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 			vmTrace.Code = code
 		}
 	}
-	if precompile && depth > 0 && value == nil {
+	if precompile && deep && (value == nil || value.IsZero()) {
 		ot.precompile = true
 		return
 	}
@@ -283,12 +287,12 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		trace.Result = &TraceResult{}
 		trace.Type = CALL
 	}
-	if depth > 0 {
+	if deep {
 		topTrace := ot.traceStack[len(ot.traceStack)-1]
 		traceIdx := topTrace.Subtraces
 		ot.traceAddr = append(ot.traceAddr, traceIdx)
 		topTrace.Subtraces++
-		if callType == vm.DELEGATECALLT {
+		if typ == vm.DELEGATECALL {
 			switch action := topTrace.Action.(type) {
 			case *CreateTraceAction:
 				value, _ = uint256.FromBig(action.Value.ToInt())
@@ -296,7 +300,7 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 				value, _ = uint256.FromBig(action.Value.ToInt())
 			}
 		}
-		if callType == vm.STATICCALLT {
+		if typ == vm.STATICCALL {
 			value = uint256.NewInt(0)
 		}
 	}
@@ -309,16 +313,31 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
+	} else if typ == vm.SELFDESTRUCT {
+		trace := &ParityTrace{}
+		trace.Type = SUICIDE
+		action := &SuicideTraceAction{}
+		action.Address = from
+		action.RefundAddress = to
+		action.Balance.ToInt().Set(value.ToBig())
+		trace.Action = action
+		topTrace := ot.traceStack[len(ot.traceStack)-1]
+		traceIdx := topTrace.Subtraces
+		ot.traceAddr = append(ot.traceAddr, traceIdx)
+		topTrace.Subtraces++
+		trace.TraceAddress = make([]int, len(ot.traceAddr))
+		copy(trace.TraceAddress, ot.traceAddr)
+		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	} else {
 		action := CallTraceAction{}
-		switch callType {
-		case vm.CALLT:
+		switch typ {
+		case vm.CALL:
 			action.CallType = CALL
-		case vm.CALLCODET:
+		case vm.CALLCODE:
 			action.CallType = CALLCODE
-		case vm.DELEGATECALLT:
+		case vm.DELEGATECALL:
 			action.CallType = DELEGATECALL
-		case vm.STATICCALLT:
+		case vm.STATICCALL:
 			action.CallType = STATICCALL
 		}
 		action.From = from
@@ -332,16 +351,24 @@ func (ot *OeTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
+}
+
+func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
+}
+
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
 		}
-		if !ot.compat && depth > 0 {
+		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
 		}
-		if depth > 0 {
+		if deep {
 			ot.lastMemOff = ot.memOffStack[len(ot.memOffStack)-1]
 			ot.memOffStack = ot.memOffStack[:len(ot.memOffStack)-1]
 			ot.lastMemLen = ot.memLenStack[len(ot.memLenStack)-1]
@@ -352,13 +379,13 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		ot.precompile = false
 		return
 	}
-	if depth == 0 {
+	if !deep {
 		ot.r.Output = common.CopyBytes(output)
 	}
 	ignoreError := false
 	topTrace := ot.traceStack[len(ot.traceStack)-1]
 	if ot.compat {
-		ignoreError = depth == 0 && topTrace.Type == CREATE
+		ignoreError = !deep && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
 		if err == vm.ErrExecutionReverted {
@@ -366,11 +393,11 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
 				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
 				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
@@ -405,19 +432,27 @@ func (ot *OeTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
-	if depth > 0 {
+	if deep {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	}
 }
 
-func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
+func (ot *OeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+	ot.captureEndOrExit(false /* deep */, output, usedGas, err)
+}
+
+func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+	ot.captureEndOrExit(true /* deep */, output, usedGas, err)
+}
+
+func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	memory := scope.Memory
 	st := scope.Stack
 
@@ -448,7 +483,9 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				showStack = 1
 			}
 			for i := showStack - 1; i >= 0; i-- {
-				ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+				if st.Len() > i {
+					ot.lastVmOp.Ex.Push = append(ot.lastVmOp.Ex.Push, st.Back(i).String())
+				}
 			}
 			// Set the "mem" of the last operation
 			var setMem bool
@@ -457,7 +494,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
@@ -466,9 +503,13 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		if ot.lastOffStack != nil {
 			ot.lastOffStack.Ex.Used = int(gas)
-			ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			if st.Len() > 0 {
+				ot.lastOffStack.Ex.Push = []string{st.Back(0).String()}
+			} else {
+				ot.lastOffStack.Ex.Push = []string{}
+			}
 			if ot.lastMemLen > 0 && memory != nil {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
@@ -500,26 +541,38 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		switch op {
 		case vm.MSTORE, vm.MLOAD:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = 32
+			if st.Len() > 0 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = 32
+			}
 		case vm.MSTORE8:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = 1
+			if st.Len() > 0 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = 1
+			}
 		case vm.RETURNDATACOPY, vm.CALLDATACOPY, vm.CODECOPY:
-			ot.lastMemOff = st.Back(0).Uint64()
-			ot.lastMemLen = st.Back(2).Uint64()
+			if st.Len() > 2 {
+				ot.lastMemOff = st.Back(0).Uint64()
+				ot.lastMemLen = st.Back(2).Uint64()
+			}
 		case vm.STATICCALL, vm.DELEGATECALL:
-			ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
-			ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+			if st.Len() > 5 {
+				ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
+			}
 		case vm.CALL, vm.CALLCODE:
-			ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
-			ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+			if st.Len() > 6 {
+				ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
+			}
 		case vm.CREATE, vm.CREATE2:
 			// Effectively disable memory output
 			ot.memOffStack = append(ot.memOffStack, 0)
 			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
-			ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+			if st.Len() > 1 {
+				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
+			}
 		}
 		if ot.lastVmOp.Ex.Used < 0 {
 			ot.lastVmOp.Ex = nil
@@ -527,32 +580,7 @@ func (ot *OeTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	}
 }
 
-func (ot *OeTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
-}
-
-func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	trace := &ParityTrace{}
-	trace.Type = SUICIDE
-	action := &SuicideTraceAction{}
-	action.Address = from
-	action.RefundAddress = to
-	action.Balance.ToInt().Set(value.ToBig())
-	trace.Action = action
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	traceIdx := topTrace.Subtraces
-	ot.traceAddr = append(ot.traceAddr, traceIdx)
-	topTrace.Subtraces++
-	trace.TraceAddress = make([]int, len(ot.traceAddr))
-	copy(trace.TraceAddress, ot.traceAddr)
-	ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
-	ot.r.Trace = append(ot.r.Trace, trace)
-}
-
-func (ot *OeTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ot *OeTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
+func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
 // Implements core/state/StateWriter to provide state diffs
@@ -711,6 +739,17 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	if !ok {
 		return nil, nil
 	}
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumPtr == nil {
+			return nil, nil
+		}
+		blockNum = *blockNumPtr
+	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		return nil, err
@@ -734,7 +773,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum), chainConfig.Rules(blockNum))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum), chainConfig.Rules(blockNum, block.Time()))
 	if err != nil {
 		return nil, err
 	}
@@ -817,7 +856,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber), chainConfig.Rules(blockNumber))
+	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber), chainConfig.Rules(blockNumber, block.Time()))
 	if err != nil {
 		return nil, err
 	}
@@ -869,7 +908,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -1079,7 +1118,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, err
 	}
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, *parentNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, *parentNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}

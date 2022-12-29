@@ -388,6 +388,9 @@ func NewTransactionsByPriceAndNonce(signer Signer, txs TransactionsGroupedBySend
 }
 
 func (t *TransactionsByPriceAndNonce) Empty() bool {
+	if t == nil {
+		return true
+	}
 	return len(t.idx) == 0
 }
 
@@ -440,6 +443,9 @@ func NewTransactionsFixedOrder(txs Transactions) *TransactionsFixedOrder {
 }
 
 func (t *TransactionsFixedOrder) Empty() bool {
+	if t == nil {
+		return true
+	}
 	return len(t.Transactions) == 0
 }
 

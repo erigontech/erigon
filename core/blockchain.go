@@ -79,7 +79,7 @@ func ExecuteBlockEphemerallyForBSC(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
@@ -197,7 +197,7 @@ func ExecuteBlockEphemerallyForBSC(
 		}
 	}
 
-	if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64()), stateWriter); err != nil {
+	if err := ibs.CommitBlock(chainConfig.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
 		return nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	} else if err := stateWriter.WriteChangeSets(); err != nil {
 		return nil, fmt.Errorf("writing changesets for block %d failed: %w", header.Number.Uint64(), err)
@@ -228,7 +228,7 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
@@ -339,7 +339,7 @@ func ExecuteBlockEphemerallyBor(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
@@ -585,7 +585,7 @@ func FinalizeBlockExecution(engine consensus.Engine, stateReader state.StateRead
 		return nil, nil, nil, err
 	}
 
-	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64()), stateWriter); err != nil {
+	if err := ibs.CommitBlock(cc.Rules(header.Number.Uint64(), header.Time), stateWriter); err != nil {
 		return nil, nil, nil, fmt.Errorf("committing block %d failed: %w", header.Number.Uint64(), err)
 	}
 
@@ -600,6 +600,6 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 		return SysCallContract(contract, data, *cc, ibs, header, engine, false /* constCall */)
 	})
 	noop := state.NewNoopWriter()
-	ibs.FinalizeTx(cc.Rules(header.Number.Uint64()), noop)
+	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil
 }

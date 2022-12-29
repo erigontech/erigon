@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +25,7 @@ func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
 		if i%2 == 1 {
 			v[20] = 2
 		}
-		err := tx.Put(kv.CallTraceSet, dbutils.EncodeBlockNumber(i), v[:])
+		err := tx.Put(kv.CallTraceSet, common2.EncodeTs(i), v[:])
 		require.NoError(t, err)
 	}
 }

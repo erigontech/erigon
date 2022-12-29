@@ -172,6 +172,33 @@ type BeaconBodyBellatrix struct {
 }
 
 /*
+ * Block body for Consensus Layer to be stored internally (payload and attestations are stored separatedly).
+ */
+type BeaconBlockForStorage struct {
+	// Non-body fields
+	Signature     [96]byte `ssz-size:"96"`
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	// Body fields
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
+	SyncAggregate     *SyncAggregate
+	// Metadatas
+	Eth1Number    uint64
+	Eth1BlockHash [32]byte `ssz-size:"32"`
+	Eth2BlockRoot [32]byte `ssz-size:"32"`
+	// Version type
+	Version uint8
+}
+
+/*
  * Bellatrix block structure.
  */
 type BeaconBlockBellatrix struct {
@@ -188,6 +215,55 @@ type BeaconBlockBellatrix struct {
 type SignedBeaconBlockBellatrix struct {
 	Block     *BeaconBlockBellatrix
 	Signature [96]byte `ssz-size:"96"`
+}
+
+type SignedBeaconBlockAltair struct {
+	Block     *BeaconBlockAltair
+	Signature [96]byte `ssz-size:"96"`
+}
+
+type BeaconBlockAltair struct {
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	Body          *BeaconBodyAltair
+}
+
+type BeaconBodyAltair struct {
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Attestations      []*Attestation         `ssz-max:"128"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
+	SyncAggregate     *SyncAggregate
+}
+
+type SignedBeaconBlockPhase0 struct {
+	Block     *BeaconBlockPhase0
+	Signature [96]byte `ssz-size:"96"`
+}
+
+type BeaconBlockPhase0 struct {
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	Body          *BeaconBodyPhase0
+}
+
+type BeaconBodyPhase0 struct {
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Attestations      []*Attestation         `ssz-max:"128"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 }
 
 /*
@@ -299,18 +375,17 @@ type Checkpoint struct {
  */
 type AggregateAndProof struct {
 	AggregatorIndex uint64
-	Aggregate       Attestation
+	Aggregate       *Attestation
 	SelectionProof  [96]byte `ssz-size:"96"`
 }
 
 type SignedAggregateAndProof struct {
-	Message   AggregateAndProof
+	Message   *AggregateAndProof
 	Signature [96]byte `ssz-size:"96"`
 }
 
-// BeaconState is used to create the initial store through checkpoint sync.
-// we only use FinalizedCheckpoint field.
-type BeaconState struct {
+// BellatrixBeaconState is the bellatrix beacon state.
+type BeaconStateBellatrix struct {
 	GenesisTime                  uint64
 	GenesisValidatorsRoot        [32]byte `ssz-size:"32"`
 	Slot                         uint64
@@ -336,6 +411,23 @@ type BeaconState struct {
 	CurrentSyncCommittee         *SyncCommittee
 	NextSyncCommittee            *SyncCommittee
 	LatestExecutionPayloadHeader *ExecutionHeader
+}
+
+// BlockRoot retrieves a the state block root from the state.
+func (b *BeaconStateBellatrix) BlockRoot() ([32]byte, error) {
+	stateRoot, err := b.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, nil
+	}
+	// We make a temporary header for block root computation
+	tempHeader := &BeaconBlockHeader{
+		Slot:          b.LatestBlockHeader.Slot,
+		ProposerIndex: b.LatestBlockHeader.ProposerIndex,
+		ParentRoot:    b.LatestBlockHeader.ParentRoot,
+		BodyRoot:      b.LatestBlockHeader.BodyRoot,
+		Root:          stateRoot,
+	}
+	return tempHeader.HashTreeRoot()
 }
 
 type ObjectSSZ interface {

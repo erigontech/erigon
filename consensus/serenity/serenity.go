@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -126,6 +127,11 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
 	}
+	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
+		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, w := range withdrawals {
 		state.AddBalance(w.Address, &w.Amount)
 	}
@@ -204,7 +210,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify existence / non-existence of withdrawalsHash
-	shanghai := chain.Config().IsShanghai(header.Number.Uint64())
+	shanghai := chain.Config().IsShanghai(header.Time)
 	if shanghai && header.WithdrawalsHash == nil {
 		return fmt.Errorf("missing withdrawalsHash")
 	}

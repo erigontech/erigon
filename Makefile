@@ -18,8 +18,10 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
+CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
+CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
@@ -207,7 +209,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.1
+GOLANG_CROSS_VERSION  ?= v1.1.1
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -278,7 +280,13 @@ coverage:
 .PHONY: hive
 hive:
 	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker pull thorax/hive:latest
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
+
+## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+.PHONY: automated-tests
+automated-tests:
+	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

@@ -2,12 +2,13 @@ package rawdbreset
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -15,29 +16,31 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	// don't reset senders here
-	if err := ResetHashState(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
 	}
-	if err := ResetIH(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	if err := ResetHistory(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
 		return err
 	}
-	if err := ResetLogIndex(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.LogIndex); err != nil {
 		return err
 	}
-	if err := ResetCallTraces(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.CallTraces); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
-	if err := ResetFinish(ctx, db); err != nil {
+	if err := Reset(ctx, db, stages.Finish); err != nil {
 		return err
 	}
 
@@ -78,7 +81,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 	}
 
 	// ensure no garbage records left (it may happen if db is inconsistent)
-	if err := tx.ForEach(kv.BlockBody, dbutils.EncodeBlockNumber(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
+	if err := tx.ForEach(kv.BlockBody, common2.EncodeTs(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
 
@@ -135,7 +138,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 			}
 		}
 
-		historyV3, err := rawdb.HistoryV3.Enabled(tx)
+		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
 		if err != nil {
 			return err
 		}
@@ -182,33 +185,6 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 	})
 }
 
-func ResetHistory(ctx context.Context, db kv.RwDB) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearTables(ctx, db, tx, kv.AccountsHistory, kv.StorageHistory); err != nil {
-			return nil
-		}
-		return clearStageProgress(tx, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
-	})
-}
-
-func ResetLogIndex(ctx context.Context, db kv.RwDB) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearTables(ctx, db, tx, kv.LogAddressIndex, kv.LogTopicIndex); err != nil {
-			return nil
-		}
-		return clearStageProgress(tx, stages.LogIndex)
-	})
-}
-
-func ResetCallTraces(ctx context.Context, db kv.RwDB) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearTables(ctx, db, tx, kv.CallFromIndex, kv.CallToIndex); err != nil {
-			return nil
-		}
-		return clearStageProgress(tx, stages.CallTraces)
-	})
-}
-
 func ResetTxLookup(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
@@ -222,53 +198,89 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetFinish(ctx context.Context, db kv.RwDB) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		return clearStageProgress(tx, stages.Finish)
-	})
+var Tables = map[stages.SyncStage][]string{
+	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
+	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
+	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
+	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
+	stages.AccountHistoryIndex: {kv.AccountsHistory},
+	stages.StorageHistoryIndex: {kv.StorageHistory},
+	stages.Finish:              {},
 }
 
-func ResetHashState(ctx context.Context, db kv.RwDB) error {
-	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearTables(ctx, db, tx, kv.HashedAccounts, kv.HashedStorage, kv.ContractCode); err != nil {
-			return nil
-		}
-		return clearStageProgress(tx, stages.HashState)
+func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
+	const ThreadsLimit = 256
+	var total uint64
+	db.View(ctx, func(tx kv.Tx) error {
+		c, _ := tx.Cursor(bucket)
+		total, _ = c.Count()
+		return nil
 	})
+	progress := atomic.NewInt64(0)
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(ThreadsLimit)
+	for i := 0; i < 256; i++ {
+		for j := 0; j < 256; j++ {
+			i := i
+			j := j
+			g.Go(func() error {
+				return db.View(ctx, func(tx kv.Tx) error {
+					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, _, err = it.Next()
+						if err != nil {
+							return err
+						}
+						select {
+						case <-logEvery.C:
+							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						default:
+						}
+					}
+					return nil
+				})
+			})
+		}
+	}
+	_ = g.Wait()
+}
+func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
+	for _, st := range stList {
+		for _, tbl := range Tables[st] {
+			WarmupTable(ctx, db, tbl, lvl)
+		}
+	}
+	return nil
 }
 
-func ResetIH(ctx context.Context, db kv.RwDB) error {
+func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearTables(ctx, db, tx, kv.TrieOfAccounts, kv.TrieOfStorage); err != nil {
-			return nil
+		for _, st := range stagesList {
+			if err := clearTables(ctx, db, tx, Tables[st]...); err != nil {
+				return nil
+			}
+			if err := clearStageProgress(tx, stagesList...); err != nil {
+				return err
+			}
 		}
-		return clearStageProgress(tx, stages.IntermediateHashes)
+		return nil
 	})
 }
 
 func warmup(ctx context.Context, db kv.RoDB, bucket string) func() {
 	wg := sync.WaitGroup{}
-	for i := 0; i < 256; i++ {
-		prefix := []byte{byte(i)}
-		wg.Add(1)
-		go func(perfix []byte) {
-			defer wg.Done()
-			if err := db.View(ctx, func(tx kv.Tx) error {
-				return tx.ForEach(bucket, prefix, func(k, v []byte) error {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
-					return nil
-				})
-			}); err != nil {
-				if !errors.Is(err, context.Canceled) {
-					log.Warn("warmup", "err", err)
-				}
-			}
-		}(prefix)
-	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		WarmupTable(ctx, db, bucket, log.LvlInfo)
+	}()
 	return func() { wg.Wait() }
 }
 
@@ -282,8 +294,12 @@ func clearTables(ctx context.Context, db kv.RoDB, tx kv.RwTx, tables ...string) 
 }
 
 func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error {
+	ctx, cancel := context.WithCancel(ctx)
 	clean := warmup(ctx, db, table)
-	defer clean()
+	defer func() {
+		cancel()
+		clean()
+	}()
 	log.Info("Clear", "table", table)
 	return tx.ClearBucket(table)
 }

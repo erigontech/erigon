@@ -20,10 +20,12 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -34,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core"
@@ -317,7 +318,7 @@ func searchChangeSet(chaindata string, key []byte, block uint64) error {
 	}
 	defer tx.Rollback()
 
-	if err := changeset.ForEach(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.AccountChangeSet, common2.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -337,7 +338,7 @@ func searchStorageChangeSet(chaindata string, key []byte, block uint64) error {
 		return err1
 	}
 	defer tx.Rollback()
-	if err := changeset.ForEach(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(block), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(tx, kv.StorageChangeSet, common2.EncodeTs(block), func(blockN uint64, k, v []byte) error {
 		if bytes.Equal(k, key) {
 			fmt.Printf("Found in block %d with value %x\n", blockN, v)
 		}
@@ -476,7 +477,7 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 		return err
 	}
 	defer c.Close()
-	blockEncoded := dbutils.EncodeBlockNumber(block)
+	blockEncoded := common2.EncodeTs(block)
 	blockTotal := getBlockTotal(tx, block, blockTotalOrOffset)
 	for k, v, err := c.Seek(blockEncoded); k != nil && blockTotal > 0; k, v, err = c.Next() {
 		if err != nil {
@@ -1001,7 +1002,7 @@ func scanReceipts2(chaindata string) error {
 		return err
 	}
 	defer tx.Rollback()
-	blockNum, err := changeset.AvailableFrom(tx)
+	blockNum, err := historyv2.AvailableFrom(tx)
 	if err != nil {
 		return err
 	}
@@ -1075,8 +1076,6 @@ func chainConfig(name string) error {
 	switch name {
 	case "mainnet":
 		chainConfig = params.MainnetChainConfig
-	case "ropsten":
-		chainConfig = params.RopstenChainConfig
 	case "sepolia":
 		chainConfig = params.SepoliaChainConfig
 	case "rinkeby":
@@ -1091,8 +1090,6 @@ func chainConfig(name string) error {
 		chainConfig = params.ChapelChainConfig
 	case "rialto":
 		chainConfig = params.RialtoChainConfig
-	case "fermion":
-		chainConfig = params.FermionChainConfig
 	case "mumbai":
 		chainConfig = params.MumbaiChainConfig
 	case "bor-mainnet":
@@ -1285,6 +1282,7 @@ func iterate(filename string, prefix string) error {
 			ef, _ := eliasfano32.ReadEliasFano(val)
 			efIt := ef.Iterator()
 			fmt.Printf("[%x] =>", key)
+			cnt := 0
 			for efIt.HasNext() {
 				txNum := efIt.Next()
 				var txKey [8]byte
@@ -1295,6 +1293,11 @@ func iterate(filename string, prefix string) error {
 				fmt.Printf(" %d", txNum)
 				if len(v) == 0 {
 					fmt.Printf("*")
+				}
+				cnt++
+				if cnt == 16 {
+					fmt.Printf("\n")
+					cnt = 0
 				}
 			}
 			fmt.Printf("\n")
@@ -1319,6 +1322,22 @@ func readSeg(chaindata string) error {
 		count++
 	}
 	fmt.Printf("count=%d\n", count)
+	return nil
+}
+
+func dumpState(chaindata string) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
+		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
+			fmt.Printf("%x %x\n", k, v)
+			return nil
+		})
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1451,6 +1470,8 @@ func main() {
 		err = rmSnKey(*chaindata)
 	case "readSeg":
 		err = readSeg(*chaindata)
+	case "dumpState":
+		err = dumpState(*chaindata)
 	}
 
 	if err != nil {

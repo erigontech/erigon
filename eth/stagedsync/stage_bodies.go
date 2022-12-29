@@ -80,7 +80,7 @@ func BodiesForward(
 		}
 	}
 	// This will update bd.maxProgress
-	if _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
+	if _, _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
 	}
 	var headerProgress, bodyProgress uint64

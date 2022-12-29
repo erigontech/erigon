@@ -223,7 +223,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		if err != nil {
 			return nil, common.Hash{}, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0), baseFee, config.Rules(0, 0))
 		if err != nil {
 			return nil, common.Hash{}, err
 		}
@@ -312,7 +312,10 @@ func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, b
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
-		balance, _ := uint256.FromBig(a.Balance)
+		balance := uint256.NewInt(0)
+		if a.Balance != nil {
+			balance, _ = uint256.FromBig(a.Balance)
+		}
 		statedb.SetBalance(addr, balance)
 		for k, v := range a.Storage {
 			key := k

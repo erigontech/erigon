@@ -385,6 +385,7 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *par
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
+		gasPrice:   *tx.FeeCap,
 		tip:        *tx.Tip,
 		feeCap:     *tx.FeeCap,
 		to:         tx.To,
