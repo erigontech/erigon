@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -75,13 +76,13 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		if err := slotToRootCollector.Collect(slotBytes[:], block.Block.StateRoot[:]); err != nil {
 			return err
 		}
-		fmt.Println(eth1Hash)
-		fmt.Println(eth2Hash)
-		fmt.Println(block.Block.StateRoot[:])
-		// Collect root indexes => slot
-		if err := rootToSlotCollector.Collect(eth1Hash[:], slotBytes[:]); err != nil {
-			return err
+		if eth1Hash != (common.Hash{}) {
+			// Collect root indexes => slot
+			if err := rootToSlotCollector.Collect(eth1Hash[:], slotBytes[:]); err != nil {
+				return err
+			}
 		}
+
 		if err := rootToSlotCollector.Collect(eth2Hash[:], slotBytes[:]); err != nil {
 			return err
 		}
