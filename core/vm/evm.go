@@ -253,7 +253,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr common.Address, input 
 		} else {
 			contract = NewContract(caller, AccountRef(addrCopy), value, gas, evm.config.SkipAnalysis)
 		}
-		contract.SetCallCode(&addrCopy, codeHash, code, evm.maybeParseContainer(code))
+		contract.SetCallCode(&addrCopy, codeHash, code, evm.parseContainer(code))
 		readOnly := false
 		if typ == STATICCALL {
 			readOnly = true
@@ -365,7 +365,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	// If the initcode is EOF, verify it is well-formed.
-	if evm.chainRules.IsShanghai && hasEOFByte(codeAndHash.code) {
+	isInitcodeEOF := hasEOFByte(codeAndHash.code)
+	if evm.chainRules.IsShanghai && isInitcodeEOF {
 		var c Container
 		if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
 			return nil, common.Address{}, 0, fmt.Errorf("%v: %v", ErrInvalidEOF, err)
@@ -403,6 +404,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrMaxCodeSizeExceeded
 	}
 
+	// Reject legacy contract deployment from EOF.
+	if err == nil && isInitcodeEOF && !hasEOFByte(ret) {
+		err = ErrLegacyCode
+	}
+
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
 			var c Container
@@ -410,7 +416,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 				err = c.ValidateCode(evm.Config().JumpTableEOF)
 			}
 			if err != nil {
-				err = fmt.Errorf("invalid code: %v", err)
+				err = fmt.Errorf("%v: %v", ErrInvalidEOF, err)
 			}
 		} else if evm.chainRules.IsLondon {
 			// Reject code starting with 0xEF if EIP-3541 is enabled.
@@ -502,12 +508,14 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }
 
-func (evm *EVM) maybeParseContainer(b []byte) *Container {
+// parseContainer tries to parse an EOF container if the Shanghai fork is active. It expects the code to already be validated.
+func (evm *EVM) parseContainer(b []byte) *Container {
 	if evm.chainRules.IsShanghai {
 		var c Container
 		if err := c.UnmarshalBinary(b); err != nil && err.Error() == "invalid magic" {
 			return nil
 		} else if err != nil {
+			// Code was already validated, so no other errors should be possible.
 			panic(fmt.Sprintf("unexpected error: %v", err))
 		}
 		return &c
