@@ -153,21 +153,19 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
-		if txTask.BlockNum > 0 {
-			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
-			// End of block transaction in a block
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
-			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
-				//fmt.Printf("error=%v\n", err)
-				txTask.Error = err
-			} else {
-				txTask.TraceTos = map[common.Address]struct{}{}
-				txTask.TraceTos[txTask.Coinbase] = struct{}{}
-				for _, uncle := range txTask.Uncles {
-					txTask.TraceTos[uncle.Coinbase] = struct{}{}
-				}
+		//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		// End of block transaction in a block
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+		}
+		if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
+			//fmt.Printf("error=%v\n", err)
+			txTask.Error = err
+		} else {
+			txTask.TraceTos = map[common.Address]struct{}{}
+			txTask.TraceTos[txTask.Coinbase] = struct{}{}
+			for _, uncle := range txTask.Uncles {
+				txTask.TraceTos[uncle.Coinbase] = struct{}{}
 			}
 		}
 	} else {
