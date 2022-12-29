@@ -45,7 +45,8 @@ type TxTask struct {
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
 
-	UsedGas uint64
+	UsedGas     uint64
+	Withdrawals types.Withdrawals
 }
 
 type TxTaskQueue []*TxTask
