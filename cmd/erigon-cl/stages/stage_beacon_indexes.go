@@ -66,16 +66,6 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		}
 		slotBytes := utils.Uint32ToBytes4(uint32(slot))
 
-		// Collect slot => root indexes
-		if err := slotToRootCollector.Collect(slotBytes[:], eth1Hash[:]); err != nil {
-			return err
-		}
-		if err := slotToRootCollector.Collect(slotBytes[:], eth2Hash[:]); err != nil {
-			return err
-		}
-		if err := slotToRootCollector.Collect(slotBytes[:], block.Block.StateRoot[:]); err != nil {
-			return err
-		}
 		if eth1Hash != (common.Hash{}) {
 			// Collect root indexes => slot
 			if err := rootToSlotCollector.Collect(eth1Hash[:], slotBytes[:]); err != nil {
@@ -96,9 +86,6 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		}
 	}
 	if err := rootToSlotCollector.Load(tx, kv.RootSlotIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-	if err := slotToRootCollector.Load(tx, kv.SlotRootIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	if err := s.Update(tx, endSlot); err != nil {
