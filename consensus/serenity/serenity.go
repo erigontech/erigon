@@ -135,7 +135,7 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 	for _, w := range withdrawals {
 		state.AddBalance(w.Address, &w.Amount)
 	}
-	if config.IsSharding(header.Number.Uint64()) {
+	if config.IsSharding(header.Time) {
 		parent := chain.GetHeaderByHash(header.ParentHash)
 		if parent == nil {
 			return nil, nil, fmt.Errorf("Could not find the parent of block %v to get excess data gas", header.Number.Uint64())
@@ -225,7 +225,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	if !chain.Config().IsSharding(header.Number.Uint64()) {
+	if !chain.Config().IsSharding(header.Time) {
 		if header.ExcessDataGas != nil {
 			return fmt.Errorf("invalid excessDataGas before fork: have %v, expected 'nil'", header.ExcessDataGas)
 		}
