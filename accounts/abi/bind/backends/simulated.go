@@ -171,7 +171,6 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		fmt.Printf("pending state\n")
 		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
 	}
 	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))

@@ -86,15 +86,6 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[common.Add
 
 	if histV3 {
 		ps.txNr, _ = rawdb.TxNums.Min(tx, blockNr)
-		fmt.Printf("n: %d, %d\n", blockNr, ps.txNr)
-		a, _ := rawdb.TxNums.Min(tx, 0)
-		fmt.Printf("n0: %d\n", a)
-		a, _ = rawdb.TxNums.Min(tx, 1)
-		fmt.Printf("n1: %d\n", a)
-		a, _ = rawdb.TxNums.Min(tx, 2)
-		fmt.Printf("n2: %d\n", a)
-		a, _ = rawdb.TxNums.Min(tx, 3)
-		fmt.Printf("n3: %d\n", a)
 	}
 	return ps
 }
