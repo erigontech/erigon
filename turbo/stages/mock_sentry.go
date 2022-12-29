@@ -100,10 +100,10 @@ func (ms *MockSentry) Close() {
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
-	ms.DB.Close()
 	if ms.HistoryV3 {
 		ms.agg.Close()
 	}
+	ms.DB.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -226,7 +226,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	var agg *libstate.Aggregator22
 	if cfg.HistoryV3 {
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		agg, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
