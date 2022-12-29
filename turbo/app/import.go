@@ -206,7 +206,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	for _, b := range chain.Blocks {
 		sentryControlServer.Hd.AddMinedHeader(b.Header())
-		sentryControlServer.Bd.AddMinedBlock(b)
+		sentryControlServer.Bd.AddToPrefetch(b)
 	}
 
 	sentryControlServer.Hd.MarkAllVerified()

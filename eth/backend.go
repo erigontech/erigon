@@ -610,9 +610,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
 					log.Error("add mined block to header downloader", "err", err)
 				}
-				if err := backend.sentriesClient.Bd.AddMinedBlock(b); err != nil {
-					log.Error("add mined block to body downloader", "err", err)
-				}
+				backend.sentriesClient.Bd.AddToPrefetch(b)
 
 				//p2p
 				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
