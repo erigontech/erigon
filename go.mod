@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20221229160843-f964c226d8e9
+	github.com/ledgerwatch/erigon-lib v0.0.0-20221229162357-1dfb2ea385a8
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221223003841-487873d31492
 	github.com/ledgerwatch/log/v3 v3.6.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -71,7 +71,7 @@ require (
 	github.com/tendermint/go-amino v0.14.1
 	github.com/tendermint/tendermint v0.31.12
 	github.com/tidwall/btree v1.5.0
-	github.com/torquem-ch/mdbx-go v0.27.1-0.20221229160737-096c28ea8168
+	github.com/torquem-ch/mdbx-go v0.27.1-0.20221229162304-2552bacd183f
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
 	github.com/urfave/cli/v2 v2.23.7
