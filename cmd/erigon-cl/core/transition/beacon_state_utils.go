@@ -5,16 +5,20 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 const (
-	SHUFFLE_ROUND_COUNT          = uint8(90)
-	EPOCHS_PER_HISTORICAL_VECTOR = uint64(1 << 16)
-	MIN_SEED_LOOKAHEAD           = uint64(1)
-	SLOTS_PER_EPOCH              = uint64(1 << 5)
+	SHUFFLE_ROUND_COUNT           = uint8(90)
+	EPOCHS_PER_HISTORICAL_VECTOR  = uint64(1 << 16)
+	MIN_SEED_LOOKAHEAD            = uint64(1)
+	SLOTS_PER_EPOCH               = uint64(1 << 5)
+	EPOCHS_PER_ETH1_VOTING_PERIOD = uint64(1 << 6)
 )
 
 func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) {
@@ -25,11 +29,10 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 	for i := uint8(0); i < SHUFFLE_ROUND_COUNT; i++ {
 		// Construct first hash input.
 		input := append(seed[:], i)
-		hash := sha256.New()
-		hash.Write(input)
+		hashedInput := utils.Keccak256(input)
 
 		// Read hash value.
-		hashValue := binary.LittleEndian.Uint64(hash.Sum(nil)[:8])
+		hashValue := binary.LittleEndian.Uint64(hashedInput[:8])
 
 		// Caclulate pivot and flip.
 		pivot := hashValue % ind_count
@@ -47,11 +50,9 @@ func ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte) (uint64, error) 
 		input2 := append(seed[:], i)
 		input2 = append(input2, positionByteArray...)
 
-		hash.Reset()
-		hash.Write(input2)
+		hashedInput2 := utils.Keccak256(input2)
 		// Read hash value.
-		source := hash.Sum(nil)
-		byteVal := source[(position%256)/8]
+		byteVal := hashedInput2[(position%256)/8]
 		bitVal := (byteVal >> (position % 8)) % 2
 		if bitVal == 1 {
 			ind = flip
@@ -121,6 +122,30 @@ func GetEpochAtSlot(slot uint64) uint64 {
 	return slot / SLOTS_PER_EPOCH
 }
 
+func GetDomain(state *state.BeaconState, domainType [4]byte, epoch uint64) ([]byte, error) {
+	if epoch == 0 {
+		epoch = GetEpochAtSlot(state.Slot())
+	}
+	var forkVersion [4]byte
+	if epoch < state.Fork().Epoch {
+		forkVersion = state.Fork().PreviousVersion
+	} else {
+		forkVersion = state.Fork().CurrentVersion
+	}
+	return fork.ComputeDomain(domainType[:], forkVersion, state.GenesisValidatorsRoot())
+}
+
+func ComputeSigningRootEpoch(epoch uint64, domain []byte) ([32]byte, error) {
+	b := make([]byte, 32)
+	binary.LittleEndian.PutUint64(b, epoch)
+	hash := utils.Keccak256(b)
+	sd := &cltypes.SigningData{
+		Root:   hash,
+		Domain: domain,
+	}
+	return sd.HashTreeRoot()
+}
+
 func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
 	epoch := GetEpochAtSlot(state.Slot())
 
@@ -146,7 +171,7 @@ func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {
 	return ComputeProposerIndex(state, indices, seedArray)
 }
 
-func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBellatrix) error {
+func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) error {
 	if block.Slot != state.Slot() {
 		return fmt.Errorf("state slot: %d, not equal to block slot: %d", state.Slot(), block.Slot)
 	}
@@ -181,6 +206,70 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlockBell
 	proposer := state.ValidatorAt(int(block.ProposerIndex))
 	if proposer.Slashed {
 		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
+	}
+	return nil
+}
+
+func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBody) error {
+	epoch := GetEpochAtSlot(state.Slot())
+	propInd, err := GetBeaconProposerIndex(state)
+	if err != nil {
+		return fmt.Errorf("unable to get proposer index: %v", err)
+	}
+	proposer := state.ValidatorAt(int(propInd))
+	domain, err := GetDomain(state, clparams.MainnetBeaconConfig.DomainRandao, epoch)
+	if err != nil {
+		return fmt.Errorf("unable to get domain: %v", err)
+	}
+	signingRoot, err := ComputeSigningRootEpoch(epoch, domain)
+	if err != nil {
+		return fmt.Errorf("unable to compute signing root: %v", err)
+	}
+	valid, err := bls.Verify(body.RandaoReveal[:], signingRoot[:], proposer.PublicKey[:])
+	if err != nil {
+		return fmt.Errorf("unable to verify public key: %x, with signing root: %x, and signature: %x, %v", proposer.PublicKey[:], signingRoot[:], body.RandaoReveal[:], err)
+	}
+	if !valid {
+		return fmt.Errorf("invalid signature: public key: %x, signing root: %x, signature: %x", proposer.PublicKey[:], signingRoot[:], body.RandaoReveal[:])
+	}
+	randaoMixes := GetRandaoMixes(state, epoch)
+	randaoHash := utils.Keccak256(body.RandaoReveal[:])
+	mix := [32]byte{}
+	for i := range mix {
+		mix[i] = randaoMixes[i] ^ randaoHash[i]
+	}
+	state.RandaoMixes()[epoch%EPOCHS_PER_HISTORICAL_VECTOR] = mix
+	return nil
+}
+
+func ProcessEth1Data(state *state.BeaconState, body *cltypes.BeaconBody) error {
+	newVotes := append(state.Eth1DataVotes(), body.Eth1Data)
+	state.SetEth1DataVotes(newVotes)
+
+	ethDataHash, err := body.Eth1Data.HashTreeRoot()
+	if err != nil {
+		return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
+	}
+	// Count how many times body.Eth1Data appears in the votes by comparing their hashes.
+	numVotes := 0
+	for i := 0; i < len(newVotes); i++ {
+		candidateHash, err := newVotes[i].HashTreeRoot()
+		if err != nil {
+			return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
+		}
+		// Check if hash bytes are equal.
+		match := true
+		for i := 0; i < len(candidateHash); i++ {
+			if candidateHash[i] != ethDataHash[i] {
+				match = false
+			}
+		}
+		if match {
+			numVotes += 1
+		}
+	}
+	if uint64(numVotes*2) > EPOCHS_PER_ETH1_VOTING_PERIOD*SLOTS_PER_EPOCH {
+		state.SetEth1Data(body.Eth1Data)
 	}
 	return nil
 }

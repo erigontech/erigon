@@ -14,7 +14,7 @@ import (
 )
 
 // This function will trigger block execution, hence: insert + validate + fcu.
-type triggerExecutionFunc func(*cltypes.SignedBeaconBlockBellatrix) error
+type triggerExecutionFunc func(*cltypes.SignedBeaconBlock) error
 
 type StageBeaconStateCfg struct {
 	db               kv.RwDB

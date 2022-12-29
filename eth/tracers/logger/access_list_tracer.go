@@ -17,8 +17,6 @@
 package logger
 
 import (
-	"time"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -175,17 +173,9 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 
 func (*AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (*AccessListTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (*AccessListTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
-func (*AccessListTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
-}
-func (*AccessListTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-func (*AccessListTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (*AccessListTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
+func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 // AccessList returns the current accesslist maintained by the tracer.

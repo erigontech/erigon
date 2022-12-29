@@ -102,13 +102,9 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideTerminalTotalDifficulty = BigFlag{
-		Name:  "override.terminaltotaldifficulty",
-		Usage: "Manually specify TerminalTotalDifficulty, overriding the bundled setting",
-	}
-	OverrideMergeNetsplitBlock = BigFlag{
-		Name:  "override.mergeNetsplitBlock",
-		Usage: "Manually specify FORK_NEXT_VALUE (see EIP-3675), overriding the bundled setting",
+	OverrideShanghaiTime = BigFlag{
+		Name:  "override.shanghaiTime",
+		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
 	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
@@ -1583,11 +1579,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverrideTerminalTotalDifficulty.Name) {
-		cfg.OverrideTerminalTotalDifficulty = BigFlagValue(ctx, OverrideTerminalTotalDifficulty.Name)
-	}
-	if ctx.IsSet(OverrideMergeNetsplitBlock.Name) {
-		cfg.OverrideMergeNetsplitBlock = BigFlagValue(ctx, OverrideMergeNetsplitBlock.Name)
+	if ctx.IsSet(OverrideShanghaiTime.Name) {
+		cfg.OverrideShanghaiTime = BigFlagValue(ctx, OverrideShanghaiTime.Name)
 	}
 
 	if ctx.IsSet(ExternalConsensusFlag.Name) {

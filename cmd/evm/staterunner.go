@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -60,26 +61,26 @@ func stateTestCmd(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// Configure the EVM logger
-	config := &vm.LogConfig{
+	config := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	var (
-		tracer   vm.Tracer
-		debugger *vm.StructLogger
+		tracer   vm.EVMLogger
+		debugger *logger.StructLogger
 	)
 	switch {
 	case ctx.Bool(MachineFlag.Name):
-		tracer = vm.NewJSONLogger(config, os.Stderr)
+		tracer = logger.NewJSONLogger(config, os.Stderr)
 
 	case ctx.Bool(DebugFlag.Name):
-		debugger = vm.NewStructLogger(config)
+		debugger = logger.NewStructLogger(config)
 		tracer = debugger
 
 	default:
-		debugger = vm.NewStructLogger(config)
+		debugger = logger.NewStructLogger(config)
 	}
 	// Load the test content from the input file
 	src, err := os.ReadFile(ctx.Args().First())
@@ -105,8 +106,8 @@ func stateTestCmd(ctx *cli.Context) error {
 func aggregateResultsFromStateTests(
 	ctx *cli.Context,
 	stateTests map[string]tests.StateTest,
-	tracer vm.Tracer,
-	debugger *vm.StructLogger,
+	tracer vm.EVMLogger,
+	debugger *logger.StructLogger,
 ) ([]StatetestResult, error) {
 	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
@@ -175,7 +176,7 @@ func aggregateResultsFromStateTests(
 					if printErr != nil {
 						log.Warn("Failed to write to stderr", "err", printErr)
 					}
-					vm.WriteTrace(os.Stderr, debugger.StructLogs())
+					logger.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
 		}

@@ -1195,7 +1195,7 @@ func newFrontierInstructionSet() JumpTable {
 			memorySize: memoryReturn,
 		},
 		SELFDESTRUCT: {
-			execute:    opSuicide,
+			execute:    opSelfdestruct,
 			dynamicGas: gasSelfdestruct,
 			numPop:     1,
 			numPush:    0,

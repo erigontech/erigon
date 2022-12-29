@@ -26,8 +26,10 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
@@ -53,25 +55,39 @@ type PlainState struct {
 	accHistoryC, storageHistoryC kv.Cursor
 	accChangesC, storageChangesC kv.CursorDupSort
 	tx                           kv.Tx
-	blockNr                      uint64
+	blockNr, txNr                uint64
+	histV3                       bool
 	storage                      map[common.Address]*btree.BTree
 	trace                        bool
 	systemContractLookup         map[common.Address][]CodeRecord
 }
 
 func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[common.Address][]CodeRecord) *PlainState {
-	c1, _ := tx.Cursor(kv.AccountsHistory)
-	c2, _ := tx.Cursor(kv.StorageHistory)
-	c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
-	c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
-
-	return &PlainState{
-		tx:          tx,
-		blockNr:     blockNr,
-		storage:     make(map[common.Address]*btree.BTree),
-		accHistoryC: c1, storageHistoryC: c2, accChangesC: c3, storageChangesC: c4,
+	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
+	ps := &PlainState{
+		tx:                   tx,
+		blockNr:              blockNr,
+		histV3:               histV3,
+		storage:              make(map[common.Address]*btree.BTree),
 		systemContractLookup: systemContractLookup,
 	}
+
+	if _, ok := tx.(kv.TemporalTx); !ok {
+		c1, _ := tx.Cursor(kv.AccountsHistory)
+		c2, _ := tx.Cursor(kv.StorageHistory)
+		c3, _ := tx.CursorDupSort(kv.AccountChangeSet)
+		c4, _ := tx.CursorDupSort(kv.StorageChangeSet)
+
+		ps.accHistoryC = c1
+		ps.storageHistoryC = c2
+		ps.accChangesC = c3
+		ps.storageChangesC = c4
+	}
+
+	if histV3 {
+		ps.txNr, _ = rawdb.TxNums.Min(tx, blockNr)
+	}
+	return ps
 }
 
 func (s *PlainState) SetTrace(trace bool) {
@@ -90,10 +106,20 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
-	if err != nil {
-		return err
+	var accData []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		accData, err = historyv2read.GetAsOfV3(ttx, false /* storage */, addr[:], s.txNr, s.histV3)
+		if err != nil {
+			return err
+		}
+	} else {
+		accData, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+		if err != nil {
+			return err
+		}
 	}
+
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "err", err)
@@ -162,9 +188,18 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 }
 
 func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
-	if err != nil {
-		return nil, err
+	var enc []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.txNr, s.histV3)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(enc) == 0 {
 		if s.trace {
@@ -199,9 +234,18 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
-	if err != nil {
-		return nil, err
+	var enc []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		enc, err = historyv2read.GetAsOfV3(ttx, true /* storage */, compositeKey, s.txNr, s.histV3)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		enc, err = historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if s.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
@@ -232,9 +276,18 @@ func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uin
 }
 
 func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
-	if err != nil {
-		return 0, err
+	var enc []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.txNr+1, s.histV3)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
+		if err != nil {
+			return 0, err
+		}
 	}
 	if len(enc) == 0 {
 		return 0, nil

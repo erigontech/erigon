@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -314,6 +313,21 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		action.Init = common.CopyBytes(input)
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
+	} else if typ == vm.SELFDESTRUCT {
+		trace := &ParityTrace{}
+		trace.Type = SUICIDE
+		action := &SuicideTraceAction{}
+		action.Address = from
+		action.RefundAddress = to
+		action.Balance.ToInt().Set(value.ToBig())
+		trace.Action = action
+		topTrace := ot.traceStack[len(ot.traceStack)-1]
+		traceIdx := topTrace.Subtraces
+		ot.traceAddr = append(ot.traceAddr, traceIdx)
+		topTrace.Subtraces++
+		trace.TraceAddress = make([]int, len(ot.traceAddr))
+		copy(trace.TraceAddress, ot.traceAddr)
+		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	} else {
 		action := CallTraceAction{}
 		switch typ {
@@ -345,7 +359,7 @@ func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.A
 	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -379,11 +393,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas 
 			switch topTrace.Type {
 			case CALL:
 				topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
 				topTrace.Result.(*TraceResult).Output = common.CopyBytes(output)
 			case CREATE:
 				topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+				topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
 				topTrace.Result.(*CreateTraceResult).Code = common.CopyBytes(output)
 			}
 		} else {
@@ -418,10 +432,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas 
 		switch topTrace.Type {
 		case CALL:
 			topTrace.Result.(*TraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*TraceResult).GasUsed.ToInt().SetUint64(usedGas)
 		case CREATE:
 			topTrace.Result.(*CreateTraceResult).GasUsed = new(hexutil.Big)
-			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(startGas - endGas)
+			topTrace.Result.(*CreateTraceResult).GasUsed.ToInt().SetUint64(usedGas)
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -430,12 +444,12 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, startGas, endGas 
 	}
 }
 
-func (ot *OeTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
-	ot.captureEndOrExit(false /* deep */, output, startGas, endGas, t, err)
+func (ot *OeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+	ot.captureEndOrExit(false /* deep */, output, usedGas, err)
 }
 
-func (ot *OeTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
-	ot.captureEndOrExit(true /* deep */, output, startGas, endGas, t, err)
+func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+	ot.captureEndOrExit(true /* deep */, output, usedGas, err)
 }
 
 func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
@@ -480,7 +494,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 				setMem = true
 			}
 			if setMem && ot.lastMemLen > 0 {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
@@ -495,7 +509,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 				ot.lastOffStack.Ex.Push = []string{}
 			}
 			if ot.lastMemLen > 0 && memory != nil {
-				cpy := memory.GetCopy(ot.lastMemOff, ot.lastMemLen)
+				cpy := memory.GetCopy(int64(ot.lastMemOff), int64(ot.lastMemLen))
 				if len(cpy) == 0 {
 					cpy = make([]byte, ot.lastMemLen)
 				}
@@ -567,31 +581,6 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 }
 
 func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
-}
-
-func (ot *OeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	trace := &ParityTrace{}
-	trace.Type = SUICIDE
-	action := &SuicideTraceAction{}
-	action.Address = from
-	action.RefundAddress = to
-	action.Balance.ToInt().Set(value.ToBig())
-	trace.Action = action
-	topTrace := ot.traceStack[len(ot.traceStack)-1]
-	traceIdx := topTrace.Subtraces
-	ot.traceAddr = append(ot.traceAddr, traceIdx)
-	topTrace.Subtraces++
-	trace.TraceAddress = make([]int, len(ot.traceAddr))
-	copy(trace.TraceAddress, ot.traceAddr)
-	ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
-	ot.r.Trace = append(ot.r.Trace, trace)
-}
-
-func (ot *OeTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ot *OeTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
 }
 
 // Implements core/state/StateWriter to provide state diffs

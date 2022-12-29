@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -890,52 +891,42 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	if err != nil {
 		return err
 	}
-	errs := make(chan error, 1024)
-	wg := &sync.WaitGroup{}
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
-	go func() {
-		for _, t := range snaptype.AllSnapshotTypes {
-			for index := range segments {
-				segment := segments[index]
-				if segment.T != t {
-					continue
-				}
-				if hasIdxFile(&segment) {
-					continue
-				}
-				if err := sem.Acquire(ctx, 1); err != nil {
-					errs <- err
-					return
-				}
-				wg.Add(1)
-				go func(sn snaptype.FileInfo) {
-					defer sem.Release(1)
-					defer wg.Done()
 
-					p := &background.Progress{}
-					ps.Add(p)
-					defer ps.Delete(p)
-					if err := buildIdx(ctx, sn, chainID, tmpDir, p, log.LvlInfo); err != nil {
-						errs <- err
-					}
-				}(segment)
+	g, gCtx := errgroup.WithContext(ctx)
+	for _, t := range snaptype.AllSnapshotTypes {
+		for index := range segments {
+			segment := segments[index]
+			if segment.T != t {
+				continue
 			}
+			if hasIdxFile(&segment) {
+				continue
+			}
+			if err := sem.Acquire(gCtx, 1); err != nil {
+				return err
+			}
+			sn := segment
+			g.Go(func() error {
+				defer sem.Release(1)
+				p := &background.Progress{}
+				ps.Add(p)
+				defer ps.Delete(p)
+				return buildIdx(gCtx, sn, chainID, tmpDir, p, log.LvlInfo)
+			})
 		}
-		wg.Wait()
-		close(errs)
+	}
+	finish := make(chan struct{})
+	go func() {
+		g.Wait()
+		close(finish)
 	}()
 
 	for {
 		select {
-		case err, ok := <-errs:
-			if !ok {
-				log.Info(fmt.Sprintf("[%s] finished indexing", logPrefix), "time", time.Since(startIndexingTime).String())
-				return nil
-			}
-			if err != nil {
-				return err
-			}
+		case <-finish:
+			return g.Wait()
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
@@ -1274,7 +1265,7 @@ func hasIdxFile(sn *snaptype.FileInfo) bool {
 	}
 	dir, _ := filepath.Split(sn.Path)
 	fName := snaptype.IdxFileName(sn.From, sn.To, sn.T.String())
-	var result bool = true
+	var result = true
 	switch sn.T {
 	case snaptype.Headers:
 		idx, err := recsplit.OpenIndex(path.Join(dir, fName))
