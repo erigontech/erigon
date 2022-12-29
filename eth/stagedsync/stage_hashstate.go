@@ -280,7 +280,7 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 				}
 
 				select {
-				case out <- pair{k, v}:
+				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
 					return ctx.Err()
 				default:
