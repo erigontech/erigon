@@ -1742,30 +1742,56 @@ type txNums struct{}
 
 var TxNums txNums
 
-func (txNums) Max(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+// Min - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
-func (txNums) Min(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+
+// Min - returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
 	}
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum-1)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v) + 1, nil
 }
