@@ -55,6 +55,11 @@ func (bits bitvec) set16(pos uint64) {
 	bits[pos/8+2] = ^a
 }
 
+// codeSegment checks if the position is in a code segment.
+func (bits *bitvec) codeSegment(pos uint64) bool {
+	return (((*bits)[pos/8] >> (pos % 8)) & 1) == 0
+}
+
 // codeBitmap collects data locations in code.
 func codeBitmap(code []byte) []uint64 {
 	// The bitmap is 4 bytes longer than necessary, in case the code
@@ -96,16 +101,19 @@ func eofCodeBitmapInternal(code, bits bitvec) bitvec {
 	for pc := uint64(0); pc < uint64(len(code)); {
 		op := OpCode(code[pc])
 		pc++
+
+		// RJUMP and RJUMPI always have 2 byte operand.
 		if int8(op) == int8(RJUMP) || int8(op) == int8(RJUMPI) {
 			bits.setN(set2BitsMask, pc)
 			pc += 2
+			continue
 		}
 		var numbits uint8
-		if int8(op) >= int8(PUSH1) || int8(op) <= int8(PUSH32) {
-			numbits = uint8(code[pc])
-			pc++
-		} else if int8(op) == int8(RJUMPV) {
+		if int8(op) >= int8(PUSH1) && int8(op) <= int8(PUSH32) {
 			numbits = uint8(op - PUSH1 + 1)
+		} else if int8(op) == int8(RJUMPV) {
+			// RJUMPV has variable sized operand
+			numbits = uint8(code[pc]*2) + 1
 		} else {
 			// If not PUSH (the int8(op) > int(PUSH32) is always false).
 			continue

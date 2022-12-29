@@ -51,7 +51,7 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 			}
 			// Verify that the relative jump offset points to a
 			// destination in-bounds.
-			if err := checkDest(code[i+1:], *analysis, i, len(code)); err != nil {
+			if err := checkDest(code[i+1:], *analysis, i+3, len(code)); err != nil {
 				return err
 			}
 			i += 2
@@ -65,12 +65,12 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 			if i+1 >= len(code) {
 				return fmt.Errorf("truncated jump table operand")
 			}
-			count := int(code[i])
+			count := int(code[i+1])
 			if count == 0 {
 				return fmt.Errorf("rjumpv branch count must not be 0")
 			}
 			for j := 0; j < count; j++ {
-				if err := checkDest(code[i+1+j*2:], *analysis, i, len(code)); err != nil {
+				if err := checkDest(code[i+2+j*2:], *analysis, i+2*count+2, len(code)); err != nil {
 					return err
 				}
 			}
@@ -111,10 +111,10 @@ func checkDest(code []byte, analysis bitvec, idx, length int) error {
 	}
 	offset := parseInt16(code)
 	dest := idx + int(offset)
-	if dest < 0 || dest >= len(code) {
+	if dest < 0 || dest >= length {
 		return fmt.Errorf("relative offset out-of-bounds: %d", dest)
 	}
-	if analysis[dest] == 1 {
+	if !analysis.codeSegment(uint64(dest)) {
 		return fmt.Errorf("relative offset into immediate operand: %d", dest)
 	}
 	return nil
@@ -139,7 +139,6 @@ func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata,
 		worklist = worklist[:idx]
 		for pos < len(code) {
 			op := OpCode(code[pos])
-			fmt.Println(op)
 
 			// Check if pos has already be visited; if so, the stack heights should be the same.
 			if exp, ok := heights[pos]; ok {

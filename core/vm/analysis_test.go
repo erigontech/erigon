@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -24,6 +25,18 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 )
+
+func bitvecToUint64Slice(b bitvec) []uint64 {
+	n := (len(b) + 7) / 8
+	padded := make([]byte, n*8)
+	copy(padded, b)
+
+	res := make([]uint64, n)
+	for i := 0; i < n; i++ {
+		res[i] = binary.LittleEndian.Uint64(padded[i*8:])
+	}
+	return res
+}
 
 func TestJumpDestAnalysis(t *testing.T) {
 	tests := []struct {
@@ -47,6 +60,28 @@ func TestJumpDestAnalysis(t *testing.T) {
 		ret := codeBitmap(test.code)
 		if ret[test.which] != test.exp {
 			t.Fatalf("expected %x, got %02x", test.exp, ret[test.which])
+		}
+		retEof := bitvecToUint64Slice(eofCodeBitmap(test.code))
+		if retEof[test.which] != test.exp {
+			t.Fatalf("eof expected %x, got %02x", test.exp, retEof[test.which])
+		}
+	}
+}
+
+func TestEOFAnalysis(t *testing.T) {
+	tests := []struct {
+		code  []byte
+		exp   byte
+		which int
+	}{
+		{[]byte{byte(RJUMP), 0x01, 0x01, 0x01}, 0b0000_0110, 0},
+		{[]byte{byte(RJUMPI), byte(RJUMP), byte(RJUMP), byte(RJUMPI)}, 0b0011_0110, 0},
+		{[]byte{byte(RJUMPV), 0x02, byte(RJUMP), 0x00, byte(RJUMPI), 0x00}, 0b0011_1110, 0},
+	}
+	for i, test := range tests {
+		ret := eofCodeBitmap(test.code)
+		if ret[test.which] != test.exp {
+			t.Fatalf("test %d: expected %x, got %02x", i, test.exp, ret[test.which])
 		}
 	}
 }
