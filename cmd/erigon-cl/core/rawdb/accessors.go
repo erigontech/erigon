@@ -185,6 +185,9 @@ func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error
 	if err != nil {
 		return nil, err
 	}
+	if signedBlock == nil {
+		return nil, nil
+	}
 
 	attestations, err := ReadAttestations(tx, slot)
 	if err != nil {
@@ -247,6 +250,9 @@ func ReadBeaconBlockForStorage(tx kv.Getter, slot uint64) (block *cltypes.Signed
 	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
 	if err != nil {
 		return nil, 0, common.Hash{}, common.Hash{}, err
+	}
+	if len(encodedBeaconBlock) == 0 {
+		return nil, 0, common.Hash{}, common.Hash{}, nil
 	}
 	if len(encodedBeaconBlock) == 0 {
 		return nil, 0, common.Hash{}, common.Hash{}, nil
