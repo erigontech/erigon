@@ -43,8 +43,6 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		progress++
 	}
 
-	slotToRootCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
-	defer slotToRootCollector.Close()
 	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer rootToSlotCollector.Close()
 
