@@ -576,7 +576,7 @@ Loop:
 					if txTask.Final {
 						gasUsed += txTask.UsedGas
 						if gasUsed != txTask.Header.GasUsed {
-							return fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed, txTask.Header.GasUsed)
+							return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d", gasUsed, txTask.Header.GasUsed, txTask.Header.Number.Uint64())
 						}
 						gasUsed = 0
 					} else {
