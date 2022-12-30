@@ -283,6 +283,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 
 	kvClient := remote.NewKVClient(conn)
+	remoteBackendClient := remote.NewETHBACKENDClient(conn)
 	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
@@ -392,6 +393,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				log.Info("HistoryV3", "enable", histV3Enabled)
 				db = temporal.New(rwKv, agg)
 			}
+			stateCache = kvcache.NewDummy()
+		} else {
+			blockReader = snapshotsync.NewBlockReader()
+			stateCache = kvcache.NewDummy()
 		}
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
@@ -399,9 +404,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		db = remoteKv
 	}
 	if cfg.WithDatadir {
-		stateCache = kvcache.NewDummy()
-		blockReader = snapshotsync.NewBlockReader()
-
 		// bor (consensus) specific db
 		var borKv kv.RoDB
 		borDbPath := filepath.Join(cfg.DataDir, "bor")
@@ -443,11 +445,12 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	miningService := rpcservices.NewMiningService(mining)
 	txPool = txpool.NewTxpoolClient(txpoolConn)
 	txPoolService := rpcservices.NewTxPoolService(txPool)
+
 	if !cfg.WithDatadir {
-		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+		blockReader = snapshotsync.NewRemoteBlockReader(remoteBackendClient)
 	}
 
-	remoteEth := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
+	remoteEth := rpcservices.NewRemoteBackend(remoteBackendClient, db, blockReader)
 	blockReader = remoteEth
 	eth = remoteEth
 	go func() {
