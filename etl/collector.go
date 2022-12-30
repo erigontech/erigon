@@ -164,7 +164,7 @@ func (c *Collector) Close() {
 // this continues until all providers have reached their EOF.
 func loadFilesIntoBucket(logPrefix string, db kv.RwTx, bucket string, bufType int, providers []dataProvider, loadFunc LoadFunc, args TransformArgs) error {
 
-	h := &Heap{comparator: args.Comparator}
+	h := &Heap{}
 	heap.Init(h)
 	for i, provider := range providers {
 		if key, value, err := provider.Next(nil, nil); err == nil {

@@ -66,7 +66,6 @@ type TransformArgs struct {
 	Quit              <-chan struct{}
 	LogDetailsExtract AdditionalLogArguments
 	LogDetailsLoad    AdditionalLogArguments
-	Comparator        kv.CmpFunc
 	// [ExtractStartKey, ExtractEndKey)
 	ExtractStartKey []byte
 	ExtractEndKey   []byte
