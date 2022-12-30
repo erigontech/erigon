@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockReader can read blocks from db and snapshots
@@ -427,7 +426,6 @@ func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Getter, ha
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	var buf []byte
 	var h *types.Header
-	log.Warn("here1")
 	ok, err := back.sn.ViewHeaders(blockHeight, func(seg *HeaderSegment) error {
 		h, buf, err = back.headerFromSnapshot(blockHeight, seg, buf)
 		if err != nil {
@@ -438,7 +436,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if err != nil {
 		return nil, nil, err
 	}
-	log.Warn("found header", "ok", ok)
 
 	if ok && h != nil {
 		var b *types.Body
@@ -454,7 +451,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		if err != nil {
 			return nil, nil, err
 		}
-		log.Warn("found body", "ok", ok)
 		if ok && b != nil {
 			if txsAmount == 0 {
 				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals)
@@ -476,7 +472,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			if err != nil {
 				return nil, nil, err
 			}
-			log.Warn("found txs", "ok", ok, "len", len(txs))
 			if ok {
 				block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 				if len(senders) != block.Transactions().Len() {
@@ -487,7 +482,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			}
 		}
 	}
-	log.Warn("here2")
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
 		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
@@ -497,10 +491,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		if err != nil {
 			return nil, nil, err
 		}
-		log.Warn("canonical", "found", block != nil)
 		return block, senders, nil
 	}
-	log.Warn("non-canonical")
 	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }
 
