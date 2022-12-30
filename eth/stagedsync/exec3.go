@@ -536,7 +536,7 @@ Loop:
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec22.TxTask{
 				BlockNum:        blockNum,
-				Header:          b.Header(), //copy header because some methods may mutate it
+				Header:          header,
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
 				Rules:           rules,
@@ -974,7 +974,7 @@ func reconstituteStep(last bool,
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &exec22.TxTask{
 					BlockNum:        bn,
-					Header:          b.Header(), //copy because some methods may mutate it
+					Header:          header,
 					Coinbase:        b.Coinbase(),
 					Uncles:          b.Uncles(),
 					Rules:           rules,
