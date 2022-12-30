@@ -183,7 +183,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 	if err != nil {
 		return nil, err
 	}
-	log.Warn("with sen", "n", number, "h", fmt.Sprintf("%x"), hash, "found", block != nil)
+	log.Warn("with sen", "n", number, "h", fmt.Sprintf("%x", hash), "found", block != nil)
 	if block == nil { // don't save nil's to cache
 		return nil, nil
 	}
