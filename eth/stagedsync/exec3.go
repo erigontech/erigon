@@ -974,7 +974,7 @@ func reconstituteStep(last bool,
 				binary.BigEndian.PutUint64(txKey[:], inputTxNum)
 				txTask := &exec22.TxTask{
 					BlockNum:        bn,
-					Header:          header,
+					Header:          b.Header(), //copy because some methods may mutate it
 					Coinbase:        b.Coinbase(),
 					Uncles:          b.Uncles(),
 					Rules:           rules,
