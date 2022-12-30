@@ -121,17 +121,30 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	return clearStageProgress(tx, stages.Senders)
 }
 
+func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
+	for _, tbl := range stateBuckets {
+		WarmupTable(ctx, db, tbl, log.LvlInfo)
+	}
+	historyV3 := kvcfg.HistoryV3.FromDB(db)
+	if historyV3 { //hist v2 is too big, if you have so much ram, just use `cat mdbx.dat > /dev/null` to warmup
+		for _, tbl := range stateHistoryV3Buckets {
+			WarmupTable(ctx, db, tbl, log.LvlInfo)
+		}
+	}
+	return
+}
+
 func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
+	historyV3 := kvcfg.HistoryV3.FromDB(db)
+	if historyV3 {
+		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
+	}
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
 			return err
 		}
 
-		stateBuckets := []string{
-			kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
-			kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
-			kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
-		}
 		if err := clearTables(ctx, db, tx, stateBuckets...); err != nil {
 			return nil
 		}
@@ -141,43 +154,10 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 			}
 		}
 
-		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return err
+		if err := clearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
+			return nil
 		}
-		if historyV3 {
-			buckets := []string{
-				kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-				kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
-				kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
-				kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-				kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
-				kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
-				kv.LogAddressKeys, kv.LogAddressIdx,
-				kv.LogTopicsKeys, kv.LogTopicsIdx,
-				kv.TracesFromKeys, kv.TracesFromIdx,
-				kv.TracesToKeys, kv.TracesToIdx,
-
-				kv.AccountChangeSet,
-				kv.StorageChangeSet,
-				kv.Receipts,
-				kv.Log,
-				kv.CallTraceSet,
-			}
-			if err := clearTables(ctx, db, tx, buckets...); err != nil {
-				return nil
-			}
-		} else {
-			if err := clearTables(ctx, db, tx,
-				kv.AccountChangeSet,
-				kv.StorageChangeSet,
-				kv.Receipts,
-				kv.Log,
-				kv.CallTraceSet,
-			); err != nil {
-				return nil
-			}
-
+		if !historyV3 {
 			genesis := core.DefaultGenesisBlockByChainName(chain)
 			if _, _, err := genesis.WriteGenesisState(tx); err != nil {
 				return err
@@ -209,6 +189,30 @@ var Tables = map[stages.SyncStage][]string{
 	stages.AccountHistoryIndex: {kv.AccountsHistory},
 	stages.StorageHistoryIndex: {kv.StorageHistory},
 	stages.Finish:              {},
+}
+var stateBuckets = []string{
+	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
+	kv.Epoch, kv.PendingEpoch, kv.BorReceipts,
+	kv.Code, kv.PlainContractCode, kv.ContractCode, kv.IncarnationMap,
+}
+var stateHistoryBuckets = []string{
+	kv.AccountChangeSet,
+	kv.StorageChangeSet,
+	kv.Receipts,
+	kv.Log,
+	kv.CallTraceSet,
+}
+var stateHistoryV3Buckets = []string{
+	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+	kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
+	kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
+	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
+	kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
+	kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
+	kv.LogAddressKeys, kv.LogAddressIdx,
+	kv.LogTopicsKeys, kv.LogTopicsIdx,
+	kv.TracesFromKeys, kv.TracesFromIdx,
+	kv.TracesToKeys, kv.TracesToIdx,
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
