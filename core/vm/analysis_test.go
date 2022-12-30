@@ -135,3 +135,20 @@ func BenchmarkJumpDest(b *testing.B) {
 		b.StopTimer()
 	}
 }
+
+func TestCodeAnalysis(t *testing.T) {
+	for _, tc := range []string{
+		"5e30303030",
+	} {
+		eofCodeBitmap(common.FromHex(tc))
+		codeBitmap(common.FromHex(tc))
+	}
+}
+
+func FuzzCodeAnalysis(f *testing.F) {
+	f.Add(common.FromHex("5e30303030"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		eofCodeBitmap(data)
+		codeBitmap(data)
+	})
+}
