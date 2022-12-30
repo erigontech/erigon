@@ -397,14 +397,14 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// check whether the max code size has been exceeded
 	maxCodeSizeExceeded := evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize && !evm.chainRules.IsAura
 
-	// Reject code starting with 0xEF if EIP-3541 is enabled.
-	if err == nil && !maxCodeSizeExceeded && len(ret) >= 1 && ret[0] == 0xEF {
+	if err == nil && !maxCodeSizeExceeded && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
 			var c Container
 			if err = c.UnmarshalBinary(ret); err != nil {
 				err = fmt.Errorf("invalid code: %v", err)
 			}
 		} else if evm.chainRules.IsLondon {
+			// Reject code starting with 0xEF if EIP-3541 is enabled.
 			err = ErrInvalidCode
 		}
 	}
