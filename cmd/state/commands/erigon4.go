@@ -197,7 +197,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, historyTx, hash, number)

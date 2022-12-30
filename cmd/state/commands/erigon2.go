@@ -238,7 +238,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {
 		blockNum++
@@ -624,25 +624,26 @@ func (ww *WriterWrapper) CreateContract(address common.Address) error {
 	return nil
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+func initConsensusEngine(chainConfig *params.ChainConfig, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+	l := log.New()
 	config := ethconfig.Defaults
 
 	switch {
 	case chainConfig.Clique != nil:
 		c := params.CliqueSnapshot
 		c.DBPath = filepath.Join(datadirCli, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
 	case chainConfig.Aura != nil:
 		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadirCli, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
 	case chainConfig.Parlia != nil:
 		// Apply special hacks for BSC params
 		params.ApplyBinanceSmartChainParams()
 		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadirCli, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
 	case chainConfig.Bor != nil:
 		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, false, datadirCli, snapshots, true /* readonly */)
+		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, false, datadirCli, snapshots, true /* readonly */)
 	default: //ethash
 		engine = ethash.NewFaker()
 	}
