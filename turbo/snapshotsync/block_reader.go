@@ -427,6 +427,7 @@ func (back *BlockReaderWithSnapshots) Body(ctx context.Context, tx kv.Getter, ha
 func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
 	var buf []byte
 	var h *types.Header
+	log.Warn("here1")
 	ok, err := back.sn.ViewHeaders(blockHeight, func(seg *HeaderSegment) error {
 		h, buf, err = back.headerFromSnapshot(blockHeight, seg, buf)
 		if err != nil {
@@ -486,6 +487,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			}
 		}
 	}
+	log.Warn("here2")
 	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 	if err != nil {
 		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
