@@ -155,6 +155,8 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 	if hashErr != nil {
 		return nil, hashErr
 	}
+	log.Warn("n2", "n", number)
+
 	return api.blockWithSenders(tx, hash, number)
 }
 
@@ -175,6 +177,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			log.Warn("n3", "n", number)
 			return it.(*types.Block), nil
 		}
 	}
