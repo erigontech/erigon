@@ -253,6 +253,7 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 	if err != nil {
 		return nil, err
 	}
+	log.Warn("n", "n", n)
 
 	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
