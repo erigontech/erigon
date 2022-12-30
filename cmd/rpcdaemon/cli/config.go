@@ -282,8 +282,9 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to execution service privateApi: %w", err)
 	}
 
-	kvClient := remote.NewKVClient(conn)
-	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, kvClient).Open()
+	remoteBackendClient := remote.NewETHBACKENDClient(conn)
+	remoteKvClient := remote.NewKVClient(conn)
+	remoteKv, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("could not connect to remoteKv: %w", err)
 	}
@@ -338,7 +339,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		if cfg.Snap.Enabled {
 			allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
 			// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `kvClient.Snapshots` after establish grpc connection
+			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 			allSnapshots.OptimisticReopenWithDB(db)
 			allSnapshots.ReopenFolder()
 			allSnapshots.LogStat()
@@ -357,7 +358,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			})
 			onNewSnapshot = func() {
 				go func() { // don't block events processing by network communication
-					reply, err := kvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+					reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 					if err != nil {
 						log.Warn("[Snapshots] reopen", "err", err)
 						return
@@ -394,6 +395,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				log.Info("HistoryV3", "enable", histV3Enabled)
 				db = temporal.New(rwKv, agg)
 			}
+			stateCache = kvcache.NewDummy()
+		} else {
+			blockReader = snapshotsync.NewBlockReader()
+			stateCache = kvcache.NewDummy()
 		}
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
@@ -401,7 +406,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		db = remoteKv
 	}
 	if cfg.WithDatadir {
-		stateCache = kvcache.NewDummy()
 		log.Warn("block reader2")
 
 		// bor (consensus) specific db
@@ -431,7 +435,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		log.Info("if you run RPCDaemon on same machine with Erigon add --datadir option")
 	}
 
-	subscribeToStateChangesLoop(ctx, kvClient, stateCache)
+	subscribeToStateChangesLoop(ctx, remoteKvClient, stateCache)
 
 	txpoolConn := conn
 	if cfg.TxPoolApiAddr != cfg.PrivateApiAddr {
@@ -446,10 +450,10 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	txPool = txpool.NewTxpoolClient(txpoolConn)
 	txPoolService := rpcservices.NewTxPoolService(txPool)
 	if !cfg.WithDatadir {
-		blockReader = snapshotsync.NewRemoteBlockReader(remote.NewETHBACKENDClient(conn))
+		blockReader = snapshotsync.NewRemoteBlockReader(remoteBackendClient)
 	}
 
-	remoteEth := rpcservices.NewRemoteBackend(remote.NewETHBACKENDClient(conn), db, blockReader)
+	remoteEth := rpcservices.NewRemoteBackend(remoteBackendClient, db, blockReader)
 	blockReader = remoteEth
 	eth = remoteEth
 	go func() {
