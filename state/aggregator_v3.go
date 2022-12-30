@@ -39,7 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 )
 
-type Aggregator22 struct {
+type AggregatorV3 struct {
 	rwTx             kv.RwTx
 	db               kv.RoDB
 	storage          *History
@@ -64,13 +64,13 @@ type Aggregator22 struct {
 	ctxCancel        context.CancelFunc
 }
 
-func NewAggregator22(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*Aggregator22, error) {
+func NewAggregator22(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &Aggregator22{ctx: ctx, ctxCancel: ctxCancel, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
+	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	return a, nil
 }
 
-func (a *Aggregator22) ReopenFiles() error {
+func (a *AggregatorV3) ReopenFiles() error {
 	dir := a.dir
 	aggregationStep := a.aggregationStep
 	var err error
@@ -99,12 +99,12 @@ func (a *Aggregator22) ReopenFiles() error {
 	return nil
 }
 
-func (a *Aggregator22) Close() {
+func (a *AggregatorV3) Close() {
 	a.ctxCancel()
 	a.closeFiles()
 }
 
-func (a *Aggregator22) SetWorkers(i int) {
+func (a *AggregatorV3) SetWorkers(i int) {
 	a.accounts.workers = i
 	a.storage.workers = i
 	a.code.workers = i
@@ -114,7 +114,7 @@ func (a *Aggregator22) SetWorkers(i int) {
 	a.tracesTo.workers = i
 }
 
-func (a *Aggregator22) Files() (res []string) {
+func (a *AggregatorV3) Files() (res []string) {
 	res = append(res, a.accounts.Files()...)
 	res = append(res, a.storage.Files()...)
 	res = append(res, a.code.Files()...)
@@ -125,7 +125,7 @@ func (a *Aggregator22) Files() (res []string) {
 	return res
 }
 
-func (a *Aggregator22) closeFiles() {
+func (a *AggregatorV3) closeFiles() {
 	if a.accounts != nil {
 		a.accounts.Close()
 	}
@@ -149,7 +149,7 @@ func (a *Aggregator22) closeFiles() {
 	}
 }
 
-func (a *Aggregator22) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) error {
+func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) error {
 	g, ctx := errgroup.WithContext(ctx)
 	if a.accounts != nil {
 		g.Go(func() error { return a.accounts.BuildMissedIndices(ctx, sem) })
@@ -175,9 +175,9 @@ func (a *Aggregator22) BuildMissedIndices(ctx context.Context, sem *semaphore.We
 	return g.Wait()
 }
 
-func (a *Aggregator22) SetLogPrefix(v string) { a.logPrefix = v }
+func (a *AggregatorV3) SetLogPrefix(v string) { a.logPrefix = v }
 
-func (a *Aggregator22) SetTx(tx kv.RwTx) {
+func (a *AggregatorV3) SetTx(tx kv.RwTx) {
 	a.rwTx = tx
 	a.accounts.SetTx(tx)
 	a.storage.SetTx(tx)
@@ -188,7 +188,7 @@ func (a *Aggregator22) SetTx(tx kv.RwTx) {
 	a.tracesTo.SetTx(tx)
 }
 
-func (a *Aggregator22) SetTxNum(txNum uint64) {
+func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.txNum.Store(txNum)
 	a.accounts.SetTxNum(txNum)
 	a.storage.SetTxNum(txNum)
@@ -228,7 +228,7 @@ func (c Agg22Collation) Close() {
 	}
 }
 
-func (a *Aggregator22) buildFiles(ctx context.Context, step uint64, txFrom, txTo uint64, db kv.RoDB) (Agg22StaticFiles, error) {
+func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64, txFrom, txTo uint64, db kv.RoDB) (Agg22StaticFiles, error) {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 	defer func(t time.Time) {
@@ -394,7 +394,7 @@ func (sf Agg22StaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
-func (a *Aggregator22) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
+func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
@@ -413,7 +413,7 @@ func (a *Aggregator22) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 	return nil
 }
 
-func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, db kv.RoDB) (err error) {
+func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64, db kv.RoDB) (err error) {
 	closeAll := true
 	log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
 	sf, err := a.buildFiles(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep, db)
@@ -431,7 +431,7 @@ func (a *Aggregator22) buildFilesInBackground(ctx context.Context, step uint64, 
 	return nil
 }
 
-func (a *Aggregator22) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
+func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
 	closeAll := true
 	maxSpan := uint64(32) * a.aggregationStep
 	r := a.findMergeRange(a.maxTxNum.Load(), maxSpan)
@@ -461,7 +461,7 @@ func (a *Aggregator22) mergeLoopStep(ctx context.Context, workers int) (somethin
 	closeAll = false
 	return true, nil
 }
-func (a *Aggregator22) MergeLoop(ctx context.Context, workers int) error {
+func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
 		if err != nil {
@@ -473,7 +473,7 @@ func (a *Aggregator22) MergeLoop(ctx context.Context, workers int) error {
 	}
 }
 
-func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo uint64) {
+func (a *AggregatorV3) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo uint64) {
 	a.accounts.integrateFiles(sf.accounts, txNumFrom, txNumTo)
 	a.storage.integrateFiles(sf.storage, txNumFrom, txNumTo)
 	a.code.integrateFiles(sf.code, txNumFrom, txNumTo)
@@ -484,7 +484,7 @@ func (a *Aggregator22) integrateFiles(sf Agg22StaticFiles, txNumFrom, txNumTo ui
 	a.recalcMaxTxNum()
 }
 
-func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
+func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad etl.LoadFunc) error {
 	stateChanges := etl.NewCollector(a.logPrefix, a.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer stateChanges.Close()
 	if err := a.accounts.pruneF(txUnwindTo, math2.MaxUint64, func(_ uint64, k, v []byte) error {
@@ -518,7 +518,7 @@ func (a *Aggregator22) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	return nil
 }
 
-func (a *Aggregator22) Warmup(txFrom, limit uint64) {
+func (a *AggregatorV3) Warmup(txFrom, limit uint64) {
 	if a.db == nil {
 		return
 	}
@@ -561,7 +561,7 @@ func (a *Aggregator22) Warmup(txFrom, limit uint64) {
 }
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *Aggregator22) DiscardHistory() *Aggregator22 {
+func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
 	a.accounts.DiscardHistory(a.tmpdir)
 	a.storage.DiscardHistory(a.tmpdir)
 	a.code.DiscardHistory(a.tmpdir)
@@ -573,7 +573,7 @@ func (a *Aggregator22) DiscardHistory() *Aggregator22 {
 }
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
-func (a *Aggregator22) StartWrites() *Aggregator22 {
+func (a *AggregatorV3) StartWrites() *AggregatorV3 {
 	a.accounts.StartWrites(a.tmpdir)
 	a.storage.StartWrites(a.tmpdir)
 	a.code.StartWrites(a.tmpdir)
@@ -583,7 +583,7 @@ func (a *Aggregator22) StartWrites() *Aggregator22 {
 	a.tracesTo.StartWrites(a.tmpdir)
 	return a
 }
-func (a *Aggregator22) FinishWrites() {
+func (a *AggregatorV3) FinishWrites() {
 	a.accounts.FinishWrites()
 	a.storage.FinishWrites()
 	a.code.FinishWrites()
@@ -597,7 +597,7 @@ type flusher interface {
 	Flush(ctx context.Context, tx kv.RwTx) error
 }
 
-func (a *Aggregator22) Flush(ctx context.Context, tx kv.RwTx) error {
+func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	flushers := []flusher{
 		a.accounts.Rotate(),
 		a.storage.Rotate(),
@@ -616,8 +616,8 @@ func (a *Aggregator22) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *Aggregator22) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
-func (a *Aggregator22) CanPruneFrom(tx kv.Tx) uint64 {
+func (a *AggregatorV3) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
+func (a *AggregatorV3) CanPruneFrom(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, kv.TracesToKeys)
 	fst2, _ := kv.FirstKey(tx, kv.StorageHistoryKeys)
 	if len(fst) > 0 && len(fst2) > 0 {
@@ -628,7 +628,7 @@ func (a *Aggregator22) CanPruneFrom(tx kv.Tx) uint64 {
 	return math2.MaxUint64
 }
 
-func (a *Aggregator22) PruneWithTiemout(ctx context.Context, timeout time.Duration) error {
+func (a *AggregatorV3) PruneWithTiemout(ctx context.Context, timeout time.Duration) error {
 	t := time.Now()
 	for a.CanPrune(a.rwTx) && time.Since(t) < timeout {
 		if err := a.Prune(ctx, 1_000); err != nil { // prune part of retired data, before commit
@@ -638,12 +638,12 @@ func (a *Aggregator22) PruneWithTiemout(ctx context.Context, timeout time.Durati
 	return nil
 }
 
-func (a *Aggregator22) Prune(ctx context.Context, limit uint64) error {
+func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
 	a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
 	return a.prune(ctx, 0, a.maxTxNum.Load(), limit)
 }
 
-func (a *Aggregator22) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
+func (a *AggregatorV3) prune(ctx context.Context, txFrom, txTo, limit uint64) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	if err := a.accounts.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
@@ -670,7 +670,7 @@ func (a *Aggregator22) prune(ctx context.Context, txFrom, txTo, limit uint64) er
 	return nil
 }
 
-func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
+func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
 	if a.maxTxNum.Load() == 0 {
 		return
 	}
@@ -707,8 +707,8 @@ func (a *Aggregator22) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func (a *Aggregator22) EndTxNumMinimax() uint64 { return a.maxTxNum.Load() }
-func (a *Aggregator22) recalcMaxTxNum() {
+func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.maxTxNum.Load() }
+func (a *AggregatorV3) recalcMaxTxNum() {
 	min := a.accounts.endTxNumMinimax()
 	if txNum := a.storage.endTxNumMinimax(); txNum < min {
 		min = txNum
@@ -753,7 +753,7 @@ func (r Ranges22) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
 
-func (a *Aggregator22) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
+func (a *AggregatorV3) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
 	var r Ranges22
 	r.accounts = a.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = a.storage.findMergeRange(maxEndTxNum, maxSpan)
@@ -802,7 +802,7 @@ func (sf SelectedStaticFiles22) Close() {
 	}
 }
 
-func (a *Aggregator22) staticFilesInRange(r Ranges22) SelectedStaticFiles22 {
+func (a *AggregatorV3) staticFilesInRange(r Ranges22) SelectedStaticFiles22 {
 	var sf SelectedStaticFiles22
 	if r.accounts.any() {
 		sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
@@ -852,7 +852,7 @@ func (mf MergedFiles22) Close() {
 	}
 }
 
-func (a *Aggregator22) mergeFiles(ctx context.Context, files SelectedStaticFiles22, r Ranges22, maxSpan uint64, workers int) (MergedFiles22, error) {
+func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles22, r Ranges22, maxSpan uint64, workers int) (MergedFiles22, error) {
 	var mf MergedFiles22
 	closeFiles := true
 	defer func() {
@@ -940,7 +940,7 @@ func (a *Aggregator22) mergeFiles(ctx context.Context, files SelectedStaticFiles
 	return mf, lastError
 }
 
-func (a *Aggregator22) integrateMergedFiles(outs SelectedStaticFiles22, in MergedFiles22) {
+func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFiles22, in MergedFiles22) {
 	a.accounts.integrateMergedFiles(outs.accountsIdx, outs.accountsHist, in.accountsIdx, in.accountsHist)
 	a.storage.integrateMergedFiles(outs.storageIdx, outs.storageHist, in.storageIdx, in.storageHist)
 	a.code.integrateMergedFiles(outs.codeIdx, outs.codeHist, in.codeIdx, in.codeHist)
@@ -950,7 +950,7 @@ func (a *Aggregator22) integrateMergedFiles(outs SelectedStaticFiles22, in Merge
 	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
 }
 
-func (a *Aggregator22) deleteFiles(outs SelectedStaticFiles22) error {
+func (a *AggregatorV3) deleteFiles(outs SelectedStaticFiles22) error {
 	if err := a.accounts.deleteFiles(outs.accountsIdx, outs.accountsHist); err != nil {
 		return err
 	}
@@ -977,9 +977,9 @@ func (a *Aggregator22) deleteFiles(outs SelectedStaticFiles22) error {
 
 // KeepInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
-func (a *Aggregator22) KeepInDB(v uint64) { a.keepInDB = v }
+func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
 
-func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
+func (a *AggregatorV3) BuildFilesInBackground(db kv.RoDB) error {
 	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
@@ -1033,14 +1033,14 @@ func (a *Aggregator22) BuildFilesInBackground(db kv.RoDB) error {
 	return nil
 }
 
-func (a *Aggregator22) AddAccountPrev(addr []byte, prev []byte) error {
+func (a *AggregatorV3) AddAccountPrev(addr []byte, prev []byte) error {
 	if err := a.accounts.AddPrevValue(addr, nil, prev); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Aggregator22) AddStoragePrev(addr []byte, loc []byte, prev []byte) error {
+func (a *AggregatorV3) AddStoragePrev(addr []byte, loc []byte, prev []byte) error {
 	if err := a.storage.AddPrevValue(addr, loc, prev); err != nil {
 		return err
 	}
@@ -1048,31 +1048,31 @@ func (a *Aggregator22) AddStoragePrev(addr []byte, loc []byte, prev []byte) erro
 }
 
 // AddCodePrev - addr+inc => code
-func (a *Aggregator22) AddCodePrev(addr []byte, prev []byte) error {
+func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
 	if err := a.code.AddPrevValue(addr, nil, prev); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (a *Aggregator22) AddTraceFrom(addr []byte) error {
+func (a *AggregatorV3) AddTraceFrom(addr []byte) error {
 	return a.tracesFrom.Add(addr)
 }
 
-func (a *Aggregator22) AddTraceTo(addr []byte) error {
+func (a *AggregatorV3) AddTraceTo(addr []byte) error {
 	return a.tracesTo.Add(addr)
 }
 
-func (a *Aggregator22) AddLogAddr(addr []byte) error {
+func (a *AggregatorV3) AddLogAddr(addr []byte) error {
 	return a.logAddrs.Add(addr)
 }
 
-func (a *Aggregator22) AddLogTopic(topic []byte) error {
+func (a *AggregatorV3) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (a *Aggregator22) DisableReadAhead() {
+func (a *AggregatorV3) DisableReadAhead() {
 	a.accounts.DisableReadAhead()
 	a.storage.DisableReadAhead()
 	a.code.DisableReadAhead()
@@ -1081,7 +1081,7 @@ func (a *Aggregator22) DisableReadAhead() {
 	a.tracesFrom.DisableReadAhead()
 	a.tracesTo.DisableReadAhead()
 }
-func (a *Aggregator22) EnableReadAhead() *Aggregator22 {
+func (a *AggregatorV3) EnableReadAhead() *AggregatorV3 {
 	a.accounts.EnableReadAhead()
 	a.storage.EnableReadAhead()
 	a.code.EnableReadAhead()
@@ -1091,7 +1091,7 @@ func (a *Aggregator22) EnableReadAhead() *Aggregator22 {
 	a.tracesTo.EnableReadAhead()
 	return a
 }
-func (a *Aggregator22) EnableMadvWillNeed() *Aggregator22 {
+func (a *AggregatorV3) EnableMadvWillNeed() *AggregatorV3 {
 	a.accounts.EnableMadvWillNeed()
 	a.storage.EnableMadvWillNeed()
 	a.code.EnableMadvWillNeed()
@@ -1101,7 +1101,7 @@ func (a *Aggregator22) EnableMadvWillNeed() *Aggregator22 {
 	a.tracesTo.EnableMadvWillNeed()
 	return a
 }
-func (a *Aggregator22) EnableMadvNormal() *Aggregator22 {
+func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 	a.accounts.EnableMadvNormalReadAhead()
 	a.storage.EnableMadvNormalReadAhead()
 	a.code.EnableMadvNormalReadAhead()
@@ -1186,18 +1186,18 @@ func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 type FilesStats22 struct {
 }
 
-func (a *Aggregator22) Stats() FilesStats22 {
+func (a *AggregatorV3) Stats() FilesStats22 {
 	var fs FilesStats22
 	return fs
 }
 
-func (a *Aggregator22) Code() *History     { return a.code }
-func (a *Aggregator22) Accounts() *History { return a.accounts }
-func (a *Aggregator22) Storage() *History  { return a.storage }
+func (a *AggregatorV3) Code() *History     { return a.code }
+func (a *AggregatorV3) Accounts() *History { return a.accounts }
+func (a *AggregatorV3) Storage() *History  { return a.storage }
 
 type Aggregator22Context struct {
 	tx         kv.Tx
-	a          *Aggregator22
+	a          *AggregatorV3
 	accounts   *HistoryContext
 	storage    *HistoryContext
 	code       *HistoryContext
@@ -1208,7 +1208,7 @@ type Aggregator22Context struct {
 	keyBuf     []byte
 }
 
-func (a *Aggregator22) MakeContext() *Aggregator22Context {
+func (a *AggregatorV3) MakeContext() *Aggregator22Context {
 	return &Aggregator22Context{
 		a:          a,
 		accounts:   a.accounts.MakeContext(),
@@ -1254,14 +1254,14 @@ func lastIdInDB(db kv.RoDB, table string) (lstInDb uint64) {
 // AggregatorStep is used for incremental reconstitution, it allows
 // accessing history in isolated way for each step
 type AggregatorStep struct {
-	a        *Aggregator22
+	a        *AggregatorV3
 	accounts *HistoryStep
 	storage  *HistoryStep
 	code     *HistoryStep
 	keyBuf   []byte
 }
 
-func (a *Aggregator22) MakeSteps() []*AggregatorStep {
+func (a *AggregatorV3) MakeSteps() []*AggregatorStep {
 	to := a.maxTxNum.Load()
 	indexedMax := cmp.Min(
 		cmp.Min(a.accounts.endIndexedTxNumMinimax(), a.storage.endIndexedTxNumMinimax()),
