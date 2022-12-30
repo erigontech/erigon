@@ -3,6 +3,14 @@ module github.com/ledgerwatch/erigon-lib
 go 1.18
 
 require (
+	github.com/ledgerwatch/interfaces v0.0.0-20221226080656-9ea2ff13ca12
+	github.com/ledgerwatch/log/v3 v3.6.0
+	github.com/ledgerwatch/secp256k1 v1.0.0
+	github.com/ledgerwatch/trackerslist v1.0.0
+	github.com/torquem-ch/mdbx-go v0.27.4
+)
+
+require (
 	github.com/RoaringBitmap/roaring v1.2.1
 	github.com/VictoriaMetrics/metrics v1.23.0
 	github.com/anacrolix/go-libutp v1.2.0
@@ -15,17 +23,12 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
 	github.com/holiman/uint256 v1.2.1
-	github.com/ledgerwatch/interfaces v0.0.0-20221226080656-9ea2ff13ca12
-	github.com/ledgerwatch/log/v3 v3.6.0
-	github.com/ledgerwatch/secp256k1 v1.0.0
-	github.com/ledgerwatch/trackerslist v1.0.0
 	github.com/matryer/moq v0.3.0
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/quasilyte/go-ruleguard/dsl v0.3.21
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.1
 	github.com/tidwall/btree v1.5.0
-	github.com/torquem-ch/mdbx-go v0.27.0
 	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.4.0
 	golang.org/x/exp v0.0.0-20221217163422-3c43f8badb15
