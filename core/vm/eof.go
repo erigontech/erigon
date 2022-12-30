@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 )
 
 const (
@@ -110,10 +111,13 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		typesSize, dataSize int
 		codeSizes           []int
 		kind                int
+		err                 error
 	)
 
 	// Parse types size.
-	if kind, typesSize = parseSection(b, offsetTypesKind); kind != kindTypes {
+	if kind, typesSize, err = parseSection(b, offsetTypesKind); err != nil {
+		return err
+	} else if kind != kindTypes {
 		return fmt.Errorf("expected kind types")
 	}
 	if typesSize > 4*1024 {
@@ -121,7 +125,9 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	}
 
 	// Parse code sizes.
-	if kind, codeSizes = parseSectionList(b, offsetCodeKind); kind != kindCode {
+	if kind, codeSizes, err = parseSectionList(b, offsetCodeKind); err != nil {
+		return fmt.Errorf("failed to parse section list: %v", err)
+	} else if kind != kindCode {
 		return fmt.Errorf("expected kind code")
 	}
 	if len(codeSizes) != typesSize/4 {
@@ -133,7 +139,9 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 	if len(b) < offsetDataKind+2 {
 		return fmt.Errorf("container size invalid")
 	}
-	if kind, dataSize = parseSection(b, offsetDataKind); kind != kindData {
+	if kind, dataSize, err = parseSection(b, offsetDataKind); err != nil {
+		return err
+	} else if kind != kindData {
 		return fmt.Errorf("expected kind data")
 	}
 	offsetTerminator := offsetDataKind + 3
@@ -154,7 +162,7 @@ func (c *Container) UnmarshalBinary(b []byte) error {
 		sig := &FunctionMetadata{
 			Input:          b[idx+i*4],
 			Output:         b[idx+i*4+1],
-			MaxStackHeight: binary.BigEndian.Uint16(b[idx+i*4+2:]),
+			MaxStackHeight: uint16(binary.BigEndian.Uint16(b[idx+i*4+2:])),
 		}
 		if sig.MaxStackHeight > 1024 {
 			return fmt.Errorf("type annotation %d max stack height must not exceed 1024", i)
@@ -194,24 +202,52 @@ func (c *Container) ValidateCode(jt *JumpTable) error {
 }
 
 // parseSection decodes a (kind, size) pair from an EOF header.
-func parseSection(b []byte, idx int) (kind, size int) {
-	return int(b[idx]), int(binary.BigEndian.Uint16(b[idx+1:]))
+func parseSection(b []byte, idx int) (kind, size int, err error) {
+	if idx+3 >= len(b) {
+		return 0, 0, io.ErrUnexpectedEOF
+	}
+	kind = int(b[idx])
+	size = int(binary.BigEndian.Uint16(b[idx+1:]))
+	return kind, size, nil
 }
 
 // parseSectionList decodes a (kind, len, []codeSize) section list from an EOF
 // header.
-func parseSectionList(b []byte, idx int) (kind int, list []int) {
-	return int(b[idx]), parseList(b, idx+1)
+func parseSectionList(b []byte, idx int) (kind int, list []int, err error) {
+	if idx >= len(b) {
+		return 0, nil, io.ErrUnexpectedEOF
+	}
+	kind = int(b[idx])
+	list, err = parseList(b, idx+1)
+	if err != nil {
+		return 0, nil, err
+	}
+	return kind, list, nil
 }
 
 // parseList decodes a list of uint16..
-func parseList(b []byte, idx int) []int {
-	count := int(binary.BigEndian.Uint16(b[idx:]))
+func parseList(b []byte, idx int) ([]int, error) {
+	if len(b) < idx+2 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	count := binary.BigEndian.Uint16(b[idx:])
+	if len(b) < 2+int(count*2) {
+		return nil, io.ErrUnexpectedEOF
+
+	}
 	list := make([]int, count)
-	for i := 0; i < count; i++ {
+	for i := 0; i < int(count); i++ {
 		list[i] = int(binary.BigEndian.Uint16(b[idx+2*i+2:]))
 	}
-	return list
+	return list, nil
+}
+
+// parseUint16 parses a 16 bit unsigned integer.
+func parseUint16(b []byte) (int, error) {
+	if len(b) < 2 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	return int(binary.BigEndian.Uint16(b)), nil
 }
 
 // check returns if b[idx] == want after performing a bounds check.
