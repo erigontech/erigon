@@ -210,6 +210,7 @@ const (
 	CREATE2
 	STATICCALL   OpCode = 0xfa
 	REVERT       OpCode = 0xfd
+	INVALID      OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
 )
 
@@ -376,6 +377,7 @@ var opCodeToString = map[OpCode]string{
 	CREATE2:      "CREATE2",
 	STATICCALL:   "STATICCALL",
 	REVERT:       "REVERT",
+	INVALID:      "INVALID",
 	SELFDESTRUCT: "SELFDESTRUCT",
 }
 
@@ -531,6 +533,7 @@ var stringToOp = map[string]OpCode{
 	"RETURN":         RETURN,
 	"CALLCODE":       CALLCODE,
 	"REVERT":         REVERT,
+	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
 }
 
