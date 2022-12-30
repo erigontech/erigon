@@ -22,19 +22,21 @@ type StageHistoryReconstructionCfg struct {
 	beaconCfg  *clparams.BeaconChainConfig
 	downloader *network.BackwardBeaconDownloader
 	state      *state.BeaconState
+	tmpdir     string
 }
 
-const RecEnabled = true
+const RecEnabled = false
 const DestinationSlot = 0
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDownloader, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, tmpdir string) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		db:         db,
 		genesisCfg: genesisCfg,
 		beaconCfg:  beaconCfg,
 		downloader: downloader,
 		state:      state,
+		tmpdir:     tmpdir,
 	}
 }
 
@@ -60,12 +62,12 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		return err
 	}
 	// ETL collectors for attestations + beacon blocks
-	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	beaconBlocksCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer beaconBlocksCollector.Close()
-	attestationsCollector := etl.NewCollector(s.LogPrefix(), "/tmp/", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	attestationsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer attestationsCollector.Close()
 
-	log.Info("[History Reconstruction Phase] Reconstructing", "from", cfg.state.LatestBlockHeader().Slot, "to", DestinationSlot)
+	log.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", DestinationSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(cfg.state.LatestBlockHeader().Slot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
@@ -104,7 +106,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				if err != nil {
 					return
 				}
-				log.Info("[History Reconstruction Phase] Backwards downloading phase",
+				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()),
 					"progress", currProgress,
 					"remaining", currProgress-DestinationSlot,
 					"blk/sec", fmt.Sprintf("%.1f", speed),
@@ -121,7 +123,6 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		cfg.downloader.RequestMore()
 	}
 	close(finishCh)
-	log.Info("History collection phase")
 	if err := attestationsCollector.Load(tx, kv.Attestetations, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
 		return err
 	}

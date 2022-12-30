@@ -406,8 +406,6 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		db = remoteKv
 	}
 	if cfg.WithDatadir {
-		log.Warn("block reader2")
-
 		// bor (consensus) specific db
 		var borKv kv.RoDB
 		borDbPath := filepath.Join(cfg.DataDir, "bor")
@@ -449,6 +447,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	miningService := rpcservices.NewMiningService(mining)
 	txPool = txpool.NewTxpoolClient(txpoolConn)
 	txPoolService := rpcservices.NewTxPoolService(txPool)
+
 	if !cfg.WithDatadir {
 		blockReader = snapshotsync.NewRemoteBlockReader(remoteBackendClient)
 	}
