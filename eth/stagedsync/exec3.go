@@ -489,7 +489,6 @@ Loop:
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
-		fmt.Printf("alex: %d, %d, %x, %d\n", blockNum, header.Number.Uint64(), header.Hash(), header.GasUsed)
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum)
 
