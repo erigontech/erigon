@@ -29,11 +29,11 @@ import (
 
 type DB struct {
 	kv.RwDB
-	agg      *state.Aggregator22
+	agg      *state.AggregatorV3
 	hitoryV3 bool
 }
 
-func New(kv kv.RwDB, agg *state.Aggregator22) *DB {
+func New(kv kv.RwDB, agg *state.AggregatorV3) *DB {
 	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv)}
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {

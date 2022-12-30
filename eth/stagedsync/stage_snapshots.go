@@ -47,7 +47,7 @@ type SnapshotsCfg struct {
 	engine             consensus.Engine
 
 	historyV3 bool
-	agg       *state.Aggregator22
+	agg       *state.AggregatorV3
 }
 
 func StageSnapshotsCfg(
@@ -61,7 +61,7 @@ func StageSnapshotsCfg(
 	dbEventNotifier snapshotsync.DBEventNotifier,
 	engine consensus.Engine,
 	historyV3 bool,
-	agg *state.Aggregator22,
+	agg *state.AggregatorV3,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
 		db:                 db,
@@ -537,7 +537,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 // retiring blocks in a single thread in the brackground
-func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.Aggregator22, ctx context.Context, tx kv.RwTx) (err error) {
+func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.AggregatorV3, ctx context.Context, tx kv.RwTx) (err error) {
 	// if something already happens in background - noop
 	if blockRetire.Working() {
 		return nil

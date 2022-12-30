@@ -1138,9 +1138,9 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *snapshotsync.RoSnapshots
-var _aggSingleton *libstate.Aggregator22
+var _aggSingleton *libstate.AggregatorV3
 
-func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22) {
+func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
