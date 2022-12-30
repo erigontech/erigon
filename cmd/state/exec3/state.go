@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -207,7 +206,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
 		} else {
-			log.Warn("gas used", "txIdx", txTask.TxIndex, "gasUsed", applyRes.UsedGas, "txHash", fmt.Sprintf("%x", txTask.Tx.Hash()))
 			txTask.UsedGas = applyRes.UsedGas
 			// Update the state with pending changes
 			ibs.SoftFinalise()
