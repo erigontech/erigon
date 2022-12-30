@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -159,6 +160,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 			}
+			fmt.Printf("header1: %d, %d\n", header.Number.Uint64(), header.GasUsed)
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
@@ -169,6 +171,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 					txTask.TraceTos[uncle.Coinbase] = struct{}{}
 				}
 			}
+			fmt.Printf("header2: %d, %d\n", header.Number.Uint64(), header.GasUsed)
 		}
 	} else {
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
@@ -212,6 +215,8 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			txTask.TraceFroms = ct.froms
 			txTask.TraceTos = ct.tos
 		}
+
+		fmt.Printf("header3: %d, %d\n", header.Number.Uint64(), header.GasUsed)
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if txTask.Error == nil {
