@@ -436,7 +436,6 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if err != nil {
 		return nil, nil, err
 	}
-
 	if ok && h != nil {
 		var b *types.Body
 		var baseTxnId uint64

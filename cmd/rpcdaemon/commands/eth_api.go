@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -155,8 +154,6 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 	if hashErr != nil {
 		return nil, hashErr
 	}
-	log.Warn("n2", "n", number)
-
 	return api.blockWithSenders(tx, hash, number)
 }
 
@@ -177,17 +174,13 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			log.Warn("n3", "n", number)
 			return it.(*types.Block), nil
 		}
 	}
-	log.Warn("n4", "n", number)
-	fmt.Printf("api._blockReader: %T\n", api._blockReader)
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	log.Warn("with sen", "n", number, "h", fmt.Sprintf("%x", hash), "found", block != nil)
 	if block == nil { // don't save nil's to cache
 		return nil, nil
 	}
@@ -260,7 +253,6 @@ func (api *BaseAPI) blockByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.B
 	if err != nil {
 		return nil, err
 	}
-	log.Warn("n", "n", n)
 
 	block, err := api.blockByNumberWithSenders(tx, n)
 	return block, err
