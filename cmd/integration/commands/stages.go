@@ -687,7 +687,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	defer agg.Close()
 
 	if warmup {
-		return reset2.WarmupExec(ctx, db, chain)
+		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
 		return reset2.ResetExec(ctx, db, chain)
