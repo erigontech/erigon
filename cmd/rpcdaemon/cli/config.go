@@ -341,6 +341,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `kvClient.Snapshots` after establish grpc connection
 			allSnapshots.OptimisticReopenWithDB(db)
 			allSnapshots.LogStat()
+			allSnapshots.ReopenFolder()
 
 			if agg, err = libstate.NewAggregator22(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
 				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
