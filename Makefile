@@ -119,6 +119,7 @@ COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
 COMMANDS += sentinel
+COMMANDS += erigon-el
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
