@@ -539,7 +539,7 @@ Loop:
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec22.TxTask{
 				BlockNum:        blockNum,
-				Header:          header,
+				Header:          b.Header(),
 				Coinbase:        b.Coinbase(),
 				Uncles:          b.Uncles(),
 				Rules:           rules,
