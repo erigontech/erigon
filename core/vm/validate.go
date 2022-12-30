@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	emath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -189,15 +190,8 @@ func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata,
 					pos += 1
 				}
 			}
-			maxStackHeight = max(maxStackHeight, height)
+			maxStackHeight = emath.Max(maxStackHeight, height)
 		}
 	}
 	return maxStackHeight, len(heights), nil
-}
-
-func max(a, b int) int {
-	if a < b {
-		return b
-	}
-	return a
 }
