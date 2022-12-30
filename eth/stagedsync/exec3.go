@@ -108,12 +108,6 @@ func ExecV3(ctx context.Context,
 	logger log.Logger,
 	maxBlockNum uint64,
 ) (err error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	defer func(t time.Time) {
-		fmt.Printf("exec3.go:111: %s, %d->%d\n", time.Since(t), execStage.BlockNumber, maxBlockNum)
-	}(time.Now())
-
 	batchSize, chainDb := cfg.batchSize, cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
@@ -472,6 +466,9 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(applyTx)
 	}
 
+	_, isPoSa := cfg.engine.(consensus.PoSA)
+	//isBor := cfg.chainConfig.Bor != nil
+
 	var b *types.Block
 	var blockNum uint64
 Loop:
@@ -553,6 +550,7 @@ Loop:
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
 				EvmBlockContext: blockContext,
+				Withdrawals:     b.Withdrawals(),
 			}
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
@@ -578,11 +576,11 @@ Loop:
 				count++
 				applyWorker.RunTxTask(txTask)
 				if err := func() error {
-					if txTask.Final {
+					if txTask.Final && !isPoSa {
 						gasUsed += txTask.UsedGas
 						if gasUsed != txTask.Header.GasUsed {
 							if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-								return fmt.Errorf("gas used by execution: %d, in header: %d", gasUsed, txTask.Header.GasUsed)
+								return fmt.Errorf("gas used by execution: %d, in header: %d, headerNum=%d, %x", gasUsed, txTask.Header.GasUsed, txTask.Header.Number.Uint64(), txTask.Header.Hash())
 							}
 						}
 						gasUsed = 0
@@ -993,6 +991,7 @@ func reconstituteStep(last bool,
 					Final:           txIndex == len(txs),
 					GetHashFn:       getHashFn,
 					EvmBlockContext: blockContext,
+					Withdrawals:     b.Withdrawals(),
 				}
 				if txIndex >= 0 && txIndex < len(txs) {
 					txTask.Tx = txs[txIndex]
