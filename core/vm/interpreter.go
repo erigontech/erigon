@@ -41,6 +41,9 @@ type Config struct {
 	StatelessExec bool      // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
 
+	JumpTable    *JumpTable // Legacy EVM instruction table
+	JumpTableEOF *JumpTable // EOF EVM instruction table
+
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
@@ -91,8 +94,6 @@ type keccakState interface {
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
 	*VM
-	legacyJt *JumpTable // Legacy EVM instruction table
-	eofJt    *JumpTable // EOF EVM instruction table
 }
 
 // structcheck doesn't see embedding
@@ -160,13 +161,14 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		}
 	}
 
+	cfg.JumpTable = jt
+	cfg.JumpTableEOF = eofJt
+
 	return &EVMInterpreter{
 		VM: &VM{
 			evm: evm,
 			cfg: cfg,
 		},
-		legacyJt: jt,
-		eofJt:    eofJt,
 	}
 }
 
@@ -226,9 +228,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	contract.Input = input
 
 	if contract.IsEOF() {
-		jt = in.eofJt
+		jt = in.cfg.JumpTableEOF
 	} else {
-		jt = in.legacyJt
+		jt = in.cfg.JumpTable
 	}
 
 	if in.cfg.Debug {
