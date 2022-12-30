@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -310,7 +311,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 				}
