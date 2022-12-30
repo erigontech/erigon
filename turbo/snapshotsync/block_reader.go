@@ -495,8 +495,10 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		if err != nil {
 			return nil, nil, err
 		}
+		log.Warn("canonical", "found", block != nil)
 		return block, senders, nil
 	}
+	log.Warn("non-canonical")
 	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
 }
 
