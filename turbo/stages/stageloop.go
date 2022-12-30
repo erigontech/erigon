@@ -388,7 +388,7 @@ func NewStagedSync(ctx context.Context,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
-	agg *state.Aggregator22,
+	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
 ) (*stagedsync.Sync, error) {
@@ -459,7 +459,7 @@ func NewStagedSync(ctx context.Context,
 	), nil
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.Aggregator22) (*stagedsync.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) (*stagedsync.Sync, error) {
 	var blockReader services.FullBlockReader
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)

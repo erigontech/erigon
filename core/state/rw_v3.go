@@ -28,7 +28,7 @@ import (
 
 const CodeSizeTable = "CodeSize"
 
-type State22 struct {
+type StateV3 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
@@ -42,8 +42,8 @@ type State22 struct {
 	finished     bool
 }
 
-func NewState22() *State22 {
-	rs := &State22{
+func NewStateV3() *StateV3 {
+	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
 		changes:      map[string]*btree2.Map[string, []byte]{},
@@ -53,7 +53,7 @@ func NewState22() *State22 {
 	return rs
 }
 
-func (rs *State22) put(table string, key, val []byte) {
+func (rs *StateV3) put(table string, key, val []byte) {
 	t, ok := rs.changes[table]
 	if !ok {
 		t = btree2.NewMap[string, []byte](128)
@@ -70,14 +70,14 @@ func (rs *State22) put(table string, key, val []byte) {
 
 const btreeOverhead = 16
 
-func (rs *State22) Get(table string, key []byte) []byte {
+func (rs *StateV3) Get(table string, key []byte) []byte {
 	rs.lock.RLock()
 	v := rs.get(table, key)
 	rs.lock.RUnlock()
 	return v
 }
 
-func (rs *State22) get(table string, key []byte) []byte {
+func (rs *StateV3) get(table string, key []byte) []byte {
 	t, ok := rs.changes[table]
 	if !ok {
 		return nil
@@ -88,7 +88,7 @@ func (rs *State22) get(table string, key []byte) []byte {
 	return nil
 }
 
-func (rs *State22) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
+func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for table, t := range rs.changes {
@@ -128,7 +128,7 @@ func (rs *State22) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *State22) Schedule() (*exec22.TxTask, bool) {
+func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	for !rs.finished && rs.queue.Len() == 0 {
@@ -143,7 +143,7 @@ func (rs *State22) Schedule() (*exec22.TxTask, bool) {
 	return nil, false
 }
 
-func (rs *State22) RegisterSender(txTask *exec22.TxTask) bool {
+func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
@@ -158,7 +158,7 @@ func (rs *State22) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	rs.txsDone.Add(1)
 
 	rs.triggerLock.Lock()
@@ -179,13 +179,13 @@ func (rs *State22) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *State22) queuePush(t *exec22.TxTask) {
+func (rs *StateV3) queuePush(t *exec22.TxTask) {
 	rs.queueLock.Lock()
 	heap.Push(&rs.queue, t)
 	rs.queueLock.Unlock()
 }
 
-func (rs *State22) AddWork(txTask *exec22.TxTask) {
+func (rs *StateV3) AddWork(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -208,14 +208,14 @@ func (rs *State22) AddWork(txTask *exec22.TxTask) {
 	rs.receiveWork.Signal()
 }
 
-func (rs *State22) Finish() {
+func (rs *StateV3) Finish() {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
 	rs.finished = true
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
+func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -324,7 +324,7 @@ func (rs *State22) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 	return nil
 }
 
-func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
+func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -372,7 +372,7 @@ func (rs *State22) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	return nil
 }
 
-func (rs *State22) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
+func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	agg.SetTxNum(txTask.TxNum)
 	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
 		return err
@@ -388,7 +388,7 @@ func (rs *State22) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
-func (rs *State22) ApplyHistory(txTask *exec22.TxTask, agg *libstate.Aggregator22) error {
+func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
@@ -437,7 +437,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	}
 }
 
-func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.Aggregator22, accumulator *shards.Accumulator) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, agg *libstate.AggregatorV3, accumulator *shards.Accumulator) error {
 	agg.SetTx(tx)
 	var currentInc uint64
 	if err := agg.Unwind(ctx, txUnwindTo, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -522,16 +522,16 @@ func (rs *State22) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *State22) DoneCount() uint64 { return rs.txsDone.Load() }
+func (rs *StateV3) DoneCount() uint64 { return rs.txsDone.Load() }
 
-func (rs *State22) SizeEstimate() uint64 {
+func (rs *StateV3) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	r := rs.sizeEstimate
 	rs.lock.RUnlock()
 	return r
 }
 
-func (rs *State22) ReadsValid(readLists map[string]*exec22.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	var t *btree2.Map[string, []byte]
 
 	rs.lock.RLock()
@@ -565,7 +565,7 @@ func (rs *State22) ReadsValid(readLists map[string]*exec22.KvList) bool {
 }
 
 type StateWriter22 struct {
-	rs           *State22
+	rs           *StateV3
 	txNum        uint64
 	writeLists   map[string]*exec22.KvList
 	accountPrevs map[string][]byte
@@ -574,7 +574,7 @@ type StateWriter22 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriter22(rs *State22) *StateWriter22 {
+func NewStateWriter22(rs *StateV3) *StateWriter22 {
 	return &StateWriter22{
 		rs:           rs,
 		writeLists:   newWriteList(),
@@ -669,12 +669,12 @@ type StateReader22 struct {
 	tx        kv.Tx
 	txNum     uint64
 	trace     bool
-	rs        *State22
+	rs        *StateV3
 	composite []byte
 	readLists map[string]*exec22.KvList
 }
 
-func NewStateReader22(rs *State22) *StateReader22 {
+func NewStateReader22(rs *StateV3) *StateReader22 {
 	return &StateReader22{
 		rs:        rs,
 		readLists: newReadList(),

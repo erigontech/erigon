@@ -269,7 +269,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	db kv.RoDB, borDb kv.RoDB,
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader,
-	ff *rpchelper.Filters, agg *libstate.Aggregator22, err error) {
+	ff *rpchelper.Filters, agg *libstate.AggregatorV3, err error) {
 	if !cfg.WithDatadir && cfg.PrivateApiAddr == "" {
 		return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("either remote db or local db must be specified")
 	}
