@@ -1211,8 +1211,8 @@ func newFrontierInstructionSet() JumpTable {
 		},
 		INVALID: {
 			execute:  opUndefined,
-			minStack: minStack(0, 0),
-			maxStack: maxStack(0, 0),
+			numPop:   0,
+			numPush:  0,
 			terminal: true,
 		},
 	}
