@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // BlockReader can read blocks from db and snapshots
@@ -436,6 +437,8 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 	if err != nil {
 		return nil, nil, err
 	}
+	log.Warn("found header", "ok", ok)
+
 	if ok && h != nil {
 		var b *types.Body
 		var baseTxnId uint64
@@ -450,6 +453,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 		if err != nil {
 			return nil, nil, err
 		}
+		log.Warn("found body", "ok", ok)
 		if ok && b != nil {
 			if txsAmount == 0 {
 				block = types.NewBlockFromStorage(hash, h, nil, b.Uncles, b.Withdrawals)
@@ -471,6 +475,7 @@ func (back *BlockReaderWithSnapshots) BlockWithSenders(ctx context.Context, tx k
 			if err != nil {
 				return nil, nil, err
 			}
+			log.Warn("found txs", "ok", ok, "len", len(txs))
 			if ok {
 				block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 				if len(senders) != block.Transactions().Len() {

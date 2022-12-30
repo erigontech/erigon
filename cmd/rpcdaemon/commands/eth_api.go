@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -177,10 +178,12 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 			return it.(*types.Block), nil
 		}
 	}
+
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
+	log.Warn("with sen", "n", number, "h", fmt.Sprintf("%x"), hash, "found", block != nil)
 	if block == nil { // don't save nil's to cache
 		return nil, nil
 	}
