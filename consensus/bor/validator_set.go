@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon/common"
+	emath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -165,12 +166,8 @@ func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
 	max := int64(math.MinInt64)
 	min := int64(math.MaxInt64)
 	for _, v := range vals.Validators {
-		if v.ProposerPriority < min {
-			min = v.ProposerPriority
-		}
-		if v.ProposerPriority > max {
-			max = v.ProposerPriority
-		}
+		min = emath.Min(v.ProposerPriority, min)
+		max = emath.Max(v.ProposerPriority, max)
 	}
 	diff := max - min
 	if diff < 0 {
