@@ -182,7 +182,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 		}
 	}
 	log.Warn("n4", "n", number)
-
+	fmt.Printf("api._blockReader: %T\n", api._blockReader)
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
 	if err != nil {
 		return nil, err
