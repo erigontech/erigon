@@ -382,6 +382,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				}()
 			}
 			onNewSnapshot()
+			log.Warn("block reader1")
 			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 
 			var histV3Enabled bool
@@ -401,7 +402,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	}
 	if cfg.WithDatadir {
 		stateCache = kvcache.NewDummy()
-		blockReader = snapshotsync.NewBlockReader()
+		log.Warn("block reader2")
 
 		// bor (consensus) specific db
 		var borKv kv.RoDB
