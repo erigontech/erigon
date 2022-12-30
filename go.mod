@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/ledgerwatch/interfaces v0.0.0-20221226080656-9ea2ff13ca12
-	github.com/ledgerwatch/log/v3 v3.6.0
+	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
 	github.com/torquem-ch/mdbx-go v0.27.4
@@ -71,7 +71,7 @@ require (
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/lispad/go-generics-tools v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
-	github.com/mattn/go-isatty v0.0.16 // indirect
+	github.com/mattn/go-isatty v0.0.17 // indirect
 	github.com/mschoch/smat v0.2.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.1.5 // indirect
