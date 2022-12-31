@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -38,8 +39,9 @@ func NewStagedSync(ctx context.Context,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	snapshots *snapshotsync.RoSnapshots,
-	agg *state.Aggregator22,
+	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
+	engine consensus.Engine,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
 	var blockReader services.FullBlockReader
@@ -56,7 +58,7 @@ func NewStagedSync(ctx context.Context,
 
 	return stagedsync.New(
 		ExecutionStages(ctx, cfg.Prune,
-			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, cfg.HistoryV3, agg),
+			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, dirs, snapshots, blockRetire, snapDownloader, blockReader, notifications.Events, engine, cfg.HistoryV3, agg),
 			stagedsync.StageHeadersCfg(
 				db,
 				controlServer.Hd,
