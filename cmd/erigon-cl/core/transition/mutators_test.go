@@ -59,12 +59,12 @@ func TestDecreaseBalance(t *testing.T) {
 		expectedBalance uint64
 	}{
 		{
-			description:     "full",
+			description:     "zero_remaining",
 			delta:           beforeBalance,
 			expectedBalance: 0,
 		},
 		{
-			description:     "remaining_balances",
+			description:     "non_zero_remaining",
 			delta:           1,
 			expectedBalance: beforeBalance - 1,
 		},
