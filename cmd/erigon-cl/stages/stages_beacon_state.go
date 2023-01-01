@@ -29,7 +29,7 @@ type StageBeaconStateCfg struct {
 }
 
 func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool, executionClient *execution_client.ExecutionClient) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:               db,
 		genesisCfg:       genesisCfg,
@@ -37,6 +37,7 @@ func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
 		state:            state,
 		clearEth1Data:    clearEth1Data,
 		triggerExecution: triggerExecution,
+		executionClient:  executionClient,
 	}
 }
 
