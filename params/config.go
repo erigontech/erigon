@@ -684,9 +684,9 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
-		//{name: "shanghaiBlock", block: c.ShanghaiBlock, optional: true},
+		// {name: "shanghaiBlock", block: c.ShanghaiTime, optional: true},
 		{name: "cancunBlock", block: c.CancunTime, optional: true},
-		//{name: "shardingForkBlock", block: c.ShardingForkBlock, optional: true},
+		// {name: "shardingForkBlock", block: new(big.Int).SetUint64(*c.ShardingForkTime), optional: true},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -766,9 +766,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	// if isForkIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, head) {
 	// 	return newCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
 	// }
-	// if isForkIncompatible(c.CancunTime, newcfg.CancunTime, head) {
-	// 	return newCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
-	// }
+	if isForkIncompatible(c.CancunTime, newcfg.CancunTime, head) {
+		return newCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
+	}
 	// if isForkIncompatible(c.ShardingForkBlock, newcfg.ShardingForkBlock, head) {
 	// 	return newCompatError("Mini-Danksharding fork block", c.ShardingForkBlock, newcfg.ShardingForkBlock)
 	// }
@@ -890,9 +890,9 @@ func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:            c.IsIstanbul(num),
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
-		IsShanghai:            c.IsShanghai(num),
+		IsShanghai:            c.IsShanghai(time),
 		IsCancun:              c.IsCancun(num),
-		IsSharding:            c.IsSharding(num),
+		IsSharding:            c.IsSharding(time),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),

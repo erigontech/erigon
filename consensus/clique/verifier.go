@@ -154,6 +154,15 @@ func (c *Clique) verifyCascadingFields(chain consensus.ChainHeaderReader, header
 		}
 	}
 
+	// TODO make sure following 2 verifications are correct and in order
+	if err := c.verifyShanghai(chain, header); err != nil {
+		return err
+	}
+
+	if err := c.verifySharding(chain, header, parent); err != nil {
+		return err
+	}
+
 	// All basic checks passed, verify the seal and return
 	return c.verifySeal(chain, header, snap)
 }
@@ -276,6 +285,30 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 		}
 		if !inturn && header.Difficulty.Cmp(diffNoTurn) != 0 {
 			return errWrongDifficulty
+		}
+	}
+
+	return nil
+}
+
+func (c *Clique) verifyShanghai(chain consensus.ChainHeaderReader, header *types.Header) error {
+	shanghai := chain.Config().IsShanghai(header.Time)
+	if shanghai && header.WithdrawalsHash == nil {
+		return fmt.Errorf("missing withdrawalsHash")
+	}
+	// Verify existence / non-existence of withdrawalsHash.
+	if !shanghai && header.WithdrawalsHash != nil {
+		return fmt.Errorf("invalid withdrawalsHash: have %s, expected nil", header.WithdrawalsHash)
+	}
+	return nil
+}
+
+func (c *Clique) verifySharding(chain consensus.ChainHeaderReader, header, parent *types.Header) error {
+
+	if chain.Config().IsSharding(header.Time) {
+		// Verify the header's EIP-4844 attributes.
+		if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
+			return err
 		}
 	}
 

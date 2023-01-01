@@ -217,7 +217,7 @@ func Main(ctx *cli.Context) error {
 		txsWithKeys = inputData.Txs
 	}
 	// We may have to sign the transactions.
-	signer := types.MakeSigner(chainConfig, prestate.Env.Number, 0)
+	signer := types.MakeSigner(chainConfig, prestate.Env.Number, prestate.Env.Timestamp)
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))

@@ -46,13 +46,28 @@ type BlockGen struct {
 	stateReader state.StateReader
 	ibs         *state.IntraBlockState
 
-	gasPool  *GasPool
-	txs      []types.Transaction
-	receipts []*types.Receipt
-	uncles   []*types.Header
+	gasPool     *GasPool
+	txs         []types.Transaction
+	receipts    []*types.Receipt
+	uncles      []*types.Header
+	withdrawals []*types.Withdrawal
 
 	config *params.ChainConfig
 	engine consensus.Engine
+}
+
+// AddWithdrawal adds a withdrawal to the generated block.
+func (b *BlockGen) AddWithdrawal(w *types.Withdrawal) {
+	// The withdrawal will be assigned the next valid index.
+	var idx uint64
+	for i := b.i - 1; i >= 0; i-- {
+		if wd := b.chain[i].Withdrawals(); len(wd) != 0 {
+			idx = wd[len(wd)-1].Index + 1
+			break
+		}
+	}
+	w.Index = idx
+	b.withdrawals = append(b.withdrawals, w)
 }
 
 // SetCoinbase sets the coinbase of the generated block.
@@ -328,6 +343,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			gen(i, b)
 		}
 		if b.engine != nil {
+			shanghai := config.IsShanghai(b.header.Time)
+			if shanghai && b.withdrawals == nil {
+				// need to make empty list to denote non-nil, but empty withdrawals to calc withdrawals hash
+				b.withdrawals = make([]*types.Withdrawal, 0)
+			} else if !shanghai && b.withdrawals != nil {
+				panic("withdrawals set before activation")
+			}
 			// Finalize and seal the block
 			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
@@ -512,4 +534,9 @@ func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header      
 func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+	if cr.Cfg.TerminalTotalDifficultyPassed {
+		return cr.Cfg.TerminalTotalDifficulty
+	}
+	return nil
+}
