@@ -12,7 +12,7 @@ import (
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
-func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg) []*stagedsync.Stage {
+func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg, beaconIndexes StageBeaconIndexesCfg) []*stagedsync.Stage {
 	return []*stagedsync.Stage{
 		{
 			ID:          stages.BeaconHistoryReconstruction,
@@ -44,6 +44,16 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 				return nil
 			},
 		},
+		{
+			ID:          stages.BeaconIndexes,
+			Description: "Compute beacon indexes",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageBeaconIndexes(beaconIndexes, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
+				return nil
+			},
+		},
 	}
 }
 
@@ -66,13 +76,15 @@ func NewConsensusStagedSync(ctx context.Context,
 	state *state.BeaconState,
 	triggerExecution triggerExecutionFunc,
 	clearEth1Data bool,
+	tmpdir string,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
 		ConsensusStages(
 			ctx,
-			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, state),
+			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, state, tmpdir),
 			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state),
 			StageBeaconState(db, genesisCfg, beaconCfg, state, triggerExecution, clearEth1Data),
+			StageBeaconIndexes(db, tmpdir),
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,

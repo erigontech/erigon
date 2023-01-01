@@ -125,11 +125,11 @@ func TestExec(t *testing.T) {
 	})
 }
 
-func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewState22()
+	rs := state.NewStateV3()
 	stateWriter := state.NewStateWriter22(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
@@ -162,10 +162,10 @@ func apply(tx kv.RwTx, agg *libstate.Aggregator22) (beforeBlock, afterBlock test
 		}, stateWriter
 }
 
-func newAgg(t *testing.T) *libstate.Aggregator22 {
+func newAgg(t *testing.T) *libstate.AggregatorV3 {
 	t.Helper()
-	dir := t.TempDir()
-	agg, err := libstate.NewAggregator22(dir, dir, ethconfig.HistoryV3AggregationStep, nil)
+	dir, ctx := t.TempDir(), context.Background()
+	agg, err := libstate.NewAggregator22(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
 	require.NoError(t, err)
 	err = agg.ReopenFiles()
 	require.NoError(t, err)

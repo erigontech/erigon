@@ -22,6 +22,7 @@ type TxTask struct {
 	Txs             types.Transactions
 	Uncles          []*types.Header
 	Coinbase        common.Address
+	Withdrawals     types.Withdrawals
 	BlockHash       common.Hash
 	Sender          *common.Address
 	SkipAnalysis    bool
