@@ -8,13 +8,13 @@ import (
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -53,10 +53,18 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 	defer db.Close()
 	// Fetch the checkpoint state.
-	cpState, err := getCheckpointState(ctx, db)
+	cpState, err := getCheckpointState(ctx, db, cfg.CheckpointUri)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
 		return err
+	}
+	var executionClient *execution_client.ExecutionClient
+	if cfg.ELEnabled {
+		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
+		if err != nil {
+			log.Warn("Could not connect to execution client", "err", err)
+			return err
+		}
 	}
 
 	log.Info("Starting sync from checkpoint.")
@@ -69,7 +77,8 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Could not start sentinel service", "err", err)
 	}
 
-	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	genesisCfg := cfg.GenesisCfg
+	beaconConfig := cfg.BeaconCfg
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisCfg)
 	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
 	bdownloader := network.NewBackwardBeaconDownloader(ctx, beaconRpc)
@@ -77,7 +86,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient)
 	if err != nil {
 		return err
 	}
@@ -123,9 +132,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context, db kv.RwDB) (*state.BeaconState, error) {
-
-	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
+func getCheckpointState(ctx context.Context, db kv.RwDB, uri string) (*state.BeaconState, error) {
 
 	state, err := core.RetrieveBeaconState(ctx, uri)
 	if err != nil {

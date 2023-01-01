@@ -22,6 +22,7 @@ type ConsensusClientCliCfg struct {
 	NoDiscovery    bool                        `json:"noDiscovery"`
 	CheckpointUri  string                      `json:"checkpointUri"`
 	Chaindata      string                      `json:"chaindata"`
+	ELEnabled      bool                        `json:"elEnabled"`
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
@@ -43,5 +44,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg.NoDiscovery = ctx.Bool(flags.NoDiscovery.Name)
 	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
+	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
 	return cfg, nil
 }

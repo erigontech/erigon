@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -77,12 +78,13 @@ func NewConsensusStagedSync(ctx context.Context,
 	triggerExecution triggerExecutionFunc,
 	clearEth1Data bool,
 	tmpdir string,
+	executionClient *execution_client.ExecutionClient,
 ) (*stagedsync.Sync, error) {
 	return stagedsync.New(
 		ConsensusStages(
 			ctx,
-			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, state, tmpdir),
-			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state),
+			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, state, tmpdir, executionClient),
+			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient),
 			StageBeaconState(db, genesisCfg, beaconCfg, state, triggerExecution, clearEth1Data),
 			StageBeaconIndexes(db, tmpdir),
 		),

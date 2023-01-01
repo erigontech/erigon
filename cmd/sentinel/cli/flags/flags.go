@@ -48,4 +48,9 @@ var (
 		Usage: "chaindata of database",
 		Value: "",
 	}
+	ELEnabledFlag = cli.BoolFlag{
+		Name:  "el.enabled",
+		Usage: "enables EL support",
+		Value: false,
+	}
 )
