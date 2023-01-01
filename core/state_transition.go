@@ -87,6 +87,7 @@ type Message interface {
 	Tip() *uint256.Int
 	MaxFeePerDataGas() *uint256.Int
 	Gas() uint64
+	DataGas() uint64
 	Value() *uint256.Int
 
 	Nonce() uint64

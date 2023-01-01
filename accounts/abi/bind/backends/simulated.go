@@ -670,7 +670,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
-	gasPool := new(core.GasPool).AddGas(math.MaxUint64)
+	gasPool := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(params.MaxDataGasPerBlock)
 
 	return core.NewStateTransition(vmEnv, msg, gasPool).TransitionDb(true /* refunds */, false /* gasBailout */)
 }
@@ -788,6 +788,7 @@ func (m callMsg) AccessList() types.AccessList   { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                   { return false }
 func (m callMsg) DataHashes() []common.Hash      { return m.CallMsg.DataHashes }
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return nil }
+func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.
