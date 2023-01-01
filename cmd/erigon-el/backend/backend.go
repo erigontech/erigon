@@ -47,6 +47,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
+	stages3 "github.com/ledgerwatch/erigon/cmd/erigon-el/stages"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -587,7 +588,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages2.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
+	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
 	if err != nil {
 		return nil, err
 	}
@@ -914,10 +915,11 @@ func (s *Ethereum) Start() error {
 		}
 		lis, err := net.Listen("tcp", "127.0.0.1:8989")
 		if err != nil {
-			log.Warn("[Sentinel] could not serve service", "reason", err)
+			log.Warn("[Exec] could not serve service", "reason", err)
 		}
 		server := grpc.NewServer()
 		execution.RegisterExecutionServer(server, eth1.NewEth1Execution(s.chainDB, s.stagedSync))
+		log.Info("Execution Module Server stated")
 		if err := server.Serve(lis); err != nil {
 			panic(err)
 		}
