@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -45,6 +46,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -906,9 +908,21 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 	// Execute one iteration
-	if err := s.stagedSync.Run(s.chainDB, nil, true, false); err != nil {
-		return err
-	}
+	go func() {
+		if err := s.stagedSync.Run(s.chainDB, nil, true, false); err != nil {
+			panic(err)
+		}
+		lis, err := net.Listen("tcp", "127.0.0.1:8989")
+		if err != nil {
+			log.Warn("[Sentinel] could not serve service", "reason", err)
+		}
+		server := grpc.NewServer()
+		execution.RegisterExecutionServer(server, eth1.NewEth1Execution(s.chainDB, s.stagedSync))
+		if err := server.Serve(lis); err != nil {
+			panic(err)
+		}
+	}()
+
 	// Start execution server
 
 	return nil

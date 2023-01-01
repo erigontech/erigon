@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
@@ -22,10 +23,10 @@ type Eth1Execution struct {
 	execution.UnimplementedExecutionServer
 
 	db                kv.RwDB
-	executionPipeline stagedsync.Sync
+	executionPipeline *stagedsync.Sync
 }
 
-func NewEth1Execution(db kv.RwDB, executionPipeline stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, executionPipeline *stagedsync.Sync) *Eth1Execution {
 	return &Eth1Execution{
 		db:                db,
 		executionPipeline: executionPipeline,
@@ -87,8 +88,89 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 	return &execution.EmptyMessage{}, tx.Commit()
 }
 
+type canonicalEntry struct {
+	hash   common.Hash
+	number uint64
+}
+
 func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256) (*execution.ForkChoiceReceipt, error) {
-	return nil, nil
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blockHash := gointerfaces.ConvertH256ToHash(hash)
+	// Step one, find reconnection point, and mark all of those headers as canonical.
+	fcuHeader, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	// If we dont have it, too bad
+	if fcuHeader == nil {
+		return &execution.ForkChoiceReceipt{
+			Success:         false,
+			LatestValidHash: &types2.H256{},
+		}, nil
+	}
+	currentParentHash := fcuHeader.ParentHash
+	currentParentNumber := fcuHeader.Number.Uint64() - 1
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash)
+	if err != nil {
+		return nil, err
+	}
+	// Find such point, and collect all hashes
+	newCanonicals := make([]*canonicalEntry, 0, 2048)
+	newCanonicals = append(newCanonicals, &canonicalEntry{
+		hash:   fcuHeader.Hash(),
+		number: fcuHeader.Number.Uint64(),
+	})
+	for !isCanonicalHash {
+		newCanonicals = append(newCanonicals, &canonicalEntry{
+			hash:   currentParentHash,
+			number: currentParentNumber,
+		})
+		currentHeader := rawdb.ReadHeader(tx, currentParentHash, currentParentNumber)
+		if currentHeader == nil {
+			return &execution.ForkChoiceReceipt{
+				Success:         false,
+				LatestValidHash: &types2.H256{},
+			}, nil
+		}
+		currentParentHash = currentHeader.ParentHash
+		currentParentNumber = currentHeader.Number.Uint64() - 1
+		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash)
+		if err != nil {
+			return nil, err
+		}
+	}
+	e.executionPipeline.UnwindTo(currentParentNumber, common.Hash{})
+	// Run the unwind
+	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
+		return nil, err
+	}
+	// Mark all new canonicals as canonicals
+	for _, canonicalSegment := range newCanonicals {
+		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
+			return nil, err
+		}
+	}
+	// Set Progress for headers and bodies accordingly.
+	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
+		return nil, err
+	}
+	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+		return nil, err
+	}
+	// Run the forkchoice
+	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
+		return nil, err
+	}
+	// if head hash was set then success otherwise no
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	return &execution.ForkChoiceReceipt{
+		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+		Success:         headHash == fcuHeader.Hash(),
+	}, tx.Commit()
 }
 
 func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
