@@ -45,6 +45,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	stages3 "github.com/ledgerwatch/erigon/cmd/erigon-el/stages"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
@@ -926,6 +927,7 @@ func (s *Ethereum) Start() error {
 	}()
 
 	// Start execution server
+
 	return nil
 }
 
