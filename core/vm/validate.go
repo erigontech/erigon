@@ -19,7 +19,7 @@ package vm
 import (
 	"fmt"
 
-	emath "github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -205,7 +205,7 @@ func validateControlFlow(code []byte, section int, metadata []*FunctionMetadata,
 					pos += 1
 				}
 			}
-			maxStackHeight = emath.Max(maxStackHeight, height)
+			maxStackHeight = cmp.Max(maxStackHeight, height)
 		}
 	}
 	return maxStackHeight, len(heights), nil

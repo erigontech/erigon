@@ -23,8 +23,6 @@ import (
 	"math/big"
 	"math/bits"
 	"strconv"
-
-	"golang.org/x/exp/constraints"
 )
 
 // Integer limit values.
@@ -116,18 +114,4 @@ func RandInt64() (int64, error) {
 		return 0, err
 	}
 	return n.Int64(), nil
-}
-
-func Min[T constraints.Ordered](a, b T) T {
-	if b < a {
-		return b
-	}
-	return a
-}
-
-func Max[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return b
-	}
-	return a
 }
