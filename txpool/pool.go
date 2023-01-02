@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/simplelru"
@@ -601,23 +602,22 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip [][32]byte) (bool, [][32]byte, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
 	// First wait for the corresponding block to arrive
 	if p.lastSeenBlock.Load() < onTopOf {
-		return false, nil, nil // Too early
+		return false, 0, nil // Too early
 	}
 
 	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
-	j := 0
 	var toRemove []*metaTx
-	yielded := make([][32]byte, 0)
+	count := 0
 
 	success, err := func() (bool, error) {
 		p.lock.Lock()
 		defer p.lock.Unlock()
 
 		best := p.pending.best
-		for i := 0; j < int(n) && i < len(best.ms); i++ {
+		for i := 0; count < int(n) && i < len(best.ms); i++ {
 			// if we wouldn't have enough gas for a standard transaction then quit out early
 			if availableGas < fixedgas.TxGas {
 				break
@@ -625,14 +625,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 			mt := best.ms[i]
 
-			skip := false
-			for _, id := range toSkip {
-				if mt.Tx.IDHash == id {
-					skip = true
-					break
-				}
-			}
-			if skip {
+			if toSkip.Contains(mt.Tx.IDHash) {
 				continue
 			}
 
@@ -662,15 +655,15 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 				availableGas -= intrinsicGas
 			}
 
-			txs.Txs[j] = rlpTx
-			copy(txs.Senders.At(j), sender)
-			txs.IsLocal[j] = isLocal
-			yielded = append(yielded, mt.Tx.IDHash)
-			j++
+			txs.Txs[count] = rlpTx
+			copy(txs.Senders.At(count), sender)
+			txs.IsLocal[count] = isLocal
+			toSkip.Add(mt.Tx.IDHash)
+			count++
 		}
 		return true, nil
 	}()
-	txs.Resize(uint(j))
+	txs.Resize(uint(count))
 	if len(toRemove) > 0 {
 		p.lock.Lock()
 		defer p.lock.Unlock()
@@ -678,7 +671,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			p.pending.Remove(mt)
 		}
 	}
-	return success, yielded, err
+	return success, count, err
 }
 
 func (p *TxPool) ResetYieldedStatus() {
@@ -690,16 +683,13 @@ func (p *TxPool) ResetYieldedStatus() {
 	}
 }
 
-func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip [][32]byte) (bool, [][32]byte, error) {
+func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
 	return p.best(n, txs, tx, onTopOf, availableGas, toSkip)
 }
 
-var (
-	emptyToSkip = make([][32]byte, 0)
-)
-
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas uint64) (bool, error) {
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, emptyToSkip)
+	set := mapset.NewSet[[32]byte]()
+	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, set)
 	return onTime, err
 }
 

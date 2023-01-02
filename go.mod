@@ -17,6 +17,7 @@ require (
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.0
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
+	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/go-stack/stack v1.8.1
 	github.com/google/btree v1.1.2
