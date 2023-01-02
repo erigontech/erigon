@@ -1261,7 +1261,7 @@ type AggregatorStep struct {
 	keyBuf   []byte
 }
 
-func (a *AggregatorV3) MakeSteps() []*AggregatorStep {
+func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
 	to := a.maxTxNum.Load()
 	indexedMax := cmp.Min(
 		cmp.Min(a.accounts.endIndexedTxNumMinimax(), a.storage.endIndexedTxNumMinimax()),
@@ -1272,22 +1272,21 @@ func (a *AggregatorV3) MakeSteps() []*AggregatorStep {
 		to = cmp.Min(to, indexedMax)
 	}
 	accountSteps := a.accounts.MakeSteps(to)
+	codeSteps := a.code.MakeSteps(to)
+	storageSteps := a.storage.MakeSteps(to)
+	if len(accountSteps) != len(storageSteps) || len(storageSteps) != len(codeSteps) {
+		return nil, fmt.Errorf("different amount of steps (try merge snapshots): accountSteps=%d, storageSteps=%d, codeSteps=%d", len(accountSteps), len(storageSteps), len(codeSteps))
+	}
 	steps := make([]*AggregatorStep, len(accountSteps))
 	for i, accountStep := range accountSteps {
 		steps[i] = &AggregatorStep{
 			a:        a,
 			accounts: accountStep,
+			storage:  storageSteps[i],
+			code:     codeSteps[i],
 		}
 	}
-	storageSteps := a.storage.MakeSteps(to)
-	for i, storageStep := range storageSteps {
-		steps[i].storage = storageStep
-	}
-	codeSteps := a.code.MakeSteps(to)
-	for i, codeStep := range codeSteps {
-		steps[i].code = codeStep
-	}
-	return steps
+	return steps, nil
 }
 
 func (as *AggregatorStep) TxNumRange() (uint64, uint64) {
