@@ -408,6 +408,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if err == nil && isInitcodeEOF && !hasEOFByte(ret) {
 		err = ErrLegacyCode
 	}
+	if err == nil && !isInitcodeEOF && hasEOFByte(ret) {
+		err = ErrLegacyDeploysEOF
+	}
 
 	if err == nil && hasEOFByte(ret) {
 		if evm.chainRules.IsShanghai {
