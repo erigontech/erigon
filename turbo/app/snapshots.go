@@ -342,7 +342,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, true, true)
 	snapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
-	if err := snapshots.ReopenWithDB(db); err != nil {
+	if err := snapshots.ReopenFolder(); err != nil {
 		return err
 	}
 
@@ -421,13 +421,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteSnapshots(tx, snapshots.Files(), agg.Files())
+	}); err != nil {
+		return err
+	}
+
 	log.Info("Prune state history")
 	for i := 0; i < 1024; i++ {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), agg.Files()); err != nil {
-				return err
-			}
 			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
 				return err
 			}
