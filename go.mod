@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230102035736-f91704764aec
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230102061333-5d2c0f71fe01
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221223003841-487873d31492
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -153,8 +153,6 @@ require (
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
-	github.com/kelindar/bitmap v1.4.1 // indirect
-	github.com/kelindar/simd v1.1.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.1.1 // indirect
 	github.com/koron/go-ssdp v0.0.3 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
