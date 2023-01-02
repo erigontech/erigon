@@ -28,7 +28,7 @@ type StageHistoryReconstructionCfg struct {
 	tmpdir          string
 }
 
-const RecEnabled = false
+const RecEnabled = true
 
 var DestinationSlot = 0
 
@@ -115,7 +115,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			}
 		}
 		// will arbitratly stop at slot 5.1M for testing reasons
-		return slot == uint64(DestinationSlot), nil
+		return /*slot == uint64(DestinationSlot), nil*/ foundLatestEth1ValidHash, nil
 	})
 	prevProgress := cfg.downloader.Progress()
 

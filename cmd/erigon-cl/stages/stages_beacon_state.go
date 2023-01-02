@@ -73,7 +73,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 	}
 	// If successful update fork choice
 	if cfg.executionClient != nil {
-		_, _, _, eth1Hash, err := rawdb.ReadBeaconBlockForStorage(tx, endSlot)
+		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, endSlot)
 		if err != nil {
 			return err
 		}

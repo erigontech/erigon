@@ -18,13 +18,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Eth1Execution struct {
 	execution.UnimplementedExecutionServer
 
 	db                kv.RwDB
-	tx                kv.RwTx
 	executionPipeline *stagedsync.Sync
 	mu                sync.Mutex
 }
@@ -39,34 +39,31 @@ func NewEth1Execution(db kv.RwDB, executionPipeline *stagedsync.Sync) *Eth1Execu
 func (e *Eth1Execution) InsertHeaders(ctx context.Context, req *execution.InsertHeadersRequest) (*execution.EmptyMessage, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 
 	for _, header := range req.Headers {
 		h, err := HeaderRpcToHeader(header)
 		if err != nil {
 			return nil, err
 		}
-		rawdb.WriteHeader(e.tx, h)
+		rawdb.WriteHeader(tx, h)
 	}
-	return &execution.EmptyMessage{}, nil
+	return &execution.EmptyMessage{}, tx.Commit()
 }
 
 func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertBodiesRequest) (*execution.EmptyMessage, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
+
 	for _, body := range req.Bodies {
 		uncles := make([]*types.Header, 0, len(body.Uncles))
 		for _, uncle := range body.Uncles {
@@ -87,7 +84,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			})
 		}
 
-		if _, _, err := rawdb.WriteRawBodyIfNotExists(e.tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
+		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
 				Uncles:       uncles,
@@ -96,7 +93,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 			return nil, err
 		}
 	}
-	return &execution.EmptyMessage{}, nil
+	return &execution.EmptyMessage{}, tx.Commit()
 }
 
 type canonicalEntry struct {
@@ -108,16 +105,15 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
+
 	blockHash := gointerfaces.ConvertH256ToHash(hash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := rawdb.ReadHeaderByHash(e.tx, blockHash)
+	fcuHeader, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +126,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 	}
 	currentParentHash := fcuHeader.ParentHash
 	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(e.tx, currentParentHash)
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +141,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 			hash:   currentParentHash,
 			number: currentParentNumber,
 		})
-		currentHeader := rawdb.ReadHeader(e.tx, currentParentHash, currentParentNumber)
+		currentHeader := rawdb.ReadHeader(tx, currentParentHash, currentParentNumber)
 		if currentHeader == nil {
 			return &execution.ForkChoiceReceipt{
 				Success:         false,
@@ -154,65 +150,73 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		}
 		currentParentHash = currentHeader.ParentHash
 		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(e.tx, currentParentHash)
+		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash)
 		if err != nil {
 			return nil, err
 		}
 	}
-	e.executionPipeline.UnwindTo(currentParentNumber, common.Hash{})
+	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
+		e.executionPipeline.UnwindTo(currentParentNumber, common.Hash{})
+	}
 	// Run the unwind
-	if err := e.executionPipeline.RunUnwind(e.db, e.tx); err != nil {
+	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
 		return nil, err
 	}
 	// Mark all new canonicals as canonicals
 	for _, canonicalSegment := range newCanonicals {
-		if err := rawdb.WriteCanonicalHash(e.tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
+		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
 			return nil, err
 		}
 	}
 	// Set Progress for headers and bodies accordingly.
-	if err := stages.SaveStageProgress(e.tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
 		return nil, err
 	}
-	if err := stages.SaveStageProgress(e.tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
+		return nil, err
+	}
+	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
 		return nil, err
 	}
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, e.tx, false, false); err != nil {
+	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
 		return nil, err
 	}
 	// if head hash was set then success otherwise no
-	headHash := rawdb.ReadHeadBlockHash(e.tx)
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	if headNumber != nil {
+		log.Info("Current forkchoice", "hash", headHash, "number", *headNumber)
+	}
 	return &execution.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-		Success:         headHash == fcuHeader.Hash(),
-	}, e.tx.Commit()
+		Success:         headHash == blockHash,
+	}, tx.Commit()
 }
 
 func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
+
 	// Retrieve header
 	var header *types.Header
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header = rawdb.ReadHeader(e.tx, blockHash, *req.BlockNumber)
+		header = rawdb.ReadHeader(tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header, err = rawdb.ReadHeaderByHash(e.tx, blockHash)
+		header, err = rawdb.ReadHeaderByHash(tx, blockHash)
 		if err != nil {
 			return nil, err
 		}
 	} else if req.BlockNumber != nil {
-		header = rawdb.ReadHeaderByNumber(e.tx, *req.BlockNumber)
+		header = rawdb.ReadHeaderByNumber(tx, *req.BlockNumber)
 	}
 	// Got nothing? return nothing :)
 	if header == nil {
@@ -228,27 +232,25 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 	// Retrieve header
 	var body *types.Body
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		body, _, _ = rawdb.ReadBody(e.tx, blockHash, *req.BlockNumber)
+		body, _, _ = rawdb.ReadBody(tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		blockNumber := rawdb.ReadHeaderNumber(e.tx, blockHash)
+		blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
 		if blockNumber == nil {
 			return nil, nil
 		}
-		body, _, _ = rawdb.ReadBody(e.tx, blockHash, *blockNumber)
+		body, _, _ = rawdb.ReadBody(tx, blockHash, *blockNumber)
 	} else if req.BlockNumber != nil {
-		body, _, _, err = rawdb.ReadBodyByNumber(e.tx, *req.BlockNumber)
+		body, _, _, err = rawdb.ReadBodyByNumber(tx, *req.BlockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -279,16 +281,14 @@ func (e *Eth1Execution) IsCanonicalHash(ctx context.Context, req *types2.H256) (
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 
 	blockHash := gointerfaces.ConvertH256ToHash(req)
-	isCanonical, err := rawdb.IsCanonicalHash(e.tx, blockHash)
+	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -299,16 +299,14 @@ func (e *Eth1Execution) GetHeaderHashNumber(ctx context.Context, req *types2.H25
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	var err error
-	if e.tx == nil {
-		e.tx, err = e.db.BeginRw(ctx)
-		if err != nil {
-			return nil, err
-		}
+	tx, err := e.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
 	}
+	defer tx.Rollback()
 
 	return &execution.GetHeaderHashNumberResponse{
-		BlockNumber: rawdb.ReadHeaderNumber(e.tx, gointerfaces.ConvertH256ToHash(req)),
+		BlockNumber: rawdb.ReadHeaderNumber(tx, gointerfaces.ConvertH256ToHash(req)),
 	}, nil
 }
 
