@@ -908,7 +908,6 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
-
 	// Execute one iteration
 	go func() {
 		if err := s.stagedSync.Run(s.chainDB, nil, true, false); err != nil {
