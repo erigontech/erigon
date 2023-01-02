@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -57,7 +58,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	// We add one so that we wait for Gossiped blocks if we are on chain tip.
 	targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
 
-	log.Info("[Beacon Downloading] Started", "start", progress, "target", targetSlot)
+	log.Info(fmt.Sprintf("[%s] Started", s.LogPrefix()), "start", progress, "target", targetSlot)
 	cfg.downloader.SetHighestProcessedSlot(progress)
 	if cfg.downloader.HighestProcessedRoot() == (common.Hash{}) {
 		cfg.downloader.SetHighestProcessedRoot(lastRoot)
@@ -135,11 +136,11 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 		select {
 		case <-logInterval.C:
-			log.Info("[Beacon Downloading] Progress", "slot", cfg.downloader.GetHighestProcessedSlot())
+			log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "slot", cfg.downloader.GetHighestProcessedSlot())
 		case <-triggerInterval.C:
 		}
 	}
-	log.Info("Processed and collected blocks", "count", targetSlot-progress)
+	log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "count", targetSlot-progress)
 	if err := s.Update(tx, cfg.downloader.GetHighestProcessedSlot()); err != nil {
 		return err
 	}
