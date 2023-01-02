@@ -227,6 +227,13 @@ func (b *SignedBeaconBlock) HashTreeRoot() ([32]byte, error) {
 
 // EncodeForStorage encodes beacon block in snappy compressed CBOR format.
 func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
+	var (
+		blockRoot common.Hash
+		err       error
+	)
+	if blockRoot, err = b.HashTreeRoot(); err != nil {
+		return nil, err
+	}
 	storageObject := &BeaconBlockForStorage{
 		Signature:         b.Signature,
 		Slot:              b.Block.Slot,
@@ -242,6 +249,7 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		VoluntaryExits:    b.Block.Body.VoluntaryExits,
 		SyncAggregate:     b.Block.Body.SyncAggregate,
 		Version:           uint8(b.Version()),
+		Eth2BlockRoot:     blockRoot,
 	}
 	if b.Version() >= clparams.BellatrixVersion {
 		storageObject.Eth1Number = b.Block.Body.ExecutionPayload.BlockNumber
@@ -255,18 +263,18 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 }
 
 // DecodeBeaconBlockForStorage decodes beacon block in snappy compressed CBOR format.
-func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Number uint64, eth1Hash common.Hash, err error) {
+func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Number uint64, eth1Hash common.Hash, eth2Hash common.Hash, err error) {
 	decompressedBuf, err := utils.DecompressSnappy(buf)
 	if err != nil {
-		return nil, 0, common.Hash{}, err
+		return nil, 0, common.Hash{}, common.Hash{}, err
 	}
 	storageObject := &BeaconBlockForStorage{}
 	var buffer bytes.Buffer
 	if _, err := buffer.Write(decompressedBuf); err != nil {
-		return nil, 0, common.Hash{}, err
+		return nil, 0, common.Hash{}, common.Hash{}, err
 	}
 	if err := cbor.Unmarshal(storageObject, &buffer); err != nil {
-		return nil, 0, common.Hash{}, err
+		return nil, 0, common.Hash{}, common.Hash{}, err
 	}
 
 	return &SignedBeaconBlock{
@@ -288,7 +296,7 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 				version:           clparams.StateVersion(storageObject.Version),
 			},
 		},
-	}, storageObject.Eth1Number, storageObject.Eth1BlockHash, nil
+	}, storageObject.Eth1Number, storageObject.Eth1BlockHash, storageObject.Eth2BlockRoot, nil
 }
 
 func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {

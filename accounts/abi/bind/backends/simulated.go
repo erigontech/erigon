@@ -116,7 +116,7 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 }
 
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
-func (b *SimulatedBackend) Agg() *state2.Aggregator22 { return b.m.HistoryV3Components() }
+func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
 	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
 }
