@@ -18,6 +18,7 @@ package vm
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -419,7 +420,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 				err = c.ValidateCode(evm.Config().JumpTableEOF)
 			}
 			if err != nil {
-				err = fmt.Errorf("%v: %v", ErrInvalidEOF, err)
+				err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
 			}
 		} else if evm.chainRules.IsLondon {
 			// Reject code starting with 0xEF if EIP-3541 is enabled.
@@ -515,7 +516,7 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 func (evm *EVM) parseContainer(b []byte) *Container {
 	if evm.chainRules.IsShanghai {
 		var c Container
-		if err := c.UnmarshalBinary(b); err != nil && err.Error() == "invalid magic" {
+		if err := c.UnmarshalBinary(b); err != nil && strings.HasPrefix(err.Error(), "invalid magic") {
 			return nil
 		} else if err != nil {
 			// Code was already validated, so no other errors should be possible.
