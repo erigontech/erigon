@@ -259,12 +259,12 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 			})
 		}
 	}
-	for i := 0; i < 256; i++ {
+	for i := 0; i < 1_000; i++ {
 		i := i
 		g.Go(func() error {
 			return db.View(ctx, func(tx kv.Tx) error {
 				seek := make([]byte, 8)
-				binary.BigEndian.PutUint64(seek, uint64(i*1_000_000))
+				binary.BigEndian.PutUint64(seek, uint64(i*100_000))
 				it, err := tx.Prefix(bucket, seek)
 				if err != nil {
 					return err
