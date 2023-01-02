@@ -1231,7 +1231,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
+		return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
 	}
 	if blockNum == 0 {
 		return fmt.Errorf("not enough transactions in the history data")
