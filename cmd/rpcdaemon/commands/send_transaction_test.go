@@ -79,8 +79,7 @@ func TestSendRawTransaction(t *testing.T) {
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
 
-	txsCh := make(chan []types.Transaction, 1)
-	id := ff.SubscribePendingTxs(txsCh)
+	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
 
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())
