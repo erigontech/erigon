@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestValidateCode(t *testing.T) {
