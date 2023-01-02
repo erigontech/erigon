@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -1210,6 +1211,13 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
+	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
+
+	// force merge snapshots before reconstitution, to allign domains progress
+	// un-finished merge can happen at "kill -9" during merge
+	if err := agg.MergeLoop(ctx, estimate.CompressSnapshot.Workers()); err != nil {
+		return err
+	}
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
@@ -1260,8 +1268,11 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer os.RemoveAll(reconDbPath)
 
 	// Incremental reconstitution, step by step (snapshot range by snapshot range)
-	defer blockSnapshots.EnableReadAhead().DisableReadAhead()
-	aggSteps := agg.MakeSteps()
+
+	aggSteps, err := agg.MakeSteps()
+	if err != nil {
+		return err
+	}
 	for step, as := range aggSteps {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
 		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
