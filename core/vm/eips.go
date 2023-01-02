@@ -249,13 +249,6 @@ func enableEOF(jt *JumpTable) {
 		numPush:     0,
 		terminal:    true,
 	}
-	jt[JUMPF] = &operation{
-		execute:     opJumpf,
-		constantGas: GasFastestStep,
-		numPop:      0,
-		numPush:     0,
-		terminal:    true,
-	}
 }
 
 // opRjump implements the rjump opcode.
@@ -330,18 +323,6 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	scope.ReturnStack = scope.ReturnStack[:last]
 	scope.CodeSection = retCtx.Section
 	*pc = retCtx.Pc - 1
-	return nil, nil
-}
-
-// opJumpf implements the JUMPF opcode
-func opJumpf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	var (
-		code = scope.Contract.CodeAt(scope.CodeSection)
-		idx  = binary.BigEndian.Uint16(code[*pc+1:])
-	)
-	scope.CodeSection = uint64(idx)
-	*pc = 0
-	*pc -= 1 // hacks xD
 	return nil, nil
 }
 

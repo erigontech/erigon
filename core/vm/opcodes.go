@@ -205,9 +205,8 @@ const (
 
 // 0xb0 range - control flow ops.
 const (
-	CALLF = 0xb0 + iota
-	RETF
-	JUMPF
+	CALLF OpCode = 0xb0
+	RETF  OpCode = 0xb1
 )
 
 // 0xf0 range - closures.
@@ -384,7 +383,6 @@ var opCodeToString = map[OpCode]string{
 	// 0xb0 range.
 	CALLF: "CALLF",
 	RETF:  "RETF",
-	JUMPF: "JUMPF",
 
 	// 0xf0 range.
 	CREATE:       "CREATE",

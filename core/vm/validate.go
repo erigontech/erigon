@@ -81,18 +81,13 @@ func validateCode(code []byte, section int, metadata []*FunctionMetadata, jt *Ju
 				}
 			}
 			i += 1 + 2*count
-		case op == CALLF || op == JUMPF:
+		case op == CALLF:
 			if i+2 >= len(code) {
 				return fmt.Errorf("truncated operand")
 			}
 			arg, _ := parseUint16(code[i+1:])
 			if arg >= len(metadata) {
 				return fmt.Errorf("code section out-of-bounds (want: %d, have: %d)", arg, len(metadata))
-			}
-			if op == JUMPF {
-				if metadata[section].Output < metadata[arg].Output {
-					return fmt.Errorf("jumpf to section with more outputs")
-				}
 			}
 			i += 2
 		}
