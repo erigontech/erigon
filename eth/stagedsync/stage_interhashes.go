@@ -37,10 +37,10 @@ type TrieCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV3 bool
-	agg       *state.Aggregator22
+	agg       *state.AggregatorV3
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator22) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -200,7 +200,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
@@ -345,7 +345,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err

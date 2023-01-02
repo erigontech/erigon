@@ -148,10 +148,12 @@ func init() {
 }
 
 func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.Context) error {
+	dirs := datadir.New(datadirCli)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	engine, vmConfig, stateStages, miningStages, miner := newSync(ctx, db, &miningConfig)
 	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
-	dirs := datadir.New(datadirCli)
-	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -421,10 +423,12 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
 }
 
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	dirs := datadir.New(datadirCli)
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
-	_, agg := allSnapshots(db)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -488,10 +492,12 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64) error {
 }
 
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
-	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, agg := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
+	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {

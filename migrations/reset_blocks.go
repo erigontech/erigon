@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -110,7 +111,8 @@ var resetBlocks4 = Migration{
 			log.Warn("NOTE: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, should not take very long")
 		}
 
-		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, dirs.Tmp); err != nil {
+		cc := tool.ChainConfig(tx)
+		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, dirs, *cc, nil); err != nil {
 			return err
 		}
 

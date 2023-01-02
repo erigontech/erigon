@@ -10,7 +10,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 )
 
@@ -35,6 +34,26 @@ var (
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
 
+func TestFilters_GenerateSubscriptionID(t *testing.T) {
+	sz := 1000
+	subs := make(chan SubscriptionID, sz)
+	for i := 0; i < sz; i++ {
+		go func() {
+			subs <- generateSubscriptionID()
+		}()
+	}
+	set := map[SubscriptionID]struct{}{}
+	for i := 0; i < sz; i++ {
+		v := <-subs
+		_, ok := set[v]
+		if ok {
+			t.Errorf("SubscriptionID Confict: %s", v)
+			return
+		}
+		set[v] = struct{}{}
+	}
+}
+
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	f := New(context.TODO(), nil, nil, nil, func() {})
 
@@ -45,9 +64,7 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 		Topics:    [][]common.Hash{{subbedTopic}},
 	}
 
-	outChan := make(chan *types.Log, 1)
-
-	f.SubscribeLogs(outChan, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria)
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -79,9 +96,7 @@ func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAr
 		Topics:    [][]common.Hash{{nilTopic, subbedTopic, nilTopic}},
 	}
 
-	outChan := make(chan *types.Log, 1)
-
-	f.SubscribeLogs(outChan, criteria)
+	outChan, _ := f.SubscribeLogs(10, criteria)
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -114,12 +129,8 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{{topic1}},
 	}
 
-	chan1 := make(chan *types.Log, 256)
-	chan2 := make(chan *types.Log, 256)
-
-	f.SubscribeLogs(chan1, criteria1)
-	f.SubscribeLogs(chan2, criteria2)
-
+	chan1, _ := f.SubscribeLogs(256, criteria1)
+	chan2, _ := f.SubscribeLogs(256, criteria2)
 	// now create a log for some other topic and distribute it
 	log := createLog()
 
@@ -161,13 +172,9 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 		Topics:    [][]common.Hash{},
 	}
 
-	chan1 := make(chan *types.Log, 256)
-	chan2 := make(chan *types.Log, 256)
-	chan3 := make(chan *types.Log, 256)
-
-	f.SubscribeLogs(chan1, criteria1)
-	f.SubscribeLogs(chan2, criteria2)
-	f.SubscribeLogs(chan3, criteria3)
+	chan1, _ := f.SubscribeLogs(256, criteria1)
+	chan2, _ := f.SubscribeLogs(256, criteria2)
+	chan3, _ := f.SubscribeLogs(256, criteria3)
 
 	// now create a log for some other topic and distribute it
 	log := createLog()
@@ -228,12 +235,11 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	f.logsRequestor.Store(loadRequester)
 
 	// first request has no filters
-	chan1 := make(chan *types.Log, 1)
 	criteria1 := filters.FilterCriteria{
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{},
 	}
-	id1 := f.SubscribeLogs(chan1, criteria1)
+	_, id1 := f.SubscribeLogs(1, criteria1)
 
 	// request should have all addresses and topics enabled
 	if lastFilterRequest.AllAddresses == false {
@@ -244,12 +250,11 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	}
 
 	// second request filters on an address
-	chan2 := make(chan *types.Log, 1)
 	criteria2 := filters.FilterCriteria{
 		Addresses: []common.Address{address1},
 		Topics:    [][]common.Hash{},
 	}
-	id2 := f.SubscribeLogs(chan2, criteria2)
+	_, id2 := f.SubscribeLogs(1, criteria2)
 
 	// request should have all addresses and all topics still and the new address
 	if lastFilterRequest.AllAddresses == false {
@@ -263,12 +268,11 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 	}
 
 	// third request filters on topic
-	chan3 := make(chan *types.Log, 1)
 	criteria3 := filters.FilterCriteria{
 		Addresses: []common.Address{},
 		Topics:    [][]common.Hash{{topic1}},
 	}
-	id3 := f.SubscribeLogs(chan3, criteria3)
+	_, id3 := f.SubscribeLogs(1, criteria3)
 
 	// request should have all addresses and all topics as well as the previous address and new topic
 	if lastFilterRequest.AllAddresses == false {
