@@ -2,6 +2,7 @@ package rawdbreset
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -228,6 +229,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	//0000000000a8a7b800000044
+
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(ThreadsLimit)
 	for i := 0; i < 256; i++ {
@@ -255,6 +258,31 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 				})
 			})
 		}
+	}
+	for i := 0; i < 256; i++ {
+		i := i
+		g.Go(func() error {
+			return db.View(ctx, func(tx kv.Tx) error {
+				seek := make([]byte, 8)
+				binary.BigEndian.PutUint64(seek, uint64(i*1_000_000))
+				it, err := tx.Prefix(bucket, seek)
+				if err != nil {
+					return err
+				}
+				for it.HasNext() {
+					_, _, err = it.Next()
+					if err != nil {
+						return err
+					}
+					select {
+					case <-logEvery.C:
+						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+					default:
+					}
+				}
+				return nil
+			})
+		})
 	}
 	_ = g.Wait()
 }
