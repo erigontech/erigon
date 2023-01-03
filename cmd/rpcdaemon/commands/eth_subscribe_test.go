@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -46,8 +45,7 @@ func TestEthSubscribe(t *testing.T) {
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, br)
 	ff := rpchelper.New(ctx, backend, nil, nil, func() {})
 
-	newHeads := make(chan *types.Header)
-	id := ff.SubscribeNewHeads(newHeads)
+	newHeads, id := ff.SubscribeNewHeads(16)
 	defer ff.UnsubscribeHeads(id)
 
 	initialCycle := true

@@ -29,8 +29,7 @@ func TestPendingBlock(t *testing.T) {
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)
-	ch := make(chan *types.Block, 1)
-	id := ff.SubscribePendingBlock(ch)
+	ch, id := ff.SubscribePendingBlock(1)
 	defer ff.UnsubscribePendingBlock(id)
 
 	ff.HandlePendingBlock(&txpool.OnPendingBlockReply{RplBlock: b})
@@ -51,9 +50,7 @@ func TestPendingLogs(t *testing.T) {
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
 	expect := []byte{211}
 
-	ch := make(chan types.Logs, 1)
-	defer close(ch)
-	id := ff.SubscribePendingLogs(ch)
+	ch, id := ff.SubscribePendingLogs(1)
 	defer ff.UnsubscribePendingLogs(id)
 
 	b, err := rlp.EncodeToBytes([]*types.Log{{Data: expect}})

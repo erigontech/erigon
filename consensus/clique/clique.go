@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"math/rand"
@@ -431,7 +432,7 @@ func (c *Clique) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return err
 	}
 	if _, authorized := snap.Signers[signer]; !authorized {
-		return ErrUnauthorizedSigner
+		return fmt.Errorf("Clique.Seal: %w", ErrUnauthorizedSigner)
 	}
 	// If we're amongst the recent signers, wait for the next block
 	for seen, recent := range snap.Recents {

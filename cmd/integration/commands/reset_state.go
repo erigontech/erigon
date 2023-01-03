@@ -82,6 +82,7 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
+	fmt.Fprintf(w, "blocks.v2: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 	h3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err
@@ -127,7 +128,6 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	}
 
 	fmt.Fprintf(w, "--\n")
-	fmt.Fprintf(w, "snapsthos: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 
 	//fmt.Printf("==== state =====\n")
 	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {

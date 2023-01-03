@@ -1672,13 +1672,6 @@ func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	}
 	return nil
 }
-func WriteHistorySnapshots(tx kv.RwTx, list []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res)
-}
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
