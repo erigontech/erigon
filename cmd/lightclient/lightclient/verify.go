@@ -97,7 +97,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	}
 	// Support only post-bellatrix forks
 	forkVersion := fork.GetLastFork(l.beaconConfig, l.genesisConfig)
-	domain, err := fork.ComputeDomain(DomainSyncCommittee, forkVersion, l.genesisConfig)
+	domain, err := fork.ComputeDomain(DomainSyncCommittee, forkVersion, l.genesisConfig.GenesisValidatorRoot)
 	if err != nil {
 		return false, err
 	}

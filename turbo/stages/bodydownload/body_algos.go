@@ -7,13 +7,13 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -108,7 +108,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		// if we already have the body we can continue on to populate header info and then skip
 		// the body request altogether
 		var err error
-		key := dbutils.EncodeBlockNumber(blockNum)
+		key := common2.EncodeTs(blockNum)
 		var bodyInBucket bool
 		if !bd.UsingExternalTx {
 			bodyInBucket, err = tx.Has("BodiesStage", key)
@@ -306,6 +306,7 @@ Loop:
 			log.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
+		// TODO(yperbasis): withdrawals
 
 		reqMap := make(map[uint64]*BodyRequest)
 		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
@@ -391,20 +392,7 @@ func (bd *BodyDownload) PrintPeerMap() {
 }
 
 func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
-	if hash := types.CalcUncleHash(block.Uncles()); hash != block.UncleHash() {
-		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", block.UncleHash())
-		return
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != block.TxHash() {
-		log.Warn("Propagated block has invalid body", "have", hash, "exp", block.TxHash())
-		return
-	}
 	bd.prefetchedBlocks.Add(block)
-}
-
-func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
-	bd.AddToPrefetch(block)
-	return nil
 }
 
 // GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies
@@ -443,7 +431,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 		writer.Reset()
 		writer.WriteString(hexutil.Encode(rlpBytes))
 
-		k := dbutils.EncodeBlockNumber(key)
+		k := common2.EncodeTs(key)
 		err = tx.Put("BodiesStage", k, writer.Bytes())
 		if err != nil {
 			return err
@@ -459,7 +447,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 
 func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
 	if !bd.UsingExternalTx {
-		key := dbutils.EncodeBlockNumber(blockNum)
+		key := common2.EncodeTs(blockNum)
 		body, err := tx.GetOne("BodiesStage", key)
 		if err != nil {
 			return nil, err

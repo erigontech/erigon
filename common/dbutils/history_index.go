@@ -1,28 +1,8 @@
 package dbutils
 
 import (
-	"encoding/binary"
-
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
-
-func AccountIndexChunkKey(key []byte, blockNumber uint64) []byte {
-	blockNumBytes := make([]byte, length.Addr+8)
-	copy(blockNumBytes, key)
-	binary.BigEndian.PutUint64(blockNumBytes[length.Addr:], blockNumber)
-
-	return blockNumBytes
-}
-
-func StorageIndexChunkKey(key []byte, blockNumber uint64) []byte {
-	//remove incarnation and add block number
-	blockNumBytes := make([]byte, length.Addr+length.Hash+8)
-	copy(blockNumBytes, key[:length.Addr])
-	copy(blockNumBytes[length.Addr:], key[length.Addr+length.Incarnation:])
-	binary.BigEndian.PutUint64(blockNumBytes[length.Addr+length.Hash:], blockNumber)
-
-	return blockNumBytes
-}
 
 func CompositeKeyWithoutIncarnation(key []byte) []byte {
 	if len(key) == length.Hash*2+length.Incarnation {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
@@ -110,13 +111,13 @@ type BaseAPI struct {
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
-	_agg         *libstate.Aggregator22
+	_agg         *libstate.AggregatorV3
 	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -207,7 +208,7 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 	if historyV3 != nil {
 		return *historyV3
 	}
-	enabled, err := rawdb.HistoryV3.Enabled(tx)
+	enabled, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		log.Warn("HisoryV2Enabled: read", "err", err)
 		return false

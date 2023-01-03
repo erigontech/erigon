@@ -1,8 +1,9 @@
 package ethconsensusconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -46,10 +47,16 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "clique", "db")
+			}
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly))
 		}
 	case *params.AuRaConfig:
 		if chainConfig.Aura != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "aura")
+			}
 			var err error
 			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
 			if err != nil {
@@ -58,6 +65,9 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.ParliaConfig:
 		if chainConfig.Parlia != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "parlia")
+			}
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *params.BorConfig:

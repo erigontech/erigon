@@ -14,11 +14,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 var stateBuckets = []string{
@@ -37,6 +39,19 @@ var stateBuckets = []string{
 	kv.StorageHistory,
 	kv.TxLookup,
 	kv.ContractTEVMCode,
+}
+
+var cmdWarmup = &cobra.Command{
+	Use: "warmup",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx, _ := common2.RootContext()
+		err := doWarmup(ctx, chaindata, bucket)
+		if err != nil {
+			log.Error(err.Error())
+			return err
+		}
+		return nil
+	},
 }
 
 var cmdCompareBucket = &cobra.Command{
@@ -110,6 +125,11 @@ func init() {
 
 	rootCmd.AddCommand(cmdCompareBucket)
 
+	withDataDir(cmdWarmup)
+	withBucket(cmdWarmup)
+
+	rootCmd.AddCommand(cmdWarmup)
+
 	withDataDir(cmdCompareStates)
 	withReferenceChaindata(cmdCompareStates)
 	withBucket(cmdCompareStates)
@@ -127,6 +147,59 @@ func init() {
 	withBucket(cmdFToMdbx)
 
 	rootCmd.AddCommand(cmdFToMdbx)
+}
+
+func doWarmup(ctx context.Context, chaindata string, bucket string) error {
+	const ThreadsLimit = 5_000
+	db := mdbx2.NewMDBX(log.New()).Path(chaindata).RoTxsLimiter(semaphore.NewWeighted(ThreadsLimit)).Readonly().MustOpen()
+	defer db.Close()
+
+	var total uint64
+	db.View(ctx, func(tx kv.Tx) error {
+		c, _ := tx.Cursor(bucket)
+		total, _ = c.Count()
+		return nil
+	})
+	progress := atomic.NewInt64(0)
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(ThreadsLimit)
+	for i := 0; i < 256; i++ {
+		for j := 0; j < 256; j++ {
+			i := i
+			j := j
+			g.Go(func() error {
+				return db.View(ctx, func(tx kv.Tx) error {
+					it, err := tx.Prefix(bucket, []byte{byte(i), byte(j)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, v, err := it.Next()
+						if len(v) > 0 {
+							_ = v[len(v)-1]
+						}
+						progress.Inc()
+						if err != nil {
+							return err
+						}
+
+						select {
+						case <-logEvery.C:
+							log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
+						default:
+						}
+					}
+					return nil
+				})
+			})
+		}
+	}
+	g.Wait()
+	return nil
 }
 
 func compareStates(ctx context.Context, chaindata string, referenceChaindata string) error {
@@ -351,7 +424,7 @@ func mdbxToMdbx(ctx context.Context, logger log.Logger, from, to string) error {
 	src := mdbx2.NewMDBX(logger).Path(from).Flags(func(flags uint) uint { return mdbx.Readonly | mdbx.Accede }).MustOpen()
 	dst := mdbx2.NewMDBX(logger).Path(to).
 		WriteMap().
-		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit }).
+		Flags(func(flags uint) uint { return flags | mdbx.NoMemInit | mdbx.WriteMap | mdbx.Accede }).
 		MustOpen()
 	return kv2kv(ctx, src, dst)
 }
@@ -368,8 +441,10 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 	}
 	defer dstTx.Rollback()
 
-	commitEvery := time.NewTicker(30 * time.Second)
+	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	var total uint64
 	for name, b := range src.AllBuckets() {
@@ -377,7 +452,8 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			continue
 		}
 
-		kv.ReadAhead(ctx, src, atomic.NewBool(false), name, nil, math.MaxUint32)
+		rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
+		_ = dstTx.ClearBucket(name)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
 			return err
@@ -410,8 +486,9 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-commitEvery.C:
+			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k))
+			case <-commitEvery.C:
 				if err2 := dstTx.Commit(); err2 != nil {
 					return err2
 				}

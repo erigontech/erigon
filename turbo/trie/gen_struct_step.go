@@ -284,7 +284,7 @@ func GenStructStep(
 			send := maxLen == 0 && (hasTree[maxLen] != 0 || hasHash[maxLen] != 0) // account.root - store only if have useful info
 			send = send || (maxLen == 1 && groups[maxLen] != 0)                   // first level of trie_account - store in any case
 			if send {
-				if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, e.topHash()); err != nil {
+				if err := h(curr[:maxLen], groups[maxLen], hasTree[maxLen], hasHash[maxLen], usefulHashes, e.topHash()[1:]); err != nil {
 					return nil, nil, nil, err
 				}
 			}
@@ -412,7 +412,7 @@ func GenStructStepOld(
 				}
 			}
 			if h != nil {
-				if err := h(curr[:maxLen], e.topHash()); err != nil {
+				if err := h(curr[:maxLen], e.topHash()[1:]); err != nil {
 					return nil, err
 				}
 			}

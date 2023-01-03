@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
@@ -106,7 +105,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 
 	var k, v []byte
 	prev := startBlock
-	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(startBlock)); k != nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.Seek(libcommon.EncodeTs(startBlock)); k != nil; k, v, err = traceCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -310,7 +309,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 
 	var k, v []byte
 	prev := to + 1
-	for k, v, err = traceCursor.Seek(dbutils.EncodeBlockNumber(to + 1)); k != nil; k, v, err = traceCursor.Next() {
+	for k, v, err = traceCursor.Seek(libcommon.EncodeTs(to + 1)); k != nil; k, v, err = traceCursor.Next() {
 		if err != nil {
 			return err
 		}

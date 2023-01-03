@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -86,7 +87,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := vm.NewJSONLogger(&vm.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
 	config.Debug, config.Tracer = true, tracer
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

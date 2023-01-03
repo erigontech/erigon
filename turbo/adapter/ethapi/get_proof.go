@@ -29,7 +29,7 @@ type StorageResult struct {
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
 	block := uint64(blockNr.Int64()) + 1
 	db := s.b.ChainDb()
-	ts := dbutils.EncodeBlockNumber(block)
+	ts := common2.EncodeTs(block)
 	accountMap := make(map[string]*accounts.Account)
 	if err := changeset.Walk(db, dbutils.AccountChangeSetBucket, ts, 0, func(blockN uint64, a, v []byte) (bool, error) {
 		a, v = common.CopyBytes(a), common.CopyBytes(v)

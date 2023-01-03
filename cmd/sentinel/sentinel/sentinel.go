@@ -254,14 +254,14 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return len(s.host.Network().Peers()) >= peers.DefaultMaxPeers
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
 func (s *Sentinel) GetPeersCount() int {
 	// Check how many peers are subscribed to beacon block
 	var sub *GossipSubscription
 	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(LightClientFinalityUpdateTopic)) {
+		if strings.Contains(topic, string(BeaconBlockTopic)) {
 			sub = currSub
 		}
 	}
@@ -270,4 +270,12 @@ func (s *Sentinel) GetPeersCount() int {
 		return len(s.host.Network().Peers())
 	}
 	return len(sub.topic.ListPeers())
+}
+
+func (s *Sentinel) Host() host.Host {
+	return s.host
+}
+
+func (s *Sentinel) Peers() *peers.Peers {
+	return s.peers
 }

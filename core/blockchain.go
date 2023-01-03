@@ -80,7 +80,7 @@ func ExecuteBlockEphemerallyForBSC(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
 	block.Uncles()
@@ -233,7 +233,7 @@ func ExecuteBlockEphemerally(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
@@ -352,7 +352,7 @@ func ExecuteBlockEphemerallyBor(
 	stateWriter state.WriterWithChangeSets,
 	epochReader consensus.EpochReader,
 	chainReader consensus.ChainHeaderReader,
-	getTracer func(txIndex int, txHash common.Hash) (vm.Tracer, error),
+	getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error),
 ) (*EphemeralExecResult, error) {
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())

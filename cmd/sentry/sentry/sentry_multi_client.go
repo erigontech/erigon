@@ -20,7 +20,7 @@ import (
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -282,7 +282,7 @@ func NewMultiClient(
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
 ) (*MultiClient, error) {
-	historyV3 := fromdb.HistoryV3(db)
+	historyV3 := kvcfg.HistoryV3.FromDB(db)
 
 	hd := headerdownload.NewHeaderDownload(
 		512,       /* anchorLimit */
@@ -491,6 +491,9 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		return fmt.Errorf("decode 4 NewBlockMsg: %w", err)
 	}
 	if err := request.SanityCheck(); err != nil {
+		return fmt.Errorf("newBlock66: %w", err)
+	}
+	if err := request.Block.HashCheck(); err != nil {
 		return fmt.Errorf("newBlock66: %w", err)
 	}
 

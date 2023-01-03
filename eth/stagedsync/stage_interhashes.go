@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"math/bits"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -36,10 +37,10 @@ type TrieCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV3 bool
-	agg       *state.Aggregator22
+	agg       *state.AggregatorV3
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator22) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -199,7 +200,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
@@ -263,9 +264,9 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	}
 	log.Trace(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(from + 1)
+	startkey := common2.EncodeTs(from + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
@@ -344,7 +345,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
@@ -398,7 +399,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 					deletedAccounts = append(deletedAccounts, newK)
 				} else {
 					var newAccount accounts.Account
-					if err = accounts.Deserialise2(&newAccount, v); err != nil {
+					if err = accounts.DeserialiseV3(&newAccount, v); err != nil {
 						return err
 					}
 					if newAccount.Incarnation > oldInc {
@@ -440,9 +441,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(to + 1)
+	startkey := common2.EncodeTs(to + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)

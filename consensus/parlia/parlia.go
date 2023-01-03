@@ -47,7 +47,7 @@ const (
 	inMemorySnapshots  = 128  // Number of recent snapshots to keep in memory
 	inMemorySignatures = 4096 // Number of recent block signatures to keep in memory
 
-	checkpointInterval = 1024        // Number of blocks after which to save the snapshot to the database
+	CheckpointInterval = 1024        // Number of blocks after which to save the snapshot to the database
 	defaultEpochLength = uint64(100) // Default number of blocks of checkpoint to update validatorSet from contract
 
 	extraVanity      = 32 // Fixed number of extra-data prefix bytes reserved for signer vanity
@@ -342,7 +342,7 @@ func (p *Parlia) verifyHeader(chain consensus.ChainHeaderReader, header *types.H
 
 	// Don't waste time checking blocks from the future
 	if header.Time > uint64(time.Now().Unix()) {
-		return consensus.ErrFutureBlock
+		return fmt.Errorf("header %d, time %d, now %d, %w", header.Number.Uint64(), header.Time, time.Now().Unix(), consensus.ErrFutureBlock)
 	}
 	// Check that the extra-data contains the vanity, validators and signature.
 	if len(header.Extra) < extraVanity {
@@ -475,7 +475,7 @@ func (p *Parlia) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 	}
 
 	if _, ok := snap.Validators[signer]; !ok {
-		return errUnauthorizedValidator
+		return fmt.Errorf("parlia.verifySeal: headerNum=%d, validator=%x, %w", header.Number.Uint64(), signer.Bytes(), errUnauthorizedValidator)
 	}
 
 	for seen, recent := range snap.Recents {
@@ -526,7 +526,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 		}
 
 		// If an on-disk checkpoint snapshot can be found, use that
-		if number%checkpointInterval == 0 {
+		if number%CheckpointInterval == 0 {
 			if s, err := loadSnapshot(p.config, p.signatures, p.db, number, hash); err == nil {
 				//log.Trace("Loaded snapshot from disk", "number", number, "hash", hash)
 				snap = s
@@ -535,21 +535,22 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 				}
 			}
 		}
-		if (verify && number%p.config.Epoch == 0) || number == 0 {
-			if (p.snapshots != nil && number <= p.snapshots.BlocksAvailable()) || number == 0 {
-				// Headers included into the snapshots have to be trusted as checkpoints
-				checkpoint := chain.GetHeader(hash, number)
-				if checkpoint != nil {
-					validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
-					// get validators from headers
-					validators, err := ParseValidators(validatorBytes)
-					if err != nil {
-						return nil, err
-					}
-					// new snapshot
-					snap = newSnapshot(p.config, p.signatures, number, hash, validators)
-					break
+		if number == 0 {
+			// Headers included into the snapshots have to be trusted as checkpoints
+			checkpoint := chain.GetHeader(hash, number)
+			if checkpoint != nil {
+				validatorBytes := checkpoint.Extra[extraVanity : len(checkpoint.Extra)-extraSeal]
+				// get validators from headers
+				validators, err := ParseValidators(validatorBytes)
+				if err != nil {
+					return nil, err
 				}
+				// new snapshot
+				snap = newSnapshot(p.config, p.signatures, number, hash, validators)
+				if err := snap.store(p.db); err != nil {
+					return nil, err
+				}
+				break
 			}
 		}
 
@@ -592,7 +593,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	p.recentSnaps.Add(snap.Hash, snap)
 
 	// If we've generated a new checkpoint snapshot, save to disk
-	if verify && snap.Number%checkpointInterval == 0 && len(headers) > 0 {
+	if verify && snap.Number%CheckpointInterval == 0 && len(headers) > 0 {
 		if err = snap.store(p.db); err != nil {
 			return nil, err
 		}
@@ -776,7 +777,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 		//log.Error("distributeIncoming", "block hash", header.Hash(), "error", err, "systemTxs", len(systemTxs))
 		return nil, nil, err
 	}
-	log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
+	//log.Debug("distribute successful", "txns", txs.Len(), "receipts", len(receipts), "gasUsed", header.GasUsed)
 	if len(systemTxs) > 0 {
 		return nil, nil, fmt.Errorf("the length of systemTxs is still %d", len(systemTxs))
 	}
@@ -841,7 +842,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 
 	// Bail out if we're unauthorized to sign a block
 	if _, authorized := snap.Validators[val]; !authorized {
-		return errUnauthorizedValidator
+		return fmt.Errorf("parlia.Seal: %w", errUnauthorizedValidator)
 	}
 
 	// If we're amongst the recent signers, wait for the next block

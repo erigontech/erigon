@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -17,8 +16,7 @@ func (api *APIImpl) NewPendingTransactionFilter(_ context.Context) (string, erro
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	txsCh := make(chan []types.Transaction, 1)
-	id := api.filters.SubscribePendingTxs(txsCh)
+	txsCh, id := api.filters.SubscribePendingTxs(32)
 	go func() {
 		for txs := range txsCh {
 			api.filters.AddPendingTxs(id, txs)
@@ -32,8 +30,7 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	ch := make(chan *types.Header, 1)
-	id := api.filters.SubscribeNewHeads(ch)
+	ch, id := api.filters.SubscribeNewHeads(32)
 	go func() {
 		for block := range ch {
 			api.filters.AddPendingBlock(id, block)
@@ -47,8 +44,7 @@ func (api *APIImpl) NewFilter(_ context.Context, crit filters.FilterCriteria) (s
 	if api.filters == nil {
 		return "", rpc.ErrNotificationsUnsupported
 	}
-	logs := make(chan *types.Log, 1)
-	id := api.filters.SubscribeLogs(logs, crit)
+	logs, id := api.filters.SubscribeLogs(256, crit)
 	go func() {
 		for lg := range logs {
 			api.filters.AddLogs(id, lg)
@@ -132,8 +128,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 
 	go func() {
 		defer debug.LogPanic()
-		headers := make(chan *types.Header, 1)
-		id := api.filters.SubscribeNewHeads(headers)
+		headers, id := api.filters.SubscribeNewHeads(32)
 		defer api.filters.UnsubscribeHeads(id)
 
 		for {
@@ -173,8 +168,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 
 	go func() {
 		defer debug.LogPanic()
-		txsCh := make(chan []types.Transaction, 1)
-		id := api.filters.SubscribePendingTxs(txsCh)
+		txsCh, id := api.filters.SubscribePendingTxs(256)
 		defer api.filters.UnsubscribePendingTxs(id)
 
 		for {
@@ -216,8 +210,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 
 	go func() {
 		defer debug.LogPanic()
-		txsCh := make(chan []types.Transaction, 1)
-		id := api.filters.SubscribePendingTxs(txsCh)
+		txsCh, id := api.filters.SubscribePendingTxs(512)
 		defer api.filters.UnsubscribePendingTxs(id)
 
 		for {
@@ -259,8 +252,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 
 	go func() {
 		defer debug.LogPanic()
-		logs := make(chan *types.Log, 1)
-		id := api.filters.SubscribeLogs(logs, crit)
+		logs, id := api.filters.SubscribeLogs(128, crit)
 		defer api.filters.UnsubscribeLogs(id)
 
 		for {
