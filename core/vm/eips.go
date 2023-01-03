@@ -325,9 +325,3 @@ func opRetf(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	*pc = retCtx.Pc - 1
 	return nil, nil
 }
-
-// parseInt16 returns the int16 located at b[0:2].
-func parseInt16(b []byte) int16 {
-	n := binary.BigEndian.Uint16(b)
-	return int16(n)
-}
