@@ -224,6 +224,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
+	} else if unwindPoint > fv.currentHeight {
+		fmt.Printf("PROBLEM COMiNG: unwindPoint %d, fv.currentHeight %d\n", unwindPoint, fv.currentHeight)
 	}
 	batch := memdb.NewMemoryBatch(tx, fv.tmpDir)
 	defer batch.Rollback()
