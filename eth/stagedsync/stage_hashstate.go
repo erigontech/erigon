@@ -155,7 +155,6 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		cfg.db,
 		tx,
 		cfg.dirs.Tmp,
-		etl.IdentityLoadFunc,
 		ctx,
 	); err != nil {
 		return err
@@ -187,7 +186,6 @@ func promotePlainState(
 	db kv.RoDB,
 	tx kv.RwTx,
 	tmpdir string,
-	loadFunc etl.LoadFunc,
 	ctx context.Context,
 ) error {
 	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -226,10 +224,10 @@ func promotePlainState(
 	}
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
-	if err := accCollector.Load(tx, kv.HashedAccounts, loadFunc, args); err != nil {
+	if err := accCollector.Load(tx, kv.HashedAccounts, etl.IdentityLoadFunc, args); err != nil {
 		return err
 	}
-	if err := storageCollector.Load(tx, kv.HashedStorage, loadFunc, args); err != nil {
+	if err := storageCollector.Load(tx, kv.HashedStorage, etl.IdentityLoadFunc, args); err != nil {
 		return err
 	}
 
