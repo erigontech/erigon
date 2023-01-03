@@ -275,11 +275,11 @@ func BodiesForward(
 				}
 
 				if blockHeight > bodyProgress {
+					fmt.Printf("Saved body progress at %d, body progress: %d, header progress %d\n", blockHeight, bodyProgress, headerProgress)
 					bodyProgress = blockHeight
 					if err = s.Update(innerTx, blockHeight); err != nil {
 						return false, fmt.Errorf("saving Bodies progress: %w", err)
 					}
-					fmt.Printf("Saved body progress at %d, body progress: %d, header progress %d\n", blockHeight, bodyProgress, headerProgress)
 				}
 			}
 		}

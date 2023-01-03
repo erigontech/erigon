@@ -87,6 +87,9 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
+	if stage == Bodies {
+		fmt.Printf("SaveStageProcess bodies: %d\n", progress)
+	}
 	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
 }
 
