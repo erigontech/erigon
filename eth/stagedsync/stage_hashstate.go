@@ -192,8 +192,10 @@ func promotePlainState(
 ) error {
 	accCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accCollector.Close()
+	accCollector.LogLvl(log.LvlTrace)
 	storageCollector := etl.NewCollector(logPrefix, tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer storageCollector.Close()
+	storageCollector.LogLvl(log.LvlTrace)
 
 	transform := func(k, v []byte) ([]byte, []byte, error) {
 		newK, err := transformPlainStateKey(k)
