@@ -116,6 +116,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
+	fmt.Printf("fv.currentHeight = %d\n", fv.currentHeight)
 	// If the head changed,e previous assumptions on head are incorrect now.
 	if fv.extendingFork != nil {
 		fv.extendingFork.Rollback()
@@ -224,7 +225,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
-	} else if unwindPoint > fv.currentHeight {
+	} else {
 		fmt.Printf("PROBLEM COMiNG: unwindPoint %d, fv.currentHeight %d\n", unwindPoint, fv.currentHeight)
 	}
 	batch := memdb.NewMemoryBatch(tx, fv.tmpDir)
