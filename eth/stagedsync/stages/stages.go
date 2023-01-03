@@ -19,6 +19,7 @@ package stages
 import (
 	"encoding/binary"
 	"fmt"
+	"runtime/debug"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -88,7 +89,7 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
 	if stage == Bodies {
-		fmt.Printf("SaveStageProcess bodies: %d\n", progress)
+		fmt.Printf("SaveStageProcess bodies: %d\n%s", progress, debug.Stack())
 	}
 	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
 }
