@@ -285,7 +285,6 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
 					return ctx.Err()
-				default:
 				}
 			}
 			return nil
@@ -575,7 +574,6 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 				case in <- pair{k: plainKey, v: newV}:
 				case <-ctx.Done():
 					return ctx.Err()
-				default:
 				}
 				return nil
 			}); err != nil {
