@@ -213,7 +213,7 @@ func promotePlainState(
 		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
-		parallelWarmup(ctx, db, kv.PlainState, 4)
+		//parallelWarmup(ctx, db, kv.PlainState, 4)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
 		}
@@ -240,10 +240,12 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
+	defer fmt.Printf("exit2\n")
 	return tx.ForEach(table, nil, func(k, v []byte) error {
 		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
 		case <-ctx.Done():
+			fmt.Printf("exit1\n")
 			return ctx.Err()
 		}
 		select {
