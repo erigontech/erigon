@@ -213,7 +213,7 @@ func promotePlainState(
 		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
-		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 4) })
+		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
