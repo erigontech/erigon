@@ -83,6 +83,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	if errStart != nil {
 		return errStart
 	}
+	fmt.Printf("Senders - body progress: %d\n", prevStageProgress)
 
 	var to = prevStageProgress
 	if toBlock > 0 {
