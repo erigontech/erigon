@@ -372,7 +372,7 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	if config.IsSharding(header.Number.Uint64()) {
+	if config.IsSharding(header.Time) {
 		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
 			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
 		} else {

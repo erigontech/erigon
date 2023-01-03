@@ -88,7 +88,7 @@ func ExecuteBlockEphemerallyForBSC(
 	header := block.Header()
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -243,7 +243,7 @@ func ExecuteBlockEphemerally(
 
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -362,7 +362,7 @@ func ExecuteBlockEphemerallyBor(
 
 	usedGas := new(uint64)
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	var (
 		rejectedTxs []*RejectedTx

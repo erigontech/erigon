@@ -426,8 +426,11 @@ func (stx SignedBlobTx) GetChainID() *uint256.Int {
 	return &chainID
 }
 
-func (stx SignedBlobTx) GetNonce() uint64       { return uint64(stx.Message.Nonce) }
-func (stx SignedBlobTx) GetGas() uint64         { return uint64(stx.Message.Gas) }
+func (stx SignedBlobTx) GetNonce() uint64 { return uint64(stx.Message.Nonce) }
+func (stx SignedBlobTx) GetGas() uint64   { return uint64(stx.Message.Gas) }
+func (stx SignedBlobTx) GetDataGas() uint64 {
+	return params.DataGasPerBlob * uint64(len(stx.Message.BlobVersionedHashes))
+}
 func (stx SignedBlobTx) GetTo() *common.Address { return (*common.Address)(stx.Message.To.Address) }
 func (stx SignedBlobTx) GetAmount() uint256.Int { return uint256.Int(stx.Message.Value) }
 func (stx SignedBlobTx) GetData() []byte        { return stx.Message.Data }

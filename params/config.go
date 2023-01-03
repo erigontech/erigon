@@ -233,9 +233,9 @@ type ChainConfig struct {
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
-	ShardingBlock *big.Int `json:"shanghaiBlock,omitempty"` // TODO(eip-4844): change to ShardingTime. Proto-danksharding switch block (nil = no fork, 0 = already activated)
-	ShanghaiTime  *big.Int `json:"shanghaiTime,omitempty"`  // Shanghai switch time (nil = no fork, 0 = already activated)
-	CancunTime    *big.Int `json:"cancunTime,omitempty"`    // Cancun switch time (nil = no fork, 0 = already activated)
+	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already activated)
+	ShardingTime *big.Int `json:"shanghaiTime,omitempty"` // Sharding switch time (nil = no fork, 0 = already activated)
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already activated)
 
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
@@ -620,8 +620,8 @@ func (c *ChainConfig) IsShanghai(time uint64) bool {
 }
 
 // IsSharding returns whether num is either equal to the fork block that activates proto-danksharding (EIP-4844)
-func (c *ChainConfig) IsSharding(num uint64) bool {
-	return isForked(c.ShardingBlock, num)
+func (c *ChainConfig) IsSharding(time uint64) bool {
+	return isForked(c.ShardingTime, time)
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
@@ -874,7 +874,7 @@ func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:            c.IsIstanbul(num),
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
-		IsSharding:            c.IsSharding(num),
+		IsSharding:            c.IsSharding(time),
 		IsShanghai:            c.IsShanghai(time),
 		IsCancun:              c.IsCancun(time),
 		IsNano:                c.IsNano(num),
