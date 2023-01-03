@@ -241,13 +241,15 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	defer logEvery.Stop()
 	var m runtime.MemStats
 	return tx.ForEach(table, nil, func(k, v []byte) error {
-		select {
+		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
 			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-		case <-ctx.Done():
-			return ctx.Err()
 		default:
 		}
 		return nil
