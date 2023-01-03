@@ -305,7 +305,7 @@ func BodiesForward(
 			stopped = true
 			return true, nil
 		}
-		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
+		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 0 {
 			return true, nil
 		}
 		timer.Stop()
