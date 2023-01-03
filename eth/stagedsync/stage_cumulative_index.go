@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"time"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -63,7 +64,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	}
 
 	currentBlockNumber := s.BlockNumber + 1
-	for k, v, err := headerC.Seek(dbutils.EncodeBlockNumber(s.BlockNumber)); k != nil; k, v, err = headerC.Next() {
+	for k, v, err := headerC.Seek(common2.EncodeTs(s.BlockNumber)); k != nil; k, v, err = headerC.Next() {
 		if err != nil {
 			return err
 		}

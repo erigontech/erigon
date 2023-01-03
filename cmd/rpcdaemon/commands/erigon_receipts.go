@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
@@ -143,10 +143,18 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
+		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return erigonLogs, err
+			}
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+				return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
 			for _, log := range logs {
 				log.Index = logIndex
@@ -154,18 +162,13 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			}
 			filtered := logs.Filter(addrMap, crit.Topics)
 			if len(filtered) == 0 {
-				return nil
+				continue
 			}
 			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for _, log := range filtered {
 				log.TxIndex = txIndex
 			}
 			blockLogs = append(blockLogs, filtered...)
-
-			return nil
-		})
-		if err != nil {
-			return erigonLogs, err
 		}
 		if len(blockLogs) == 0 {
 			continue
@@ -203,6 +206,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 			erigonLog.Data = log.Data
 			erigonLog.Index = log.Index
 			erigonLog.Removed = log.Removed
+			erigonLog.TxIndex = log.TxIndex
 			erigonLogs = append(erigonLogs, erigonLog)
 		}
 	}
@@ -303,10 +307,18 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		err := tx.ForPrefix(kv.Log, dbutils.EncodeBlockNumber(blockNumber), func(k, v []byte) error {
+		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return erigonLogs, err
+			}
 			var logs types.Logs
 			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return fmt.Errorf("receipt unmarshal failed:  %w", err)
+				return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
 			}
 			for _, log := range logs {
 				log.Index = logIndex
@@ -319,7 +331,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				filtered = logs.Filter(addrMap, crit.Topics)
 			}
 			if len(filtered) == 0 {
-				return nil
+				continue
 			}
 			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
 			for i := range filtered {
@@ -331,12 +343,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			}
 			blockCount++
 			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-				return nil
+				continue
 			}
-			return nil
-		})
-		if err != nil {
-			return erigonLogs, err
 		}
 		if len(blockLogs) == 0 {
 			continue
@@ -386,6 +394,63 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		}
 	}
 	return erigonLogs, nil
+}
+
+func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, cannonicalBlockHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if !isCanonicalHash {
+		return nil, fmt.Errorf("the hash %s is not cannonical", cannonicalBlockHash)
+	}
+
+	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+	block, err := api.blockByNumberWithSenders(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	if err != nil {
+		return nil, fmt.Errorf("getReceipts error: %w", err)
+	}
+	result := make([]map[string]interface{}, 0, len(receipts))
+	for _, receipt := range receipts {
+		txn := block.Transactions()[receipt.TransactionIndex]
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+	}
+
+	if chainConfig.Bor != nil {
+		borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
+		if borTx != nil {
+			borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), block.NumberU64(), receipts)
+			if err != nil {
+				return nil, err
+			}
+			if borReceipt != nil {
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.

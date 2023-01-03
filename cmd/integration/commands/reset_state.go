@@ -8,7 +8,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -24,7 +26,10 @@ var cmdResetState = &cobra.Command{
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
-		sn, _ := allSnapshots(db)
+		sn, agg := allSnapshots(ctx, db)
+		defer sn.Close()
+		defer agg.Close()
+
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
@@ -37,7 +42,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		sn, _ = allSnapshots(db)
+		sn, _ = allSnapshots(ctx, db)
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
 			return err
 		}
@@ -53,7 +58,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
+func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -62,55 +67,67 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	fmt.Fprintf(w, "Note: prune_at doesn't mean 'all data before were deleted' - it just mean stage.Prune function were run to this block. Because 1 stage may prune multiple data types to different prune distance.\n")
 	fmt.Fprint(w, "\n \t\t stage_at \t prune_at\n")
 	for _, stage := range stages.AllStages {
-		if progress, err = stages.GetStageProgress(db, stage); err != nil {
+		if progress, err = stages.GetStageProgress(tx, stage); err != nil {
 			return err
 		}
-		prunedTo, err := stages.GetStagePruneProgress(db, stage)
+		prunedTo, err := stages.GetStagePruneProgress(tx, stage)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(w, "%s \t\t %d \t %d\n", string(stage), progress, prunedTo)
 	}
-	pm, err := prune.Get(db)
+	pm, err := prune.Get(tx)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-
-	s1, err := db.ReadSequence(kv.EthTx)
+	fmt.Fprintf(w, "blocks.v2: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
+	h3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err
 	}
-	s2, err := db.ReadSequence(kv.NonCanonicalTxs)
+	lastK, lastV, err := rawdb.Last(tx, kv.MaxTxNum)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV))
+
+	s1, err := tx.ReadSequence(kv.EthTx)
+	if err != nil {
+		return err
+	}
+	s2, err := tx.ReadSequence(kv.NonCanonicalTxs)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		firstNonGenesis, err := rawdb.SecondKey(db, kv.Headers)
+		firstNonGenesisHeader, err := rawdb.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		if firstNonGenesis != nil {
-			fmt.Fprintf(w, "first header in db: %d\n", binary.BigEndian.Uint64(firstNonGenesis))
-		} else {
-			fmt.Fprintf(w, "no headers in db\n")
-		}
-		firstNonGenesis, err = rawdb.SecondKey(db, kv.BlockBody)
+		lastHeaders, err := rawdb.LastKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		if firstNonGenesis != nil {
-			fmt.Fprintf(w, "first body in db: %d\n\n", binary.BigEndian.Uint64(firstNonGenesis))
-		} else {
-			fmt.Fprintf(w, "no bodies in db\n\n")
+		firstNonGenesisBody, err := rawdb.SecondKey(tx, kv.BlockBody)
+		if err != nil {
+			return err
 		}
+		lastBody, err := rawdb.LastKey(tx, kv.BlockBody)
+		if err != nil {
+			return err
+		}
+		fstHeader := u64or0(firstNonGenesisHeader)
+		lstHeader := u64or0(lastHeaders)
+		fstBody := u64or0(firstNonGenesisBody)
+		lstBody := u64or0(lastBody)
+		fmt.Fprintf(w, "in db: first header %d, last header %d, first body %d, last body %d\n", fstHeader, lstHeader, fstBody, lstBody)
 	}
 
 	fmt.Fprintf(w, "--\n")
-	fmt.Fprintf(w, "snapsthos: blocks=%d, segments=%d, indices=%d\n\n", snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
 
 	//fmt.Printf("==== state =====\n")
 	//db.ForEach(kv.PlainState, nil, func(k, v []byte) error {
@@ -133,4 +150,10 @@ func printStages(db kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	//	return nil
 	//})
 	return nil
+}
+func u64or0(in []byte) (v uint64) {
+	if len(in) > 0 {
+		v = binary.BigEndian.Uint64(in)
+	}
+	return v
 }

@@ -20,11 +20,13 @@ import (
 	ptypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -72,7 +74,7 @@ type MockSentry struct {
 	Genesis        *types.Block
 	SentryClient   direct.SentryClient
 	PeerId         *ptypes.H512
-	UpdateHead     func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int)
+	UpdateHead     func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int)
 	streams        map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages   []*proto_sentry.OutboundMessageData
 	StreamWg       sync.WaitGroup
@@ -89,7 +91,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
-	agg            *libstate.Aggregator22
+	agg            *libstate.AggregatorV3
 	BlockSnapshots *snapshotsync.RoSnapshots
 }
 
@@ -98,10 +100,10 @@ func (ms *MockSentry) Close() {
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
-	ms.DB.Close()
 	if ms.HistoryV3 {
 		ms.agg.Close()
 	}
+	ms.DB.Close()
 }
 
 // Stream returns stream, waiting if necessary
@@ -206,12 +208,40 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	dirs := datadir.New(tmpdir)
 	var err error
 
+	cfg := ethconfig.Defaults
+	cfg.HistoryV3 = ethconfig.EnableHistoryV3InTest
+	cfg.StateStream = true
+	cfg.BatchSize = 1 * datasize.MB
+	cfg.Sync.BodyDownloadTimeoutSeconds = 10
+	cfg.DeprecatedTxPool.Disable = !withTxPool
+	cfg.DeprecatedTxPool.StartOnInit = true
+
 	db := memdb.New()
 	ctx, ctxCancel := context.WithCancel(context.Background())
+	_ = db.Update(ctx, func(tx kv.RwTx) error {
+		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
+		return nil
+	})
+
+	var agg *libstate.AggregatorV3
+	if cfg.HistoryV3 {
+		dir.MustExist(dirs.SnapHistory)
+		agg, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		if err != nil {
+			panic(err)
+		}
+		if err := agg.ReopenFiles(); err != nil {
+			panic(err)
+		}
+	}
+
+	if cfg.HistoryV3 {
+		db = temporal.New(db, agg)
+	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
 	mock := &MockSentry{
-		Ctx: ctx, cancel: ctxCancel, DB: db,
+		Ctx: ctx, cancel: ctxCancel, DB: db, agg: agg,
 		t:           t,
 		Log:         log.New(),
 		Dirs:        dirs,
@@ -224,11 +254,11 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
-		UpdateHead: func(Ctx context.Context, head uint64, hash common.Hash, td *uint256.Int) {
+		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int) {
 		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
-		HistoryV3:      ethconfig.EnableHistoryV3InTest,
 		BlockSnapshots: snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap),
+		HistoryV3:      cfg.HistoryV3,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
@@ -240,30 +270,6 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sendHeaderRequest := func(_ context.Context, r *headerdownload.HeaderRequest) ([64]byte, bool) { return [64]byte{}, false }
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
-	cfg := ethconfig.Defaults
-	cfg.HistoryV3 = mock.HistoryV3
-	cfg.StateStream = true
-	cfg.BatchSize = 1 * datasize.MB
-	cfg.Sync.BodyDownloadTimeoutSeconds = 10
-	cfg.DeprecatedTxPool.Disable = !withTxPool
-	cfg.DeprecatedTxPool.StartOnInit = true
-
-	_ = db.Update(ctx, func(tx kv.RwTx) error {
-		_, _ = rawdb.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
-		return nil
-	})
-
-	if cfg.HistoryV3 {
-		dir.MustExist(dirs.SnapHistory)
-		mock.agg, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
-		if err != nil {
-			panic(err)
-		}
-		if err := mock.agg.ReopenFiles(); err != nil {
-			panic(err)
-		}
-
-	}
 
 	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
@@ -340,7 +346,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, mock.BlockSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg),
+			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, mock.BlockSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.Engine, mock.HistoryV3, mock.agg),
 			stagedsync.StageHeadersCfg(
 				mock.DB,
 				mock.sentriesClient.Hd,
@@ -550,11 +556,10 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	ms.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := false
-	highestSeenHeader := chain.Blocks[n-1].NumberU64()
 	if ms.TxPool != nil {
 		ms.ReceiveWg.Add(1)
 	}
-	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil); err != nil {
+	if _, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead); err != nil {
 		return err
 	}
 	if ms.TxPool != nil {
@@ -570,12 +575,14 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 	}
 
 	for i := n; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
 		ms.SendPayloadRequest(chain.Blocks[i])
 	}
 
 	initialCycle := false
-	highestSeenHeader := chain.TopBlock.NumberU64()
-	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err := StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead)
 	if err != nil {
 		return err
 	}
@@ -588,7 +595,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 		FinalizedBlockHash: chain.TopBlock.Hash(),
 	}
 	ms.SendForkChoiceRequest(&fc)
-	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, highestSeenHeader, ms.Notifications, initialCycle, ms.UpdateHead, nil)
+	headBlockHash, err = StageLoopStep(ms.Ctx, ms.ChainConfig, ms.DB, ms.Sync, ms.Notifications, initialCycle, ms.UpdateHead)
 	if err != nil {
 		return err
 	}
@@ -647,8 +654,9 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 	if ms.HistoryV3 {
 		aggCtx := ms.agg.MakeContext()
 		aggCtx.SetTx(tx)
-		r := state.NewHistoryReader22(aggCtx)
+		r := state.NewHistoryReaderV3()
 		r.SetTx(tx)
+		r.SetAc(aggCtx)
 		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
 		if err != nil {
 			panic(err)
@@ -657,13 +665,13 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		return r
 	}
 
-	return state.NewPlainState(tx, blockNum)
+	return state.NewPlainState(tx, blockNum, nil)
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
 	return state.NewPlainStateReader(tx)
 }
 
-func (ms *MockSentry) HistoryV3Components() *libstate.Aggregator22 {
+func (ms *MockSentry) HistoryV3Components() *libstate.AggregatorV3 {
 	return ms.agg
 }

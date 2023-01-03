@@ -109,7 +109,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	currentHeaderIdx := uint64(0)
 	canonical := make([]common.Hash, to-s.BlockNumber)
 
-	for k, v, err := canonicalC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, v, err = canonicalC.Next() {
+	for k, v, err := canonicalC.Seek(libcommon.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
 			return err
 		}
@@ -210,7 +210,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer bodiesC.Close()
 
 Loop:
-	for k, _, err := bodiesC.Seek(dbutils.EncodeBlockNumber(startFrom)); k != nil; k, _, err = bodiesC.Next() {
+	for k, _, err := bodiesC.Seek(libcommon.EncodeTs(startFrom)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}

@@ -73,8 +73,8 @@ type IntraBlockState interface {
 	GetState(address common.Address, slot *common.Hash, outValue *uint256.Int)
 	SetState(common.Address, *common.Hash, uint256.Int)
 
-	Suicide(common.Address) bool
-	HasSuicided(common.Address) bool
+	Selfdestruct(common.Address) bool
+	HasSelfdestructed(common.Address) bool
 
 	// Exist reports whether the given account exists in state.
 	// Notably this should also return true for suicided accounts.

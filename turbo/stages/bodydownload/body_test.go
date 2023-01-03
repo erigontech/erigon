@@ -11,7 +11,7 @@ import (
 func TestCreateBodyDownload(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	bd := NewBodyDownload(100, ethash.NewFaker())
-	if _, _, _, err := bd.UpdateFromDb(tx); err != nil {
+	if _, _, _, _, err := bd.UpdateFromDb(tx); err != nil {
 		t.Fatalf("update from db: %v", err)
 	}
 }

@@ -6,9 +6,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -148,7 +149,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := core.NewEVMTxContext(r.message)
-	r.intraBlockState.Reset()
+	r.intraBlockState = state.New(r.stateReader)
 	r.evm.Reset(txCtx, r.intraBlockState)
 
 	timedOut := false
@@ -185,10 +186,10 @@ func NewReusableCaller(
 	chainConfig *params.ChainConfig,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-	intraBlockState := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	if overrides != nil {
-		if err := overrides.Override(intraBlockState); err != nil {
+		if err := overrides.Override(ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -210,11 +211,11 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
 		evm:             evm,
-		intraBlockState: intraBlockState,
+		intraBlockState: ibs,
 		baseFee:         baseFee,
 		gasCap:          gasCap,
 		callTimeout:     callTimeout,

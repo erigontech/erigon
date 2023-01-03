@@ -15,16 +15,19 @@ package lightclient
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/common"
@@ -50,7 +53,7 @@ type LightClient struct {
 	lastEth2ParentRoot   common.Hash // Last ETH2 Parent root.
 	recentHashesCache    *lru.Cache
 	db                   kv.RwDB
-	sentinel             sentinel.SentinelClient
+	rpc                  *rpc.BeaconRpcP2P
 	execution            remote.ETHBACKENDServer
 	store                *LightClientStore
 }
@@ -65,7 +68,7 @@ func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.Gen
 		genesisConfig:     genesisConfig,
 		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel),
 		recentHashesCache: recentHashesCache,
-		sentinel:          sentinel,
+		rpc:               rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig),
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
@@ -189,9 +192,11 @@ func (l *LightClient) Start() {
 			defer tx.Rollback()
 
 			if l.verbose {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
 				log.Info("[LightClient] Validated Chain Segments",
 					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", lastValidated.AttestedHeader.Slot)
+					"to", lastValidated.AttestedHeader.Slot, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 		}
 		l.importBlockIfPossible()
@@ -200,14 +205,20 @@ func (l *LightClient) Start() {
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &sentinel.EmptyMessage{})
+			peers, err := l.rpc.Peers()
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
-			log.Info("[LightClient] P2P", "peers", peers.Amount)
+			log.Info("[LightClient] P2P", "peers", peers)
 		case <-updateStatusSentinel.C:
 			if err := l.updateStatus(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Error("Could not update sentinel status", "err", err)
 				return
 			}
@@ -256,10 +267,6 @@ func (l *LightClient) importBlockIfPossible() {
 }
 
 func (l *LightClient) updateStatus() error {
-	forkDigest, err := fork.ComputeForkDigest(l.beaconConfig, l.genesisConfig)
-	if err != nil {
-		return err
-	}
 	finalizedRoot, err := l.store.finalizedHeader.HashTreeRoot()
 	if err != nil {
 		return err
@@ -268,12 +275,5 @@ func (l *LightClient) updateStatus() error {
 	if err != nil {
 		return err
 	}
-	_, err = l.sentinel.SetStatus(l.ctx, &sentinel.Status{
-		ForkDigest:     utils.Bytes4ToUint32(forkDigest),
-		FinalizedRoot:  gointerfaces.ConvertHashToH256(finalizedRoot),
-		FinalizedEpoch: l.store.finalizedHeader.Slot / 32,
-		HeadRoot:       gointerfaces.ConvertHashToH256(headRoot),
-		HeadSlot:       l.store.optimisticHeader.Slot,
-	})
-	return err
+	return l.rpc.SetStatus(finalizedRoot, l.store.finalizedHeader.Slot/32, headRoot, l.store.optimisticHeader.Slot)
 }

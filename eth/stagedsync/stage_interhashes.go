@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"math/bits"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -22,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 )
 
@@ -35,10 +37,10 @@ type TrieCfg struct {
 	hd                *headerdownload.HeaderDownload
 
 	historyV3 bool
-	agg       *state.Aggregator22
+	agg       *state.AggregatorV3
 }
 
-func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.Aggregator22) TrieCfg {
+func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3) TrieCfg {
 	return TrieCfg{
 		db:                db,
 		checkRoot:         checkRoot,
@@ -106,7 +108,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		tooBigJump = s.BlockNumber < n
 	}
 	if s.BlockNumber == 0 || tooBigJump {
-		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, quit); err != nil {
+		if root, err = RegenerateIntermediateHashes(logPrefix, tx, cfg, expectedRootHash, ctx); err != nil {
 			return trie.EmptyRoot, err
 		}
 	} else {
@@ -141,11 +143,13 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	return root, err
 }
 
-func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, quit <-chan struct{}) (common.Hash, error) {
+func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, expectedRootHash common.Hash, ctx context.Context) (common.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	_ = db.ClearBucket(kv.TrieOfAccounts)
 	_ = db.ClearBucket(kv.TrieOfStorage)
+	kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxUint32)
+	kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxUint32)
 
 	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close()
@@ -159,7 +163,7 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 	if err := loader.Reset(trie.NewRetainList(0), accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
 		return trie.EmptyRoot, err
 	}
-	hash, err := loader.CalcTrieRoot(db, []byte{}, quit)
+	hash, err := loader.CalcTrieRoot(db, []byte{}, ctx.Done())
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
@@ -169,10 +173,10 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 	}
 	log.Info(fmt.Sprintf("[%s] Trie root", logPrefix), "hash", hash.Hex())
 
-	if err := accTrieCollector.Load(db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil
@@ -196,7 +200,7 @@ func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPref
 	}
 }
 
-func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregator22, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
+func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3, from, to uint64, storage bool, load func(k []byte, v []byte) error) error {
 	nonEmptyMarker := []byte{1}
 
 	agg.SetTx(p.tx)
@@ -260,9 +264,9 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	}
 	log.Trace(fmt.Sprintf("[%s] Incremental state promotion of intermediate hashes", logPrefix), "from", from, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(from + 1)
+	startkey := common2.EncodeTs(from + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)
@@ -341,7 +345,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 	return nil
 }
 
-func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator22, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
+func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
@@ -395,7 +399,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 					deletedAccounts = append(deletedAccounts, newK)
 				} else {
 					var newAccount accounts.Account
-					if err = accounts.Deserialise2(&newAccount, v); err != nil {
+					if err = accounts.DeserialiseV3(&newAccount, v); err != nil {
 						return err
 					}
 					if newAccount.Incarnation > oldInc {
@@ -437,9 +441,9 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	}
 	log.Info(fmt.Sprintf("[%s] Unwinding", logPrefix), "from", s.BlockNumber, "to", to, "csbucket", changeSetBucket)
 
-	startkey := dbutils.EncodeBlockNumber(to + 1)
+	startkey := common2.EncodeTs(to + 1)
 
-	decode := changeset.Mapper[changeSetBucket].Decode
+	decode := historyv2.Mapper[changeSetBucket].Decode
 	var deletedAccounts [][]byte
 	extract := func(dbKey, dbValue []byte, next etl.ExtractNextFunc) error {
 		_, k, v, err := decode(dbKey, dbValue)

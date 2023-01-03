@@ -200,13 +200,6 @@ const (
 	LOG4
 )
 
-// unofficial opcodes used for parsing.
-const (
-	PUSH OpCode = 0xb0 + iota
-	DUP
-	SWAP
-)
-
 // 0xf0 range - closures.
 const (
 	CREATE OpCode = 0xf0 + iota
@@ -217,6 +210,7 @@ const (
 	CREATE2
 	STATICCALL   OpCode = 0xfa
 	REVERT       OpCode = 0xfd
+	INVALID      OpCode = 0xfe
 	SELFDESTRUCT OpCode = 0xff
 )
 
@@ -383,11 +377,8 @@ var opCodeToString = map[OpCode]string{
 	CREATE2:      "CREATE2",
 	STATICCALL:   "STATICCALL",
 	REVERT:       "REVERT",
+	INVALID:      "INVALID",
 	SELFDESTRUCT: "SELFDESTRUCT",
-
-	PUSH: "PUSH",
-	DUP:  "DUP",
-	SWAP: "SWAP",
 }
 
 func (op OpCode) String() string {
@@ -542,6 +533,7 @@ var stringToOp = map[string]OpCode{
 	"RETURN":         RETURN,
 	"CALLCODE":       CALLCODE,
 	"REVERT":         REVERT,
+	"INVALID":        INVALID,
 	"SELFDESTRUCT":   SELFDESTRUCT,
 }
 

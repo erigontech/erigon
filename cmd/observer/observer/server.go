@@ -109,8 +109,8 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
-	forks := forkid.GatherForks(chainConfig)
-	return eth.CurrentENREntryFromForks(forks, *genesisHash, 0), nil
+	heightForks, timeForks := forkid.GatherForks(chainConfig)
+	return eth.CurrentENREntryFromForks(heightForks, timeForks, *genesisHash, 0, 0), nil
 }
 
 func (server *Server) Bootnodes() []*enode.Node {

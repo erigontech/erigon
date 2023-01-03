@@ -42,6 +42,10 @@ var (
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
 	ErrInvalidCode              = errors.New("invalid code")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
+
+	// errStopToken is an internal token indicating interpreter loop termination,
+	// never returned to outside callers.
+	errStopToken = errors.New("stop token")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

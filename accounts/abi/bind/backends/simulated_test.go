@@ -146,7 +146,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	statedb := state.New(state.NewPlainState(tx, num+1))
+	statedb := state.New(state.NewPlainState(tx, num+1, nil))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
@@ -495,7 +495,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("b9b046f9"),
-		}, 0, errors.New("invalid opcode: opcode 0xfe not defined"), nil},
+		}, 0, errors.New("invalid opcode: INVALID"), nil},
 
 		{"Valid", ethereum.CallMsg{
 			From:     addr,

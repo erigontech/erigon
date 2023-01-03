@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -44,11 +45,12 @@ var stateTestCommand = cli.Command{
 // StatetestResult contains the execution status after running a state test, any
 // error that might have occurred and a dump of the final state if requested.
 type StatetestResult struct {
-	Name  string      `json:"name"`
-	Pass  bool        `json:"pass"`
-	Fork  string      `json:"fork"`
-	Error string      `json:"error,omitempty"`
-	State *state.Dump `json:"state,omitempty"`
+	Name  string       `json:"name"`
+	Pass  bool         `json:"pass"`
+	Root  *common.Hash `json:"stateRoot,omitempty"`
+	Fork  string       `json:"fork"`
+	Error string       `json:"error,omitempty"`
+	State *state.Dump  `json:"state,omitempty"`
 }
 
 func stateTestCmd(ctx *cli.Context) error {
@@ -59,26 +61,26 @@ func stateTestCmd(ctx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// Configure the EVM logger
-	config := &vm.LogConfig{
+	config := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
 		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
 	}
 	var (
-		tracer   vm.Tracer
-		debugger *vm.StructLogger
+		tracer   vm.EVMLogger
+		debugger *logger.StructLogger
 	)
 	switch {
 	case ctx.Bool(MachineFlag.Name):
-		tracer = vm.NewJSONLogger(config, os.Stderr)
+		tracer = logger.NewJSONLogger(config, os.Stderr)
 
 	case ctx.Bool(DebugFlag.Name):
-		debugger = vm.NewStructLogger(config)
+		debugger = logger.NewStructLogger(config)
 		tracer = debugger
 
 	default:
-		debugger = vm.NewStructLogger(config)
+		debugger = logger.NewStructLogger(config)
 	}
 	// Load the test content from the input file
 	src, err := os.ReadFile(ctx.Args().First())
@@ -104,8 +106,8 @@ func stateTestCmd(ctx *cli.Context) error {
 func aggregateResultsFromStateTests(
 	ctx *cli.Context,
 	stateTests map[string]tests.StateTest,
-	tracer vm.Tracer,
-	debugger *vm.StructLogger,
+	tracer vm.EVMLogger,
+	debugger *logger.StructLogger,
 ) ([]StatetestResult, error) {
 	// Iterate over all the stateTests, run them and aggregate the results
 	cfg := vm.Config{
@@ -156,13 +158,15 @@ func aggregateResultsFromStateTests(
 			*/
 
 			// print state root for evmlab tracing
-			if ctx.Bool(MachineFlag.Name) && statedb != nil {
-				_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root.Bytes())
-				if printErr != nil {
-					log.Warn("Failed to write to stderr", "err", printErr)
+			if statedb != nil {
+				result.Root = &root
+				if ctx.Bool(MachineFlag.Name) {
+					_, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", root.Bytes())
+					if printErr != nil {
+						log.Warn("Failed to write to stderr", "err", printErr)
+					}
 				}
 			}
-
 			results = append(results, *result)
 
 			// Print any structured logs collected
@@ -172,7 +176,7 @@ func aggregateResultsFromStateTests(
 					if printErr != nil {
 						log.Warn("Failed to write to stderr", "err", printErr)
 					}
-					vm.WriteTrace(os.Stderr, debugger.StructLogs())
+					logger.WriteTrace(os.Stderr, debugger.StructLogs())
 				}
 			}
 		}

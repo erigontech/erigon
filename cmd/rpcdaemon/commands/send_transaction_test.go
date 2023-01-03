@@ -59,8 +59,7 @@ func TestSendRawTransaction(t *testing.T) {
 		m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceeed
 
 		initialCycle := true
-		highestSeenHeader := chain.TopBlock.NumberU64()
-		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, highestSeenHeader, m.Notifications, initialCycle, m.UpdateHead, nil); err != nil {
+		if _, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,8 +79,7 @@ func TestSendRawTransaction(t *testing.T) {
 	err = txn.MarshalBinary(buf)
 	require.NoError(err)
 
-	txsCh := make(chan []types.Transaction, 1)
-	id := ff.SubscribePendingTxs(txsCh)
+	txsCh, id := ff.SubscribePendingTxs(1)
 	defer ff.UnsubscribePendingTxs(id)
 
 	_, err = api.SendRawTransaction(ctx, buf.Bytes())

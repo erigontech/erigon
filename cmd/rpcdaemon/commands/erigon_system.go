@@ -13,7 +13,8 @@ import (
 // Forks is a data type to record a list of forks passed by this node
 type Forks struct {
 	GenesisHash common.Hash `json:"genesis"`
-	Forks       []uint64    `json:"forks"`
+	HeightForks []uint64    `json:"heightForks"`
+	TimeForks   []uint64    `json:"timeForks"`
 }
 
 // Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
@@ -28,9 +29,9 @@ func (api *ErigonImpl) Forks(ctx context.Context) (Forks, error) {
 	if err != nil {
 		return Forks{}, err
 	}
-	forksBlocks := forkid.GatherForks(chainConfig)
+	heightForks, timeForks := forkid.GatherForks(chainConfig)
 
-	return Forks{genesis.Hash(), forksBlocks}, nil
+	return Forks{genesis.Hash(), heightForks, timeForks}, nil
 }
 
 // Post the merge eth_blockNumber will return latest forkChoiceHead block number

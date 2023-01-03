@@ -45,6 +45,17 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (P
 	if !ok {
 		return nil, nil
 	}
+	// Private API returns 0 if transaction is not found.
+	if blockNumber == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumPtr == nil {
+			return nil, nil
+		}
+		blockNumber = *blockNumPtr
+	}
 	block, err := api.blockByNumberWithSenders(tx, blockNumber)
 	if err != nil {
 		return nil, err
@@ -543,7 +554,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				allTxs.Add(it.Next())
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				allTxs.AddMany(n)
 			}
 			fromAddresses[*addr] = struct{}{}
 		}
@@ -553,7 +568,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		if addr != nil {
 			it := ac.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
 			for it.HasNext() {
-				txsTo.Add(it.Next())
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				txsTo.AddMany(n)
 			}
 			toAddresses[*addr] = struct{}{}
 		}
@@ -605,8 +624,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
-	stateReader := state.NewHistoryReader22(ac)
+	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
+	stateReader.SetAc(ac)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()
