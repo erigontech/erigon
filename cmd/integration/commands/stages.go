@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -25,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -1314,24 +1312,19 @@ func initConsensusEngine(cc *params.ChainConfig, datadir string, db kv.RwDB) (en
 	snapshots, _ := allSnapshots(context.Background(), db)
 	config := ethconfig.Defaults
 
-	switch {
-	case cc.Clique != nil:
-		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case cc.Aura != nil:
-		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case cc.Parlia != nil:
-		// Apply special hacks for BSC params
-		params.ApplyBinanceSmartChainParams()
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, db.ReadOnly(), db)
-	case cc.Bor != nil:
-		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, db.ReadOnly(), db)
-	default: //ethash
-		engine = ethash.NewFaker()
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if cc.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
 	}
-	return
+	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, datadir, snapshots, false /* readonly */, db)
 }
