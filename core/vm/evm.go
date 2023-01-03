@@ -17,8 +17,8 @@
 package vm
 
 import (
+	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -370,10 +370,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.chainRules.IsShanghai && isInitcodeEOF {
 		var c Container
 		if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
-			return nil, common.Address{}, 0, fmt.Errorf("%v: %v", ErrInvalidEOF, err)
+			return nil, common.Address{}, 0, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
 		}
 		if err := c.ValidateCode(evm.Config().JumpTableEOF); err != nil {
-			return nil, common.Address{}, 0, fmt.Errorf("%v: %v", ErrInvalidEOF, err)
+			return nil, common.Address{}, 0, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
 		}
 		contract.Container = &c
 	}
@@ -516,7 +516,7 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 func (evm *EVM) parseContainer(b []byte) *Container {
 	if evm.chainRules.IsShanghai {
 		var c Container
-		if err := c.UnmarshalBinary(b); err != nil && strings.HasPrefix(err.Error(), "invalid magic") {
+		if err := c.UnmarshalBinary(b); errors.Is(err, ErrInvalidMagic) {
 			return nil
 		} else if err != nil {
 			// Code was already validated, so no other errors should be possible.
