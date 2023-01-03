@@ -215,7 +215,7 @@ func promotePlainState(
 		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
-		//parallelWarmup(ctx, db, kv.PlainState, 4)
+		parallelWarmup(ctx, db, kv.PlainState, 4)
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
 			return err
 		}
@@ -298,20 +298,29 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 }
 
 func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
-
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(workers)
-	for i := 0; i < 256; i++ {
-		i := i
-		g.Go(func() error {
-			return db.View(ctx, func(tx kv.Tx) error {
-				return tx.ForPrefix(bucket, []byte{byte(i)}, func(k, v []byte) error { return nil })
+	go func() {
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(workers)
+		for i := 0; i < 256; i++ {
+			i := i
+			g.Go(func() error {
+				return db.View(ctx, func(tx kv.Tx) error {
+					it, err := tx.Prefix(bucket, []byte{byte(i)})
+					if err != nil {
+						return err
+					}
+					for it.HasNext() {
+						_, _, err = it.Next()
+						if err != nil {
+							return err
+						}
+					}
+					return nil
+				})
 			})
-		})
-	}
-	_ = g.Wait()
+		}
+		_ = g.Wait()
+	}()
 }
 
 func transformPlainStateKey(key []byte) ([]byte, error) {
