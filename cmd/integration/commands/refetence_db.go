@@ -452,7 +452,7 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			continue
 		}
 
-		rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
+		go rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
 		_ = dstTx.ClearBucket(name)
 		c, err := dstTx.RwCursor(name)
 		if err != nil {
