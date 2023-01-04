@@ -13,4 +13,5 @@ var CLDefaultFlags = []cli.Flag{
 	&NoDiscovery,
 	&ChaindataFlag,
 	&ELEnabledFlag,
+	&BeaconDBModeFlag,
 }

@@ -53,4 +53,9 @@ var (
 		Usage: "enables EL support",
 		Value: false,
 	}
+	BeaconDBModeFlag = cli.StringFlag{
+		Name:  "beacon-db-mode",
+		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
+		Value: "full",
+	}
 )

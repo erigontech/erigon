@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -52,6 +53,10 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Error opening database", "err", err)
 	}
 	defer db.Close()
+	if err := checkAndStoreBeaconDataConfigWithDB(ctx, db, cfg.BeaconDataCfg); err != nil {
+		log.Error("Could load beacon data configuration", "err", err)
+		return err
+	}
 	// Fetch the checkpoint state.
 	cpState, err := getCheckpointState(ctx, db, cfg.CheckpointUri)
 	if err != nil {
@@ -86,7 +91,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient, cfg.BeaconDataCfg)
 	if err != nil {
 		return err
 	}
@@ -133,7 +138,6 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 }
 
 func getCheckpointState(ctx context.Context, db kv.RwDB, uri string) (*state.BeaconState, error) {
-
 	state, err := core.RetrieveBeaconState(ctx, uri)
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
@@ -152,4 +156,36 @@ func getCheckpointState(ctx context.Context, db kv.RwDB, uri string) (*state.Bea
 	}
 	log.Info("Checkpoint sync successful: hurray!")
 	return state, tx.Commit()
+}
+
+func checkAndStoreBeaconDataConfigWithDB(ctx context.Context, db kv.RwDB, provided *rawdb.BeaconDataConfig) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		log.Error("[DB] Failed", "reason", err)
+		return err
+	}
+	defer tx.Rollback()
+	if provided == nil {
+		return errors.New("no valid beacon data config found")
+	}
+	stored, err := rawdb.ReadBeaconDataConfig(tx)
+	if err != nil {
+		return err
+	}
+	if stored != nil {
+		if err := checkBeaconDataConfig(provided, stored); err != nil {
+			return err
+		}
+	}
+	return rawdb.WriteBeaconDataConfig(tx, provided)
+}
+
+func checkBeaconDataConfig(provided *rawdb.BeaconDataConfig, stored *rawdb.BeaconDataConfig) error {
+	if provided.BackFillingAmount != stored.BackFillingAmount {
+		return fmt.Errorf("mismatching backfilling amount, provided %d, stored %d", provided.BackFillingAmount, stored.BackFillingAmount)
+	}
+	if provided.SlotPerRestorePoint != stored.SlotPerRestorePoint {
+		return fmt.Errorf("mismatching sprp, provided %d, stored %d", provided.SlotPerRestorePoint, stored.SlotPerRestorePoint)
+	}
+	return nil
 }
