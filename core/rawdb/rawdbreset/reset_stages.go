@@ -224,6 +224,9 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 		total, _ = c.Count()
 		return nil
 	})
+	if total < 10_000 {
+		return
+	}
 	progress := atomic.NewInt64(0)
 
 	logEvery := time.NewTicker(20 * time.Second)
