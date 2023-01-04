@@ -707,17 +707,18 @@ func (rb *BlockRawBody) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-// Unpack retrieves the transactions and uncles from the range packet and returns
+// Unpack retrieves the transactions, uncles, and withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header) {
+func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
 	var (
-		txset    = make([][][]byte, len(*p))
-		uncleset = make([][]*types.Header, len(*p))
+		txSet         = make([][][]byte, len(*p))
+		uncleSet      = make([][]*types.Header, len(*p))
+		withdrawalSet = make([]types.Withdrawals, len(*p))
 	)
 	for i, body := range *p {
-		txset[i], uncleset[i] = body.Transactions, body.Uncles
+		txSet[i], uncleSet[i], withdrawalSet[i] = body.Transactions, body.Uncles, body.Withdrawals
 	}
-	return txset, uncleset
+	return txSet, uncleSet, withdrawalSet
 }
 
 // GetNodeDataPacket represents a trie node data query.
