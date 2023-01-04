@@ -533,6 +533,15 @@ func TestTransactionCoding(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// RLP
+		parsedTx, err = encodeDecodeRLP(tx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = assertEqual(parsedTx, tx); err != nil {
+			t.Fatal(err)
+		}
+
 		// JSON
 		parsedTx, err = encodeDecodeJSON(tx)
 		if err != nil {
@@ -599,6 +608,39 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	}
 	var parsedTx Transaction
 	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
+		return nil, fmt.Errorf("rlp decoding failed: %w", err)
+	}
+	return parsedTx, nil
+}
+
+func encodeDecodeRLP(tx Transaction) (Transaction, error) {
+	var buf bytes.Buffer
+	var err error
+
+	switch t := tx.(type) {
+	case *LegacyTx:
+		if err := t.EncodeRLP(&buf); err != nil {
+			return nil, err
+		}
+	case *AccessListTx:
+		if err := t.EncodeRLP(&buf); err != nil {
+			return nil, err
+		}
+	case *DynamicFeeTransaction:
+		if err := t.EncodeRLP(&buf); err != nil {
+			return nil, err
+		}
+	case *SignedBlobTx:
+		if err := t.EncodeRLP(&buf); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unknown tx type: %v", t)
+	}
+
+	var parsedTx Transaction
+	s := rlp.NewStream(&buf, 0)
+	if parsedTx, err = DecodeRLPTransaction(s); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %w", err)
 	}
 	return parsedTx, nil
