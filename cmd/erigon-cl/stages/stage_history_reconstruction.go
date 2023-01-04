@@ -139,7 +139,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				}
 				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()),
 					"progress", currProgress,
-					"remaining", currProgress-uint64(destinationSlot),
+					"remaining", currProgress-destinationSlot,
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount,
 				)
