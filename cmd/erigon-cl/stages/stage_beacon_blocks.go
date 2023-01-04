@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -18,21 +19,23 @@ import (
 )
 
 type StageBeaconsBlockCfg struct {
-	db         kv.RwDB
-	downloader *network.ForwardBeaconDownloader
-	genesisCfg *clparams.GenesisConfig
-	beaconCfg  *clparams.BeaconChainConfig
-	state      *state.BeaconState
+	db              kv.RwDB
+	downloader      *network.ForwardBeaconDownloader
+	genesisCfg      *clparams.GenesisConfig
+	beaconCfg       *clparams.BeaconChainConfig
+	executionClient *execution_client.ExecutionClient
+	state           *state.BeaconState
 }
 
 func StageBeaconsBlock(db kv.RwDB, downloader *network.ForwardBeaconDownloader, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState) StageBeaconsBlockCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, executionClient *execution_client.ExecutionClient) StageBeaconsBlockCfg {
 	return StageBeaconsBlockCfg{
-		db:         db,
-		downloader: downloader,
-		genesisCfg: genesisCfg,
-		beaconCfg:  beaconCfg,
-		state:      state,
+		db:              db,
+		downloader:      downloader,
+		genesisCfg:      genesisCfg,
+		beaconCfg:       beaconCfg,
+		state:           state,
+		executionClient: executionClient,
 	}
 }
 
@@ -48,13 +51,17 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		defer tx.Rollback()
 	}
 	progress := s.BlockNumber
+	var lastRoot common.Hash
 	if progress == 0 {
 		progress = cfg.state.LatestBlockHeader().Slot
+		lastRoot, err = cfg.state.BlockRoot()
+	} else {
+		_, _, _, lastRoot, err = rawdb.ReadBeaconBlockForStorage(tx, progress)
 	}
-	lastRoot, err := cfg.state.BlockRoot()
 	if err != nil {
 		return err
 	}
+
 	// We add one so that we wait for Gossiped blocks if we are on chain tip.
 	targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
 
@@ -114,7 +121,13 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
 				return
 			}
+			if cfg.executionClient != nil && block.Version() >= clparams.BellatrixVersion {
+				if err = cfg.executionClient.InsertExecutionPayload(block.Block.Body.ExecutionPayload); err != nil {
+					log.Warn("Could not send Execution Payload", "err", err)
+				}
+			}
 		}
+
 		// Checks done, update all internals accordingly
 		return lastSlotInSegment, lastRootInSegment, nil
 	})
