@@ -176,6 +176,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		// Update fork head hash.
 		fv.extendingForkHeadHash = header.Hash()
+		fmt.Printf("extendCanonical header.Num %d, currentHeight: %d\n", header.Number.Uint64(), fv.currentHeight)
 		return fv.validateAndStorePayload(fv.extendingFork, header, body, 0, nil, nil, fv.extendingForkNotifications)
 	}
 
