@@ -42,6 +42,12 @@ func TestBlockchain(t *testing.T) {
 	// TODO(yperbasis): revisit
 	bt.skipLoad(`^TransitionTests/bcMergeToShanghai/shanghaiBeforeTransition\.json`)
 
+	// Skipping due to https://github.com/ethereum/tests/issues/1133
+	bt.skipLoad(`^EIPTests/bc4895-withdrawals/withdrawalsAddressBounds\.json`)
+	bt.skipLoad(`^EIPTests/bc4895-withdrawals/withdrawalsAmountBounds\.json`)
+	bt.skipLoad(`^EIPTests/bc4895-withdrawals/withdrawalsIndexBounds\.json`)
+	bt.skipLoad(`^EIPTests/bc4895-withdrawals/withdrawalsValidatorIndexBounds\.json`)
+
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
