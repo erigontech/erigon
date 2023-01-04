@@ -341,9 +341,9 @@ func (c *Bor) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.
 }
 
 func (c *Bor) WithExecutionContext(ctx context.Context) *Bor {
-	subclient := *c
+	subclient := c
 	subclient.execCtx = ctx
-	return &subclient
+	return subclient
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
