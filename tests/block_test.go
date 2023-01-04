@@ -38,6 +38,10 @@ func TestBlockchain(t *testing.T) {
 	// For speedier CI-runs those are skipped.
 	bt.skipLoad(`^GeneralStateTests/`)
 
+	// MergeToShanghaiAt5 is not supported since Shanghai is based on time rather than block number
+	// TODO(yperbasis): revisit
+	bt.skipLoad(`^TransitionTests/bcMergeToShanghai/shanghaiBeforeTransition\.json`)
+
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
