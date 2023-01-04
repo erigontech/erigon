@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/protolambda/ztyp/codec"
 	"github.com/protolambda/ztyp/conv"
-	"github.com/protolambda/ztyp/tree"
 	. "github.com/protolambda/ztyp/view"
 )
 
@@ -57,10 +56,6 @@ func (*ECDSASignature) FixedLength() uint64 {
 	return 1 + 32 + 32
 }
 
-func (sig *ECDSASignature) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot(&sig.V, &sig.R, &sig.S)
-}
-
 type AddressSSZ common.Address
 
 func (addr *AddressSSZ) Deserialize(dr *codec.DecodingReader) error {
@@ -81,12 +76,6 @@ func (*AddressSSZ) ByteLength() uint64 {
 
 func (*AddressSSZ) FixedLength() uint64 {
 	return 20
-}
-
-func (addr *AddressSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	var out tree.Root
-	copy(out[0:20], addr[:])
-	return out
 }
 
 // AddressOptionalSSZ implements Union[None, Address]
@@ -137,14 +126,6 @@ func (*AddressOptionalSSZ) FixedLength() uint64 {
 	return 0
 }
 
-func (ao *AddressOptionalSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	if ao.Address == nil {
-		return hFn(tree.Root{}, tree.Root{0: 0})
-	} else {
-		return hFn(ao.Address.HashTreeRoot(hFn), tree.Root{0: 1})
-	}
-}
-
 type TxDataView []byte
 
 func (tdv *TxDataView) Deserialize(dr *codec.DecodingReader) error {
@@ -161,10 +142,6 @@ func (tdv TxDataView) ByteLength() (out uint64) {
 
 func (tdv *TxDataView) FixedLength() uint64 {
 	return 0
-}
-
-func (tdv TxDataView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.ByteListHTR(tdv, MAX_CALLDATA_SIZE)
 }
 
 func (tdv TxDataView) MarshalText() ([]byte, error) {
@@ -239,16 +216,6 @@ func (vhv *VersionedHashesView) FixedLength() uint64 {
 	return 0 // it's a list, no fixed length
 }
 
-func (vhv VersionedHashesView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(vhv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*tree.Root)(&vhv[i])
-		}
-		return nil
-	}, length, MAX_VERSIONED_HASHES_LIST_SIZE)
-}
-
 type StorageKeysView []common.Hash
 
 func (skv *StorageKeysView) Deserialize(dr *codec.DecodingReader) error {
@@ -267,16 +234,6 @@ func (skv *StorageKeysView) FixedLength() uint64 {
 	return 0 // it's a list, no fixed length
 }
 
-func (skv StorageKeysView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(skv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*tree.Root)(&skv[i])
-		}
-		return nil
-	}, length, MAX_ACCESS_LIST_STORAGE_KEYS)
-}
-
 type AccessTupleView AccessTuple
 
 func (atv *AccessTupleView) Deserialize(dr *codec.DecodingReader) error {
@@ -293,10 +250,6 @@ func (atv *AccessTupleView) ByteLength() uint64 {
 
 func (atv *AccessTupleView) FixedLength() uint64 {
 	return 0
-}
-
-func (atv *AccessTupleView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
 }
 
 type AccessListView AccessList
@@ -324,16 +277,6 @@ func (alv AccessListView) ByteLength() (out uint64) {
 
 func (alv *AccessListView) FixedLength() uint64 {
 	return 0
-}
-
-func (alv AccessListView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(alv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*AccessTupleView)(&alv[i])
-		}
-		return nil
-	}, length, MAX_ACCESS_LIST_SIZE)
 }
 
 type BlobTxMessage struct {
@@ -366,10 +309,6 @@ func (tx *BlobTxMessage) ByteLength() uint64 {
 
 func (tx *BlobTxMessage) FixedLength() uint64 {
 	return 0
-}
-
-func (tx *BlobTxMessage) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -587,20 +526,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 
 // Hash computes the hash (but not for signatures!)
 func (stx *SignedBlobTx) Hash() common.Hash {
-	hash := prefixedRlpHash(BlobTxType, []interface{}{
-		stx.GetChainID(),
-		stx.GetNonce(),
-		stx.GetTip(),
-		stx.GetFeeCap(),
-		stx.GetGas(),
-		stx.GetTo(),
-		stx.GetAmount(),
-		stx.Message.Data,
-		stx.GetAccessList(),
-		stx.Signature.V, stx.Signature.R, stx.Signature.S,
-	})
-	// stx.hash.Store(&hash)
-	return hash
+	return prefixedSSZHash(BlobTxType, stx)
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
@@ -646,10 +572,7 @@ func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *
 }
 
 func (stx SignedBlobTx) SigningHash(chainID *big.Int) common.Hash {
-	// return prefixedRlpHash(
-	return prefixedSSZHash(
-		BlobTxType,
-		&stx.Message)
+	return prefixedSSZHash(BlobTxType, &stx.Message)
 }
 
 func (stx *SignedBlobTx) Size() common.StorageSize {
@@ -687,8 +610,4 @@ func (stx *SignedBlobTx) ByteLength() uint64 {
 
 func (stx *SignedBlobTx) FixedLength() uint64 {
 	return 0
-}
-
-func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
-	return stx.Message.BlobVersionedHashes
 }

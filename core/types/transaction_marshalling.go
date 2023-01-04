@@ -34,8 +34,8 @@ type txJSON struct {
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
 	// only  used for signedBlobTx
-	MaxFeePerDataGas    *hexutil.Big         `json:"maxFeePerDataGas,omitempty"`
-	BlobVersionedHashes *VersionedHashesView `json:"blobVersionedHashes,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big  `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
 
 	// Only used for encoding:
 	Hash common.Hash `json:"hash"`
@@ -118,8 +118,7 @@ func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	enc.R = (*hexutil.Big)(tx.Signature.GetR().ToBig())
 	enc.S = (*hexutil.Big)(tx.Signature.GetS().ToBig())
 	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.GetMaxFeePerDataGas().ToBig())
-	hashVersion := tx.GetBlobHashVersion()
-	enc.BlobVersionedHashes = &hashVersion
+	enc.BlobVersionedHashes = tx.GetDataHashes()
 	return json.Marshal(&enc)
 }
 
@@ -448,6 +447,18 @@ func (tx *SignedBlobTx) UnmarshalJSON(input []byte) error {
 		return errors.New("missing required field 'input' in transaction")
 	}
 	tx.Message.Data = TxDataView(*dec.Data)
+
+	if dec.MaxFeePerDataGas == nil {
+		return errors.New("missing required field 'maxFeePerDataGas' in transaction")
+	}
+	maxFeePerDataGas, overflow := uint256.FromBig(dec.MaxFeePerDataGas.ToInt())
+	if overflow {
+		return errors.New("'maxFeePerDataGas' in transaction does not fit in 256 bits")
+	}
+	tx.Message.MaxFeePerDataGas = Uint256View(*maxFeePerDataGas)
+
+	tx.Message.BlobVersionedHashes = VersionedHashesView(dec.BlobVersionedHashes)
+
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
