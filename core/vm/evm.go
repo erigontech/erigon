@@ -365,7 +365,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
-	isInitcodeEOF := hasEOFByte(codeAndHash.code)
+	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
 	if evm.chainRules.IsShanghai {
 		if isCallerEOF && !isInitcodeEOF {
 			// Don't allow EOF contract to run legacy initcode.
@@ -411,7 +411,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	// Reject legacy contract deployment from EOF.
-	if err == nil && isInitcodeEOF && !hasEOFByte(ret) {
+	if err == nil && isInitcodeEOF && !hasEOFMagic(ret) {
 		err = ErrLegacyCode
 	}
 
@@ -419,7 +419,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		if evm.chainRules.IsShanghai {
 			var c Container
 			if err = c.UnmarshalBinary(ret); err == nil {
-				err = c.ValidateCode(evm.Config().JumpTableEOF)
+				err = c.ValidateCode(evm.config.JumpTableEOF)
 			}
 			if err != nil {
 				err = fmt.Errorf("%w: %v", ErrInvalidEOF, err)
@@ -467,7 +467,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.intraBlockState.GetNonce(caller.Address()))
-	isCallerEOF := hasEOFByte(evm.intraBlockState.GetCode(caller.Address()))
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
 	return evm.create(caller, &codeAndHash{code: code}, gas, endowment, contractAddr, CREATE, true /* incrementNonce */, isCallerEOF)
 }
 
@@ -479,7 +479,7 @@ func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, endowment *u
 func (evm *EVM) Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	codeAndHash := &codeAndHash{code: code}
 	contractAddr = crypto.CreateAddress2(caller.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
-	isCallerEOF := hasEOFByte(evm.intraBlockState.GetCode(caller.Address()))
+	isCallerEOF := hasEOFMagic(evm.intraBlockState.GetCode(caller.Address()))
 	return evm.create(caller, codeAndHash, gas, endowment, contractAddr, CREATE2, true /* incrementNonce */, isCallerEOF)
 }
 
