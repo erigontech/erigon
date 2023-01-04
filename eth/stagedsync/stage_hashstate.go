@@ -195,24 +195,27 @@ func promotePlainState(
 	defer storageCollector.Close()
 	storageCollector.LogLvl(log.LvlTrace)
 
-	transform := func(k, v []byte) ([]byte, []byte, error) {
-		newK, err := transformPlainStateKey(k)
-		return newK, v, err
-	}
-	collect := func(k, v []byte) error {
+	in, outAcc, outSt := make(chan pair, 10_000), make(chan pair, 10_000), make(chan pair, 10_000)
+	transform := func(k, v []byte) {
+		newK, _ := transformPlainStateKey(k)
 		if len(k) == 32 {
-			return accCollector.Collect(k, v)
+			outSt <- pair{k: newK, v: v}
+		} else {
+			outAcc <- pair{k: newK, v: v}
 		}
-		return storageCollector.Collect(k, v)
 	}
 
 	{ //errgroup cancelation scope
 		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
-		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
-		g.Go(func() error { return collectChan(ctx, out, collect) })
+		g.Go(func() error {
+			defer close(outAcc)
+			defer close(outSt)
+			return parallelTransform(ctx, in, transform, estimate.AlmostAllCPUs())
+		})
+		g.Go(func() error { return collectChan(ctx, outAcc, accCollector.Collect) })
+		g.Go(func() error { return collectChan(ctx, outSt, storageCollector.Collect) })
 		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
@@ -273,19 +276,14 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 	}
 	return nil
 }
-func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
-	defer close(out)
+func parallelTransform(ctx context.Context, in chan pair, transform func(k, v []byte), workers int) error {
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
 			for item := range in {
-				k, v, err := transform(item.k, item.v)
-				if err != nil {
-					return err
-				}
+				transform(item.k, item.v)
 
 				select {
-				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -546,9 +544,10 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	transform := func(k, v []byte) ([]byte, []byte, error) {
-		newK, err := transformPlainStateKey(k)
-		return newK, v, err
+	in, outSt := make(chan pair, 1_000), make(chan pair, 1_000)
+	transform := func(k, v []byte) {
+		newK, _ := transformPlainStateKey(k)
+		outSt <- pair{k: newK, v: v}
 	}
 
 	if storage {
@@ -556,9 +555,12 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 			g, ctx := errgroup.WithContext(p.ctx)
 
 			// pipeline: extract -> transform -> collect
-			in, out := make(chan pair, 1_000), make(chan pair, 1_000)
-			g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
-			g.Go(func() error { return collectChan(ctx, out, collector.Collect) })
+			g.Go(func() error {
+				defer close(outSt)
+				return parallelTransform(ctx, in, transform, estimate.AlmostAllCPUs())
+			})
+
+			g.Go(func() error { return collectChan(ctx, outSt, collector.Collect) })
 
 			if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
 				accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
