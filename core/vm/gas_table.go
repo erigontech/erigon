@@ -313,19 +313,15 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 		return 0, err
 	}
 	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
+	if overflow || len > params.MaxInitCodeSize {
 		return 0, ErrGasUintOverflow
 	}
-	if len <= params.MaxInitCodeSize {
-		numWords := ToWordSize(len)
-		wordGas, overflow := math.SafeMul(numWords, params.InitCodeWordGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, wordGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
+	numWords := ToWordSize(len)
+	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := params.InitCodeWordGas * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
 }
@@ -336,18 +332,12 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Me
 		return 0, err
 	}
 	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
+	if overflow || len > params.MaxInitCodeSize {
 		return 0, ErrGasUintOverflow
-	}
-	wordCost := params.Keccak256WordGas
-	if len <= params.MaxInitCodeSize {
-		wordCost += params.InitCodeWordGas
 	}
 	numWords := ToWordSize(len)
-	wordGas, overflow := math.SafeMul(numWords, wordCost)
-	if overflow {
-		return 0, ErrGasUintOverflow
-	}
+	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
 		return 0, ErrGasUintOverflow
