@@ -116,7 +116,6 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
-	fmt.Printf("fv.currentHeight = %d\n", fv.currentHeight)
 	// If the head changed,e previous assumptions on head are incorrect now.
 	if fv.extendingFork != nil {
 		fv.extendingFork.Rollback()

@@ -275,7 +275,6 @@ func BodiesForward(
 				}
 
 				if blockHeight > bodyProgress {
-					fmt.Printf("Saved body progress at %d, body progress: %d, header progress %d\n", blockHeight, bodyProgress, headerProgress)
 					bodyProgress = blockHeight
 					if err = s.Update(innerTx, blockHeight); err != nil {
 						return false, fmt.Errorf("saving Bodies progress: %w", err)
@@ -306,7 +305,7 @@ func BodiesForward(
 			stopped = true
 			return true, nil
 		}
-		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 0 {
+		if !firstCycle && s.BlockNumber > 0 && noProgressCount >= 5 {
 			return true, nil
 		}
 		timer.Stop()
