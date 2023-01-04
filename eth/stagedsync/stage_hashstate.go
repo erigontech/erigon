@@ -210,7 +210,7 @@ func promotePlainState(
 		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
-		in, out := make(chan pair, 1_000), make(chan pair, 1_000)
+		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
