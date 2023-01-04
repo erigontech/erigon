@@ -61,6 +61,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	if err != nil {
 		return err
 	}
+	// Initialize payload insertion batch
+	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
 
 	// We add one so that we wait for Gossiped blocks if we are on chain tip.
 	targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
@@ -122,7 +124,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 				return
 			}
 			if cfg.executionClient != nil && block.Version() >= clparams.BellatrixVersion {
-				if err = cfg.executionClient.InsertExecutionPayload(block.Block.Body.ExecutionPayload); err != nil {
+				if err = executionPayloadInsertionBatch.WriteExecutionPayload(block.Block.Body.ExecutionPayload); err != nil {
 					log.Warn("Could not send Execution Payload", "err", err)
 				}
 			}
@@ -152,6 +154,10 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "slot", cfg.downloader.GetHighestProcessedSlot())
 		case <-triggerInterval.C:
 		}
+	}
+	// Flush inserted payloads to execution client
+	if err := executionPayloadInsertionBatch.Flush(); err != nil {
+		return err
 	}
 	log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "count", targetSlot-progress)
 	if err := s.Update(tx, cfg.downloader.GetHighestProcessedSlot()); err != nil {
