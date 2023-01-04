@@ -502,10 +502,25 @@ func (h *Header) Size() common.StorageSize {
 	if h.BaseFee != nil {
 		s += common.StorageSize(bitsToBytes(h.BaseFee.BitLen()))
 	}
+	if h.ExcessDataGas != nil {
+		s += common.StorageSize(h.ExcessDataGas.BitLen())
+	}
 	if h.WithdrawalsHash != nil {
-		s += common.StorageSize(32)
+		s += common.StorageSize(common.HashLength)
 	}
 	return s
+	// var feeBits int
+	// if h.BaseFee != nil {
+	// 	feeBits = h.BaseFee.BitLen()
+	// }
+	// if h.ExcessDataGas != nil {
+	// 	feeBits += h.ExcessDataGas.BitLen()
+	// }
+	// var withdrawalBytes int
+	// if h.WithdrawalsHash != nil {
+	// 	withdrawalBytes = common.HashLength
+	// }
+	// return headerSize + common.StorageSize(len(h.Extra)+(h.Difficulty.BitLen()+h.Number.BitLen()+feeBits)/8+withdrawalBytes)
 }
 
 // SanityCheck checks a few basic things -- these checks are way beyond what
@@ -527,6 +542,11 @@ func (h *Header) SanityCheck() error {
 	if h.BaseFee != nil {
 		if bfLen := h.BaseFee.BitLen(); bfLen > 256 {
 			return fmt.Errorf("too large base fee: bitlen %d", bfLen)
+		}
+	}
+	if h.ExcessDataGas != nil {
+		if bfLen := h.ExcessDataGas.BitLen(); bfLen > 256 {
+			return fmt.Errorf("too large excess data gas: bitlen %d", bfLen)
 		}
 	}
 	return nil
@@ -1443,6 +1463,13 @@ func (b *Block) BaseFee() *big.Int {
 }
 func (b *Block) WithdrawalsHash() *common.Hash { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals      { return b.withdrawals }
+
+func (b *Block) ExcessDataGas() *big.Int {
+	if b.header.ExcessDataGas == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.ExcessDataGas)
+}
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }

@@ -594,15 +594,16 @@ func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
 
 // Unpack retrieves the transactions and uncles from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
+func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header, [][]*types.Withdrawal) {
 	var (
-		txset    = make([][]types.Transaction, len(*p))
-		uncleset = make([][]*types.Header, len(*p))
+		txset         = make([][]types.Transaction, len(*p))
+		uncleset      = make([][]*types.Header, len(*p))
+		withdrawalset = make([][]*types.Withdrawal, len(*p))
 	)
 	for i, body := range *p {
-		txset[i], uncleset[i] = body.Transactions, body.Uncles
+		txset[i], uncleset[i], withdrawalset[i] = body.Transactions, body.Uncles, body.Withdrawals
 	}
-	return txset, uncleset
+	return txset, uncleset, withdrawalset
 }
 
 func (rb BlockRawBody) EncodeRLP(w io.Writer) error {

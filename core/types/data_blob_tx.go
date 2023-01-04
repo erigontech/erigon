@@ -396,6 +396,7 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 type SignedBlobTx struct {
 	TransactionMisc
 
+	WrapData  TxWrapData
 	Message   BlobTxMessage
 	Signature ECDSASignature
 }
@@ -705,3 +706,5 @@ func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 }
 
 func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.GetDataHashes() }
+
+// func (stx *SignedBlobTx) WrapData() TxWrapData      { return nil }

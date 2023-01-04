@@ -609,6 +609,12 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
+	if header.WithdrawalsHash != nil {
+		enc = append(enc, header.WithdrawalsHash)
+	}
+	if header.ExcessDataGas != nil {
+		enc = append(enc, header.ExcessDataGas)
+	}
 	rlp.Encode(hasher, enc)
 	hasher.Sum(hash[:0])
 	return hash

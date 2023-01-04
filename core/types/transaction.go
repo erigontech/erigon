@@ -70,7 +70,7 @@ type Transaction interface {
 	AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error)
 	WithSignature(signer Signer, sig []byte) (Transaction, error)
 	FakeSign(address common.Address) (Transaction, error)
-	Hash() common.Hash
+	Hash() common.Hash // TODO make it EIP-4844
 	SigningHash(chainID *big.Int) common.Hash
 	Size() common.StorageSize
 	GetData() []byte
@@ -93,6 +93,29 @@ type Transaction interface {
 
 	// eip-4844. DataHashes returns the blob versioned hashes of the transaction.
 	DataHashes() []common.Hash
+}
+
+// TxBlobWrapData returns the blob and kzg data, if any.
+// kzgs and blobs may be empty if the transaction is not wrapped.
+func TxBlobWrapData(tx Transaction) (versionedHashes []common.Hash, kzgs BlobKzgs, blobs Blobs, aggProof KZGProof) {
+
+	// it is temporary solution
+	// TODO: redo this after making better research
+
+	// it is expected that Transaction is SignedBlobTx, so
+	if signedBlobTx, ok := tx.(*SignedBlobTx); ok {
+		return signedBlobTx.Message.BlobVersionedHashes, signedBlobTx.WrapData.kzgs(), signedBlobTx.WrapData.blobs(), signedBlobTx.WrapData.aggregatedProof()
+	}
+
+	// if signedBlobTx, ok := tx.(*SignedBlobTx); ok {
+	// 	return signedBlobTx.Message.BlobVersionedHashes, blobWrap.BlobKzgs, blobWrap.Blobs, blobWrap.KzgAggregatedProof
+	// }
+	// if blobWrap, ok := tx.wrapData.(*BlobTxWrapData); ok {
+	// 	if signedBlobTx, ok := tx.inner.(*SignedBlobTx); ok {
+	// 		return signedBlobTx.Message.BlobVersionedHashes, blobWrap.BlobKzgs, blobWrap.Blobs, blobWrap.KzgAggregatedProof
+	// 	}
+	// }
+	return nil, nil, nil, KZGProof{}
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete

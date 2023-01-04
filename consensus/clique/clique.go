@@ -569,6 +569,12 @@ func encodeSigHeader(w io.Writer, header *types.Header) {
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
+	if header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash {
+		panic("unexpected withdrawal hash value in clique")
+	}
+	if header.ExcessDataGas != nil {
+		enc = append(enc, header.ExcessDataGas)
+	}
 	if err := rlp.Encode(w, enc); err != nil {
 		panic("can't encode: " + err.Error())
 	}
