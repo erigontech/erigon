@@ -231,7 +231,7 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		blockRoot common.Hash
 		err       error
 	)
-	if blockRoot, err = b.HashTreeRoot(); err != nil {
+	if blockRoot, err = b.Block.HashTreeRoot(); err != nil {
 		return nil, err
 	}
 	storageObject := &BeaconBlockForStorage{

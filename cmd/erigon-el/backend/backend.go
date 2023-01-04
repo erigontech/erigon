@@ -919,7 +919,7 @@ func (s *Ethereum) Start() error {
 		}
 		server := grpc.NewServer()
 		execution.RegisterExecutionServer(server, eth1.NewEth1Execution(s.chainDB, s.stagedSync))
-		log.Info("Execution Module Server stated")
+		log.Info("Execution Module Server started!")
 		if err := server.Serve(lis); err != nil {
 			panic(err)
 		}
