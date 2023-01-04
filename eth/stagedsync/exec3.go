@@ -471,7 +471,6 @@ func ExecV3(ctx context.Context,
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	//isBor := cfg.chainConfig.Bor != nil
 
-	var b *types.Block
 	var blockNum uint64
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {

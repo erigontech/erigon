@@ -265,4 +265,4 @@ require (
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
-replace github.com/ledgerwatch/erigon-lib => github.com/roberto-bayardo/erigon-lib v0.0.0-20221229161106-35ac4a79c7e4
+replace github.com/ledgerwatch/erigon-lib => github.com/roberto-bayardo/erigon-lib v0.0.0-20230104005804-c105ae6af778
