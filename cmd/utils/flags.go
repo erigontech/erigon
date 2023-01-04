@@ -1158,7 +1158,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	}
 	sz := cfg.MdbxPageSize.Bytes()
 	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		panic("invalid --db.pagesize: %d, see: " + strconv.Itoa(int(sz)) + DbPageSizeFlag.Usage)
 	}
 }
 
