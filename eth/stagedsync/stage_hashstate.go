@@ -207,7 +207,7 @@ func promotePlainState(
 	}
 
 	{ //errgroup cancelation scope
-		g, _ := errgroup.WithContext(ctx)
+		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
@@ -219,17 +219,16 @@ func promotePlainState(
 			return err
 		}
 		if err := g.Wait(); err != nil {
-			fmt.Printf("wait: %s\n", err)
-			return err
+			return fmt.Errorf("g.Wait: %w", err)
 		}
 	}
 
 	args := etl.TransformArgs{Quit: ctx.Done()}
 	if err := accCollector.Load(tx, kv.HashedAccounts, etl.IdentityLoadFunc, args); err != nil {
-		return err
+		return fmt.Errorf("accCollector.Load: %w", err)
 	}
 	if err := storageCollector.Load(tx, kv.HashedStorage, etl.IdentityLoadFunc, args); err != nil {
-		return err
+		return fmt.Errorf("storageCollector.Load: %w", err)
 	}
 
 	return nil
