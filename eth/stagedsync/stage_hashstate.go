@@ -207,7 +207,7 @@ func promotePlainState(
 	}
 
 	{ //errgroup cancelation scope
-		g, ctx := errgroup.WithContext(ctx)
+		g, _ := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
@@ -267,7 +267,7 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 				return nil
 			}
 			if err := collect(item.k, item.v); err != nil {
-				fmt.Printf("exit5\n")
+				fmt.Printf("exit5: %s\n", err)
 				return err
 			}
 		case <-ctx.Done():
