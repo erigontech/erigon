@@ -291,7 +291,7 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 				select {
 				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
-					return fmt.Errorf("cancel1: %w", ctx.Err())
+					return ctx.Err()
 				}
 			}
 			return nil
@@ -314,7 +314,7 @@ func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int)
 				for it.HasNext() {
 					_, _, err = it.Next()
 					if err != nil {
-						return fmt.Errorf("cancel3: %w", err)
+						return err
 					}
 				}
 				return nil
