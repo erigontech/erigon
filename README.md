@@ -625,7 +625,7 @@ Getting in touch
 
 ### Erigon Discord Server
 
-The main discussions are happening on our Discord server. To get an invite, send an email to `a.akhunov [at] erigon.tech` with
+The main discussions are happening on our Discord server. To get an invite, send an email to `tg [at] torquem.ch` with
 your name, occupation, a brief explanation of why you want to join the Discord, and how you heard about Erigon.
 
 ### Reporting security issues/concerns
