@@ -163,6 +163,11 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	}
 
 	if extendCanonical {
+		if header.Number.Uint64() > fv.currentHeight+1 {
+			// Cannot extend because some stages are behind the headers. This usually happens when body download timeouts
+			status = remote.EngineStatus_ACCEPTED
+			return
+		}
 		// If the new block extends the canonical chain we update extendingFork.
 		if fv.extendingFork == nil {
 			fv.extendingFork = memdb.NewMemoryBatch(tx, fv.tmpDir)
@@ -224,6 +229,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
+	} else if unwindPoint > fv.currentHeight {
+		// Some stages are behind headers so we cannot do in-memory validations. This usually happens when body download timeouts
+		status = remote.EngineStatus_ACCEPTED
+		return
 	}
 	batch := memdb.NewMemoryBatch(tx, fv.tmpDir)
 	defer batch.Rollback()
