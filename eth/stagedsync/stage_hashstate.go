@@ -281,7 +281,6 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
-			defer fmt.Printf("exit1\n")
 			for item := range in {
 				k, v, err := transform(item.k, item.v)
 				if err != nil {
