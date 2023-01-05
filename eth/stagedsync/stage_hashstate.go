@@ -268,6 +268,7 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 				return nil
 			}
 			if err := collect(item.k, item.v); err != nil {
+				fmt.Printf("exit8: %s\n", err)
 				return fmt.Errorf("collectChan: %w", err)
 			}
 		case <-ctx.Done():
