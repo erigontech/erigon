@@ -130,6 +130,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		for {
 			select {
 			case <-logInterval.C:
+				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
 				speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
 				prevProgress = currProgress
@@ -137,12 +138,14 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				if err != nil {
 					return
 				}
-				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()),
+				logArgs = append(logArgs,
 					"progress", currProgress,
-					"remaining", currProgress-destinationSlot,
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"peers", peerCount,
-				)
+					"peers", peerCount)
+				if currentSlot > destinationSlot {
+					logArgs = append(logArgs, "remaining", currentSlot-destinationSlot)
+				}
+				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()), logArgs...)
 			case <-finishCh:
 				return
 			case <-ctx.Done():
@@ -160,17 +163,21 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	if err := beaconBlocksCollector.Load(tx, kv.BeaconBlocks, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
 		return err
 	}
+	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
 	// Send in ordered manner EL blocks to Execution Layer
 	if err := executionPayloadsCollector.Load(tx, kv.BeaconBlocks, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		payload := &cltypes.ExecutionPayload{}
 		if err := payload.UnmarshalSSZ(v); err != nil {
 			return err
 		}
-		if err := cfg.executionClient.InsertExecutionPayload(payload); err != nil {
+		if err := executionPayloadInsertionBatch.WriteExecutionPayload(payload); err != nil {
 			return err
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+		return err
+	}
+	if err := executionPayloadInsertionBatch.Flush(); err != nil {
 		return err
 	}
 	if err := s.Update(tx, 1); err != nil {
