@@ -259,17 +259,19 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 
 func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) error) error {
 	defer fmt.Printf("exit3\n")
-	for item := range out {
-		if err := collect(item.k, item.v); err != nil {
-			return err
-		}
+	for {
 		select {
+		case item, ok := <-out:
+			if !ok {
+				return nil
+			}
+			if err := collect(item.k, item.v); err != nil {
+				return err
+			}
 		case <-ctx.Done():
 			return fmt.Errorf("cancel2: %w", ctx.Err())
-		default:
 		}
 	}
-	return nil
 }
 func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
 	defer fmt.Printf("exit2\n")
