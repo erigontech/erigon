@@ -103,7 +103,6 @@ func (tx *AccessListTx) Size() common.StorageSize {
 		return size.(common.StorageSize)
 	}
 	c := tx.EncodingSize()
-	c++ // TxType
 	tx.size.Store(common.StorageSize(c))
 	return common.StorageSize(c)
 }
