@@ -219,6 +219,7 @@ func promotePlainState(
 			return err
 		}
 		if err := g.Wait(); err != nil {
+			fmt.Printf("wait: %s\n", err)
 			return err
 		}
 	}
@@ -267,8 +268,7 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 				return nil
 			}
 			if err := collect(item.k, item.v); err != nil {
-				fmt.Printf("exit5: %s\n", err)
-				return err
+				return fmt.Errorf("collectChan: %w", err)
 			}
 		case <-ctx.Done():
 			return fmt.Errorf("cancel2: %w", ctx.Err())
