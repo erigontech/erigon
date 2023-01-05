@@ -206,13 +206,12 @@ func promotePlainState(
 		return storageCollector.Collect(k, v)
 	}
 
+	// pipeline: extract -> transform -> collect
+	in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 	{ //errgroup cancelation scope
-		g, groupCtx := errgroup.WithContext(ctx)
-
-		// pipeline: extract -> transform -> collect
-		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-		g.Go(func() error { return parallelTransform(groupCtx, in, out, transform, estimate.AlmostAllCPUs()) })
-		g.Go(func() error { return collectChan(groupCtx, out, collect) })
+		g, ctx := errgroup.WithContext(ctx)
+		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
+		g.Go(func() error { return collectChan(ctx, out, collect) })
 		//g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
@@ -245,7 +244,8 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
 		case <-ctx.Done():
-			return fmt.Errorf("cancel5: %w", ctx.Err())
+			return nil
+			//return fmt.Errorf("cancel5: %w", ctx.Err())
 		}
 		select {
 		case <-logEvery.C:
