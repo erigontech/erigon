@@ -207,12 +207,12 @@ func promotePlainState(
 	}
 
 	{ //errgroup cancelation scope
-		g, ctx := errgroup.WithContext(ctx)
+		g, groupCtx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
 		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
-		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
-		g.Go(func() error { return collectChan(ctx, out, collect) })
+		g.Go(func() error { return parallelTransform(groupCtx, in, out, transform, estimate.AlmostAllCPUs()) })
+		g.Go(func() error { return collectChan(groupCtx, out, collect) })
 		//g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
