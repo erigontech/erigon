@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -26,13 +27,15 @@ type Eth1Execution struct {
 
 	db                kv.RwDB
 	executionPipeline *stagedsync.Sync
+	blockReader       services.FullBlockReader
 	mu                sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, executionPipeline *stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *stagedsync.Sync) *Eth1Execution {
 	return &Eth1Execution{
 		db:                db,
 		executionPipeline: executionPipeline,
+		blockReader:       blockReader,
 	}
 }
 
@@ -104,7 +107,6 @@ type canonicalEntry struct {
 func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256) (*execution.ForkChoiceReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, err
@@ -113,7 +115,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 
 	blockHash := gointerfaces.ConvertH256ToHash(hash)
 	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +143,10 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 			hash:   currentParentHash,
 			number: currentParentNumber,
 		})
-		currentHeader := rawdb.ReadHeader(tx, currentParentHash, currentParentNumber)
+		currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
+		if err != nil {
+			return nil, err
+		}
 		if currentHeader == nil {
 			return &execution.ForkChoiceReceipt{
 				Success:         false,
@@ -208,15 +213,15 @@ func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegment
 	var header *types.Header
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header = rawdb.ReadHeader(tx, blockHash, *req.BlockNumber)
+		header, err = e.blockReader.Header(ctx, tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header, err = rawdb.ReadHeaderByHash(tx, blockHash)
-		if err != nil {
-			return nil, err
-		}
+		header, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
 	} else if req.BlockNumber != nil {
-		header = rawdb.ReadHeaderByNumber(tx, *req.BlockNumber)
+		header, err = e.blockReader.HeaderByNumber(ctx, tx, *req.BlockNumber)
+	}
+	if err != nil {
+		return nil, err
 	}
 	// Got nothing? return nothing :)
 	if header == nil {
@@ -241,19 +246,24 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	var body *types.Body
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		body, _, _ = rawdb.ReadBody(tx, blockHash, *req.BlockNumber)
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 		blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
 		if blockNumber == nil {
 			return nil, nil
 		}
-		body, _, _ = rawdb.ReadBody(tx, blockHash, *blockNumber)
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
+
 	} else if req.BlockNumber != nil {
-		body, _, _, err = rawdb.ReadBodyByNumber(tx, *req.BlockNumber)
-		if err != nil {
+		blockHash, err2 := e.blockReader.CanonicalHash(ctx, tx, *req.BlockNumber)
+		if err2 != nil {
 			return nil, err
 		}
+		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if body == nil {
 		return nil, nil
@@ -304,7 +314,6 @@ func (e *Eth1Execution) GetHeaderHashNumber(ctx context.Context, req *types2.H25
 		return nil, err
 	}
 	defer tx.Rollback()
-
 	return &execution.GetHeaderHashNumberResponse{
 		BlockNumber: rawdb.ReadHeaderNumber(tx, gointerfaces.ConvertH256ToHash(req)),
 	}, nil

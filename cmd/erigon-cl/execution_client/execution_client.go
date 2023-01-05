@@ -3,6 +3,7 @@ package execution_client
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -16,28 +17,36 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-//var connAddr = "127.0.0.1:8989"
-
+// ExecutionClient interfaces with the Erigon-EL component consensus side.
 type ExecutionClient struct {
 	client execution.ExecutionClient
 	ctx    context.Context
 }
 
+// NewExecutionClient establishes a client-side connection with Erigon-EL
 func NewExecutionClient(ctx context.Context, addr string) (*ExecutionClient, error) {
-	// creating grpc client connection
+	// Set up dial options for the gRPC client connection
 	var dialOpts []grpc.DialOption
-
 	dialOpts = []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16 * datasize.MB))),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                5 * time.Minute,
+			Timeout:             10 * time.Minute,
+			PermitWithoutStream: true,
+		}),
 	}
 
+	// Add transport credentials to the dial options
 	dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	// Create the gRPC client connection
 	conn, err := grpc.DialContext(ctx, addr, dialOpts...)
 	if err != nil {
+		// Return an error if the connection fails
 		return nil, fmt.Errorf("creating client connection to execution client: %w", err)
 	}
 
+	// Return a new ExecutionClient struct with the gRPC client and context set as fields
 	return &ExecutionClient{
 		client: execution.NewExecutionClient(conn),
 		ctx:    ctx,
@@ -71,11 +80,24 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []c
 	return err
 }
 
-func (ec *ExecutionClient) InsertExecutionPayload(payload *cltypes.ExecutionPayload) error {
-	if err := ec.InsertHeaders([]*types.Header{payload.Header()}); err != nil {
+// InsertExecutionPayloads insert a segment of execution payloads
+func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.ExecutionPayload) error {
+	headers := make([]*types.Header, 0, len(payloads))
+	bodies := make([]*types.RawBody, 0, len(payloads))
+	blockHashes := make([]common.Hash, 0, len(payloads))
+	blockNumbers := make([]uint64, 0, len(payloads))
+
+	for _, payload := range payloads {
+		headers = append(headers, payload.Header())
+		bodies = append(bodies, payload.BlockBody())
+		blockHashes = append(blockHashes, payload.BlockHash)
+		blockNumbers = append(blockNumbers, payload.BlockNumber)
+	}
+
+	if err := ec.InsertHeaders(headers); err != nil {
 		return err
 	}
-	return ec.InsertBodies([]*types.RawBody{payload.BlockBody()}, []common.Hash{payload.BlockHash}, []uint64{payload.BlockNumber})
+	return ec.InsertBodies(bodies, blockHashes, blockNumbers)
 }
 
 func (ec *ExecutionClient) ForkChoiceUpdate(headHash common.Hash) (*execution.ForkChoiceReceipt, error) {
