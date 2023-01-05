@@ -245,7 +245,7 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("cancel5: %w", ctx.Err())
 		}
 		select {
 		case <-logEvery.C:
