@@ -210,10 +210,16 @@ func promotePlainState(
 	in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 	{ //errgroup cancelation scope
 		g, ctx := errgroup.WithContext(ctx)
-		g.Go(func() error { return extractTableToChan(ctx, db, kv.PlainState, in, logPrefix) })
 		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		//g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
+
+		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
+			if err := g.Wait(); err != nil {
+				return fmt.Errorf("g.Wait: %w", err)
+			}
+			return err
+		}
 
 		if err := g.Wait(); err != nil {
 			return fmt.Errorf("g.Wait: %w", err)
@@ -233,29 +239,26 @@ func promotePlainState(
 
 type pair struct{ k, v []byte }
 
-func extractTableToChan(ctx context.Context, db kv.RoDB, table string, in chan pair, logPrefix string) error {
+func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string) error {
 	defer fmt.Printf("exit extractTableToChan\n")
 	defer close(in)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
-	return db.View(ctx, func(tx kv.Tx) error {
-		return tx.ForEach(table, nil, func(k, v []byte) error {
-			select { // this select can't print logs, because of
-			case in <- pair{k: k, v: v}:
-			case <-ctx.Done():
-				return nil
-				//return fmt.Errorf("cancel5: %w", ctx.Err())
-			}
-			select {
-			case <-logEvery.C:
-				dbg.ReadMemStats(&m)
-				log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-			default:
-			}
-			return nil
-		})
+	return tx.ForEach(table, nil, func(k, v []byte) error {
+		select { // this select can't print logs, because of
+		case in <- pair{k: k, v: v}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-logEvery.C:
+			dbg.ReadMemStats(&m)
+			log.Info(fmt.Sprintf("[%s] ETL [1/2] Extracting", logPrefix), "current_prefix", hex.EncodeToString(k[:4]), "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		default:
+		}
+		return nil
 	})
 }
 
