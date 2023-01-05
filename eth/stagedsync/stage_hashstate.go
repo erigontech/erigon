@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -215,8 +216,8 @@ func promotePlainState(
 		//g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
-			if err := g.Wait(); err != nil {
-				return fmt.Errorf("g.Wait: %w", err)
+			if errors.Is(err, context.Canceled) {
+				return g.Wait()
 			}
 			return err
 		}
