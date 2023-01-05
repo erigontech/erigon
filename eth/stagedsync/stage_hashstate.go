@@ -236,6 +236,7 @@ func promotePlainState(
 type pair struct{ k, v []byte }
 
 func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string) error {
+	defer fmt.Printf("exit extractTableToChan\n")
 	defer close(in)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
