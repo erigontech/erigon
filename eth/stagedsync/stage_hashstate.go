@@ -244,12 +244,12 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
-	defer fmt.Printf("exit2\n")
+	defer log.Warn("exit2")
 	return tx.ForEach(table, nil, func(k, v []byte) error {
 		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
 		case <-ctx.Done():
-			fmt.Printf("exit1\n")
+			log.Warn("exit1")
 			return ctx.Err()
 		}
 		select {
