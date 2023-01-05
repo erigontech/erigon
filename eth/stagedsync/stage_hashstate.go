@@ -263,9 +263,11 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 		select {
 		case item, ok := <-out:
 			if !ok {
+				fmt.Printf("exit4\n")
 				return nil
 			}
 			if err := collect(item.k, item.v); err != nil {
+				fmt.Printf("exit5\n")
 				return err
 			}
 		case <-ctx.Done():
