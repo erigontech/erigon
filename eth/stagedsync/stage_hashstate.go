@@ -551,52 +551,35 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	transform := func(k, v []byte) ([]byte, []byte, error) {
-		newK, err := transformPlainStateKey(k)
-		return newK, v, err
-	}
-
 	if storage {
-		{ //errgroup cancelation scope
-			g, ctx := errgroup.WithContext(p.ctx)
-
-			// pipeline: extract -> transform -> collect
-			in, out := make(chan pair, 1_000), make(chan pair, 1_000)
-			g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
-			g.Go(func() error { return collectChan(ctx, out, collector.Collect) })
-
-			if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
-				accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
+		if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
+			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
+			if err != nil {
+				return err
+			}
+			incarnation := uint64(1)
+			if len(accBytes) != 0 {
+				incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
 				if err != nil {
 					return err
 				}
-				incarnation := uint64(1)
-				if len(accBytes) != 0 {
-					incarnation, err = accounts.DecodeIncarnationFromStorage(accBytes)
-					if err != nil {
-						return err
-					}
-					if incarnation == 0 {
-						return nil
-					}
+				if incarnation == 0 {
+					return nil
 				}
-				plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
-				newV, err := p.tx.GetOne(kv.PlainState, plainKey)
-				if err != nil {
-					return err
-				}
-				select {
-				case in <- pair{k: plainKey, v: newV}:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-				return nil
-			}); err != nil {
+			}
+			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
+			newV, err := p.tx.GetOne(kv.PlainState, plainKey)
+			if err != nil {
 				return err
 			}
-			if err := g.Wait(); err != nil {
+			newK, err := transformPlainStateKey(plainKey)
+			if err != nil {
 				return err
 			}
+
+			return collector.Collect(newK, newV)
+		}); err != nil {
+			return err
 		}
 		if err := collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
 			return err
