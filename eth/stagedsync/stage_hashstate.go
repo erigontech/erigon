@@ -258,6 +258,7 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 }
 
 func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) error) error {
+	defer fmt.Printf("exit3\n")
 	for item := range out {
 		if err := collect(item.k, item.v); err != nil {
 			return err
@@ -271,10 +272,12 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 	return nil
 }
 func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
+	defer fmt.Printf("exit2\n")
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
+			defer fmt.Printf("exit1\n")
 			for item := range in {
 				k, v, err := transform(item.k, item.v)
 				if err != nil {
