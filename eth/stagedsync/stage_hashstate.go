@@ -207,15 +207,22 @@ func promotePlainState(
 		return storageCollector.Collect(k, v)
 	}
 
-	// pipeline: extract -> transform -> collect
-	in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 	{ //errgroup cancelation scope
+		// pipeline: extract -> transform -> collect
+		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
 		g, ctx := errgroup.WithContext(ctx)
-		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
+		g.Go(func() error {
+			defer close(out)
+			return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()).Wait()
+		})
 		g.Go(func() error { return collectChan(ctx, out, collect) })
 		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
+			// if ctx canceled, then maybe it's because of error in errgroup
+			//
+			// errgroup doesn't play with pattern where some 1 goroutine-producer is outside of errgroup
+			// but RwTx doesn't allow move between goroutines
 			if errors.Is(err, context.Canceled) {
 				return g.Wait()
 			}
@@ -277,8 +284,7 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 		}
 	}
 }
-func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
-	defer close(out)
+func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) *errgroup.Group {
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
@@ -297,7 +303,7 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 			return nil
 		})
 	}
-	return hashG.Wait()
+	return hashG
 }
 
 func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) error {
