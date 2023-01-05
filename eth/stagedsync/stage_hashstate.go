@@ -195,27 +195,24 @@ func promotePlainState(
 	defer storageCollector.Close()
 	storageCollector.LogLvl(log.LvlTrace)
 
-	in, outAcc, outSt := make(chan pair, 10_000), make(chan pair, 10_000), make(chan pair, 10_000)
-	transform := func(k, v []byte) {
-		newK, _ := transformPlainStateKey(k)
+	transform := func(k, v []byte) ([]byte, []byte, error) {
+		newK, err := transformPlainStateKey(k)
+		return newK, v, err
+	}
+	collect := func(k, v []byte) error {
 		if len(k) == 32 {
-			outSt <- pair{k: newK, v: v}
-		} else {
-			outAcc <- pair{k: newK, v: v}
+			return accCollector.Collect(k, v)
 		}
+		return storageCollector.Collect(k, v)
 	}
 
 	{ //errgroup cancelation scope
 		g, ctx := errgroup.WithContext(ctx)
 
 		// pipeline: extract -> transform -> collect
-		g.Go(func() error {
-			defer close(outAcc)
-			defer close(outSt)
-			return parallelTransform(ctx, in, transform, estimate.AlmostAllCPUs())
-		})
-		g.Go(func() error { return collectChan(ctx, outAcc, accCollector.Collect) })
-		g.Go(func() error { return collectChan(ctx, outSt, storageCollector.Collect) })
+		in, out := make(chan pair, 10_000), make(chan pair, 10_000)
+		g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
+		g.Go(func() error { return collectChan(ctx, out, collect) })
 		g.Go(func() error { return parallelWarmup(ctx, db, kv.PlainState, 2) })
 
 		if err := extractTableToChan(ctx, tx, kv.PlainState, in, logPrefix); err != nil {
@@ -244,12 +241,10 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	var m runtime.MemStats
-	defer log.Warn("exit2")
 	return tx.ForEach(table, nil, func(k, v []byte) error {
 		select { // this select can't print logs, because of
 		case in <- pair{k: k, v: v}:
 		case <-ctx.Done():
-			log.Warn("exit1")
 			return ctx.Err()
 		}
 		select {
@@ -267,23 +262,22 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 		if err := collect(item.k, item.v); err != nil {
 			return err
 		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 	}
 	return nil
 }
-func parallelTransform(ctx context.Context, in chan pair, transform func(k, v []byte), workers int) error {
+func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
+	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
 		hashG.Go(func() error {
 			for item := range in {
-				transform(item.k, item.v)
+				k, v, err := transform(item.k, item.v)
+				if err != nil {
+					return err
+				}
 
 				select {
+				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -544,10 +538,9 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	collector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collector.Close()
 
-	in, outSt := make(chan pair, 1_000), make(chan pair, 1_000)
-	transform := func(k, v []byte) {
-		newK, _ := transformPlainStateKey(k)
-		outSt <- pair{k: newK, v: v}
+	transform := func(k, v []byte) ([]byte, []byte, error) {
+		newK, err := transformPlainStateKey(k)
+		return newK, v, err
 	}
 
 	if storage {
@@ -555,12 +548,9 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 			g, ctx := errgroup.WithContext(p.ctx)
 
 			// pipeline: extract -> transform -> collect
-			g.Go(func() error {
-				defer close(outSt)
-				return parallelTransform(ctx, in, transform, estimate.AlmostAllCPUs())
-			})
-
-			g.Go(func() error { return collectChan(ctx, outSt, collector.Collect) })
+			in, out := make(chan pair, 1_000), make(chan pair, 1_000)
+			g.Go(func() error { return parallelTransform(ctx, in, out, transform, estimate.AlmostAllCPUs()) })
+			g.Go(func() error { return collectChan(ctx, out, collector.Collect) })
 
 			if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
 				accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
