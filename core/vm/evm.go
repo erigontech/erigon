@@ -366,7 +366,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
-	if evm.chainRules.IsShanghai {
+	if evm.chainRules.IsCancun {
 		if isCallerEOF && !isInitcodeEOF {
 			// Don't allow EOF contract to run legacy initcode.
 			return nil, common.Address{}, gas, ErrLegacyCode
@@ -416,7 +416,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if err == nil && hasEOFByte(ret) {
-		if evm.chainRules.IsShanghai {
+		if evm.chainRules.IsCancun {
 			var c Container
 			if err = c.UnmarshalBinary(ret); err == nil {
 				err = c.ValidateCode(evm.config.JumpTableEOF)
@@ -516,9 +516,9 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }
 
-// parseContainer tries to parse an EOF container if the Shanghai fork is active. It expects the code to already be validated.
+// parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
 func (evm *EVM) parseContainer(b []byte) *Container {
-	if evm.chainRules.IsShanghai {
+	if evm.chainRules.IsCancun {
 		var c Container
 		if err := c.UnmarshalBinary(b); errors.Is(err, ErrInvalidMagic) {
 			return nil

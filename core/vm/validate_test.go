@@ -242,7 +242,7 @@ func TestValidateCode(t *testing.T) {
 			metadata: []*FunctionMetadata{{Input: 0, Output: 0, MaxStackHeight: 2}, {Input: 2, Output: 1, MaxStackHeight: 2}},
 		},
 	} {
-		err := validateCode(test.code, test.section, test.metadata, &shanghaiEOFInstructionSet)
+		err := validateCode(test.code, test.section, test.metadata, &cancunEOFInstructionSet)
 		if (err != nil && test.err == nil) || (err == nil && test.err != nil) || (err != nil && test.err != nil && err.Error() != test.err.Error()) {
 			t.Errorf("test %d (%s): unexpected error (want: %v, got: %v)", i, common.Bytes2Hex(test.code), test.err, err)
 		}

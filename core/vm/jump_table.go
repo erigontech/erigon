@@ -67,7 +67,6 @@ var (
 	berlinInstructionSet           = newBerlinInstructionSet()
 	londonInstructionSet           = newLondonInstructionSet()
 	shanghaiInstructionSet         = newShanghaiInstructionSet()
-	shanghaiEOFInstructionSet      = newShanghaiEOFInstructionSet()
 	cancunInstructionSet           = newCancunInstructionSet()
 	cancunEOFInstructionSet        = newCancunEOFInstructionSet()
 )
@@ -105,13 +104,6 @@ func newCancunEOFInstructionSet() JumpTable {
 // and cancun instructions.
 func newCancunInstructionSet() JumpTable {
 	instructionSet := newShanghaiInstructionSet()
-	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-func newShanghaiEOFInstructionSet() JumpTable {
-	instructionSet := newShanghaiInstructionSet()
-	enableEOF(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

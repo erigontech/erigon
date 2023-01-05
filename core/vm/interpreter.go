@@ -130,7 +130,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		eofJt = &cancunEOFInstructionSet
 	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
-		eofJt = &shanghaiEOFInstructionSet
 	case evm.ChainRules().IsLondon:
 		jt = &londonInstructionSet
 	case evm.ChainRules().IsBerlin:
