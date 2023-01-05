@@ -241,7 +241,6 @@ func promotePlainState(
 type pair struct{ k, v []byte }
 
 func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pair, logPrefix string) error {
-	defer fmt.Printf("exit extractTableToChan\n")
 	defer close(in)
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -264,25 +263,21 @@ func extractTableToChan(ctx context.Context, tx kv.Tx, table string, in chan pai
 }
 
 func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) error) error {
-	defer fmt.Printf("exit3\n")
 	for {
 		select {
 		case item, ok := <-out:
 			if !ok {
-				fmt.Printf("exit4\n")
 				return nil
 			}
 			if err := collect(item.k, item.v); err != nil {
-				fmt.Printf("exit8: %s\n", err)
 				return fmt.Errorf("collectChan: %w", err)
 			}
 		case <-ctx.Done():
-			return fmt.Errorf("cancel2: %w", ctx.Err())
+			return ctx.Err()
 		}
 	}
 }
 func parallelTransform(ctx context.Context, in chan pair, out chan pair, transform func(k, v []byte) ([]byte, []byte, error), workers int) error {
-	defer fmt.Printf("exit2\n")
 	defer close(out)
 	hashG, ctx := errgroup.WithContext(ctx)
 	for i := 0; i < workers; i++ {
