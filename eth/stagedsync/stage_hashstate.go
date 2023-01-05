@@ -262,6 +262,11 @@ func collectChan(ctx context.Context, out chan pair, collect func(k, v []byte) e
 		if err := collect(item.k, item.v); err != nil {
 			return err
 		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancel2: %w", ctx.Err())
+		default:
+		}
 	}
 	return nil
 }
@@ -279,7 +284,7 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 				select {
 				case out <- pair{k: k, v: v}:
 				case <-ctx.Done():
-					return ctx.Err()
+					return fmt.Errorf("cancel1: %w", ctx.Err())
 				}
 			}
 			return nil
@@ -302,7 +307,7 @@ func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int)
 				for it.HasNext() {
 					_, _, err = it.Next()
 					if err != nil {
-						return err
+						return fmt.Errorf("cancel3: %w", err)
 					}
 				}
 				return nil
