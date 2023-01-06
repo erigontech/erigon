@@ -79,14 +79,15 @@ func InitiateValidatorExit(state *state.BeaconState, index uint64) {
 func SlashValidator(state *state.BeaconState, slashedInd, whistleblowerInd uint64) error {
 	epoch := GetEpochAtSlot(state.Slot())
 	InitiateValidatorExit(state, slashedInd)
-	validator := state.ValidatorAt(int(slashedInd))
-	validator.Slashed = true
+	newValidator := *state.ValidatorAt(int(slashedInd))
+	newValidator.Slashed = true
 	withdrawEpoch := epoch + EPOCHS_PER_SLASHINGS_VECTOR
-	if validator.WithdrawableEpoch < withdrawEpoch {
-		validator.WithdrawableEpoch = withdrawEpoch
+	if newValidator.WithdrawableEpoch < withdrawEpoch {
+		newValidator.WithdrawableEpoch = withdrawEpoch
 	}
-	state.Slashings()[epoch%EPOCHS_PER_SLASHINGS_VECTOR] += validator.EffectiveBalance
-	DecreaseBalance(state, slashedInd, validator.EffectiveBalance/MIN_SLASHING_PENALTY_QUOTIENT)
+	state.SetValidatorAt(int(slashedInd), &newValidator)
+	state.Slashings()[epoch%EPOCHS_PER_SLASHINGS_VECTOR] += newValidator.EffectiveBalance
+	DecreaseBalance(state, slashedInd, newValidator.EffectiveBalance/MIN_SLASHING_PENALTY_QUOTIENT)
 
 	proposerInd, err := GetBeaconProposerIndex(state)
 	if err != nil {
@@ -95,7 +96,7 @@ func SlashValidator(state *state.BeaconState, slashedInd, whistleblowerInd uint6
 	if whistleblowerInd == 0 {
 		whistleblowerInd = proposerInd
 	}
-	whistleBlowerReward := validator.EffectiveBalance / WHISTLEBLOWER_REWARD_QUOTIENT
+	whistleBlowerReward := newValidator.EffectiveBalance / WHISTLEBLOWER_REWARD_QUOTIENT
 	proposerReward := whistleBlowerReward / PROPOSER_REWARD_QUOTIENT
 	IncreaseBalance(state, proposerInd, proposerReward)
 	IncreaseBalance(state, whistleblowerInd, whistleBlowerReward)

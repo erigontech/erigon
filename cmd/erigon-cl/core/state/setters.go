@@ -62,6 +62,10 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.historicalRoots[index] = root
 }
 
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+	b.validators[index] = validator
+}
+
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataLeafIndex] = true
 	b.eth1Data = eth1Data
