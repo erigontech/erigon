@@ -1,6 +1,7 @@
 package sentry
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
@@ -73,11 +74,19 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 	}
 }
 
-func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, block *types.Block, td *big.Int) {
+func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
 	cs.lock.RLock()
 	defer cs.lock.RUnlock()
+	txs := make([]types.Transaction, len(body.Transactions))
+	for i, tx := range body.Transactions {
+		var err error
+		if txs[i], err = types.DecodeTransaction(rlp.NewStream(bytes.NewReader(tx), 0)); err != nil {
+			log.Error("broadcastNewBlock", "err", err)
+			return
+		}
+	}
 	data, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
-		Block: block,
+		Block: types.NewBlock(header, txs, body.Uncles, nil, body.Withdrawals),
 		TD:    td,
 	})
 	if err != nil {
