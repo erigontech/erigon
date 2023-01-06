@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
-	"golang.org/x/exp/slices"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
@@ -499,6 +498,23 @@ func (s *StateChangePubSub) remove(id uint) {
 }
 
 // Temporal methods
+func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+	reply = &remote.DomainGetReply{}
+	if err := s.with(req.TxID, func(tx kv.Tx) error {
+		ttx, ok := tx.(kv.TemporalTx)
+		if !ok {
+			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
+		}
+		reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.Ts)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return reply, nil
+}
 func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
 	reply = &remote.HistoryGetReply{}
 	if err := s.with(req.TxID, func(tx kv.Tx) error {
@@ -534,7 +550,7 @@ func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexR
 				if err != nil {
 					return err
 				}
-				if err := stream.Send(&remote.IndexRangeReply{Timestamps: slices.Clone(batch)}); err != nil {
+				if err := stream.Send(&remote.IndexRangeReply{Timestamps: batch}); err != nil {
 					return err
 				}
 			}

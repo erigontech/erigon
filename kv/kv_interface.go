@@ -35,11 +35,17 @@ import (
 //  Stream - high-level simplified api for iteration over Table, InvertedIndex, History, Domain, ...
 
 //Methods Naming:
-// Get: exact match of criterias
-// Range: [from, to). Range(from, nil) means [from, EndOfTable). Range(nil, to) means [StartOfTable, to).
-// Each: Range(from, nil)
-// Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
-// Amount: [from, INF) AND maximum N records
+//  Get: exact match of criterias
+//  Range: [from, to). Range(from, nil) means [from, EndOfTable). Range(nil, to) means [StartOfTable, to).
+//  Each: Range(from, nil)
+//  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
+//  Amount: [from, INF) AND maximum N records
+
+//Entity Naming:
+//  State: simple table in db
+//  InvertedIndex: supports range-scans
+//  History: can return value of key K as of given TimeStamp. Doesn't know about latest/current value of key K. Returns NIL if K not changed after TimeStamp.
+//  Domain: as History but also aware about latest/current value of key K.
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
@@ -385,8 +391,11 @@ type RwCursorDupSort interface {
 var ErrNotSupported = errors.New("not supported")
 
 // ---- Temporal part
-type History string
-type InvertedIdx string
+type (
+	Domain      string
+	History     string
+	InvertedIdx string
+)
 type TemporalRoDb interface {
 	RoDB
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
@@ -394,7 +403,7 @@ type TemporalRoDb interface {
 }
 type TemporalTx interface {
 	Tx
-	// HistoryGet 1 record from the History. History doesn't store current value - use `DomainGet()` instead.
+	DomainGet(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps UnaryStream[uint64], err error)
 }
