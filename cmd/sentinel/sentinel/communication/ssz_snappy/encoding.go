@@ -22,10 +22,9 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
-func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
+func EncodeAndWrite(w io.Writer, val cltypes.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
@@ -39,8 +38,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	sw := snappy.NewBufferedWriter(wr)
 	defer sw.Flush()
 	// Marshall and snap it
-	xs := make([]byte, 0, val.SizeSSZ())
-	enc, err := val.MarshalSSZTo(xs)
+	enc, err := val.MarshalSSZ()
 	if err != nil {
 		return err
 	}
@@ -58,7 +56,7 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	return DecodeAndReadNoForkDigest(r, val)
 }
 
-func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.ObjectSSZ) error {
+func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.EncodableSSZ) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {

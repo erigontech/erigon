@@ -3,18 +3,8 @@ package cltypes
 import (
 	"bytes"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
-
-// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
-type AttestationData struct {
-	Slot            uint64
-	Index           uint64
-	BeaconBlockHash [32]byte `ssz-size:"32"`
-	Source          *Checkpoint
-	Target          *Checkpoint
-}
 
 /*
  * BeaconBlockHeader is the message we validate in the lightclient.
@@ -36,15 +26,6 @@ type SignedBeaconBlockHeader struct {
 	Signature [96]byte `ssz-size:"96"`
 }
 
-/*
- * IndexedAttestation are attestantions sets to prove that someone misbehaved.
- */
-type IndexedAttestation struct {
-	AttestingIndices []uint64 `ssz-max:"2048"`
-	Data             *AttestationData
-	Signature        [96]byte `ssz-size:"96"`
-}
-
 // Slashing requires 2 blocks with the same signer as proof
 type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader
@@ -57,13 +38,6 @@ type ProposerSlashing struct {
 type AttesterSlashing struct {
 	Attestation_1 *IndexedAttestation
 	Attestation_2 *IndexedAttestation
-}
-
-// Full signed attestation
-type Attestation struct {
-	AggregationBits []byte `ssz-max:"2048" ssz:"bitlist"`
-	Data            *AttestationData
-	Signature       [96]byte `ssz-size:"96"`
 }
 
 type DepositData struct {
@@ -415,11 +389,4 @@ func (b *BeaconStateBellatrix) BlockRoot() ([32]byte, error) {
 		Root:          stateRoot,
 	}
 	return tempHeader.HashTreeRoot()
-}
-
-type ObjectSSZ interface {
-	ssz.Marshaler
-	ssz.Unmarshaler
-
-	HashTreeRoot() ([32]byte, error)
 }

@@ -3,8 +3,17 @@ package cltypes
 import (
 	"encoding/binary"
 
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
+
+// Full signed attestation
+type Attestation struct {
+	AggregationBits []byte `ssz-max:"2048" ssz:"bitlist"`
+	Data            *AttestationData
+	Signature       [96]byte `ssz-size:"96"`
+}
 
 const maxAttestationSize = 2276
 
@@ -250,5 +259,119 @@ func rebuildAggregationBits(buf []byte) (n int, ret []byte) {
 		ret = append(ret, currByte)
 		i++
 	}
+	return
+}
+
+/*
+ * IndexedAttestation are attestantions sets to prove that someone misbehaved.
+ */
+type IndexedAttestation struct {
+	AttestingIndices []uint64 `ssz-max:"2048"`
+	Data             *AttestationData
+	Signature        [96]byte `ssz-size:"96"`
+}
+
+// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
+type AttestationData struct {
+	Slot            uint64
+	Index           uint64
+	BeaconBlockHash [32]byte `ssz-size:"32"`
+	Source          *Checkpoint
+	Target          *Checkpoint
+}
+
+// MarshalSSZ ssz marshals the AttestationData object
+func (a *AttestationData) MarshalSSZ() ([]byte, error) {
+	return ssz.MarshalSSZ(a)
+}
+
+// MarshalSSZTo ssz marshals the AttestationData object to a target array
+func (a *AttestationData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+	dst = buf
+
+	dst = ssz.MarshalUint64(dst, a.Slot)
+	dst = ssz.MarshalUint64(dst, a.Index)
+	dst = append(dst, a.BeaconBlockHash[:]...)
+
+	if a.Source == nil {
+		a.Source = new(Checkpoint)
+	}
+	if dst, err = a.Source.MarshalSSZTo(dst); err != nil {
+		return
+	}
+
+	if a.Target == nil {
+		a.Target = new(Checkpoint)
+	}
+	if dst, err = a.Target.MarshalSSZTo(dst); err != nil {
+		return
+	}
+
+	return
+}
+
+// UnmarshalSSZ ssz unmarshals the AttestationData object
+func (a *AttestationData) UnmarshalSSZ(buf []byte) error {
+	var err error
+	size := uint64(len(buf))
+	if size != uint64(a.SizeSSZ()) {
+		return ssz.ErrSize
+	}
+
+	a.Slot = ssz.UnmarshallUint64(buf[0:8])
+	a.Index = ssz.UnmarshallUint64(buf[8:16])
+	copy(a.BeaconBlockHash[:], buf[16:48])
+
+	if a.Source == nil {
+		a.Source = new(Checkpoint)
+	}
+	if err = a.Source.UnmarshalSSZ(buf[48:88]); err != nil {
+		return err
+	}
+
+	if a.Target == nil {
+		a.Target = new(Checkpoint)
+	}
+	if err = a.Target.UnmarshalSSZ(buf[88:128]); err != nil {
+		return err
+	}
+
+	return err
+}
+
+// SizeSSZ returns the ssz encoded size in bytes for the AttestationData object
+func (a *AttestationData) SizeSSZ() int {
+	return 2*common.BlockNumberLength + common.HashLength + a.Source.SizeSSZ()*2
+}
+
+// HashTreeRoot ssz hashes the AttestationData object
+func (a *AttestationData) HashTreeRoot() ([32]byte, error) {
+	sourceRoot, err := a.Source.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	targetRoot, err := a.Source.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return merkle_tree.ArraysRoot([][32]byte{
+		merkle_tree.Uint64Root(a.Slot),
+		merkle_tree.Uint64Root(a.Index),
+		a.BeaconBlockHash,
+		sourceRoot,
+		targetRoot,
+	}, 8)
+}
+
+// HashTreeRootWith ssz hashes the AttestationData object with a hasher
+func (a *AttestationData) HashTreeRootWith(hh *ssz.Hasher) (err error) {
+	var root common.Hash
+	root, err = a.HashTreeRoot()
+	if err != nil {
+		return
+	}
+
+	hh.PutBytes(root[:])
+
 	return
 }
