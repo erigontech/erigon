@@ -210,7 +210,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
 func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
-	header, body := bd.prefetchedBlocks.Pop(hash)
+	header, body := bd.prefetchedBlocks.Get(hash)
 
 	if body == nil {
 		return false
