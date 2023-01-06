@@ -1,6 +1,10 @@
 package cltypes
 
-import ssz "github.com/ferranbt/fastssz"
+import (
+	"encoding/binary"
+
+	ssz "github.com/ferranbt/fastssz"
+)
 
 type ObjectSSZ interface {
 	ssz.Marshaler
@@ -21,4 +25,14 @@ type Marshaler interface {
 
 type Unmarshaler interface {
 	UnmarshalSSZ(buf []byte) error
+}
+
+func MarshalUint64SSZ(x uint64) []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, x)
+	return buf
+}
+
+func UnmarshalUint64SSZ(x []byte) uint64 {
+	return binary.LittleEndian.Uint64(x)
 }

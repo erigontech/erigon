@@ -1,8 +1,6 @@
 package cltypes
 
 import (
-	"encoding/binary"
-
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -14,23 +12,23 @@ type Metadata struct {
 
 func (m *Metadata) MarshalSSZ() ([]byte, error) {
 	ret := make([]byte, 24)
-	binary.BigEndian.PutUint64(ret, m.SeqNumber)
-	binary.BigEndian.PutUint64(ret[8:], m.Attnets)
+	copy(ret, MarshalUint64SSZ(m.SeqNumber))
+	copy(ret[8:], MarshalUint64SSZ(m.Attnets))
 	if m.Syncnets == nil {
 		return ret[:16], nil
 	}
-	binary.BigEndian.PutUint64(ret[16:], *m.Syncnets)
+	copy(ret[16:], MarshalUint64SSZ(*m.Syncnets))
 	return ret, nil
 }
 
 func (m *Metadata) UnmarshalSSZ(buf []byte) error {
-	m.SeqNumber = binary.BigEndian.Uint64(buf)
-	m.Attnets = binary.BigEndian.Uint64(buf[8:])
+	m.SeqNumber = UnmarshalUint64SSZ(buf)
+	m.Attnets = UnmarshalUint64SSZ(buf[8:])
 	if len(buf) < 24 {
 		return nil
 	}
 	m.Syncnets = new(uint64)
-	*m.Syncnets = binary.BigEndian.Uint64(buf[16:])
+	*m.Syncnets = UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -49,12 +47,12 @@ type Ping struct {
 
 func (p *Ping) MarshalSSZ() ([]byte, error) {
 	ret := make([]byte, p.SizeSSZ())
-	binary.BigEndian.PutUint64(ret, p.Id)
+	copy(ret, MarshalUint64SSZ(p.Id))
 	return ret, nil
 }
 
 func (p *Ping) UnmarshalSSZ(buf []byte) error {
-	p.Id = binary.BigEndian.Uint64(buf)
+	p.Id = UnmarshalUint64SSZ(buf)
 	return nil
 }
 
@@ -91,14 +89,14 @@ type LightClientUpdatesByRangeRequest struct {
 
 func (l *LightClientUpdatesByRangeRequest) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, l.SizeSSZ())
-	binary.BigEndian.PutUint64(buf, l.Period)
-	binary.BigEndian.PutUint64(buf[8:], l.Count)
+	copy(buf, MarshalUint64SSZ(l.Period))
+	copy(buf[8:], MarshalUint64SSZ(l.Count))
 	return buf, nil
 }
 
 func (l *LightClientUpdatesByRangeRequest) UnmarshalSSZ(buf []byte) error {
-	l.Period = binary.BigEndian.Uint64(buf)
-	l.Count = binary.BigEndian.Uint64(buf[8:])
+	l.Period = UnmarshalUint64SSZ(buf)
+	l.Count = UnmarshalUint64SSZ(buf[8:])
 	return nil
 }
 
@@ -117,16 +115,16 @@ type BeaconBlocksByRangeRequest struct {
 
 func (b *BeaconBlocksByRangeRequest) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, b.SizeSSZ())
-	binary.BigEndian.PutUint64(buf, b.StartSlot)
-	binary.BigEndian.PutUint64(buf[8:], b.Count)
-	binary.BigEndian.PutUint64(buf[16:], b.Step)
+	copy(buf, MarshalUint64SSZ(b.StartSlot))
+	copy(buf[8:], MarshalUint64SSZ(b.Count))
+	copy(buf[16:], MarshalUint64SSZ(b.Step))
 	return buf, nil
 }
 
 func (b *BeaconBlocksByRangeRequest) UnmarshalSSZ(buf []byte) error {
-	b.StartSlot = binary.BigEndian.Uint64(buf)
-	b.Count = binary.BigEndian.Uint64(buf[8:])
-	b.Step = binary.BigEndian.Uint64(buf[16:])
+	b.StartSlot = UnmarshalUint64SSZ(buf)
+	b.Count = UnmarshalUint64SSZ(buf[8:])
+	b.Step = UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -150,18 +148,18 @@ func (s *Status) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, s.SizeSSZ())
 	copy(buf, s.ForkDigest[:])
 	copy(buf[4:], s.FinalizedRoot[:])
-	binary.BigEndian.PutUint64(buf[36:], s.FinalizedEpoch)
+	copy(buf[36:], MarshalUint64SSZ(s.FinalizedEpoch))
 	copy(buf[44:], s.HeadRoot[:])
-	binary.BigEndian.PutUint64(buf[76:], s.HeadSlot)
+	copy(buf[76:], MarshalUint64SSZ(s.HeadSlot))
 	return buf, nil
 }
 
 func (s *Status) UnmarshalSSZ(buf []byte) error {
 	copy(s.ForkDigest[:], buf)
 	copy(s.FinalizedRoot[:], buf[4:])
-	s.FinalizedEpoch = binary.BigEndian.Uint64(buf[36:])
+	s.FinalizedEpoch = UnmarshalUint64SSZ(buf[36:])
 	copy(s.HeadRoot[:], buf[44:])
-	s.HeadSlot = binary.BigEndian.Uint64(buf[76:])
+	s.HeadSlot = UnmarshalUint64SSZ(buf[76:])
 	return nil
 }
 
