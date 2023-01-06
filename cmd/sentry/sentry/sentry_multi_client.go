@@ -535,7 +535,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
-	cs.Bd.AddToPrefetch(request.Block)
+	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
@@ -552,7 +552,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
-	txs, uncles := request.BlockRawBodiesPacket.Unpack()
+	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
 	if len(txs) == 0 && len(uncles) == 0 {
 		outreq := proto_sentry.PeerUselessRequest{
 			PeerId: inreq.PeerId,
@@ -564,7 +564,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

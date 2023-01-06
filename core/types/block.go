@@ -599,6 +599,12 @@ type BodyForStorage struct {
 	Withdrawals []*Withdrawal
 }
 
+// Alternative representation of the Block.
+type HeaderAndBody struct {
+	Header *Header
+	Body   *RawBody
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
