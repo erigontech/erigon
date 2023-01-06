@@ -2,7 +2,7 @@ package commands
 
 import (
 	"fmt"
-
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
@@ -41,7 +41,7 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
 	hashes := map[common.Hash]bool{*hash: true}
-	if err := services.SearchReservesForTransactionHash(hashes); err != nil {
+	if _, err = services.SearchReservesForTransactionHash(hashes); err != nil {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
 
@@ -83,13 +83,16 @@ func callContractTx() (*common.Hash, error) {
 	}
 	hashes[*eventHash] = true
 
-	if err := services.SearchReservesForTransactionHash(hashes); err != nil {
+	txToBlockMap, err := services.SearchReservesForTransactionHash(hashes)
+	if err != nil {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
 
-	//if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
-	//	return nil, fmt.Errorf("failed to get logs: %v", err)
-	//}
+	expectedLog := devnetutils.BuildLog(*eventHash, (*txToBlockMap)[*eventHash], address)
+
+	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog); err != nil {
+		return nil, fmt.Errorf("failed to get logs: %v", err)
+	}
 
 	return hash, nil
 }

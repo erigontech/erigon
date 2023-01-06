@@ -161,6 +161,7 @@ func NewMethodSubscription(name SubMethod) *MethodSubscription {
 type Block struct {
 	Number       *hexutil.Big
 	Transactions []common.Hash
+	BlockHash    common.Hash
 }
 
 // ParameterFromArgument merges the argument and parameter and returns a flag input string

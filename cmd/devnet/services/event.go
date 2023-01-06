@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/common"
@@ -36,14 +37,14 @@ func InitSubscriptions(methods []models.SubMethod) {
 	}()
 }
 
-func SearchReservesForTransactionHash(hashes map[common.Hash]bool) error {
+func SearchReservesForTransactionHash(hashes map[common.Hash]bool) (*map[common.Hash]string, error) {
 	fmt.Printf("Searching for txes in reserved blocks...\n")
-	err := searchBlockForHashes(hashes)
+	m, err := searchBlockForHashes(hashes)
 	if err != nil {
-		return fmt.Errorf("failed to search reserves for hashes: %v", err)
+		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
 	}
 
-	return nil
+	return m, nil
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
@@ -151,11 +152,13 @@ func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, err
 //	return blockN, err
 //}
 
-func searchBlockForHashes(hashmap map[common.Hash]bool) error {
-	toFind := len(hashmap)
+func searchBlockForHashes(hashesmap map[common.Hash]bool) (*map[common.Hash]string, error) {
+	txToBlock := make(map[common.Hash]string, len(hashesmap))
+
+	toFind := len(hashesmap)
 	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
 	if methodSub == nil {
-		return fmt.Errorf("client subscription should not be nil")
+		return nil, fmt.Errorf("client subscription should not be nil")
 	}
 
 	var blockCount int
@@ -165,17 +168,17 @@ func searchBlockForHashes(hashmap map[common.Hash]bool) error {
 		case block := <-models.NewHeadsChan:
 			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
 			blockNum := block.(map[string]interface{})["number"].(string)
-			_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum)
+			_, numFound, foundErr := txHashInBlock(methodSub.Client, hashesmap, blockNum, txToBlock)
 			if foundErr != nil {
-				return fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
+				return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
 			}
 			toFind -= numFound // remove the amount of found txs from the amount we're looking for
 			if toFind == 0 {   // this means we have found all the txs we're looking for
 				fmt.Printf("All the transactions created have been mined\n")
-				return nil
+				return &txToBlock, nil
 			}
 			if blockCount == models.MaxNumberOfBlockChecks {
-				return fmt.Errorf("timeout when searching for tx")
+				return nil, fmt.Errorf("timeout when searching for tx")
 			}
 		}
 	}

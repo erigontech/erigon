@@ -97,7 +97,7 @@ func initializeTransactOps(nonce uint64) (*bind.TransactOpts, error) {
 }
 
 // txHashInBlock checks if the block with block number has the transaction hash in its list of transactions
-func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber string) (uint64, int, error) {
+func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber string, txToBlockMap map[common.Hash]string) (uint64, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // releases the resources held by the context
 
@@ -110,11 +110,15 @@ func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber
 		return uint64(0), 0, fmt.Errorf("failed to get block by number: %v", err)
 	}
 
+	fmt.Printf("Block Deets => %+v\n", currBlock)
+
 	for _, txnHash := range currBlock.Transactions {
 		// check if tx is in the hash set and remove it from the set if it is present
 		if _, ok := hashmap[txnHash]; ok {
 			numFound++
 			fmt.Printf("SUCCESS => Tx with hash %q is in mined block with number %q\n", txnHash, blockNumber)
+			// add the block number as an entry to the map
+			txToBlockMap[txnHash] = blockNumber
 			delete(hashmap, txnHash)
 			if len(hashmap) == 0 {
 				return devnetutils.HexToInt(blockNumber), numFound, nil
