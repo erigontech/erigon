@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"testing"
 	"time"
@@ -527,18 +528,16 @@ func TestTransactionCoding(t *testing.T) {
 		// RLP or SSZ
 		parsedTx, err := encodeDecodeBinary(tx)
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err = assertEqual(parsedTx, tx); err != nil {
+			t.Errorf("fail on test %v: %v", i, err)
+		} else if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
 
 		// RLP
-		parsedTx, err = encodeDecodeRLP(tx)
+		parsedTx, err = encodeDecodeRLPAndCheckSize(tx)
 		if err != nil {
-			t.Fatal(err)
-		}
-		if err = assertEqual(parsedTx, tx); err != nil {
+			t.Errorf("fail %v: %v", i, err)
+		} else if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
 
@@ -606,6 +605,7 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	if err = tx.MarshalBinary(&buf); err != nil {
 		return nil, fmt.Errorf("rlp encoding failed: %w", err)
 	}
+
 	var parsedTx Transaction
 	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %w", err)
@@ -613,7 +613,7 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	return parsedTx, nil
 }
 
-func encodeDecodeRLP(tx Transaction) (Transaction, error) {
+func encodeDecodeRLPAndCheckSize(tx Transaction) (Transaction, error) {
 	var buf bytes.Buffer
 	var err error
 
@@ -636,6 +636,20 @@ func encodeDecodeRLP(tx Transaction) (Transaction, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unknown tx type: %v", t)
+	}
+
+	// Confirm tx.Size() computes the right value
+	computedSize := int(tx.Size())
+
+	// Adjust the size to account for the struct size prefix value
+	if computedSize >= 56 {
+		computedSize += (bits.Len(uint(computedSize)) + 7) / 8
+	}
+	computedSize++
+
+	actualSize := buf.Len()
+	if computedSize != actualSize {
+		return nil, fmt.Errorf("Computed size (%v) doesn't equal actual size (%v)", computedSize, actualSize)
 	}
 
 	var parsedTx Transaction

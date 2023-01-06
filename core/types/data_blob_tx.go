@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -545,15 +544,6 @@ func (tx SignedBlobTx) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-// TODO: review field order
-// by trangtran
-func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
-	nonceLen = rlp.IntLenExcludingHead(stx.GetNonce())
-	gasLen = rlp.IntLenExcludingHead(stx.GetGas())
-	accessListLen = accessListSize(stx.GetAccessList())
-	return int(codec.ContainerLength(&stx.Message, &stx.Signature)), nonceLen, gasLen, accessListLen
-}
-
 func (stx SignedBlobTx) encodePayload(w io.Writer) error {
 	wcodec := codec.NewEncodingWriter(w)
 	return wcodec.Container(&stx.Message, &stx.Signature)
@@ -585,13 +575,9 @@ func (stx *SignedBlobTx) Size() common.StorageSize {
 }
 
 func (tx SignedBlobTx) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
-	envelopeSize := payloadSize
-	// Add envelope size and type size
-	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-	}
-	envelopeSize += 2
+	envelopeSize := int(codec.ContainerLength(&tx.Message, &tx.Signature))
+	// Add type byte
+	envelopeSize++
 	return envelopeSize
 }
 
