@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
@@ -18,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/rlp"
 
@@ -121,7 +123,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			NotifyPendingLogs(logPrefix, cfg.notifier, logs)
 		} else {
 
-			yielded := make([][32]byte, 0)
+			yielded := mapset.NewSet[[32]byte]()
 			simulationTx := memdb.NewMemoryBatch(tx, cfg.tmpdir)
 			defer simulationTx.Rollback()
 			executionAt, err := s.ExecutionAt(tx)
@@ -134,7 +136,6 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				if err != nil {
 					return err
 				}
-				yielded = append(yielded, y...)
 
 				if !txs.Empty() {
 					logs, stop, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId)
@@ -150,7 +151,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				}
 
 				// if we yielded less than the count we wanted, assume the txpool has run dry now and stop to save another loop
-				if len(y) < 50 {
+				if y < 50 {
 					break
 				}
 			}
@@ -190,17 +191,17 @@ func getNextTransactions(
 	amount uint16,
 	executionAt uint64,
 	simulationTx *memdb.MemoryMutation,
-	alreadyYielded [][32]byte,
-) (types.TransactionsStream, [][32]byte, error) {
+	alreadyYielded mapset.Set[[32]byte],
+) (types.TransactionsStream, int, error) {
 	txSlots := types2.TxsRlp{}
 	var onTime bool
-	var yielded [][32]byte
+	count := 0
 	if err := cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
 		counter := 0
 		for !onTime && counter < 1000 {
 			remainingGas := header.GasLimit - header.GasUsed
-			if onTime, yielded, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, alreadyYielded); err != nil {
+			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, alreadyYielded); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -208,7 +209,7 @@ func getNextTransactions(
 		}
 		return nil
 	}); err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
 	var txs []types.Transaction //nolint:prealloc
@@ -223,7 +224,7 @@ func getNextTransactions(
 			continue
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, 0, err
 		}
 		if !transaction.GetChainID().IsZero() && transaction.GetChainID().Cmp(chainID) != 0 {
 			continue
@@ -240,10 +241,10 @@ func getNextTransactions(
 	blockNum := executionAt + 1
 	txs, err := filterBadTransactions(txs, cfg.chainConfig, blockNum, header.BaseFee, simulationTx)
 	if err != nil {
-		return nil, nil, err
+		return nil, 0, err
 	}
 
-	return types.NewTransactionsFixedOrder(txs), yielded, nil
+	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
 func filterBadTransactions(transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {

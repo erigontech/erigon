@@ -8,22 +8,23 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
-type DoubleHash [2 * common.HashLength]byte
+// TripleHash is type to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
+type TripleHash [3 * common.HashLength]byte
 
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
 	peerID          [64]byte
-	txs             *[][][]byte
-	uncles          *[][]*types.Header
+	txs             [][][]byte
+	uncles          [][]*types.Header
+	withdrawals     []types.Withdrawals
 	lenOfP2PMessage uint64
 }
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
 	peerMap          map[[64]byte]int
-	requestedMap     map[DoubleHash]uint64
+	requestedMap     map[TripleHash]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
 	Engine           consensus.Engine
@@ -54,7 +55,7 @@ type BodyRequest struct {
 // NewBodyDownload create a new body download state object
 func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownload {
 	bd := &BodyDownload{
-		requestedMap:     make(map[DoubleHash]uint64),
+		requestedMap:     make(map[TripleHash]uint64),
 		outstandingLimit: uint64(outstandingLimit),
 		delivered:        roaring64.New(),
 		deliveriesH:      make(map[uint64]*types.Header),
