@@ -28,7 +28,7 @@ func NewPrefetchedBlocks() *PrefetchedBlocks {
 
 func (pb *PrefetchedBlocks) Pop(hash common.Hash) (*types.Header, *types.RawBody) {
 	if val, ok := pb.blocks.Get(hash); ok && val != nil {
-		pb.blocks.Remove(hash)
+		//pb.blocks.Remove(hash)
 		if headerAndBody, ok := val.(HeaderAndBody); ok {
 			return headerAndBody.header, headerAndBody.body
 		}
