@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -138,7 +138,7 @@ func ComputeDomain(
 }
 
 func ComputeSigningRoot(
-	obj cltypes.ObjectSSZ,
+	obj ssz_utils.ObjectSSZ,
 	domain []byte,
 ) ([32]byte, error) {
 	objRoot, err := obj.HashTreeRoot()

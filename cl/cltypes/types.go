@@ -323,13 +323,6 @@ type Validator struct {
 	WithdrawableEpoch          uint64
 }
 
-type PendingAttestation struct {
-	AggregationBits []byte `ssz-max:"2048"`
-	Data            *AttestationData
-	InclusionDelay  uint64
-	ProposerIndex   uint64
-}
-
 /*
  * AggregateAndProof contains the index of the aggregator, the attestation
  * to be aggregated and the BLS signature of the attestation.

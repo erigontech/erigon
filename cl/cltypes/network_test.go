@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -39,7 +40,7 @@ var testStatus = &cltypes.Status{
 }
 
 func TestMarshalNetworkTypes(t *testing.T) {
-	cases := []cltypes.EncodableSSZ{
+	cases := []ssz_utils.EncodableSSZ{
 		testMetadata,
 		testPing,
 		testSingleRoot,
@@ -48,7 +49,7 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		testStatus,
 	}
 
-	unmarshalDestinations := []cltypes.EncodableSSZ{
+	unmarshalDestinations := []ssz_utils.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
 		&cltypes.SingleRoot{},

@@ -117,7 +117,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(12): Balances
 	if b.isLeafDirty(BalancesLeafIndex) {
-		balancesRoot, err := state_encoding.Uint64ListRootWithLimit(b.balances, state_encoding.ValidatorLimitForBalancesChunks())
+		balancesRoot, err := merkle_tree.Uint64ListRootWithLimit(b.balances, state_encoding.ValidatorLimitForBalancesChunks())
 		if err != nil {
 			return err
 		}
@@ -143,7 +143,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
-		participationRoot, err := state_encoding.ParticipationBitsRoot(b.previousEpochParticipation)
+		participationRoot, err := merkle_tree.BitlistRootWithLimit(b.previousEpochParticipation, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(16): CurrentEpochParticipation
 	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
-		participationRoot, err := state_encoding.ParticipationBitsRoot(b.currentEpochParticipation)
+		participationRoot, err := merkle_tree.BitlistRootWithLimit(b.currentEpochParticipation, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
-		scoresRoot, err := state_encoding.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
+		scoresRoot, err := merkle_tree.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
 		if err != nil {
 			return err
 		}

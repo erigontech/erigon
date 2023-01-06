@@ -12,3 +12,11 @@ func Uint64Root(val uint64) common.Hash {
 	binary.LittleEndian.PutUint64(root[:], val)
 	return root
 }
+
+func SignatureRoot(signature [96]byte) (common.Hash, error) {
+	return ArraysRoot([][32]byte{
+		common.BytesToHash(signature[:]),
+		common.BytesToHash(signature[32:]),
+		common.BytesToHash(signature[64:]),
+	}, 4)
+}

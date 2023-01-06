@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -109,7 +110,7 @@ func (b *BeaconState) LatestExecutionPayloadHeader() *cltypes.ExecutionHeader {
 }
 
 // GetStateSSZObject allows us to use ssz methods.
-func (b *BeaconState) GetStateSSZObject() cltypes.ObjectSSZ {
+func (b *BeaconState) GetStateSSZObject() ssz_utils.ObjectSSZ {
 	switch b.version {
 	case clparams.BellatrixVersion:
 		return &cltypes.BeaconStateBellatrix{

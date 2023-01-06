@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -12,23 +13,24 @@ type Metadata struct {
 
 func (m *Metadata) MarshalSSZ() ([]byte, error) {
 	ret := make([]byte, 24)
-	copy(ret, MarshalUint64SSZ(m.SeqNumber))
-	copy(ret[8:], MarshalUint64SSZ(m.Attnets))
+	ssz_utils.MarshalUint64SSZ(ret, m.SeqNumber)
+	ssz_utils.MarshalUint64SSZ(ret[8:], m.Attnets)
+
 	if m.Syncnets == nil {
 		return ret[:16], nil
 	}
-	copy(ret[16:], MarshalUint64SSZ(*m.Syncnets))
+	ssz_utils.MarshalUint64SSZ(ret[16:], *m.Syncnets)
 	return ret, nil
 }
 
 func (m *Metadata) UnmarshalSSZ(buf []byte) error {
-	m.SeqNumber = UnmarshalUint64SSZ(buf)
-	m.Attnets = UnmarshalUint64SSZ(buf[8:])
+	m.SeqNumber = ssz_utils.UnmarshalUint64SSZ(buf)
+	m.Attnets = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	if len(buf) < 24 {
 		return nil
 	}
 	m.Syncnets = new(uint64)
-	*m.Syncnets = UnmarshalUint64SSZ(buf[16:])
+	*m.Syncnets = ssz_utils.UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -47,12 +49,12 @@ type Ping struct {
 
 func (p *Ping) MarshalSSZ() ([]byte, error) {
 	ret := make([]byte, p.SizeSSZ())
-	copy(ret, MarshalUint64SSZ(p.Id))
+	ssz_utils.MarshalUint64SSZ(ret, p.Id)
 	return ret, nil
 }
 
 func (p *Ping) UnmarshalSSZ(buf []byte) error {
-	p.Id = UnmarshalUint64SSZ(buf)
+	p.Id = ssz_utils.UnmarshalUint64SSZ(buf)
 	return nil
 }
 
@@ -89,14 +91,14 @@ type LightClientUpdatesByRangeRequest struct {
 
 func (l *LightClientUpdatesByRangeRequest) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, l.SizeSSZ())
-	copy(buf, MarshalUint64SSZ(l.Period))
-	copy(buf[8:], MarshalUint64SSZ(l.Count))
+	ssz_utils.MarshalUint64SSZ(buf, l.Period)
+	ssz_utils.MarshalUint64SSZ(buf[8:], l.Count)
 	return buf, nil
 }
 
 func (l *LightClientUpdatesByRangeRequest) UnmarshalSSZ(buf []byte) error {
-	l.Period = UnmarshalUint64SSZ(buf)
-	l.Count = UnmarshalUint64SSZ(buf[8:])
+	l.Period = ssz_utils.UnmarshalUint64SSZ(buf)
+	l.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	return nil
 }
 
@@ -115,16 +117,16 @@ type BeaconBlocksByRangeRequest struct {
 
 func (b *BeaconBlocksByRangeRequest) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, b.SizeSSZ())
-	copy(buf, MarshalUint64SSZ(b.StartSlot))
-	copy(buf[8:], MarshalUint64SSZ(b.Count))
-	copy(buf[16:], MarshalUint64SSZ(b.Step))
+	ssz_utils.MarshalUint64SSZ(buf, b.StartSlot)
+	ssz_utils.MarshalUint64SSZ(buf[8:], b.Count)
+	ssz_utils.MarshalUint64SSZ(buf[16:], b.Step)
 	return buf, nil
 }
 
 func (b *BeaconBlocksByRangeRequest) UnmarshalSSZ(buf []byte) error {
-	b.StartSlot = UnmarshalUint64SSZ(buf)
-	b.Count = UnmarshalUint64SSZ(buf[8:])
-	b.Step = UnmarshalUint64SSZ(buf[16:])
+	b.StartSlot = ssz_utils.UnmarshalUint64SSZ(buf)
+	b.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	b.Step = ssz_utils.UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -148,18 +150,18 @@ func (s *Status) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, s.SizeSSZ())
 	copy(buf, s.ForkDigest[:])
 	copy(buf[4:], s.FinalizedRoot[:])
-	copy(buf[36:], MarshalUint64SSZ(s.FinalizedEpoch))
+	ssz_utils.MarshalUint64SSZ(buf[36:], s.FinalizedEpoch)
 	copy(buf[44:], s.HeadRoot[:])
-	copy(buf[76:], MarshalUint64SSZ(s.HeadSlot))
+	ssz_utils.MarshalUint64SSZ(buf[76:], s.HeadSlot)
 	return buf, nil
 }
 
 func (s *Status) UnmarshalSSZ(buf []byte) error {
 	copy(s.ForkDigest[:], buf)
 	copy(s.FinalizedRoot[:], buf[4:])
-	s.FinalizedEpoch = UnmarshalUint64SSZ(buf[36:])
+	s.FinalizedEpoch = ssz_utils.UnmarshalUint64SSZ(buf[36:])
 	copy(s.HeadRoot[:], buf[44:])
-	s.HeadSlot = UnmarshalUint64SSZ(buf[76:])
+	s.HeadSlot = ssz_utils.UnmarshalUint64SSZ(buf[76:])
 	return nil
 }
 

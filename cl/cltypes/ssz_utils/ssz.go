@@ -1,4 +1,4 @@
-package cltypes
+package ssz_utils
 
 import (
 	"encoding/binary"
@@ -27,10 +27,8 @@ type Unmarshaler interface {
 	UnmarshalSSZ(buf []byte) error
 }
 
-func MarshalUint64SSZ(x uint64) []byte {
-	buf := make([]byte, 8)
+func MarshalUint64SSZ(buf []byte, x uint64) {
 	binary.LittleEndian.PutUint64(buf, x)
-	return buf
 }
 
 func UnmarshalUint64SSZ(x []byte) uint64 {
