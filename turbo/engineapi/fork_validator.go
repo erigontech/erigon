@@ -245,7 +245,7 @@ func (fv *ForkValidator) TryAddingPoWBlock(block *types.Block) {
 	defer fv.clean()
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.sideForksBlock[block.Hash()] = types.HeaderAndBody{block.Header(), block.RawBody()}
+	fv.sideForksBlock[block.Hash()] = types.HeaderAndBody{Header: block.Header(), Body: block.RawBody()}
 }
 
 // Clear wipes out current extending fork data and notify txpool.
@@ -300,17 +300,18 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 			}
 			encodedTxs = append(encodedTxs, common.CopyBytes(buf.Bytes()))
 		}
-		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{header, &types.RawBody{
+		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: &types.RawBody{
 			Transactions: encodedTxs,
+			// TODO(yperbasis): withdrawals
 		}}
 	} else {
-		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{header, body}
+		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: body}
 	}
 	status = remote.EngineStatus_VALID
 	return
 }
 
-// clean wipes out all outdated sideforks whose distance exceed the height of the head.
+// clean wipes out all outdated side forks whose distance exceed the height of the head.
 func (fv *ForkValidator) clean() {
 	for hash, sb := range fv.sideForksBlock {
 		if math.AbsoluteDifference(fv.currentHeight, sb.Header.Number.Uint64()) > maxForkDepth {
