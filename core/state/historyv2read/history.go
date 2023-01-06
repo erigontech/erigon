@@ -15,9 +15,9 @@ const DefaultIncarnation = uint64(1)
 func GetAsOfV3(tx kv.TemporalTx, storage bool, key []byte, timestamp uint64, histV3 bool) (v []byte, err error) {
 	var ok bool
 	if storage {
-		v, ok, err = tx.HistoryGet(temporal.Storage, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.StorageHistory, key, timestamp)
 	} else {
-		v, ok, err = tx.HistoryGet(temporal.Accounts, key, timestamp)
+		v, ok, err = tx.HistoryGet(temporal.AccountsHistory, key, timestamp)
 	}
 	if err != nil {
 		return nil, err
@@ -42,6 +42,14 @@ func GetAsOfV3(tx kv.TemporalTx, storage bool, key []byte, timestamp uint64, his
 	}
 
 	//restore codehash
+	v, err = RestoreCodeHash(tx, key, v)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func RestoreCodeHash(tx kv.Getter, key, v []byte) ([]byte, error) {
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(v); err != nil {
 		return nil, err
@@ -75,27 +83,10 @@ func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool
 	if ok {
 		//restore codehash
 		if !storage {
-			var acc accounts.Account
-			if err := acc.DecodeForStorage(v); err != nil {
+			//restore codehash
+			v, err = RestoreCodeHash(tx, key, v)
+			if err != nil {
 				return nil, err
-			}
-			if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
-				var codeHash []byte
-				var err error
-
-				prefix := make([]byte, length.Addr+length.BlockNum)
-				copy(prefix, key)
-				binary.BigEndian.PutUint64(prefix[length.Addr:], acc.Incarnation)
-
-				codeHash, err = tx.GetOne(kv.PlainContractCode, prefix)
-				if err != nil {
-					return nil, err
-				}
-				if len(codeHash) > 0 {
-					acc.CodeHash.SetBytes(codeHash)
-				}
-				v = make([]byte, acc.EncodingLengthForStorage())
-				acc.EncodeForStorage(v)
 			}
 		}
 
