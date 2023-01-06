@@ -538,15 +538,8 @@ func (tx SignedBlobTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (stx SignedBlobTx) encodePayload(w io.Writer) error {
 	wcodec := codec.NewEncodingWriter(w)
-	return wcodec.Container(&stx.Message, &stx.Signature)
+	return tx.Serialize(wcodec)
 }
 
 func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {

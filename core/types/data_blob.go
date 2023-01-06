@@ -1,16 +1,22 @@
 package types
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
+	"time"
+
+	"github.com/holiman/uint256"
+	"github.com/protolambda/go-kzg/eth"
+	"github.com/protolambda/ztyp/codec"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/protolambda/go-kzg/eth"
-	"github.com/protolambda/ztyp/codec"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // Compressed BLS12-381 G1 element
@@ -289,6 +295,8 @@ func (blobs Blobs) ComputeCommitmentsAndAggregatedProof() (commitments []KZGComm
 	return commitments, versionedHashes, kzgProof, nil
 }
 
+// BlobTxWrapper is the "network representation" of a Blob transaction, that is it includes not
+// only the SignedBlobTx but also all the associated blob data.
 type BlobTxWrapper struct {
 	Tx                 SignedBlobTx
 	BlobKzgs           BlobKzgs
@@ -312,25 +320,11 @@ func (txw *BlobTxWrapper) FixedLength() uint64 {
 	return 0
 }
 
-type BlobTxWrapData struct {
-	BlobKzgs           BlobKzgs
-	Blobs              Blobs
-	KzgAggregatedProof KZGProof
-}
-
-func (b *BlobTxWrapData) sizeWrapData() common.StorageSize {
-	return common.StorageSize(4 + 4 + b.BlobKzgs.ByteLength() + b.Blobs.ByteLength() + b.KzgAggregatedProof.ByteLength())
-}
-
-// validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
-func (b *BlobTxWrapData) validateBlobTransactionWrapper(inner Transaction) error {
-	blobTx, ok := inner.(*SignedBlobTx)
-	if !ok {
-		return fmt.Errorf("expected signed blob tx, got %T", inner)
-	}
-	l1 := len(b.BlobKzgs)
-	l2 := len(blobTx.Message.BlobVersionedHashes)
-	l3 := len(b.Blobs)
+func (txw *BlobTxWrapper) VerifyBlobs() error {
+	blobTx := txw.Tx.Message
+	l1 := len(txw.BlobKzgs)
+	l2 := len(blobTx.BlobVersionedHashes)
+	l3 := len(txw.Blobs)
 	if l1 != l2 || l2 != l3 {
 		return fmt.Errorf("lengths don't match %v %v %v", l1, l2, l3)
 	}
@@ -340,54 +334,94 @@ func (b *BlobTxWrapData) validateBlobTransactionWrapper(inner Transaction) error
 	if l1 > params.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
-	ok, err := eth.VerifyAggregateKZGProof(b.Blobs, b.BlobKzgs, eth.KZGProof(b.KzgAggregatedProof))
+	ok, err := eth.VerifyAggregateKZGProof(txw.Blobs, txw.BlobKzgs, eth.KZGProof(txw.KzgAggregatedProof))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
 	}
 	if !ok {
 		return errors.New("failed to verify kzg")
 	}
-	for i, h := range blobTx.Message.BlobVersionedHashes {
-		if computed := b.BlobKzgs[i].ComputeVersionedHash(); computed != h {
+	for i, h := range blobTx.BlobVersionedHashes {
+		if computed := txw.BlobKzgs[i].ComputeVersionedHash(); computed != h {
 			return fmt.Errorf("versioned hash %d supposedly %s but does not match computed %s", i, h, computed)
 		}
 	}
 	return nil
 }
 
-func (b *BlobTxWrapData) copy() TxWrapData {
-	return &BlobTxWrapData{
-		BlobKzgs:           b.BlobKzgs.copy(),
-		Blobs:              b.Blobs.copy(),
-		KzgAggregatedProof: b.KzgAggregatedProof,
+// Implement transaction interface
+func (txw *BlobTxWrapper) Type() byte               { return txw.Tx.Type() }
+func (txw *BlobTxWrapper) GetChainID() *uint256.Int { return txw.Tx.GetChainID() }
+func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
+func (txw *BlobTxWrapper) GetPrice() *uint256.Int   { return txw.Tx.GetPrice() }
+func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
+func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
+	return txw.GetEffectiveGasTip(baseFee)
+}
+func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int      { return txw.Tx.GetFeeCap() }
+func (txw *BlobTxWrapper) Cost() *uint256.Int           { return txw.Tx.GetFeeCap() }
+func (txw *BlobTxWrapper) GetDataHashes() []common.Hash { return txw.Tx.GetDataHashes() }
+func (txw *BlobTxWrapper) GetGas() uint64               { return txw.Tx.GetGas() }
+func (txw *BlobTxWrapper) GetDataGas() uint64           { return txw.Tx.GetDataGas() }
+func (txw *BlobTxWrapper) GetValue() *uint256.Int       { return txw.Tx.GetValue() }
+func (txw *BlobTxWrapper) Time() time.Time              { return txw.Tx.Time() }
+func (txw *BlobTxWrapper) GetTo() *common.Address       { return txw.Tx.GetTo() }
+func (txw *BlobTxWrapper) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
+	return txw.Tx.AsMessage(s, baseFee, rules)
+}
+func (txw *BlobTxWrapper) WithSignature(signer Signer, sig []byte) (Transaction, error) {
+	return txw.Tx.WithSignature(signer, sig)
+}
+func (txw *BlobTxWrapper) FakeSign(address common.Address) (Transaction, error) {
+	return txw.Tx.FakeSign(address)
+}
+func (txw *BlobTxWrapper) Hash() common.Hash { return txw.Tx.Hash() }
+func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) common.Hash {
+	return txw.Tx.SigningHash(chainID)
+}
+func (txw *BlobTxWrapper) GetData() []byte           { return txw.Tx.GetData() }
+func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
+func (txw *BlobTxWrapper) Protected() bool           { return txw.Tx.Protected() }
+func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
+	return txw.Tx.RawSignatureValues()
+}
+func (txw *BlobTxWrapper) Sender(s Signer) (common.Address, error) { return txw.Tx.Sender(s) }
+func (txw *BlobTxWrapper) GetSender() (common.Address, bool)       { return txw.Tx.GetSender() }
+func (txw *BlobTxWrapper) SetSender(address common.Address)        { txw.Tx.SetSender(address) }
+func (txw *BlobTxWrapper) IsContractDeploy() bool                  { return txw.Tx.IsContractDeploy() }
+func (txw *BlobTxWrapper) IsStarkNet() bool                        { return false }
+
+func (txw *BlobTxWrapper) Size() common.StorageSize {
+	if size := txw.Tx.size.Load(); size != nil {
+		return size.(common.StorageSize)
 	}
+	c := txw.EncodingSize()
+	txw.Tx.size.Store(common.StorageSize(c))
+	return common.StorageSize(c)
 }
 
-func (b *BlobTxWrapData) kzgs() BlobKzgs {
-	return b.BlobKzgs
+func (txw BlobTxWrapper) EncodingSize() int {
+	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof))
+	// Add type byte
+	envelopeSize++
+	return envelopeSize
 }
 
-func (b *BlobTxWrapData) blobs() Blobs {
-	return b.Blobs
-}
-
-func (b *BlobTxWrapData) aggregatedProof() KZGProof {
-	return b.KzgAggregatedProof
-}
-
-func (b *BlobTxWrapData) encodeTyped(w io.Writer, txdata Transaction) error {
-	if _, err := w.Write([]byte{BlobTxType}); err != nil {
+func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
+	var b [33]byte
+	// encode TxType
+	b[0] = BlobTxType
+	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	blobTx, ok := txdata.(*SignedBlobTx)
-	if !ok {
-		return fmt.Errorf("expected signed blob tx, got %T", txdata)
+	wcodec := codec.NewEncodingWriter(w)
+	return txw.Serialize(wcodec)
+}
+
+func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+	var buf bytes.Buffer
+	if err := txw.MarshalBinary(&buf); err != nil {
+		return err
 	}
-	wrapped := BlobTxWrapper{
-		Tx:                 *blobTx,
-		BlobKzgs:           b.BlobKzgs,
-		Blobs:              b.Blobs,
-		KzgAggregatedProof: b.KzgAggregatedProof,
-	}
-	return EncodeSSZ(w, &wrapped)
+	return rlp.Encode(w, buf.Bytes())
 }

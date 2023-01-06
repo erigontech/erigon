@@ -552,16 +552,6 @@ func (m *Message) SetIsFree(isFree bool) {
 
 func (m Message) DataHashes() []common.Hash { return m.dataHashes }
 
-type TxWrapData interface {
-	copy() TxWrapData
-	kzgs() BlobKzgs
-	blobs() Blobs
-	aggregatedProof() KZGProof
-	encodeTyped(w io.Writer, txdata Transaction) error
-	sizeWrapData() common.StorageSize
-	validateBlobTransactionWrapper(inner Transaction) error
-}
-
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {
 	err := dest.Deserialize(codec.NewDecodingReader(bytes.NewReader(data), uint64(len(data))))
 	return err

@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/protolambda/go-kzg/bls"
 	. "github.com/protolambda/ztyp/view"
 	"github.com/stretchr/testify/assert"
 )
@@ -520,6 +521,25 @@ func TestTransactionCoding(t *testing.T) {
 					BlobVersionedHashes: VersionedHashesView(hashVersion),
 				},
 			}
+		case 6:
+			hashVersion := []common.Hash{common.BytesToHash([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})}
+			inner := SignedBlobTx{
+				Message: BlobTxMessage{
+					ChainID:             Uint256View(*uint256.NewInt(1)),
+					Nonce:               Uint64View(i),
+					AccessList:          AccessListView(accesses),
+					MaxFeePerDataGas:    Uint256View(*uint256.NewInt(10)),
+					BlobVersionedHashes: VersionedHashesView(hashVersion),
+				},
+			}
+			var kzgProof KZGProof
+			copy(kzgProof[:], bls.ToCompressedG1((*bls.G1Point)(&bls.ZeroG1)))
+			txdata = &BlobTxWrapper{
+				Tx:                 inner,
+				BlobKzgs:           BlobKzgs{KZGCommitment{0: 0xc0}},
+				Blobs:              Blobs{Blob{}},
+				KzgAggregatedProof: kzgProof,
+			}
 		}
 		tx, err := SignNewTx(key, *signer, txdata)
 		if err != nil {
@@ -631,6 +651,10 @@ func encodeDecodeRLPAndCheckSize(tx Transaction) (Transaction, error) {
 			return nil, err
 		}
 	case *SignedBlobTx:
+		if err := t.EncodeRLP(&buf); err != nil {
+			return nil, err
+		}
+	case *BlobTxWrapper:
 		if err := t.EncodeRLP(&buf); err != nil {
 			return nil, err
 		}
