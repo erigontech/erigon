@@ -14,7 +14,7 @@ type (
 	PendingLogsSubID  SubscriptionID
 	PendingBlockSubID SubscriptionID
 	PendingTxsSubID   SubscriptionID
-	LogsSubID         uint64
+	LogsSubID         SubscriptionID
 )
 
 var globalSubscriptionId uint64
