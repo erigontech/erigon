@@ -85,7 +85,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 	}
 	stub := make([]any, 0)
 	// remove 0x
-	cutIndex := strings.TrimPrefix("0x", index)
+	cutIndex := strings.TrimPrefix(index, "0x")
 	if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
 		cutIndex = index[2:]
 	}
