@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
@@ -278,7 +279,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -300,22 +301,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		currentHeight := headersChain[i].Number.Uint64()
 		currentHash := headersChain[i].Hash()
 		// Prepare memory state for block execution
-		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
-		if err != nil {
-			return err
-		}
-		/*
-			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody)
-			if err != nil {
-				return err
-			}
-			if ok {
-
-				if txNums != nil {
-					txNums.Append(currentHeight, lastTxnNum)
-				}
-			}
-		*/
+		Bd.AddToPrefetch(currentHeader, currentBody)
 		rawdb.WriteHeader(batch, currentHeader)
 		if err = rawdb.WriteHeaderNumber(batch, currentHash, currentHeight); err != nil {
 			return err
@@ -350,28 +336,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, h
 		return err
 	}
 	if body != nil {
-		if err = stages.SaveStageProgress(batch, stages.Bodies, height); err != nil {
-			return err
-		}
-		_, _, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
-		if err != nil {
-			return err
-		}
-		/*
-			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(batch, hash, height, body)
-			if err != nil {
-				return err
-			}
-			if ok {
-				if txNums != nil {
-					txNums.Append(height, lastTxnNum)
-				}
-			}
-		*/
-	} else {
-		if err = stages.SaveStageProgress(batch, stages.Bodies, height-1); err != nil {
-			return err
-		}
+		Bd.AddToPrefetch(header, body)
 	}
 	// Run state sync
 	if err = stateSync.Run(nil, batch, false /* firstCycle */, quiet); err != nil {
