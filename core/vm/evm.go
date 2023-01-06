@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"errors"
 	"fmt"
 	"sync/atomic"
 
@@ -514,11 +513,9 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 
 // parseContainer tries to parse an EOF container if the Cancun fork is active. It expects the code to already be validated.
 func (evm *EVM) parseContainer(b []byte) *Container {
-	if evm.chainRules.IsCancun {
+	if evm.chainRules.IsCancun && hasEOFMagic(b) {
 		var c Container
-		if err := c.UnmarshalBinary(b); errors.Is(err, ErrInvalidMagic) {
-			return nil
-		} else if err != nil {
+		if err := c.UnmarshalBinary(b); err != nil {
 			// Code was already validated, so no other errors should be possible.
 			panic(fmt.Sprintf("unexpected error: %v", err))
 		}
