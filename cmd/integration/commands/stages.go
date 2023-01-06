@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -280,9 +279,12 @@ var cmdSetSnap = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
-		snapshots, _ := allSnapshots(db)
+		sn, agg := allSnapshots(cmd.Context(), db)
+		defer sn.Close()
+		defer agg.Close()
+
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return snap.ForceSetFlags(tx, snapshots.Cfg())
+			return snap.ForceSetFlags(tx, sn.Cfg())
 		}); err != nil {
 			log.Error("Error", "err", err)
 			return
@@ -297,7 +299,7 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
-			return rawdb.HistoryV3.ForceWrite(tx, _forceSetHistoryV3)
+			return kvcfg.HistoryV3.ForceWrite(tx, _forceSetHistoryV3)
 		}); err != nil {
 			log.Error("Error", "err", err)
 			return
@@ -470,8 +472,13 @@ func stageSnapshots(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHeaders(db kv.RwDB, ctx context.Context) error {
-	sn, _ := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	br := getBlockReader(db)
+	engine, _, _, _, _ := newSync(ctx, db, nil)
+	chainConfig, _, _ := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if !(unwind > 0 || reset) {
 			log.Info("This command only works with --unwind or --reset options")
@@ -479,7 +486,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, br, dirs.Tmp); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
 			return nil
@@ -538,9 +545,11 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageBodies(db kv.RwDB, ctx context.Context) error {
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
+	chainConfig, historyV3 := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
-	chainConfig, historyV3 := fromdb.ChainConfig(db), fromdb.HistoryV3(db)
-	sn, _ := allSnapshots(db)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		s := stage(sync, tx, nil, stages.Bodies)
@@ -572,9 +581,11 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 
 func stageSenders(db kv.RwDB, ctx context.Context) error {
 	tmpdir := datadir.New(datadirCli).Tmp
-	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
-	snapshots, _ := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
+	_, _, sync, _, _ := newSync(ctx, db, nil)
 
 	must(sync.SetCurrentStage(stages.Senders))
 
@@ -628,12 +639,12 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
 	var br *snapshotsync.BlockRetire
-	if snapshots.Cfg().Enabled {
+	if sn.Cfg().Enabled {
 		workers := runtime.GOMAXPROCS(-1) - 1
 		if workers < 1 {
 			workers = 1
 		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, snapshots, db, nil, nil)
+		br = snapshotsync.NewBlockRetire(workers, tmpdir, sn, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -665,12 +676,17 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
-	chainConfig, historyV3, pm := fromdb.ChainConfig(db), fromdb.HistoryV3(db), fromdb.PruneMode(db)
+	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	dirs := datadir.New(datadirCli)
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))
-	_, agg := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 
+	if warmup {
+		return reset2.WarmupExec(ctx, db)
+	}
 	if reset {
 		return reset2.ResetExec(ctx, db, chain)
 	}
@@ -731,13 +747,18 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageTrie(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV3(db)
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.IntermediateHashes))
-	_, agg := allSnapshots(db)
 
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.IntermediateHashes)
+	}
 	if reset {
-		return reset2.ResetIH(ctx, db)
+		return reset2.Reset(ctx, db, stages.IntermediateHashes)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -782,13 +803,18 @@ func stageTrie(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHashState(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV3(db)
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.HashState))
-	_, agg := allSnapshots(db)
 
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.HashState)
+	}
 	if reset {
-		return reset2.ResetHashState(ctx, db)
+		return reset2.Reset(ctx, db, stages.HashState)
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -833,14 +859,17 @@ func stageHashState(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageLogIndex(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV3(db)
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		return fmt.Errorf("this stage is disable in --history.v3=true")
 	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.LogIndex))
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.LogIndex)
+	}
 	if reset {
-		return reset2.ResetLogIndex(ctx, db)
+		return reset2.Reset(ctx, db, stages.LogIndex)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -885,15 +914,18 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageCallTraces(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV3(db)
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		return fmt.Errorf("this stage is disable in --history.v3=true")
 	}
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.CallTraces))
 
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.CallTraces)
+	}
 	if reset {
-		return reset2.ResetCallTraces(ctx, db)
+		return reset2.Reset(ctx, db, stages.CallTraces)
 	}
 
 	tx, err := db.BeginRw(ctx)
@@ -945,15 +977,21 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 }
 
 func stageHistory(db kv.RwDB, ctx context.Context) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), fromdb.HistoryV3(db)
+	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		return fmt.Errorf("this stage is disable in --history.v3=true")
 	}
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.AccountHistoryIndex))
 
+	if warmup {
+		return reset2.Warmup(ctx, db, log.LvlInfo, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
+	}
 	if reset {
-		return reset2.ResetHistory(ctx, db)
+		return reset2.Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex)
 	}
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
@@ -1001,7 +1039,6 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		sn, _ := allSnapshots(db)
 		_ = printStages(tx, sn)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
@@ -1019,7 +1056,9 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 	chainConfig := fromdb.ChainConfig(db)
 	must(sync.SetCurrentStage(stages.TxLookup))
-	sn, _ := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 
 	if reset {
 		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetTxLookup(tx) })
@@ -1065,7 +1104,9 @@ func stageTxLookup(db kv.RwDB, ctx context.Context) error {
 }
 
 func printAllStages(db kv.RoDB, ctx context.Context) error {
-	sn, _ := allSnapshots(db)
+	sn, agg := allSnapshots(ctx, db)
+	defer sn.Close()
+	defer agg.Close()
 	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) })
 }
 
@@ -1095,9 +1136,9 @@ func removeMigration(db kv.RwDB, ctx context.Context) error {
 
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *snapshotsync.RoSnapshots
-var _aggSingleton *libstate.Aggregator22
+var _aggSingleton *libstate.AggregatorV3
 
-func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22) {
+func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.AggregatorV3) {
 	openSnapshotOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
@@ -1111,7 +1152,7 @@ func allSnapshots(db kv.RoDB) (*snapshotsync.RoSnapshots, *libstate.Aggregator22
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		_aggSingleton, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
@@ -1143,7 +1184,7 @@ var _blockReaderSingleton services.FullBlockReader
 func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
 		_blockReaderSingleton = snapshotsync.NewBlockReader()
-		if sn, _ := allSnapshots(db); sn.Cfg().Enabled {
+		if sn, _ := allSnapshots(context.Background(), db); sn.Cfg().Enabled {
 			x := snapshotsync.NewBlockReaderWithSnapshots(sn)
 			_blockReaderSingleton = x
 		}
@@ -1152,8 +1193,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
-	logger := log.New()
-	dirs, historyV3, pm := datadir.New(datadirCli), fromdb.HistoryV3(db), fromdb.PruneMode(db)
+	dirs, historyV3, pm := datadir.New(datadirCli), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 
 	vmConfig := &vm.Config{}
 
@@ -1183,10 +1223,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		cfg.Miner = *miningConfig
 	}
 	cfg.Dirs = datadir.New(datadirCli)
-	allSn, agg := allSnapshots(db)
+	allSn, agg := allSnapshots(ctx, db)
 	cfg.Snapshot = allSn.Cfg()
 
-	engine := initConsensusEngine(chainConfig, logger, allSn, cfg.Dirs.DataDir, db)
+	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
 
 	br := getBlockReader(db)
 	sentryControlServer, err := sentry.NewMultiClient(
@@ -1206,7 +1246,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil)
+	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil, engine)
 	if err != nil {
 		panic(err)
 	}
@@ -1267,27 +1307,24 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots, datadir string, db kv.RwDB) (engine consensus.Engine) {
+func initConsensusEngine(cc *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
+	l := log.New()
+	snapshots, _ := allSnapshots(context.Background(), db)
 	config := ethconfig.Defaults
 
-	switch {
-	case chainConfig.Clique != nil:
-		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadir, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
-	case chainConfig.Aura != nil:
-		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadir, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
-	case chainConfig.Parlia != nil:
-		// Apply special hacks for BSC params
-		params.ApplyBinanceSmartChainParams()
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadir, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadir, snapshots, true /* readonly */, db)
-	case chainConfig.Bor != nil:
-		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, HeimdallURL, false, datadir, snapshots, true /* readonly */, db)
-	default: //ethash
-		engine = ethash.NewFaker()
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if cc.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
 	}
-	return
+	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, datadir, snapshots, db.ReadOnly(), db)
 }

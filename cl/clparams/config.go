@@ -38,7 +38,7 @@ const (
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 1 * time.Second
-	RespTimeout    time.Duration = 3 * time.Second
+	RespTimeout    time.Duration = 15 * time.Second
 )
 
 var (
@@ -713,6 +713,6 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 1 is Ethereum Mainnet
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
-func Supported(id uint64) bool {
+func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
 }

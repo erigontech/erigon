@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -132,30 +131,9 @@ func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlockBellatrix {
 	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
 	// Gossip failed use the rpc and attempt to retrieve last block.
 	if c.lastReceivedSlot != currentSlot {
-		go c.retrieveTip()
 		return nil
 	}
 	block := c.currBlock
 	c.currBlock = nil
 	return block
-}
-
-func (c *ChainTipSubscriber) retrieveTip() {
-	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
-	objs, err := rpc.SendBeaconBlocksByRangeReq(c.ctx, currentSlot, 1, c.sentinel)
-	if err != nil {
-		return
-	}
-	// Count is one, must be 1
-	if len(objs) != 1 {
-		return
-	}
-	currentSlot = utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
-	block := objs[0].(*cltypes.SignedBeaconBlockBellatrix).Block
-	if currentSlot == block.Slot {
-		c.mu.Lock()
-		c.currBlock = block
-		c.lastReceivedSlot = currentSlot
-		defer c.mu.Unlock()
-	}
 }

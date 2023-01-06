@@ -440,7 +440,7 @@ func (hd *HeaderDownload) requestMoreHeadersForPOS(currentTime time.Time) (timeo
 		Anchor:  anchor,
 		Hash:    anchor.parentHash,
 		Number:  anchor.blockHeight - 1,
-		Length:  128,
+		Length:  192,
 		Skip:    0,
 		Reverse: true,
 	}
@@ -488,10 +488,14 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime time.T
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
+	if hd.topSeenHeightPoW < hd.highestInDb+192 {
+		// trying to prevent empty responses
+		return nil
+	}
 	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
-	stride := uint64(1) // Fix for BSC, for some reason most peers cannot response to the skeleton requests with non-zero strides anymore, so we are getting stuck very frequently
-	strideHeight := hd.highestInDb + stride
+	stride := uint64(8 * 192)
 	var length uint64 = 192
+	strideHeight := hd.highestInDb + 1
 	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
 }
 
@@ -659,10 +663,14 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 		headerHash := sh.Hash
 
 		if headerHash != hd.posAnchor.parentHash {
-			if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
-				log.Debug("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
-				return nil, nil
-			}
+			// Code below prevented syncing from Nethermind nodes who discregarded Reverse parameter to GetBlockHeaders messages
+			// With this code commented out, the sync proceeds but very slowly (getting 1 header from the response of 192 headers)
+			/*
+				if hd.posAnchor.blockHeight != 1 && sh.Number != hd.posAnchor.blockHeight-1 {
+					log.Debug("[Downloader] posAnchor", "blockHeight", hd.posAnchor.blockHeight)
+					//return nil, nil
+				}
+			*/
 			log.Debug("[Downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
 			// Not penalise because we might have sent request twice
 			continue

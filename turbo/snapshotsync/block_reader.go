@@ -165,7 +165,24 @@ func (back *RemoteBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnH
 }
 
 func (back *RemoteBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	panic("not implemented")
+	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	b, err := back.BodyWithTransactions(ctx, tx, canonicalHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+	if i < 0 {
+		return nil, nil
+	}
+	if len(b.Transactions) <= i {
+		return nil, nil
+	}
+	return b.Transactions[i], nil
 }
 
 func (back *RemoteBlockReader) BlockWithSenders(ctx context.Context, _ kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {

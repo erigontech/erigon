@@ -15,3 +15,13 @@ func SortedKeys[K constraints.Ordered, V any](m map[K]V) []K {
 	slices.Sort(keys)
 	return keys
 }
+
+func RemoveDuplicatesFromSorted[T constraints.Ordered](slice []T) []T {
+	for i := 1; i < len(slice); i++ {
+		if slice[i] == slice[i-1] {
+			slice = append(slice[:i], slice[i+1:]...)
+			i--
+		}
+	}
+	return slice
+}

@@ -221,7 +221,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReader23, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReaderV4, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()

@@ -38,6 +38,7 @@ type TransactionTracer struct {
 	DefaultTracer
 	ctx     context.Context
 	Results []*TraceEntry
+	depth   int // computed from CaptureStart, CaptureEnter, and CaptureExit calls
 }
 
 func NewTransactionTracer(ctx context.Context) *TransactionTracer {
@@ -47,7 +48,7 @@ func NewTransactionTracer(ctx context.Context) *TransactionTracer {
 	}
 }
 
-func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.Address, precompile bool, input []byte, value *uint256.Int) {
 	if precompile {
 		return
 	}
@@ -55,34 +56,50 @@ func (t *TransactionTracer) CaptureStart(env *vm.EVM, depth int, from common.Add
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
 	_value := new(big.Int)
-	_value.Set(value.ToBig())
-	if callType == vm.CALLT {
-		t.Results = append(t.Results, &TraceEntry{"CALL", depth, from, to, (*hexutil.Big)(_value), inputCopy})
+	if value != nil {
+		_value.Set(value.ToBig())
+	}
+	if typ == vm.CALL {
+		t.Results = append(t.Results, &TraceEntry{"CALL", t.depth, from, to, (*hexutil.Big)(_value), inputCopy})
 		return
 	}
-	if callType == vm.STATICCALLT {
-		t.Results = append(t.Results, &TraceEntry{"STATICCALL", depth, from, to, nil, inputCopy})
+	if typ == vm.STATICCALL {
+		t.Results = append(t.Results, &TraceEntry{"STATICCALL", t.depth, from, to, nil, inputCopy})
 		return
 	}
-	if callType == vm.DELEGATECALLT {
-		t.Results = append(t.Results, &TraceEntry{"DELEGATECALL", depth, from, to, nil, inputCopy})
+	if typ == vm.DELEGATECALL {
+		t.Results = append(t.Results, &TraceEntry{"DELEGATECALL", t.depth, from, to, nil, inputCopy})
 		return
 	}
-	if callType == vm.CALLCODET {
-		t.Results = append(t.Results, &TraceEntry{"CALLCODE", depth, from, to, (*hexutil.Big)(_value), inputCopy})
+	if typ == vm.CALLCODE {
+		t.Results = append(t.Results, &TraceEntry{"CALLCODE", t.depth, from, to, (*hexutil.Big)(_value), inputCopy})
 		return
 	}
-	if callType == vm.CREATET {
-		t.Results = append(t.Results, &TraceEntry{"CREATE", depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
+	if typ == vm.CREATE {
+		t.Results = append(t.Results, &TraceEntry{"CREATE", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
 		return
 	}
-	if callType == vm.CREATE2T {
-		t.Results = append(t.Results, &TraceEntry{"CREATE2", depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
+	if typ == vm.CREATE2 {
+		t.Results = append(t.Results, &TraceEntry{"CREATE2", t.depth, from, to, (*hexutil.Big)(value.ToBig()), inputCopy})
 		return
+	}
+
+	if typ == vm.SELFDESTRUCT {
+		last := t.Results[len(t.Results)-1]
+		t.Results = append(t.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
 	}
 }
 
-func (l *TransactionTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	last := l.Results[len(l.Results)-1]
-	l.Results = append(l.Results, &TraceEntry{"SELFDESTRUCT", last.Depth + 1, from, to, (*hexutil.Big)(value.ToBig()), nil})
+func (t *TransactionTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.depth = 0
+	t.captureStartOrEnter(vm.CALL, from, to, precompile, input, value)
+}
+
+func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	t.depth++
+	t.captureStartOrEnter(typ, from, to, precompile, input, value)
+}
+
+func (t *TransactionTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+	t.depth--
 }

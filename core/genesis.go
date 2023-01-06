@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -88,6 +89,14 @@ type AuthorityRoundSeal struct {
 	Step uint64 `json:"step"`
 	/// Seal signature.
 	Signature common.Hash `json:"signature"`
+}
+
+var genesisTmpDB kv.RwDB
+var genesisDBLock *sync.Mutex
+
+func init() {
+	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(os.TempDir()).MapSize(2 * datasize.GB).PageSize(2 * 4096).WriteMergeThreshold(2 * 8192).MustOpen()
+	genesisDBLock = &sync.Mutex{}
 }
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
@@ -183,16 +192,16 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil, nil)
+	return CommitGenesisBlockWithOverride(db, genesis, nil)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShanghaiTime *big.Int) (*params.ChainConfig, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime)
 	if err != nil {
 		return c, b, err
 	}
@@ -211,7 +220,7 @@ func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, 
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock, overrideTerminalTotalDifficulty *big.Int) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.Int) (*params.ChainConfig, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -222,11 +231,8 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideMergeNetsplitBlock,
 	}
 
 	applyOverrides := func(config *params.ChainConfig) {
-		if overrideMergeNetsplitBlock != nil {
-			config.MergeNetsplitBlock = overrideMergeNetsplitBlock
-		}
-		if overrideTerminalTotalDifficulty != nil {
-			config.TerminalTotalDifficulty = overrideTerminalTotalDifficulty
+		if overrideShanghaiTime != nil {
+			config.ShanghaiTime = overrideShanghaiTime
 		}
 	}
 
@@ -361,6 +367,11 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 	}
 
+	var withdrawals []*types.Withdrawal
+	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
+		withdrawals = []*types.Withdrawal{}
+	}
+
 	var root common.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
@@ -368,9 +379,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		tmpDB := mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).MustOpen()
-		defer tmpDB.Close()
-		tx, err := tmpDB.BeginRw(context.Background())
+		genesisDBLock.Lock()
+		defer genesisDBLock.Unlock()
+		tx, err := genesisTmpDB.BeginRw(context.Background())
 		if err != nil {
 			panic(err)
 		}
@@ -431,7 +442,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 
 	head.Root = root
 
-	return types.NewBlock(head, nil, nil, nil, nil), statedb, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
 func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {

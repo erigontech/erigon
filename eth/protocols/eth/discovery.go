@@ -39,9 +39,9 @@ func (e enrEntry) ENRKey() string {
 }
 
 // CurrentENREntryFromForks constructs an `eth` ENR entry based on the current state of the chain.
-func CurrentENREntryFromForks(forks []uint64, genesisHash common.Hash, headHeight uint64) *enrEntry {
+func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash common.Hash, headHeight, headTime uint64) *enrEntry {
 	return &enrEntry{
-		ForkID: forkid.NewIDFromForks(forks, genesisHash, headHeight),
+		ForkID: forkid.NewIDFromForks(heightForks, timeForks, genesisHash, headHeight, headTime),
 	}
 }
 

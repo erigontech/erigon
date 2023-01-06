@@ -16,7 +16,7 @@ import (
 )
 
 type GenericTracer interface {
-	vm.Tracer
+	vm.EVMLogger
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }

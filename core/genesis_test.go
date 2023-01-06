@@ -28,7 +28,7 @@ func TestDefaultGenesisBlockHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		_, block, err := WriteGenesisBlock(tx, genesis, nil, nil)
+		_, block, err := WriteGenesisBlock(tx, genesis, nil)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -79,13 +79,13 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 func TestCommitGenesisIdempotency(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	genesis := DefaultGenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err := WriteGenesisBlock(tx, genesis, nil, nil)
+	_, _, err := WriteGenesisBlock(tx, genesis, nil)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = WriteGenesisBlock(tx, genesis, nil, nil)
+	_, _, err = WriteGenesisBlock(tx, genesis, nil)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)

@@ -48,6 +48,8 @@ var (
 	torrentMaxPeers                int
 	torrentConnsPerFile            int
 	targetFile                     string
+	disableIPV6                    bool
+	disableIPV4                    bool
 )
 
 func init() {
@@ -64,6 +66,8 @@ func init() {
 	rootCmd.Flags().IntVar(&torrentMaxPeers, "torrent.maxpeers", utils.TorrentMaxPeersFlag.Value, utils.TorrentMaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentConnsPerFile, "torrent.conns.perfile", utils.TorrentConnsPerFileFlag.Value, utils.TorrentConnsPerFileFlag.Usage)
 	rootCmd.Flags().IntVar(&torrentDownloadSlots, "torrent.download.slots", utils.TorrentDownloadSlotsFlag.Value, utils.TorrentDownloadSlotsFlag.Usage)
+	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
+	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -130,7 +134,7 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 
-	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
+	log.Info("Run snapshot downloader", "addr", downloaderApiAddr, "datadir", dirs.DataDir, "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate.String(), "upload.rate", uploadRate.String())
 	natif, err := nat.Parse(natSetting)
 	if err != nil {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
@@ -142,6 +146,9 @@ func Downloader(ctx context.Context) error {
 		return err
 	}
 	downloadernat.DoNat(natif, cfg)
+
+	cfg.ClientConfig.DisableIPv6 = disableIPV6
+	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
 	d, err := downloader.New(cfg)
 	if err != nil {
