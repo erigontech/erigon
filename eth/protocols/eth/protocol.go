@@ -183,15 +183,7 @@ func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range tp {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -207,19 +199,8 @@ func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range tp {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -447,15 +428,7 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range bb.Transactions {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -490,19 +463,8 @@ func (bb BlockBody) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.Transactions {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
@@ -786,15 +748,7 @@ func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range ptp {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -810,19 +764,8 @@ func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range ptp {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -860,15 +803,7 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range ptp66.PooledTransactionsPacket {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			txLen = t.EncodingSize()
-		case *types.AccessListTx:
-			txLen = t.EncodingSize()
-		case *types.DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -901,19 +836,8 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range ptp66.PooledTransactionsPacket {
-		switch t := tx.(type) {
-		case *types.LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *types.DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	return nil

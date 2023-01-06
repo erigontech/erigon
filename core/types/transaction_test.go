@@ -637,29 +637,8 @@ func encodeDecodeRLPAndCheckSize(tx Transaction) (Transaction, error) {
 	var buf bytes.Buffer
 	var err error
 
-	switch t := tx.(type) {
-	case *LegacyTx:
-		if err := t.EncodeRLP(&buf); err != nil {
-			return nil, err
-		}
-	case *AccessListTx:
-		if err := t.EncodeRLP(&buf); err != nil {
-			return nil, err
-		}
-	case *DynamicFeeTransaction:
-		if err := t.EncodeRLP(&buf); err != nil {
-			return nil, err
-		}
-	case *SignedBlobTx:
-		if err := t.EncodeRLP(&buf); err != nil {
-			return nil, err
-		}
-	case *BlobTxWrapper:
-		if err := t.EncodeRLP(&buf); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("unknown tx type: %v", t)
+	if err := tx.EncodeRLP(&buf); err != nil {
+		return nil, err
 	}
 
 	// Confirm tx.Size() computes the right value

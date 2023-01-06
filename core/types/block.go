@@ -968,15 +968,7 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 	payloadSize++
 	for _, tx := range bb.Transactions {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *LegacyTx:
-			txLen = t.EncodingSize()
-		case *AccessListTx:
-			txLen = t.EncodingSize()
-		case *DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
 		}
@@ -1034,19 +1026,8 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.Transactions {
-		switch t := tx.(type) {
-		case *LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
@@ -1336,19 +1317,7 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	payloadSize++
 	for _, tx := range bb.transactions {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *LegacyTx:
-			txLen = t.EncodingSize()
-		case *AccessListTx:
-			txLen = t.EncodingSize()
-		case *DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		case *StarknetTransaction:
-			txLen = t.EncodingSize()
-		case *SignedBlobTx:
-			txLen = t.EncodingSize()
-		}
+		txLen := int(tx.Size())
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
 		}
@@ -1416,27 +1385,8 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.transactions {
-		switch t := tx.(type) {
-		case *LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *StarknetTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *SignedBlobTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
