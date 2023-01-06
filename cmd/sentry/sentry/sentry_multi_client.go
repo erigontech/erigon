@@ -535,7 +535,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
-	cs.Bd.AddToPrefetch(request.Block)
+	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
