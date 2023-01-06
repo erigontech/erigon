@@ -652,7 +652,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 }
 
 func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo-1, "storage", storage, "codes", codes)
 
 	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
