@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
@@ -162,10 +163,16 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		return
 	}
 
+	bodiesProgress, err := stages.GetStageProgress(tx, stages.Bodies)
+	if err != nil {
+		criticalError = err
+		return
+	}
+
 	if extendCanonical {
-		if header.Number.Uint64() > fv.currentHeight+1 {
-			// Cannot extend because some stages are behind the headers. This usually happens when body download timeouts
-			fmt.Printf("CANNOT EXTEND: header.Number.Uint64() %d > fv.currentHeight %d + 1\n", header.Number.Uint64(), fv.currentHeight)
+		if header.Number.Uint64() > bodiesProgress+1 {
+			// Cannot extend because bodies stages is behind the headers stage. This usually happens when body download timeouts
+			fmt.Printf("CANNOT EXTEND: header.Number.Uint64() %d > bodiesProgress %d + 1\n", header.Number.Uint64(), bodiesProgress)
 			status = remote.EngineStatus_ACCEPTED
 			return
 		}
@@ -227,14 +234,15 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 		}
 		unwindPoint = sb.header.Number.Uint64() - 1
 	}
+	if unwindPoint > bodiesProgress {
+		fmt.Printf("CANNOT EXTEND: unwindPoint %d > bodiesProgress %d\n", unwindPoint, bodiesProgress)
+		// Bodies stage is behind headers stage so we cannot do in-memory validations. This usually happens when body download timeouts
+		status = remote.EngineStatus_ACCEPTED
+		return
+	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
-	} else if unwindPoint > fv.currentHeight {
-		fmt.Printf("CANNOT EXTEND: unwindPoint %d > fv.currentHeight %d\n", unwindPoint, fv.currentHeight)
-		// Some stages are behind headers so we cannot do in-memory validations. This usually happens when body download timeouts
-		status = remote.EngineStatus_ACCEPTED
-		return
 	}
 	batch := memdb.NewMemoryBatch(tx, fv.tmpDir)
 	defer batch.Rollback()
