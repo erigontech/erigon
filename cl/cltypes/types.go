@@ -7,13 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-// Eth1Data represents the relevant ETH1 Data for block buidling.
-type Eth1Data struct {
-	Root         [32]byte `ssz-size:"32"`
-	DepositCount uint64
-	BlockHash    [32]byte `ssz-size:"32"`
-}
-
 // AttestantionData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData struct {
 	Slot            uint64
@@ -361,12 +354,6 @@ type PendingAttestation struct {
 	Data            *AttestationData
 	InclusionDelay  uint64
 	ProposerIndex   uint64
-}
-
-// Checkpoint is used to create the initial store through checkpoint sync.
-type Checkpoint struct {
-	Epoch uint64
-	Root  [32]byte `ssz-size:"32"`
 }
 
 /*

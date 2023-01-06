@@ -1,4 +1,4 @@
-package state_encoding
+package merkle_tree
 
 // ZeroHashes is a representation of all zerohashes of
 // varying depths till h=100.
