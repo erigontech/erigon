@@ -2,9 +2,11 @@ package commands
 
 import (
 	"context"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -74,15 +76,16 @@ func (api *APIImpl) UninstallFilter(_ context.Context, index string) (bool, erro
 	return isDeleted, nil
 }
 
-// GetFilterChanges implements eth_getFilterChanges. Polling method for a previously-created filter, which returns an array of logs which occurred since last poll.
-func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]interface{}, error) {
+// GetFilterChanges implements eth_getFilterChanges.
+// Polling method for a previously-created filter
+// returns an array of logs, block headers, or pending transactions which occurred since last poll.
+func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
-	stub := make([]interface{}, 0)
-
+	stub := make([]any, 0)
 	// remove 0x
-	cutIndex := index
+	cutIndex := strings.TrimPrefix("0x", index)
 	if len(index) >= 2 && index[0] == '0' && (index[1] == 'x' || index[1] == 'X') {
 		cutIndex = index[2:]
 	}
@@ -112,6 +115,24 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]interfa
 		return stub, nil
 	}
 	return stub, nil
+}
+
+// GetFilterLogs implements eth_getFilterLogs.
+// Polling method for a previously-created filter
+// returns an array of logs which occurred since last poll.
+func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log, error) {
+	if api.filters == nil {
+		return nil, rpc.ErrNotificationsUnsupported
+	}
+	id, err := hexutil.DecodeUint64(index)
+	if err != nil {
+		return nil, nil
+	}
+	logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(id))
+	if !ok {
+		return nil, nil
+	}
+	return logs, nil
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
