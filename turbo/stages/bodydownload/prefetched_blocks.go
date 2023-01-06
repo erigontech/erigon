@@ -11,11 +11,6 @@ type PrefetchedBlocks struct {
 	blocks *lru.Cache
 }
 
-type HeaderAndBody struct {
-	header *types.Header
-	body   *types.RawBody
-}
-
 func NewPrefetchedBlocks() *PrefetchedBlocks {
 	// Setting this to 2500 as `erigon import` imports blocks in batches of 2500
 	// and the import command makes use of PrefetchedBlocks.
@@ -29,8 +24,8 @@ func NewPrefetchedBlocks() *PrefetchedBlocks {
 func (pb *PrefetchedBlocks) Pop(hash common.Hash) (*types.Header, *types.RawBody) {
 	if val, ok := pb.blocks.Get(hash); ok && val != nil {
 		//pb.blocks.Remove(hash)
-		if headerAndBody, ok := val.(HeaderAndBody); ok {
-			return headerAndBody.header, headerAndBody.body
+		if headerAndBody, ok := val.(types.HeaderAndBody); ok {
+			return headerAndBody.Header, headerAndBody.Body
 		}
 	}
 	return nil, nil
@@ -41,5 +36,5 @@ func (pb *PrefetchedBlocks) Add(h *types.Header, b *types.RawBody) {
 		return
 	}
 	hash := h.Hash()
-	pb.blocks.ContainsOrAdd(hash, HeaderAndBody{header: h, body: b})
+	pb.blocks.ContainsOrAdd(hash, types.HeaderAndBody{Header: h, Body: b})
 }
