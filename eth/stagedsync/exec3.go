@@ -568,7 +568,7 @@ Loop:
 				}
 			}
 
-			fmt.Printf("send: %d\n", txTask.TxNum)
+			fmt.Printf("send: %d, %t\n", txTask.TxNum, rs == nil)
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
