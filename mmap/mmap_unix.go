@@ -31,6 +31,22 @@ import (
 const MaxMapSize = 0xFFFFFFFFFFFF
 
 // mmap memory maps a DB's data file.
+func MmapRw(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
+	// Map the data file to memory.
+	mmapHandle1, err := unix.Mmap(int(f.Fd()), 0, size, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Advise the kernel that the mmap is accessed randomly.
+	err = unix.Madvise(mmapHandle1, syscall.MADV_RANDOM)
+	if err != nil && !errors.Is(err, syscall.ENOSYS) {
+		// Ignore not implemented error in kernel because it still works.
+		return nil, nil, fmt.Errorf("madvise: %w", err)
+	}
+	mmapHandle2 := (*[MaxMapSize]byte)(unsafe.Pointer(&mmapHandle1[0]))
+	return mmapHandle1, mmapHandle2, nil
+}
 func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	// Map the data file to memory.
 	mmapHandle1, err := unix.Mmap(int(f.Fd()), 0, size, syscall.PROT_READ, syscall.MAP_SHARED)

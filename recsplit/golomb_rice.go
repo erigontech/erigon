@@ -26,7 +26,7 @@ import (
 )
 
 // Optimal Golomb-Rice parameters for leaves
-var bijMemo []uint32 = []uint32{0, 0, 0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 21, 22, 23, 25, 26, 28, 29, 30}
+var bijMemo = []uint32{0, 0, 0, 1, 3, 4, 5, 7, 8, 10, 11, 12, 14, 15, 16, 18, 19, 21, 22, 23, 25, 26, 28, 29, 30}
 
 // GolombRice can build up the golomb-rice encoding of the sequeuce of numbers, as well as read the numbers back from it.
 type GolombRice struct {

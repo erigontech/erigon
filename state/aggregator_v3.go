@@ -57,11 +57,13 @@ type AggregatorV3 struct {
 	aggregationStep  uint64
 	keepInDB         uint64
 	maxTxNum         atomic.Uint64
-	working          atomic.Bool
-	workingMerge     atomic.Bool
-	warmupWorking    atomic.Bool
-	ctx              context.Context
-	ctxCancel        context.CancelFunc
+
+	working                atomic.Bool
+	workingMerge           atomic.Bool
+	workingOptionalIndices atomic.Bool
+	warmupWorking          atomic.Bool
+	ctx                    context.Context
+	ctxCancel              context.CancelFunc
 }
 
 func NewAggregator22(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
@@ -83,16 +85,16 @@ func (a *AggregatorV3) ReopenFiles() error {
 	if a.code, err = NewHistory(dir, a.tmpdir, aggregationStep, "code", kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings, true /* compressVals */, nil); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
-	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, nil); err != nil {
+	if a.logAddrs, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logaddrs", kv.LogAddressKeys, kv.LogAddressIdx, false, nil); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
-	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, nil); err != nil {
+	if a.logTopics, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "logtopics", kv.LogTopicsKeys, kv.LogTopicsIdx, false, nil); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
-	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, nil); err != nil {
+	if a.tracesFrom, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesfrom", kv.TracesFromKeys, kv.TracesFromIdx, false, nil); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
-	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, nil); err != nil {
+	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil); err != nil {
 		return fmt.Errorf("ReopenFiles: %w", err)
 	}
 	a.recalcMaxTxNum()
@@ -149,16 +151,50 @@ func (a *AggregatorV3) closeFiles() {
 	}
 }
 
+func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context) {
+	if a.workingOptionalIndices.Load() {
+		return
+	}
+	a.workingOptionalIndices.Store(true)
+	go func() {
+		defer a.workingOptionalIndices.Store(false)
+
+		//It's time to build optional lazy indices
+
+		if err := a.accounts.localityIndex.BuildMissedIndices(ctx, a.accounts.InvertedIndex); err != nil {
+			log.Warn("merge", "err", err)
+		}
+		if err := a.storage.localityIndex.BuildMissedIndices(ctx, a.storage.InvertedIndex); err != nil {
+			log.Warn("merge", "err", err)
+		}
+		if err := a.code.localityIndex.BuildMissedIndices(ctx, a.code.InvertedIndex); err != nil {
+			log.Warn("merge", "err", err)
+		}
+	}()
+}
+
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) error {
+	if err := a.storage.localityIndex.BuildMissedIndices(ctx, a.storage.InvertedIndex); err != nil {
+		panic(err)
+	}
+	if err := a.accounts.localityIndex.BuildMissedIndices(ctx, a.accounts.InvertedIndex); err != nil {
+		return err
+	}
+	if err := a.code.localityIndex.BuildMissedIndices(ctx, a.code.InvertedIndex); err != nil {
+		return err
+	}
 	g, ctx := errgroup.WithContext(ctx)
 	if a.accounts != nil {
 		g.Go(func() error { return a.accounts.BuildMissedIndices(ctx, sem) })
+		g.Go(func() error { return a.accounts.localityIndex.BuildMissedIndices(ctx, a.accounts.InvertedIndex) })
 	}
 	if a.storage != nil {
 		g.Go(func() error { return a.storage.BuildMissedIndices(ctx, sem) })
+		g.Go(func() error { return a.storage.localityIndex.BuildMissedIndices(ctx, a.storage.InvertedIndex) })
 	}
 	if a.code != nil {
 		g.Go(func() error { return a.code.BuildMissedIndices(ctx, sem) })
+		g.Go(func() error { return a.code.localityIndex.BuildMissedIndices(ctx, a.code.InvertedIndex) })
 	}
 	if a.logAddrs != nil {
 		g.Go(func() error { return a.logAddrs.BuildMissedIndices(ctx, sem) })
@@ -172,6 +208,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, sem *semaphore.We
 	if a.tracesTo != nil {
 		g.Go(func() error { return a.tracesTo.BuildMissedIndices(ctx, sem) })
 	}
+
 	return g.Wait()
 }
 
@@ -433,7 +470,7 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64, 
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
 	closeAll := true
-	maxSpan := uint64(32) * a.aggregationStep
+	maxSpan := a.aggregationStep * StepsInBiggestFile
 	r := a.findMergeRange(a.maxTxNum.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
@@ -1018,12 +1055,14 @@ func (a *AggregatorV3) BuildFilesInBackground(db kv.RoDB) error {
 		if a.workingMerge.Load() {
 			return
 		}
-		defer a.workingMerge.Store(true)
+		a.workingMerge.Store(true)
 		go func() {
 			defer a.workingMerge.Store(false)
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
 				log.Warn("merge", "err", err)
 			}
+
+			a.BuildOptionalMissedIndices(a.ctx)
 		}()
 	}()
 

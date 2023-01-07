@@ -64,6 +64,8 @@ type InvertedIndex struct {
 	workers         int
 	txNumBytes      [8]byte
 
+	localityIndex *LocalityIndex
+
 	wal     *invertedIndexWAL
 	walLock sync.RWMutex
 }
@@ -74,6 +76,7 @@ func NewInvertedIndex(
 	filenameBase string,
 	indexKeysTable string,
 	indexTable string,
+	withLocalityIndex bool,
 	integrityFileExtensions []string,
 ) (*InvertedIndex, error) {
 	ii := InvertedIndex{
@@ -94,6 +97,14 @@ func NewInvertedIndex(
 	if err := ii.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
+
+	if withLocalityIndex {
+		ii.localityIndex, err = NewLocalityIndex(dir, tmpdir, aggregationStep, filenameBase)
+		if err != nil {
+			return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
+		}
+	}
+
 	return &ii, nil
 }
 
@@ -419,7 +430,7 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
-	var ic = InvertedIndexContext{ii: ii}
+	var ic = InvertedIndexContext{ii: ii, localityIndex: ii.localityIndex}
 	ic.files = btree.NewG[ctxItem](32, ctxItemLess)
 	ii.files.Ascend(func(item *filesItem) bool {
 		if item.index == nil {
@@ -591,8 +602,9 @@ func (it *InvertedIterator) ToBitamp32() *roaring.Bitmap {
 }
 
 type InvertedIndexContext struct {
-	ii    *InvertedIndex
-	files *btree.BTreeG[ctxItem]
+	ii            *InvertedIndex
+	files         *btree.BTreeG[ctxItem]
+	localityIndex *LocalityIndex
 }
 
 // IterateRange is to be used in public API, therefore it relies on read-only transaction

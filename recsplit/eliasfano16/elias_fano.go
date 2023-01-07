@@ -34,11 +34,11 @@ import (
 const (
 	log2q      uint64 = 8
 	q          uint64 = 1 << log2q
-	qMask      uint64 = q - 1
+	qMask             = q - 1
 	superQ     uint64 = 1 << 14
-	superQMask uint64 = superQ - 1
-	qPerSuperQ uint64 = superQ / q       // 64
-	superQSize uint64 = 1 + qPerSuperQ/4 // 1 + 64/4 = 17
+	superQMask        = superQ - 1
+	qPerSuperQ        = superQ / q       // 64
+	superQSize        = 1 + qPerSuperQ/4 // 1 + 64/4 = 17
 )
 
 // EliasFano can be used to encode one monotone sequence

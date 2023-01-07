@@ -141,6 +141,7 @@ func OpenIndex(indexFile string) (*Index, error) {
 			computeGolombRice(i, idx.golombRice, idx.leafSize, idx.primaryAggrBound, idx.secondaryAggrBound)
 		}
 	}
+
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
 	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
@@ -258,6 +259,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	b := gr.ReadNext(idx.golombParam(m))
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
+
 	return binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 }
 

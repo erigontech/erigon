@@ -1042,3 +1042,17 @@ func (h *History) deleteFiles(indexOuts, historyOuts []*filesItem) error {
 	}
 	return nil
 }
+
+func (li *LocalityIndex) deleteFiles(out *filesItem) error {
+	if out == nil || out.index == nil {
+		return nil
+	}
+	out.index.Close()
+	if li.file != nil && out.endTxNum == li.file.endTxNum { //paranoic protection against delettion of current file
+		return nil
+	}
+
+	idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, out.startTxNum/li.aggregationStep, out.endTxNum/li.aggregationStep))
+	_ = os.Remove(idxPath) // may not exist
+	return nil
+}

@@ -595,6 +595,7 @@ func (rs *RecSplit) Build() error {
 	// Construct Elias Fano index
 	rs.ef.Build(rs.bucketSizeAcc, rs.bucketPosAcc)
 	rs.built = true
+
 	// Write out bucket count, bucketSize, leafSize
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.bucketCount)
 	if _, err := rs.indexW.Write(rs.numBuf[:8]); err != nil {
@@ -623,6 +624,7 @@ func (rs *RecSplit) Build() error {
 			return fmt.Errorf("writing start seed: %w", err)
 		}
 	}
+
 	if rs.enums {
 		if err := rs.indexW.WriteByte(1); err != nil {
 			return fmt.Errorf("writing enums = true: %w", err)
