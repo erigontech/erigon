@@ -151,7 +151,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
 		}
 	}()
-	fmt.Printf("RegisterSender: %d\n", txTask.TxNum)
+	fmt.Printf("RegisterSender: %d, %t\n", txTask.TxNum, rs.senderTxNums == nil)
 	defer fmt.Printf("RegisterSenderdone: %d\n", txTask.TxNum)
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
