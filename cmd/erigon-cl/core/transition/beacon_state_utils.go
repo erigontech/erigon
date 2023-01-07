@@ -139,11 +139,7 @@ func ComputeSigningRootEpoch(epoch uint64, domain []byte) ([32]byte, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
 	hash := utils.Keccak256(b)
-	sd := &cltypes.SigningData{
-		Root:   hash,
-		Domain: domain,
-	}
-	return sd.HashTreeRoot()
+	return utils.Keccak256(hash[:], domain), nil
 }
 
 func GetBeaconProposerIndex(state *state.BeaconState) (uint64, error) {

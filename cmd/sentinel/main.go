@@ -26,6 +26,7 @@ import (
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
@@ -61,7 +62,7 @@ func constructBodyFreeRequest(t string) *sentinelrpc.RequestData {
 	}
 }
 
-func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*sentinelrpc.RequestData, error) {
+func constructRequest(t string, reqBody ssz_utils.ObjectSSZ) (*sentinelrpc.RequestData, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
 		return nil, fmt.Errorf("unable to encode request body: %v", err)

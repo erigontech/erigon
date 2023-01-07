@@ -35,7 +35,7 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) {
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, &cltypes.MetadataV1{
+	ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
 	}, SuccessfulResponsePrefix)
