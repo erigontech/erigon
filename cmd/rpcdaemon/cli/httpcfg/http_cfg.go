@@ -62,5 +62,6 @@ type HttpCfg struct {
 	LogDirVerbosity     string
 	LogDirPath          string
 
-	BatchLimit int // Maximum number of requests in a batch
+	BatchLimit      int // Maximum number of requests in a batch
+	ReturnDataLimit int // Maximum number of bytes retutned from calls (like eth_call)
 }
