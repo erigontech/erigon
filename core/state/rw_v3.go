@@ -145,6 +145,7 @@ func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	fmt.Printf("RegisterSender: %d\n", txTask.TxNum)
+	defer fmt.Printf("RegisterSenderdone: %d\n", txTask.TxNum)
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	fmt.Printf("RegisterSender after lock: %d\n", txTask.TxNum)
