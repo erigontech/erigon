@@ -323,21 +323,6 @@ type Validator struct {
 	WithdrawableEpoch          uint64
 }
 
-/*
- * AggregateAndProof contains the index of the aggregator, the attestation
- * to be aggregated and the BLS signature of the attestation.
- */
-type AggregateAndProof struct {
-	AggregatorIndex uint64
-	Aggregate       *Attestation
-	SelectionProof  [96]byte `ssz-size:"96"`
-}
-
-type SignedAggregateAndProof struct {
-	Message   *AggregateAndProof
-	Signature [96]byte `ssz-size:"96"`
-}
-
 // BellatrixBeaconState is the bellatrix beacon state.
 type BeaconStateBellatrix struct {
 	GenesisTime                  uint64

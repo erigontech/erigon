@@ -300,7 +300,7 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 	}, storageObject.Eth1Number, storageObject.Eth1BlockHash, storageObject.Eth2BlockRoot, nil
 }
 
-func NewSignedBeaconBlock(obj ssz_utils.ObjectSSZ) *SignedBeaconBlock {
+func NewSignedBeaconBlock(obj interface{}) *SignedBeaconBlock {
 	switch block := obj.(type) {
 	case *SignedBeaconBlockPhase0:
 		return &SignedBeaconBlock{
