@@ -38,6 +38,9 @@ func TestBlockchain(t *testing.T) {
 	// For speedier CI-runs those are skipped.
 	bt.skipLoad(`^GeneralStateTests/`)
 
+	// Skipping due to https://github.com/ethereum/tests/issues/1133
+	bt.skipLoad(`^EIPTests/bc4895-withdrawals/`)
+
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)
