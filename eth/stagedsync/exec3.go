@@ -485,6 +485,7 @@ Loop:
 			// TODO: panic here and see that overall prodcess deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
+		b = b.Copy()
 		txs := b.Transactions()
 		header := b.Header()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
