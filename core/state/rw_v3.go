@@ -151,11 +151,8 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
 		}
 	}()
-	fmt.Printf("RegisterSender: %d, %t\n", txTask.TxNum, rs.senderTxNums == nil)
-	defer fmt.Printf("RegisterSenderdone: %d\n", txTask.TxNum)
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	fmt.Printf("RegisterSender after lock: %d\n", txTask.TxNum)
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
 	if deferral {
 		// Transactions with the same sender have obvious data dependency, no point running it before lastTxNum
