@@ -44,7 +44,7 @@ func TestUint64ListRootWithLimit(t *testing.T) {
 func TestParticipationBitsRoot(t *testing.T) {
 	expected := common.HexToHash("0x8e6653ba3656afddaf5e6c69c149e63a2e26ff91a2e361b3c40b11f08c039572")
 	bits := []byte{1, 2, 4, 5, 2, 5, 6, 7, 1, 4, 3, 5, 100, 6, 64, 2}
-	root, err := merkle_tree.BitlistRootWithLimit(bits, 1099511627776)
+	root, err := merkle_tree.BitlistRootWithLimitForState(bits, 1099511627776)
 	require.NoError(t, err)
 	require.Equal(t, expected, common.Hash(root))
 }

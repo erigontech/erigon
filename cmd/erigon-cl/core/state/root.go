@@ -143,7 +143,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	}
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
-		participationRoot, err := merkle_tree.BitlistRootWithLimit(b.previousEpochParticipation, state_encoding.ValidatorRegistryLimit)
+		participationRoot, err := merkle_tree.BitlistRootWithLimitForState(b.previousEpochParticipation, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}
@@ -152,7 +152,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(16): CurrentEpochParticipation
 	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
-		participationRoot, err := merkle_tree.BitlistRootWithLimit(b.currentEpochParticipation, state_encoding.ValidatorRegistryLimit)
+		participationRoot, err := merkle_tree.BitlistRootWithLimitForState(b.currentEpochParticipation, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}

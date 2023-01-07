@@ -1,6 +1,8 @@
 package merkle_tree
 
 import (
+	"math/bits"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
 )
@@ -70,13 +72,29 @@ func Uint64ListRootWithLimit(list []uint64, limit uint64) ([32]byte, error) {
 	return utils.Keccak256(base[:], lengthRoot[:]), nil
 }
 
-// ParticipationBitsRoot computes the HashTreeRoot merkleization of
+// BitlistRootWithLimit computes the HashTreeRoot merkleization of
 // participation roots.
 func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
-	roots, err := packBits(bits)
+	var (
+		unpackedRoots []byte
+		size          uint64
+	)
+	unpackedRoots, size = parseBitlist(unpackedRoots, bits)
+
+	roots := packBits(unpackedRoots)
+	base, err := MerkleizeVector(roots, (limit+255)/256)
 	if err != nil {
 		return [32]byte{}, err
 	}
+
+	lengthRoot := Uint64Root(size)
+	return utils.Keccak256(base[:], lengthRoot[:]), nil
+}
+
+// BitlistRootWithLimitForState computes the HashTreeRoot merkleization of
+// participation roots.
+func BitlistRootWithLimitForState(bits []byte, limit uint64) ([32]byte, error) {
+	roots := packBits(bits)
 
 	base, err := MerkleizeVector(roots, (limit+31)/32)
 	if err != nil {
@@ -87,12 +105,30 @@ func BitlistRootWithLimit(bits []byte, limit uint64) ([32]byte, error) {
 	return utils.Keccak256(base[:], lengthRoot[:]), nil
 }
 
-func packBits(bytes []byte) ([][32]byte, error) {
+func packBits(bytes []byte) [][32]byte {
 	var chunks [][32]byte
 	for i := 0; i < len(bytes); i += 32 {
 		var chunk [32]byte
 		copy(chunk[:], bytes[i:])
 		chunks = append(chunks, chunk)
 	}
-	return chunks, nil
+	return chunks
+}
+
+func parseBitlist(dst, buf []byte) ([]byte, uint64) {
+	msb := uint8(bits.Len8(buf[len(buf)-1])) - 1
+	size := uint64(8*(len(buf)-1) + int(msb))
+
+	dst = append(dst, buf...)
+	dst[len(dst)-1] &^= uint8(1 << msb)
+
+	newLen := len(dst)
+	for i := len(dst) - 1; i >= 0; i-- {
+		if dst[i] != 0x00 {
+			break
+		}
+		newLen = i
+	}
+	res := dst[:newLen]
+	return res, size
 }
