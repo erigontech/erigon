@@ -217,19 +217,20 @@ var stateHistoryV3Buckets = []string{
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
-	const ThreadsLimit = 256
+	const ThreadsLimit = 128
 	var total uint64
 	db.View(ctx, func(tx kv.Tx) error {
 		c, _ := tx.Cursor(bucket)
 		total, _ = c.Count()
 		return nil
 	})
+	if total < 10_000 {
+		return
+	}
 	progress := atomic.NewInt64(0)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
-	//0000000000a8a7b800000044
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(ThreadsLimit)
@@ -248,7 +249,10 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 						if err != nil {
 							return err
 						}
+						progress.Inc()
 						select {
+						case <-ctx.Done():
+							return ctx.Err()
 						case <-logEvery.C:
 							log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
@@ -275,6 +279,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 						return err
 					}
 					select {
+					case <-ctx.Done():
+						return ctx.Err()
 					case <-logEvery.C:
 						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 					default:

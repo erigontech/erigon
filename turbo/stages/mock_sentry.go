@@ -26,7 +26,9 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -236,7 +238,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	if cfg.HistoryV3 {
-		db = temporal.New(db, agg)
+		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
 	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
@@ -275,7 +277,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
+	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig

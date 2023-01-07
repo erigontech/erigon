@@ -51,6 +51,7 @@ type LightClient struct {
 	highestValidated     uint64      // Highest ETH2 slot validated.
 	highestProcessedRoot common.Hash // Highest processed ETH2 block root.
 	lastEth2ParentRoot   common.Hash // Last ETH2 Parent root.
+	finalizedEth1Hash    common.Hash
 	recentHashesCache    *lru.Cache
 	db                   kv.RwDB
 	rpc                  *rpc.BeaconRpcP2P
@@ -244,6 +245,13 @@ func (l *LightClient) importBlockIfPossible() {
 		return
 	}
 
+	finalizedEth2Root, err := l.store.finalizedHeader.HashTreeRoot()
+	if err != nil {
+		return
+	}
+	if finalizedEth2Root == currentRoot {
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.BlockHash
+	}
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
 		l.lastEth2ParentRoot = curr.ParentRoot
 		return
@@ -258,6 +266,7 @@ func (l *LightClient) importBlockIfPossible() {
 	if l.verbose {
 		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
 	}
+
 	// If all of the above is gud then do the push
 	if err := l.processBeaconBlock(curr); err != nil {
 		log.Warn("Could not send beacon block to ETH1", "err", err)

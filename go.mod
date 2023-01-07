@@ -3,12 +3,12 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230104025717-6fe6bbc066bf
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230107045610-db1dab8e264c
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221223003841-487873d31492
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.1-0.20230104024903-ada71c64b6a9
+	github.com/torquem-ch/mdbx-go v0.27.5
 )
 
 require (
@@ -26,6 +26,7 @@ require (
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
+	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
