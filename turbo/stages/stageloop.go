@@ -81,7 +81,7 @@ func StageLoop(
 	defer close(waitForDone)
 	initialCycle := true
 
-	for cycle := 0; ; cycle++ {
+	for {
 		start := time.Now()
 
 		select {
@@ -109,7 +109,7 @@ func StageLoop(
 			continue
 		}
 
-		initialCycle = cycle > 100
+		initialCycle = false
 		hd.EnableRequestChaining()
 
 		if loopMinTime != 0 {
