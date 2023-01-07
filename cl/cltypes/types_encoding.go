@@ -430,7 +430,7 @@ func (d *Deposit) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		return err
 	}
 
-	hh.AppendBytes32(root[:])
+	hh.PutBytes(root[:])
 	return
 }
 

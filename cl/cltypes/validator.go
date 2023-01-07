@@ -11,7 +11,7 @@ const DepositProofLength = 33
 
 type DepositData struct {
 	PubKey                [48]byte
-	WithdrawalCredentials []byte // 32 byte
+	WithdrawalCredentials [32]byte // 32 byte
 	Amount                uint64
 	Signature             [96]byte
 	Root                  common.Hash // Ignored if not for hashing
@@ -20,7 +20,7 @@ type DepositData struct {
 func (d *DepositData) MarshalSSZ() ([]byte, error) {
 	buf := make([]byte, d.SizeSSZ())
 	copy(buf, d.PubKey[:])
-	copy(buf[48:], d.WithdrawalCredentials)
+	copy(buf[48:], d.WithdrawalCredentials[:])
 	ssz_utils.MarshalUint64SSZ(buf[80:], d.Amount)
 	copy(buf[88:], d.Signature[:])
 	return buf, nil
@@ -28,7 +28,7 @@ func (d *DepositData) MarshalSSZ() ([]byte, error) {
 
 func (d *DepositData) UnmarshalSSZ(buf []byte) error {
 	copy(d.PubKey[:], buf)
-	copy(d.WithdrawalCredentials, buf[48:])
+	copy(d.WithdrawalCredentials[:], buf[48:])
 	d.Amount = ssz_utils.UnmarshalUint64SSZ(buf[80:])
 	copy(d.Signature[:], buf[88:])
 	return nil
@@ -40,20 +40,20 @@ func (d *DepositData) SizeSSZ() int {
 
 func (d *DepositData) HashTreeRoot() ([32]byte, error) {
 	var (
-		leaves [][32]byte = make([][32]byte, 5)
+		leaves = make([][32]byte, 4)
 		err    error
 	)
 	leaves[0], err = merkle_tree.PublicKeyRoot(d.PubKey)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	leaves[1], leaves[2] = common.BytesToHash(d.WithdrawalCredentials), merkle_tree.Uint64Root(d.Amount)
+	leaves[1] = d.WithdrawalCredentials
+	leaves[2] = merkle_tree.Uint64Root(d.Amount)
 	leaves[3], err = merkle_tree.SignatureRoot(d.Signature)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	leaves[4] = d.Root
-	return merkle_tree.ArraysRoot(leaves, 8)
+	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
 type Deposit struct {
@@ -63,16 +63,17 @@ type Deposit struct {
 }
 
 func (d *Deposit) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, 0, d.SizeSSZ())
-	for _, proofSeg := range d.Proof {
-		buf = append(buf, proofSeg...)
+	buf := make([]byte, d.SizeSSZ())
+	for i, proofSeg := range d.Proof {
+		copy(buf[i*32:], proofSeg)
 	}
 
 	dataEnc, err := d.Data.MarshalSSZ()
 	if err != nil {
 		return nil, err
 	}
-	return append(buf, dataEnc...), nil
+	copy(buf[33*32:], dataEnc)
+	return buf, nil
 }
 
 func (d *Deposit) UnmarshalSSZ(buf []byte) error {

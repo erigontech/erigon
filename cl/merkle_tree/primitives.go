@@ -25,7 +25,7 @@ func PublicKeyRoot(key [48]byte) (common.Hash, error) {
 	var lastByte [32]byte
 	copy(lastByte[:], key[32:])
 	return ArraysRoot([][32]byte{
-		common.BytesToHash(key[0:32]),
-		common.BytesToHash(lastByte[:]),
+		common.BytesToHash(key[:32]),
+		lastByte,
 	}, 2)
 }
