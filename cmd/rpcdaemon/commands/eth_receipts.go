@@ -57,10 +57,15 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 		}
 		return h
 	}
+	var excessDataGas *big.Int
+	ph, _ := api._blockReader.HeaderByHash(ctx, tx, block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		header := block.Header()
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{})
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
 		if err != nil {
 			return nil, err
 		}
@@ -338,6 +343,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var lastBlockNum uint64
 	var blockHash common.Hash
 	var header *types.Header
+	var parent *types.Header
+	var excessDataGas *big.Int
 	var signer *types.Signer
 	var rules *params.Rules
 	var skipAnalysis bool
@@ -388,6 +395,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
+			parent, _ = api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
+			if parent != nil {
+				excessDataGas = parent.ExcessDataGas
+			}
 			lastBlockNum = blockNum
 			blockHash = header.Hash()
 			signer = types.MakeSigner(chainConfig, blockNum, 0)
@@ -402,7 +413,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
-			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
+			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader, excessDataGas)
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1

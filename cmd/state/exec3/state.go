@@ -129,6 +129,13 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
+
+	var excessDataGas *big.Int
+	ph := rw.chain.GetHeaderByHash(header.ParentHash)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
@@ -149,7 +156,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, excessDataGas)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
@@ -157,7 +164,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, excessDataGas)
 			}
 
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
@@ -195,8 +202,11 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		} else {
 			blockContext := txTask.EvmBlockContext
 			if !rw.background {
+				var excessDataGas *big.Int
+				// TODO: Get the last block header
+
 				getHashFn := core.GetHashFn(header, rw.getHeader)
-				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, excessDataGas)
 			}
 			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 			vmenv = rw.evm

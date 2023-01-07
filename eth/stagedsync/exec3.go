@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -496,7 +497,12 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		var excessDataGas *big.Int
+		ph := getHeaderFunc(header.ParentHash, header.Number.Uint64()-1)
+		if ph != nil {
+			excessDataGas = ph.ExcessDataGas
+		}
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, excessDataGas)
 
 		if parallel {
 			select {
@@ -971,7 +977,14 @@ func reconstituteStep(last bool,
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+
+		var excessDataGas *big.Int
+		ph := getHeaderFunc(header.ParentHash, header.Number.Uint64()-1)
+		if ph != nil {
+			excessDataGas = ph.ExcessDataGas
+		}
+
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, excessDataGas)
 		rules := chainConfig.Rules(bn, b.Time())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {

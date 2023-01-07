@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"math/bits"
 	"os"
 	"os/signal"
@@ -408,6 +409,12 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 
+	var excessDataGas *big.Int
+	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
 		if daoBlock {
@@ -415,7 +422,7 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

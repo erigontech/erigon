@@ -83,11 +83,11 @@ func (*AddressSSZ) FixedLength() uint64 {
 	return 20
 }
 
-func (addr *AddressSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	var out tree.Root
-	copy(out[0:20], addr[:])
-	return out
-}
+// func (addr *AddressSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
+// 	var out tree.Root
+// 	copy(out[0:20], addr[:])
+// 	return out
+// }
 
 // AddressOptionalSSZ implements Union[None, Address]
 type AddressOptionalSSZ struct {
@@ -137,13 +137,13 @@ func (*AddressOptionalSSZ) FixedLength() uint64 {
 	return 0
 }
 
-func (ao *AddressOptionalSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	if ao.Address == nil {
-		return hFn(tree.Root{}, tree.Root{0: 0})
-	} else {
-		return hFn(ao.Address.HashTreeRoot(hFn), tree.Root{0: 1})
-	}
-}
+// func (ao *AddressOptionalSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
+// 	if ao.Address == nil {
+// 		return hFn(tree.Root{}, tree.Root{0: 0})
+// 	} else {
+// 		return hFn(ao.Address.HashTreeRoot(hFn), tree.Root{0: 1})
+// 	}
+// }
 
 type TxDataView []byte
 
@@ -295,9 +295,9 @@ func (atv *AccessTupleView) FixedLength() uint64 {
 	return 0
 }
 
-func (atv *AccessTupleView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
-}
+// func (atv *AccessTupleView) HashTreeRoot(hFn tree.HashFn) tree.Root {
+// 	return hFn.HashTreeRoot((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
+// }
 
 type AccessListView AccessList
 
@@ -326,15 +326,15 @@ func (alv *AccessListView) FixedLength() uint64 {
 	return 0
 }
 
-func (alv AccessListView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(alv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*AccessTupleView)(&alv[i])
-		}
-		return nil
-	}, length, MAX_ACCESS_LIST_SIZE)
-}
+// func (alv AccessListView) HashTreeRoot(hFn tree.HashFn) tree.Root {
+// 	length := uint64(len(alv))
+// 	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
+// 		if i < length {
+// 			return (*AccessTupleView)(&alv[i])
+// 		}
+// 		return nil
+// 	}, length, MAX_ACCESS_LIST_SIZE)
+// }
 
 type BlobTxMessage struct {
 	ChainID          Uint256View
@@ -368,9 +368,9 @@ func (tx *BlobTxMessage) FixedLength() uint64 {
 	return 0
 }
 
-func (tx *BlobTxMessage) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
-}
+// func (tx *BlobTxMessage) HashTreeRoot(hFn tree.HashFn) tree.Root {
+// 	return hFn.HashTreeRoot(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
+// }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (tx *BlobTxMessage) copy() *BlobTxMessage {

@@ -624,6 +624,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
+	var excessDataGas *big.Int
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
 	stateReader.SetAc(ac)
@@ -649,6 +650,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 				rpc.HandleError(err, stream)
 				stream.WriteObjectEnd()
 				continue
+			}
+			ph, _ := api._blockReader.HeaderByHash(ctx, dbtx, lastHeader.ParentHash)
+			if ph != nil {
+				excessDataGas = ph.ExcessDataGas
 			}
 			lastBlockNum = blockNum
 			lastBlockHash = lastHeader.Hash()
@@ -812,7 +817,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		vmConfig.Tracer = &ot
 		ibs := state.New(cachedReader)
 
-		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
+		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, excessDataGas)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 

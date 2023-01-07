@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"os/signal"
 	"path"
@@ -243,11 +244,18 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 		}
 	}
 	txNum++ // Pre block transaction
+
+	var excessDataGas *big.Int
+	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+
 	for i, tx := range block.Transactions() {
 		hw.SetTxNum(txNum)
 		ibs := state.New(hw)
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

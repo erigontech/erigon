@@ -3,12 +3,14 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -80,7 +82,12 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	var excessDataGas *big.Int
+	ph, _ := headerReader.HeaderByHash(ctx, tx, header.ParentHash)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, excessDataGas)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
@@ -105,8 +112,8 @@ func DoCall(
 	return result, nil
 }
 
-func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader, excessDataGas *big.Int) evmtypes.BlockContext {
+	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */, excessDataGas)
 }
 
 func getHashGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) common.Hash {
@@ -207,8 +214,12 @@ func NewReusableCaller(
 	if err != nil {
 		return nil, err
 	}
-
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
+	var excessDataGas *big.Int
+	ph, _ := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, excessDataGas)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})

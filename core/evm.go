@@ -30,7 +30,7 @@ import (
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
-func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader, author *common.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader, author *common.Address, excessDataGas *big.Int) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary common.Address
 	if author == nil {
@@ -59,17 +59,25 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 		transferFunc = Transfer
 	}
 
+	// In the event excessDataGas is nil (which happens if the parent block is pre-sharding),
+	// we bootstrap BlockContext.ExcessDataGas with the zero value.
+	edg := new(big.Int)
+	if excessDataGas != nil {
+		edg.Set(excessDataGas)
+	}
+
 	return evmtypes.BlockContext{
-		CanTransfer: CanTransfer,
-		Transfer:    transferFunc,
-		GetHash:     blockHashFunc,
-		Coinbase:    beneficiary,
-		BlockNumber: header.Number.Uint64(),
-		Time:        header.Time,
-		Difficulty:  new(big.Int).Set(header.Difficulty),
-		BaseFee:     &baseFee,
-		GasLimit:    header.GasLimit,
-		PrevRanDao:  prevRandDao,
+		CanTransfer:   CanTransfer,
+		Transfer:      transferFunc,
+		GetHash:       blockHashFunc,
+		Coinbase:      beneficiary,
+		BlockNumber:   header.Number.Uint64(),
+		Time:          header.Time,
+		Difficulty:    new(big.Int).Set(header.Difficulty),
+		BaseFee:       &baseFee,
+		ExcessDataGas: edg,
+		GasLimit:      header.GasLimit,
+		PrevRanDao:    prevRandDao,
 	}
 }
 

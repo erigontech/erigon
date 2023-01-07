@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
@@ -41,6 +42,18 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
+
+	getHeader := func(hash common.Hash, n uint64) *types.Header {
+		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
+		return h
+	}
+
+	var excessDataGas *big.Int
+	ph := getHeader(header.ParentHash, header.Nonce.Uint64()-1)
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
+
 	if historyV3 {
 		ibs := state.New(reader)
 		if txIndex == 0 && len(block.Transactions()) == 0 {
@@ -52,15 +65,10 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		txn := block.Transactions()[txIndex]
 		signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.Time()))
-		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
+		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader, excessDataGas)
 		txCtx := core.NewEVMTxContext(msg)
 		return msg, blockCtx, txCtx, ibs, reader, nil
 
-	}
-
-	getHeader := func(hash common.Hash, n uint64) *types.Header {
-		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
-		return h
 	}
 
 	// Create the parent state database
@@ -71,8 +79,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	}
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
-
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
 
@@ -92,7 +99,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
