@@ -194,10 +194,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			vmenv = rw.starkNetEvm
 		} else {
 			blockContext := txTask.EvmBlockContext
-			if !rw.background {
-				getHashFn := core.GetHashFn(header, rw.getHeader)
-				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-			}
 			getHashFn := core.GetHashFn(header, rw.getHeader)
 			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
 			txContext := core.NewEVMTxContext(msg)
