@@ -350,8 +350,8 @@ var (
 	}
 	RpcBatchLimit = cli.IntFlag{
 		Name:  "rpc.batch.limit",
-		Usage: "Maximum number of requests in a batch, default 0 (unlimited)",
-		Value: 0,
+		Usage: "Maximum number of requests in a batch",
+		Value: 100,
 	}
 	RpcReturnDataLimit = cli.IntFlag{
 		Name:  "rpc.returndata.limit",
