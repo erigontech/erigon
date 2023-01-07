@@ -1221,24 +1221,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
+	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
-	}
-	if blockNum == 0 {
-		return fmt.Errorf("not enough transactions in the history data")
-	}
-	blockNum--
-	var txNum uint64
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		if !ok {
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
+		}
+		if blockNum == 0 {
+			return fmt.Errorf("not enough transactions in the history data")
+		}
+		blockNum--
 		txNum, err = rawdb.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return err
