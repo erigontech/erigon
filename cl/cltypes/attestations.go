@@ -336,6 +336,7 @@ func (a *Attestation) UnmarshalSSZ(buf []byte) error {
 	// Field (0) 'AggregationBits'
 	{
 		buf = tail[o0:]
+		fmt.Println(tail[o0:])
 		if err = ssz.ValidateBitlist(buf, 2048); err != nil {
 			return err
 		}

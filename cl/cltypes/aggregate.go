@@ -1,6 +1,8 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+)
 
 /*
  * AggregateAndProof contains the index of the aggregator, the attestation
@@ -13,38 +15,35 @@ type AggregateAndProof struct {
 }
 
 func (a *AggregateAndProof) MarshalSSZ() ([]byte, error) {
-	offset := 8
 	buf := make([]byte, a.SizeSSZ())
+
 	ssz_utils.MarshalUint64SSZ(buf, a.AggregatorIndex)
+	ssz_utils.EncodeOffset(buf[8:], 108)
 
 	marshalledAggregate, err := a.Aggregate.MarshalSSZ()
 	if err != nil {
 		return nil, err
 	}
-	copy(buf[offset:], marshalledAggregate)
-	offset += a.Aggregate.SizeSSZ()
-
-	copy(buf[offset:], a.SelectionProof[:])
-
+	copy(buf[12:], a.SelectionProof[:])
+	copy(buf[108:], marshalledAggregate)
 	return buf, nil
 }
 
 func (a *AggregateAndProof) UnmarshalSSZ(buf []byte) error {
 	a.AggregatorIndex = ssz_utils.UnmarshalUint64SSZ(buf)
-
 	if a.Aggregate == nil {
 		a.Aggregate = new(Attestation)
 	}
-	if err := a.Aggregate.UnmarshalSSZ(buf[8:]); err != nil {
+
+	copy(a.SelectionProof[:], buf[12:])
+	if err := a.Aggregate.UnmarshalSSZ(buf[108:]); err != nil {
 		return err
 	}
-
-	copy(a.SelectionProof[:], buf[8+a.Aggregate.SizeSSZ():])
 	return nil
 }
 
 func (a *AggregateAndProof) SizeSSZ() int {
-	return 104 + a.Aggregate.SizeSSZ()
+	return 108 + a.Aggregate.SizeSSZ()
 }
 
 type SignedAggregateAndProof struct {
@@ -60,25 +59,27 @@ func (a *SignedAggregateAndProof) MarshalSSZ() ([]byte, error) {
 		return nil, err
 	}
 
-	copy(buf, marshalledAggregate)
-	copy(buf[a.Message.SizeSSZ():], a.Signature[:])
+	ssz_utils.EncodeOffset(buf, 100)
+	copy(buf[4:], a.Signature[:])
+	copy(buf[100:], marshalledAggregate)
 
 	return buf, nil
 }
 
 func (a *SignedAggregateAndProof) UnmarshalSSZ(buf []byte) error {
-
 	if a.Message == nil {
 		a.Message = new(AggregateAndProof)
 	}
-	if err := a.Message.UnmarshalSSZ(buf); err != nil {
+
+	copy(a.Signature[:], buf[4:])
+
+	if err := a.Message.UnmarshalSSZ(buf[100:]); err != nil {
 		return err
 	}
 
-	copy(a.Signature[:], buf[a.Message.SizeSSZ():])
 	return nil
 }
 
 func (a *SignedAggregateAndProof) SizeSSZ() int {
-	return 96 + a.Message.SizeSSZ()
+	return 100 + a.Message.SizeSSZ()
 }

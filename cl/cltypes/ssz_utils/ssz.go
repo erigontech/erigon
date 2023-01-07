@@ -31,6 +31,16 @@ func MarshalUint64SSZ(buf []byte, x uint64) {
 	binary.LittleEndian.PutUint64(buf, x)
 }
 
+// EncodeOffset marshals a little endian uint32 to buf
+func EncodeOffset(buf []byte, offset uint32) {
+	binary.LittleEndian.PutUint32(buf, offset)
+}
+
+// ReadOffset unmarshals a little endian uint32 to dst
+func DecodeOffset(x []byte) uint32 {
+	return binary.LittleEndian.Uint32(x)
+}
+
 func UnmarshalUint64SSZ(x []byte) uint64 {
 	return binary.LittleEndian.Uint64(x)
 }
