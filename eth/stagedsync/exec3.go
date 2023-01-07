@@ -571,7 +571,7 @@ Loop:
 						return err
 					}
 					txTask.Sender = &sender
-					fmt.Printf("need recover!! %d\n", txTask.TxNum)
+					fmt.Printf("need recover!! %d,%d\n", txTask.BlockNum, txTask.TxNum)
 				}
 			}
 
