@@ -40,30 +40,6 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation
 }
 
-type DepositData struct {
-	PubKey                [48]byte `ssz-size:"48"`
-	WithdrawalCredentials []byte   `ssz-size:"32"`
-	Amount                uint64
-	Signature             [96]byte `ssz-size:"96"`
-	Root                  [32]byte `ssz:"-"`
-}
-
-type Deposit struct {
-	// Merkle proof is used for deposits
-	Proof [][]byte `ssz-size:"33,32"`
-	Data  *DepositData
-}
-
-type VoluntaryExit struct {
-	Epoch          uint64
-	ValidatorIndex uint64
-}
-
-type SignedVoluntaryExit struct {
-	VolunaryExit *VoluntaryExit
-	Signature    [96]byte `ssz-size:"96"`
-}
-
 /*
  * SyncAggregate, Determines successfull committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.

@@ -393,105 +393,6 @@ func (a *AttesterSlashing) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	return
 }
 
-
-// MarshalSSZ ssz marshals the DepositData object
-func (d *DepositData) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(d)
-}
-
-// MarshalSSZTo ssz marshals the DepositData object to a target array
-func (d *DepositData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'PubKey'
-	dst = append(dst, d.PubKey[:]...)
-
-	// Field (1) 'WithdrawalCredentials'
-	if size := len(d.WithdrawalCredentials); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.WithdrawalCredentials", size, 32)
-		return
-	}
-	dst = append(dst, d.WithdrawalCredentials...)
-
-	// Field (2) 'Amount'
-	dst = ssz.MarshalUint64(dst, d.Amount)
-
-	// Field (3) 'Signature'
-	dst = append(dst, d.Signature[:]...)
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the DepositData object
-func (d *DepositData) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 184 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'PubKey'
-	copy(d.PubKey[:], buf[0:48])
-
-	// Field (1) 'WithdrawalCredentials'
-	if cap(d.WithdrawalCredentials) == 0 {
-		d.WithdrawalCredentials = make([]byte, 0, len(buf[48:80]))
-	}
-	d.WithdrawalCredentials = append(d.WithdrawalCredentials, buf[48:80]...)
-
-	// Field (2) 'Amount'
-	d.Amount = ssz.UnmarshallUint64(buf[80:88])
-
-	// Field (3) 'Signature'
-	copy(d.Signature[:], buf[88:184])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the DepositData object
-func (d *DepositData) SizeSSZ() (size int) {
-	size = 184
-	return
-}
-
-// HashTreeRoot ssz hashes the DepositData object
-func (d *DepositData) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(d)
-}
-
-// HashTreeRootWith ssz hashes the DepositData object with a hasher
-func (d *DepositData) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'PubKey'
-	hh.PutBytes(d.PubKey[:])
-
-	// Field (1) 'WithdrawalCredentials'
-	if size := len(d.WithdrawalCredentials); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.WithdrawalCredentials", size, 32)
-		return
-	}
-	hh.PutBytes(d.WithdrawalCredentials)
-
-	// Field (2) 'Amount'
-	hh.PutUint64(d.Amount)
-
-	// Field (3) 'Signature'
-	hh.PutBytes(d.Signature[:])
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
-// MarshalSSZ ssz marshals the Deposit object
-func (d *Deposit) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(d)
-}
-
 // MarshalSSZTo ssz marshals the Deposit object to a target array
 func (d *Deposit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
@@ -513,158 +414,24 @@ func (d *Deposit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	if d.Data == nil {
 		d.Data = new(DepositData)
 	}
-	if dst, err = d.Data.MarshalSSZTo(dst); err != nil {
+	var m []byte
+	if m, err = d.Data.MarshalSSZ(); err != nil {
 		return
 	}
+	dst = append(dst, m...)
 
 	return
-}
-
-// UnmarshalSSZ ssz unmarshals the Deposit object
-func (d *Deposit) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 1240 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'Proof'
-	d.Proof = make([][]byte, 33)
-	for ii := 0; ii < 33; ii++ {
-		if cap(d.Proof[ii]) == 0 {
-			d.Proof[ii] = make([]byte, 0, len(buf[0:1056][ii*32:(ii+1)*32]))
-		}
-		d.Proof[ii] = append(d.Proof[ii], buf[0:1056][ii*32:(ii+1)*32]...)
-	}
-
-	// Field (1) 'Data'
-	if d.Data == nil {
-		d.Data = new(DepositData)
-	}
-	if err = d.Data.UnmarshalSSZ(buf[1056:1240]); err != nil {
-		return err
-	}
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the Deposit object
-func (d *Deposit) SizeSSZ() (size int) {
-	size = 1240
-	return
-}
-
-// HashTreeRoot ssz hashes the Deposit object
-func (d *Deposit) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(d)
 }
 
 // HashTreeRootWith ssz hashes the Deposit object with a hasher
 func (d *Deposit) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Proof'
-	{
-		if size := len(d.Proof); size != 33 {
-			err = ssz.ErrVectorLengthFn("--.Proof", size, 33)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range d.Proof {
-			if len(i) != 32 {
-				err = ssz.ErrBytesLength
-				return
-			}
-			hh.Append(i)
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
+	root, err := d.HashTreeRoot()
+	if err != nil {
+		return err
 	}
 
-	// Field (1) 'Data'
-	if err = d.Data.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
+	hh.AppendBytes32(root[:])
 	return
-}
-
-// MarshalSSZ ssz marshals the VoluntaryExit object
-func (v *VoluntaryExit) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(v)
-}
-
-// MarshalSSZTo ssz marshals the VoluntaryExit object to a target array
-func (v *VoluntaryExit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'Epoch'
-	dst = ssz.MarshalUint64(dst, v.Epoch)
-
-	// Field (1) 'ValidatorIndex'
-	dst = ssz.MarshalUint64(dst, v.ValidatorIndex)
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the VoluntaryExit object
-func (v *VoluntaryExit) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 16 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'Epoch'
-	v.Epoch = ssz.UnmarshallUint64(buf[0:8])
-
-	// Field (1) 'ValidatorIndex'
-	v.ValidatorIndex = ssz.UnmarshallUint64(buf[8:16])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the VoluntaryExit object
-func (v *VoluntaryExit) SizeSSZ() (size int) {
-	size = 16
-	return
-}
-
-// HashTreeRoot ssz hashes the VoluntaryExit object
-func (v *VoluntaryExit) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(v)
-}
-
-// HashTreeRootWith ssz hashes the VoluntaryExit object with a hasher
-func (v *VoluntaryExit) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Epoch'
-	hh.PutUint64(v.Epoch)
-
-	// Field (1) 'ValidatorIndex'
-	hh.PutUint64(v.ValidatorIndex)
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
-// MarshalSSZ ssz marshals the SignedVoluntaryExit object
-func (s *SignedVoluntaryExit) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(s)
 }
 
 // MarshalSSZTo ssz marshals the SignedVoluntaryExit object to a target array
@@ -675,9 +442,11 @@ func (s *SignedVoluntaryExit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	if s.VolunaryExit == nil {
 		s.VolunaryExit = new(VoluntaryExit)
 	}
-	if dst, err = s.VolunaryExit.MarshalSSZTo(dst); err != nil {
+	var m []byte
+	if m, err = s.VolunaryExit.MarshalSSZ(); err != nil {
 		return
 	}
+	dst = append(dst, m...)
 
 	// Field (1) 'Signature'
 	dst = append(dst, s.Signature[:]...)
@@ -685,47 +454,16 @@ func (s *SignedVoluntaryExit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// UnmarshalSSZ ssz unmarshals the SignedVoluntaryExit object
-func (s *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 112 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'VolunaryExit'
-	if s.VolunaryExit == nil {
-		s.VolunaryExit = new(VoluntaryExit)
-	}
-	if err = s.VolunaryExit.UnmarshalSSZ(buf[0:16]); err != nil {
-		return err
-	}
-
-	// Field (1) 'Signature'
-	copy(s.Signature[:], buf[16:112])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the SignedVoluntaryExit object
-func (s *SignedVoluntaryExit) SizeSSZ() (size int) {
-	size = 112
-	return
-}
-
-// HashTreeRoot ssz hashes the SignedVoluntaryExit object
-func (s *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(s)
-}
-
 // HashTreeRootWith ssz hashes the SignedVoluntaryExit object with a hasher
 func (s *SignedVoluntaryExit) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	indx := hh.Index()
-
+	var root [32]byte
 	// Field (0) 'VolunaryExit'
-	if err = s.VolunaryExit.HashTreeRootWith(hh); err != nil {
+	if root, err = s.VolunaryExit.HashTreeRoot(); err != nil {
 		return
 	}
+
+	hh.PutBytes(root[:])
 
 	// Field (1) 'Signature'
 	hh.PutBytes(s.Signature[:])

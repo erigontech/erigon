@@ -11,7 +11,7 @@ import (
 type AggregateAndProof struct {
 	AggregatorIndex uint64
 	Aggregate       *Attestation
-	SelectionProof  [96]byte `ssz-size:"96"`
+	SelectionProof  [96]byte
 }
 
 func (a *AggregateAndProof) MarshalSSZ() ([]byte, error) {
@@ -48,7 +48,7 @@ func (a *AggregateAndProof) SizeSSZ() int {
 
 type SignedAggregateAndProof struct {
 	Message   *AggregateAndProof
-	Signature [96]byte `ssz-size:"96"`
+	Signature [96]byte
 }
 
 func (a *SignedAggregateAndProof) MarshalSSZ() ([]byte, error) {
