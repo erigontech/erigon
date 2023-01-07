@@ -565,6 +565,8 @@ Loop:
 
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
+				} else {
+					fmt.Printf("need recover!! %d\n", txTask.TxNum)
 				}
 			}
 
