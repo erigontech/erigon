@@ -210,28 +210,28 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
 func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
-	block := bd.prefetchedBlocks.Pop(hash)
+	header, body := bd.prefetchedBlocks.Get(hash)
 
-	if block == nil {
+	if body == nil {
 		return false
 	}
 
 	// Block is prefetched, no need to request
-	bd.deliveriesH[blockNum] = block.Header()
+	bd.deliveriesH[blockNum] = header
 
 	// make sure we have the body in the bucket for later use
-	bd.addBodyToBucket(tx, blockNum, block.RawBody())
+	bd.addBodyToBucket(tx, blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
-		log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
+	if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
+		log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
 	} else if parent != nil {
-		if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
-			td := new(big.Int).Add(block.Difficulty(), parent)
-			go blockPropagator(context.Background(), block, td)
+		if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
+			td := new(big.Int).Add(header.Difficulty, parent)
+			go blockPropagator(context.Background(), header, body, td)
 		}
 	} else {
-		log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
+		log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 	}
 
 	return true
@@ -401,8 +401,8 @@ func (bd *BodyDownload) PrintPeerMap() {
 	bd.peerMap = make(map[[64]byte]int)
 }
 
-func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
-	bd.prefetchedBlocks.Add(block)
+func (bd *BodyDownload) AddToPrefetch(header *types.Header, body *types.RawBody) {
+	bd.prefetchedBlocks.Add(header, body)
 }
 
 // GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies

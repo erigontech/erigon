@@ -524,7 +524,7 @@ func handleNewPayload(
 	}
 
 	if cfg.bodyDownload != nil {
-		cfg.bodyDownload.AddToPrefetch(block)
+		cfg.bodyDownload.AddToPrefetch(header, block.RawBody())
 	}
 
 	return response, nil

@@ -134,3 +134,86 @@ func TestInitiatieValidatorExit(t *testing.T) {
 		})
 	}
 }
+
+func TestSlashValidator(t *testing.T) {
+	slashedInd := 567
+	whistleblowerInd := 678
+
+	successState := getTestState(t)
+	successState.SetSlashings([]uint64{0})
+
+	successBalances := []uint64{}
+	wantBalances := []uint64{}
+	for i := 0; i < len(successState.Validators()); i++ {
+		successBalances = append(successBalances, uint64(i+1))
+		wantBalances = append(wantBalances, uint64(i+1))
+	}
+	successState.SetBalances(successBalances)
+
+	// Set up slashed balance.
+	preSlashBalance := uint64(1 << 20)
+	successState.Balances()[slashedInd] = preSlashBalance
+	successState.ValidatorAt(slashedInd).EffectiveBalance = preSlashBalance
+	wantBalances[slashedInd] = preSlashBalance - (preSlashBalance / MIN_SLASHING_PENALTY_QUOTIENT)
+
+	// Set up whistleblower & validator balances.
+	wbReward := preSlashBalance / WHISTLEBLOWER_REWARD_QUOTIENT
+	wantBalances[whistleblowerInd] += wbReward
+	valInd, err := GetBeaconProposerIndex(successState)
+	if err != nil {
+		t.Fatalf("unable to get proposer index for test state: %v", err)
+	}
+	wantBalances[valInd] += wbReward / PROPOSER_REWARD_QUOTIENT
+
+	failState := getTestState(t)
+	failState.SetSlashings([]uint64{0})
+	for _, v := range failState.Validators() {
+		v.ExitEpoch = 0
+	}
+	failState.SetBalances(successBalances)
+
+	testCases := []struct {
+		description  string
+		state        *state.BeaconState
+		wantBalances []uint64
+		wantErr      bool
+	}{
+		{
+			description:  "success",
+			state:        successState,
+			wantBalances: wantBalances,
+			wantErr:      false,
+		},
+		{
+			description: "fail_no_active_validators",
+			state:       failState,
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			err := SlashValidator(tc.state, uint64(slashedInd), uint64(whistleblowerInd))
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("unexpected success, wantErr is true")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("unexpected error, wanted success: %v", err)
+			}
+			// Check balances.
+			for i, bal := range tc.wantBalances {
+				if bal != tc.state.Balances()[i] {
+					t.Errorf("unexpected balance for index: %d, want %d: got %d", i, bal, tc.state.Balances()[i])
+				}
+			}
+			// Check that the validator is slashed.
+			if !tc.state.ValidatorAt(slashedInd).Slashed {
+				t.Errorf("slashed index validator not set as slashed")
+			}
+		})
+	}
+}
