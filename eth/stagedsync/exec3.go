@@ -221,8 +221,6 @@ func ExecV3(ctx context.Context,
 			case <-ctx.Done():
 				return ctx.Err()
 			case txTask := <-resultCh:
-				fmt.Printf("apply step: %d\n", txTask.TxNum)
-
 				if err := func() error {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
