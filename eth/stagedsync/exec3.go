@@ -221,6 +221,8 @@ func ExecV3(ctx context.Context,
 			case <-ctx.Done():
 				return ctx.Err()
 			case txTask := <-resultCh:
+				fmt.Printf("apply step: %d\n", txTask.TxNum)
+
 				if err := func() error {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -566,6 +568,7 @@ Loop:
 				}
 			}
 
+			fmt.Printf("send: %d\n", txTask.TxNum)
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
