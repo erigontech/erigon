@@ -569,7 +569,7 @@ Loop:
 						return err
 					}
 					txTask.Sender = &sender
-					fmt.Printf("need recover!! %d,%d\n", txTask.BlockNum, txTask.TxNum)
+					log.Warn("expencive sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 
