@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -107,10 +106,8 @@ func (rw *Worker) Run() {
 }
 
 func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
-	fmt.Printf("RunTxTask: %d\n", txTask.TxNum)
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
-	fmt.Printf("RunTxTask after lock: %d\n", txTask.TxNum)
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
