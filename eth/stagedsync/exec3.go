@@ -735,13 +735,9 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			repeatCount.Inc()
 
-			if txTask.Error != nil {
-				fmt.Printf("alex1: %s\n", txTask.Error)
-			}
 			// immediately retry once
 			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
-				fmt.Printf("alex: %s\n", txTask.Error)
 				return txTask.Error
 				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
 				//rs.AddWork(txTask)
@@ -749,7 +745,6 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			}
 		}
 
-		fmt.Printf("apply: %d\n", txTask.TxNum)
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 			return fmt.Errorf("StateV3.Apply: %w", err)
 		}
