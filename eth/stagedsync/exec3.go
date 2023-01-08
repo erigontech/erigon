@@ -581,6 +581,7 @@ Loop:
 						currentQueueSize := rs.AddWork(txTask)
 						if currentQueueSize > queueSize {
 							time.Sleep(time.Microsecond)
+							log.Warn("after sleep", "l", rs.QueueLen())
 						}
 					}
 				} else {
