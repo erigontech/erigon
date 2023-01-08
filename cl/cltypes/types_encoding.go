@@ -393,7 +393,6 @@ func (a *AttesterSlashing) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	return
 }
 
-
 // MarshalSSZ ssz marshals the DepositData object
 func (d *DepositData) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(d)
