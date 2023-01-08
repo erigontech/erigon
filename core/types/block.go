@@ -1520,25 +1520,28 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	return rlpHash(uncles)
 }
 
+func CopyTxs(in Transactions) Transactions {
+	transactionsData, err := MarshalTransactionsBinary(in)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	out, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+	for i := 0; i < len(in); i++ {
+		if s, ok := in[i].GetSender(); ok {
+			out[i].SetSender(s)
+		}
+	}
+	return out
+}
+
 // Copy creates a deep copy of the Block.
 func (b *Block) Copy() *Block {
 	uncles := make([]*Header, 0, len(b.uncles))
 	for _, uncle := range b.uncles {
 		uncles = append(uncles, CopyHeader(uncle))
-	}
-
-	transactionsData, err := MarshalTransactionsBinary(b.transactions)
-	if err != nil {
-		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
-	}
-	transactions, err := DecodeTransactions(transactionsData)
-	if err != nil {
-		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
-	}
-	for i := 0; i < len(transactions); i++ {
-		if s, ok := b.transactions[i].GetSender(); ok {
-			transactions[i].SetSender(s)
-		}
 	}
 
 	var withdrawals []*Withdrawal
@@ -1565,7 +1568,7 @@ func (b *Block) Copy() *Block {
 	return &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
-		transactions: transactions,
+		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		hash:         hashValue,
 		size:         sizeValue,

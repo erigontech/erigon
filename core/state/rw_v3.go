@@ -129,6 +129,12 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
+func (rs *StateV3) QueueLen() int {
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
+	return rs.queue.Len()
+}
+
 func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
@@ -187,13 +193,15 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 	return count
 }
 
-func (rs *StateV3) queuePush(t *exec22.TxTask) {
+func (rs *StateV3) queuePush(t *exec22.TxTask) int {
 	rs.queueLock.Lock()
 	heap.Push(&rs.queue, t)
+	l := len(rs.queue)
 	rs.queueLock.Unlock()
+	return l
 }
 
-func (rs *StateV3) AddWork(txTask *exec22.TxTask) {
+func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -212,8 +220,9 @@ func (rs *StateV3) AddWork(txTask *exec22.TxTask) {
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	rs.queuePush(txTask)
+	queueLen = rs.queuePush(txTask)
 	rs.receiveWork.Signal()
+	return queueLen
 }
 
 func (rs *StateV3) Finish() {
