@@ -485,9 +485,8 @@ Loop:
 			// TODO: panic here and see that overall prodcess deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
-		b = b.Copy()
 		txs := b.Transactions()
-		header := b.Header()
+		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
 		signer := *types.MakeSigner(chainConfig, blockNum)
 
@@ -569,7 +568,7 @@ Loop:
 						return err
 					}
 					txTask.Sender = &sender
-					log.Warn("expencive sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
+					log.Warn("[Execution] expencive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 

@@ -122,7 +122,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.stateReader.ResetReadSet()
 	rw.stateWriter.ResetWriteSet()
-	ibs := state.New(rw.stateReader)
+	rw.ibs.Reset()
+	ibs := rw.ibs
+
 	rules := txTask.Rules
 	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
@@ -147,9 +149,9 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
 		}
 		syscall := func(contract common.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, types.CopyHeader(header), rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -192,12 +194,12 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			vmenv = rw.starkNetEvm
 		} else {
 			blockContext := txTask.EvmBlockContext
-			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
-			txContext := core.NewEVMTxContext(msg)
-			vmenv = vm.NewEVM(blockContext, txContext, ibs, rw.chainConfig, vmConfig)
-			//rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
-			//vmenv = rw.evm
+			if !rw.background {
+				getHashFn := core.GetHashFn(header, rw.getHeader)
+				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			}
+			rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
+			vmenv = rw.evm
 		}
 		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {

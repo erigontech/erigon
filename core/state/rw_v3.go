@@ -145,6 +145,7 @@ func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
+	//TODO: it deadlocks on panic, fix it
 	defer func() {
 		rec := recover()
 		if rec != nil {
