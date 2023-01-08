@@ -1535,6 +1535,11 @@ func (b *Block) Copy() *Block {
 	if err != nil {
 		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
+	for i := 0; i < len(transactions); i++ {
+		if s, ok := b.transactions[i].GetSender(); ok {
+			transactions[i].SetSender(s)
+		}
+	}
 
 	var withdrawals []*Withdrawal
 	if b.withdrawals != nil {

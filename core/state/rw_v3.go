@@ -12,6 +12,7 @@ import (
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -144,6 +145,13 @@ func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
+	//TODO: it deadlocks on panic, fix it
+	defer func() {
+		rec := recover()
+		if rec != nil {
+			fmt.Printf("panic?: %s,%s\n", rec, dbg.Stack())
+		}
+	}()
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	lastTxNum, deferral := rs.senderTxNums[*txTask.Sender]
