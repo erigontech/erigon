@@ -533,7 +533,7 @@ func (s *EthBackendServer) EngineGetPayloadV3(ctx context.Context, req *remote.E
 	return &types2.ExecutionPayloadV3{Payload: &types2.ExecutionPayloadV2{Payload: payload, Withdrawals: withdrawals}, ExcessDataGas: excessDataGasReply}, nil
 }
 
-// GetBlobsBundleV1 returns a bundle of all blobs and theirf corresponding KZG commitments by payload id
+// GetBlobsBundleV1 returns a bundle of all blobs and their corresponding KZG commitments by payload id
 func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
 	if !s.proposing {
 		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
@@ -563,26 +563,37 @@ func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remo
 	blobsBundle := &types2.BlobsBundleV1{
 		BlockHash: gointerfaces.ConvertHashToH256(block.Header().Hash()),
 	}
-	// TODO: Adapt the geth code below to finish the implementation after support for
-	// BlobWrapData() is added
-	/*
-		for i, tx := range block.Transactions() {
-			if tx.Type() != types.BlobTxType {
-				continue
-			}
-			versionedHashes, kzgs, blobs, aggProof := tx.BlobWrapData()
-			if len(versionedHashes) != len(kzgs) || len(versionedHashes) != len(blobs) {
-				return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d)"+
-					" / versioned hashes (%d)", i, blockHash, len(blobs), len(kzgs), len(versionedHashes))
-			}
-			var zProof types.KZGProof
-			if zProof == aggProof {
-				return nil, errors.New("aggregated proof is not available in blobs")
-			}
-			blobsBundle.Blobs = append(blobsBundle.Blobs, blobs...)
-			blobsBundle.KZGs = append(blobsBundle.KZGs, kzgs...)
+	for i, tx := range block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
 		}
-	*/
+		blobtx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
+		}
+		versionedHashes, kzgs, blobs, aggProof := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.KzgAggregatedProof
+		if len(versionedHashes) != len(kzgs) || len(versionedHashes) != len(blobs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d)"+
+				" / versioned hashes (%d)", i, block.Hash(), len(blobs), len(kzgs), len(versionedHashes))
+		}
+		var zProof types.KZGProof
+		if zProof == aggProof {
+			return nil, errors.New("aggregated proof is missing")
+		}
+		// Convert each blob of field elements into a flat blob of bytes
+		for _, blob := range blobs {
+			out := make([]byte, params.FieldElementsPerBlob*32)
+			j := 0
+			for _, elem := range blob {
+				copy(out[j:j+32], elem[:])
+				j += 32
+			}
+			blobsBundle.Blobs = append(blobsBundle.Blobs, out)
+		}
+		for _, kzg := range kzgs {
+			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
+		}
+	}
 	return blobsBundle, nil
 }
 
