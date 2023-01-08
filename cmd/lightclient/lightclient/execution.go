@@ -71,13 +71,14 @@ func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatr
 	if err != nil {
 		return err
 	}
+
 	// Wait a bit
 	time.Sleep(500 * time.Millisecond)
 	_, err = l.execution.EngineForkChoiceUpdatedV1(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
 		ForkchoiceState: &remote.EngineForkChoiceState{
 			HeadBlockHash:      payloadHash,
 			SafeBlockHash:      payloadHash,
-			FinalizedBlockHash: payloadHash,
+			FinalizedBlockHash: gointerfaces.ConvertHashToH256(l.finalizedEth1Hash),
 		},
 	})
 	return err

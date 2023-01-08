@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -59,7 +60,10 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
 		if len(val) > 0 {
 			var a accounts.Account
 			a.Reset()
@@ -109,7 +113,10 @@ func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
 		copy(compositeKey[:20], key[:20])
 		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
@@ -131,7 +138,10 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
 
 	for it.HasNext() {
-		key, val := it.Next()
+		key, val, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
@@ -157,7 +167,11 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 func (sw *ScanWorker) BitmapAccounts() error {
 	it := sw.as.IterateAccountsTxs()
 	for it.HasNext() {
-		sw.bitmap.Add(it.Next())
+		v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		sw.bitmap.Add(v)
 	}
 	return nil
 }
@@ -165,7 +179,11 @@ func (sw *ScanWorker) BitmapAccounts() error {
 func (sw *ScanWorker) BitmapStorage() error {
 	it := sw.as.IterateStorageTxs()
 	for it.HasNext() {
-		sw.bitmap.Add(it.Next())
+		v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		sw.bitmap.Add(v)
 	}
 	return nil
 }
@@ -173,7 +191,11 @@ func (sw *ScanWorker) BitmapStorage() error {
 func (sw *ScanWorker) BitmapCode() error {
 	it := sw.as.IterateCodeTxs()
 	for it.HasNext() {
-		sw.bitmap.Add(it.Next())
+		v, err := it.Next()
+		if err != nil {
+			return err
+		}
+		sw.bitmap.Add(v)
 	}
 	return nil
 }
@@ -289,7 +311,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, txTask.Header, ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, nil /* withdrawals */, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					panic(fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err))
 				}

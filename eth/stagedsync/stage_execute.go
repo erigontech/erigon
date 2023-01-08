@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -83,7 +84,7 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *core.Genesis
-	agg       *libstate.Aggregator22
+	agg       *libstate.AggregatorV3
 }
 
 func StageExecuteBlocksCfg(
@@ -104,7 +105,7 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *core.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.Aggregator22,
+	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            db,
@@ -151,8 +152,8 @@ func executeBlock(
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
-		return vm.NewStructLogger(&vm.LogConfig{}), nil
+	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
+		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
 	callTracer := calltracer.NewCallTracer()
@@ -275,7 +276,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewState22()
+	rs := state.NewStateV3()
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
@@ -285,7 +286,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
 	sendersProgress, err := senderStageProgress(tx, db)
 	if err != nil {
 		return 0, false, err
@@ -306,17 +307,17 @@ func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
-	rs := state.NewState22()
+	rs := state.NewStateV3()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdb.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
-		return fmt.Errorf("State22.Unwind: %w", err)
+		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
 	if err := rs.Flush(ctx, tx, s.LogPrefix(), time.NewTicker(30*time.Second)); err != nil {
-		return fmt.Errorf("State22.Flush: %w", err)
+		return fmt.Errorf("StateV3.Flush: %w", err)
 	}
 
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -464,10 +465,10 @@ Loop:
 			if err = batch.Commit(); err != nil {
 				return err
 			}
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}
@@ -502,7 +503,7 @@ Loop:
 
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
-		log.Error("writing plain state version", "err", err)
+		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	if !useExternalTx {

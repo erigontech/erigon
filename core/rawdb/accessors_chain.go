@@ -945,10 +945,23 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 
 	prefix := make([]byte, 8)
 	binary.BigEndian.PutUint64(prefix, blockNum)
-	if err := db.ForPrefix(kv.Log, prefix, func(k, v []byte) error {
+
+	it, err := db.Prefix(kv.Log, prefix)
+	if err != nil {
+		log.Error("logs fetching failed", "err", err)
+		return nil
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			log.Error("logs fetching failed", "err", err)
+			return nil
+		}
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return fmt.Errorf("receipt unmarshal failed:  %w", err)
+			err = fmt.Errorf("receipt unmarshal failed:  %w", err)
+			log.Error("logs fetching failed", "err", err)
+			return nil
 		}
 
 		txIndex := int(binary.BigEndian.Uint32(k[8:]))
@@ -957,11 +970,6 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		if txIndex < len(receipts) {
 			receipts[txIndex].Logs = logs
 		}
-
-		return nil
-	}); err != nil {
-		log.Error("logs fetching failed", "err", err)
-		return nil
 	}
 
 	return receipts
@@ -1264,7 +1272,7 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	return
 }
 
-// LastKey - candidate on move to kv.Tx interface
+// LastKey
 func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
 	if err != nil {
@@ -1276,6 +1284,20 @@ func LastKey(tx kv.Tx, table string) ([]byte, error) {
 		return nil, err
 	}
 	return k, nil
+}
+
+// Last - candidate on move to kv.Tx interface
+func Last(tx kv.Tx, table string) ([]byte, []byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close()
+	k, v, err := c.Last()
+	if err != nil {
+		return nil, nil, err
+	}
+	return k, v, nil
 }
 
 // SecondKey - useful if table always has zero-key (for example genesis block)
@@ -1658,13 +1680,6 @@ func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	}
 	return nil
 }
-func WriteHistorySnapshots(tx kv.RwTx, list []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res)
-}
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
@@ -1734,30 +1749,56 @@ type txNums struct{}
 
 var TxNums txNums
 
-func (txNums) Max(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+// Min - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
-func (txNums) Min(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+
+// Min - returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
 	}
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum-1)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v) + 1, nil
 }
@@ -1769,7 +1810,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	}
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
-		if lastBlockNum+1 != blockNum {
+		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
 			return fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
 		}
 	}

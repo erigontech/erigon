@@ -1,8 +1,6 @@
 package commands
 
 import (
-	"time"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -30,19 +28,8 @@ func (t *DefaultTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 func (t *DefaultTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-func (t *DefaultTracer) CaptureEnd(output []byte, startGas, endGas uint64, d time.Duration, err error) {
+func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
-func (t *DefaultTracer) CaptureExit(output []byte, startGas, endGas uint64, d time.Duration, err error) {
-}
-
-func (t *DefaultTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-
-func (t *DefaultTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-
-func (t *DefaultTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
+func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }

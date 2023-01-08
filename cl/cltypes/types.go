@@ -3,25 +3,8 @@ package cltypes
 import (
 	"bytes"
 
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
-
-// Eth1Data represents the relevant ETH1 Data for block buidling.
-type Eth1Data struct {
-	Root         [32]byte `ssz-size:"32"`
-	DepositCount uint64
-	BlockHash    [32]byte `ssz-size:"32"`
-}
-
-// AttestantionData contains information about attestantion, including finalized/attested checkpoints.
-type AttestationData struct {
-	Slot            uint64
-	Index           uint64
-	BeaconBlockHash [32]byte `ssz-size:"32"`
-	Source          *Checkpoint
-	Target          *Checkpoint
-}
 
 /*
  * BeaconBlockHeader is the message we validate in the lightclient.
@@ -43,15 +26,6 @@ type SignedBeaconBlockHeader struct {
 	Signature [96]byte `ssz-size:"96"`
 }
 
-/*
- * IndexedAttestation are attestantions sets to prove that someone misbehaved.
- */
-type IndexedAttestation struct {
-	AttestingIndices []uint64 `ssz-max:"2048"`
-	Data             *AttestationData
-	Signature        [96]byte `ssz-size:"96"`
-}
-
 // Slashing requires 2 blocks with the same signer as proof
 type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader
@@ -64,13 +38,6 @@ type ProposerSlashing struct {
 type AttesterSlashing struct {
 	Attestation_1 *IndexedAttestation
 	Attestation_2 *IndexedAttestation
-}
-
-// Full signed attestation
-type Attestation struct {
-	AggregationBits []byte `ssz-max:"2048" ssz:"bitlist"`
-	Data            *AttestationData
-	Signature       [96]byte `ssz-size:"96"`
 }
 
 type DepositData struct {
@@ -172,6 +139,33 @@ type BeaconBodyBellatrix struct {
 }
 
 /*
+ * Block body for Consensus Layer to be stored internally (payload and attestations are stored separatedly).
+ */
+type BeaconBlockForStorage struct {
+	// Non-body fields
+	Signature     [96]byte `ssz-size:"96"`
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	// Body fields
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
+	SyncAggregate     *SyncAggregate
+	// Metadatas
+	Eth1Number    uint64
+	Eth1BlockHash [32]byte `ssz-size:"32"`
+	Eth2BlockRoot [32]byte `ssz-size:"32"`
+	// Version type
+	Version uint8
+}
+
+/*
  * Bellatrix block structure.
  */
 type BeaconBlockBellatrix struct {
@@ -188,6 +182,55 @@ type BeaconBlockBellatrix struct {
 type SignedBeaconBlockBellatrix struct {
 	Block     *BeaconBlockBellatrix
 	Signature [96]byte `ssz-size:"96"`
+}
+
+type SignedBeaconBlockAltair struct {
+	Block     *BeaconBlockAltair
+	Signature [96]byte `ssz-size:"96"`
+}
+
+type BeaconBlockAltair struct {
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	Body          *BeaconBodyAltair
+}
+
+type BeaconBodyAltair struct {
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Attestations      []*Attestation         `ssz-max:"128"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
+	SyncAggregate     *SyncAggregate
+}
+
+type SignedBeaconBlockPhase0 struct {
+	Block     *BeaconBlockPhase0
+	Signature [96]byte `ssz-size:"96"`
+}
+
+type BeaconBlockPhase0 struct {
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    [32]byte `ssz-size:"32"`
+	StateRoot     [32]byte `ssz-size:"32"`
+	Body          *BeaconBodyPhase0
+}
+
+type BeaconBodyPhase0 struct {
+	RandaoReveal      [96]byte `ssz-size:"96"`
+	Eth1Data          *Eth1Data
+	Graffiti          []byte                 `ssz-size:"32"`
+	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
+	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
+	Attestations      []*Attestation         `ssz-max:"128"`
+	Deposits          []*Deposit             `ssz-max:"16"`
+	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 }
 
 /*
@@ -280,19 +323,6 @@ type Validator struct {
 	WithdrawableEpoch          uint64
 }
 
-type PendingAttestation struct {
-	AggregationBits []byte `ssz-max:"2048"`
-	Data            *AttestationData
-	InclusionDelay  uint64
-	ProposerIndex   uint64
-}
-
-// Checkpoint is used to create the initial store through checkpoint sync.
-type Checkpoint struct {
-	Epoch uint64
-	Root  [32]byte `ssz-size:"32"`
-}
-
 /*
  * AggregateAndProof contains the index of the aggregator, the attestation
  * to be aggregated and the BLS signature of the attestation.
@@ -352,11 +382,4 @@ func (b *BeaconStateBellatrix) BlockRoot() ([32]byte, error) {
 		Root:          stateRoot,
 	}
 	return tempHeader.HashTreeRoot()
-}
-
-type ObjectSSZ interface {
-	ssz.Marshaler
-	ssz.Unmarshaler
-
-	HashTreeRoot() ([32]byte, error)
 }

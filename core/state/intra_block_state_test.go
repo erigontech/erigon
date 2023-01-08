@@ -124,9 +124,9 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			},
 		},
 		{
-			name: "Suicide",
+			name: "Selfdestruct",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.Suicide(addr)
+				s.Selfdestruct(addr)
 			},
 		},
 		{
@@ -277,7 +277,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
 			return err
 		}
-		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
+		checkeq("HasSelfdestructed", state.HasSelfdestructed(addr), checkstate.HasSelfdestructed(addr))
 		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
 		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))

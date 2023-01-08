@@ -69,6 +69,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcAccessListFlag,
 	&utils.RpcTraceCompatFlag,
 	&utils.RpcGasCapFlag,
+	&utils.RpcBatchLimit,
+	&utils.RpcReturnDataLimit,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
 	&HTTPReadTimeoutFlag,
@@ -140,8 +142,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideTerminalTotalDifficulty,
-	&utils.OverrideMergeNetsplitBlock,
+	&utils.OverrideShanghaiTime,
 
 	&utils.ConfigFlag,
 	&logging.LogConsoleVerbosityFlag,

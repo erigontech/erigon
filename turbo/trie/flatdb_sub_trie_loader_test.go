@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/stretchr/testify/assert"
 )
@@ -107,7 +107,7 @@ func TestIsSequence(t *testing.T) {
 		{prev: "1234", next: "5678", expect: false},
 	}
 	for _, tc := range cases {
-		next, _ := dbutils.NextSubtree(common.FromHex(tc.prev))
+		next, _ := kv.NextSubtree(common.FromHex(tc.prev))
 		res := isSequenceOld(next, common.FromHex(tc.next))
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}

@@ -2,18 +2,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
@@ -40,21 +42,38 @@ func main() {
 func runConsensusLayerNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	cfg, _ := lcCli.SetupConsensusClientCfg(cliCtx)
-
-	db, err := mdbx.NewTemporaryMdbx()
+	var db kv.RwDB
+	var err error
+	if cfg.Chaindata == "" {
+		db, err = mdbx.NewTemporaryMdbx()
+	} else {
+		db, err = mdbx.Open(cfg.Chaindata, log.Root(), false)
+	}
 	if err != nil {
 		log.Error("Error opening database", "err", err)
 	}
 	defer db.Close()
+	if err := checkAndStoreBeaconDataConfigWithDB(ctx, db, cfg.BeaconDataCfg); err != nil {
+		log.Error("Could load beacon data configuration", "err", err)
+		return err
+	}
 	// Fetch the checkpoint state.
-	cpState, err := getCheckpointState(ctx, db)
+	cpState, err := getCheckpointState(ctx, db, cfg.CheckpointUri)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
 		return err
 	}
+	var executionClient *execution_client.ExecutionClient
+	if cfg.ELEnabled {
+		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
+		if err != nil {
+			log.Warn("Could not connect to execution client", "err", err)
+			return err
+		}
+	}
 
 	log.Info("Starting sync from checkpoint.")
-
+	tmpdir := "/tmp"
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
@@ -63,14 +82,16 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Could not start sentinel service", "err", err)
 	}
 
-	genesisCfg, _, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
-	downloader := network.NewForwardBeaconDownloader(ctx, s)
-	bdownloader := network.NewBackwardBeaconDownloader(ctx, s)
+	genesisCfg := cfg.GenesisCfg
+	beaconConfig := cfg.BeaconCfg
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisCfg)
+	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
+	bdownloader := network.NewBackwardBeaconDownloader(ctx, beaconRpc)
 
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient, cfg.BeaconDataCfg)
 	if err != nil {
 		return err
 	}
@@ -116,10 +137,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context, db kv.RwDB) (*state.BeaconState, error) {
-
-	uri := clparams.GetCheckpointSyncEndpoint(clparams.MainnetNetwork)
-
+func getCheckpointState(ctx context.Context, db kv.RwDB, uri string) (*state.BeaconState, error) {
 	state, err := core.RetrieveBeaconState(ctx, uri)
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
@@ -138,4 +156,36 @@ func getCheckpointState(ctx context.Context, db kv.RwDB) (*state.BeaconState, er
 	}
 	log.Info("Checkpoint sync successful: hurray!")
 	return state, tx.Commit()
+}
+
+func checkAndStoreBeaconDataConfigWithDB(ctx context.Context, db kv.RwDB, provided *rawdb.BeaconDataConfig) error {
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		log.Error("[DB] Failed", "reason", err)
+		return err
+	}
+	defer tx.Rollback()
+	if provided == nil {
+		return errors.New("no valid beacon data config found")
+	}
+	stored, err := rawdb.ReadBeaconDataConfig(tx)
+	if err != nil {
+		return err
+	}
+	if stored != nil {
+		if err := checkBeaconDataConfig(provided, stored); err != nil {
+			return err
+		}
+	}
+	return rawdb.WriteBeaconDataConfig(tx, provided)
+}
+
+func checkBeaconDataConfig(provided *rawdb.BeaconDataConfig, stored *rawdb.BeaconDataConfig) error {
+	if provided.BackFillingAmount != stored.BackFillingAmount {
+		return fmt.Errorf("mismatching backfilling amount, provided %d, stored %d", provided.BackFillingAmount, stored.BackFillingAmount)
+	}
+	if provided.SlotPerRestorePoint != stored.SlotPerRestorePoint {
+		return fmt.Errorf("mismatching sprp, provided %d, stored %d", provided.SlotPerRestorePoint, stored.SlotPerRestorePoint)
+	}
+	return nil
 }

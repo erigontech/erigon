@@ -29,7 +29,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -54,7 +56,7 @@ type PlainState struct {
 	accHistoryC, storageHistoryC kv.Cursor
 	accChangesC, storageChangesC kv.CursorDupSort
 	tx                           kv.Tx
-	blockNr                      uint64
+	blockNr, txNr                uint64
 	histV3                       bool
 	storage                      map[common.Address]*btree.BTree
 	trace                        bool
@@ -83,6 +85,9 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[common.Add
 		ps.storageChangesC = c4
 	}
 
+	if histV3 {
+		ps.txNr, _ = rawdb.TxNums.Min(tx, blockNr)
+	}
 	return ps
 }
 
@@ -105,7 +110,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	var accData []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		accData, err = historyv2read.GetAsOfV3(ttx, false /* storage */, addr[:], s.blockNr, s.histV3)
+		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], s.txNr)
 		if err != nil {
 			return err
 		}
@@ -187,7 +192,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.blockNr, s.histV3)
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], s.txNr)
 		if err != nil {
 			return nil, err
 		}
@@ -233,7 +238,7 @@ func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, true /* storage */, compositeKey, s.blockNr, s.histV3)
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, compositeKey, s.txNr)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +280,7 @@ func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, err
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.blockNr+1, s.histV3)
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], s.txNr+1)
 		if err != nil {
 			return 0, err
 		}

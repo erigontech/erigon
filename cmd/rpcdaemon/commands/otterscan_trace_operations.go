@@ -49,8 +49,7 @@ func (t *OperationsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to c
 	if typ == vm.CREATE2 {
 		t.Results = append(t.Results, &InternalOperation{OP_CREATE2, from, to, (*hexutil.Big)(value.ToBig())})
 	}
-}
-
-func (l *OperationsTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	l.Results = append(l.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
+	if typ == vm.SELFDESTRUCT {
+		t.Results = append(t.Results, &InternalOperation{OP_SELF_DESTRUCT, from, to, (*hexutil.Big)(value.ToBig())})
+	}
 }

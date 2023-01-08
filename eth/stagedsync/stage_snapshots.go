@@ -20,6 +20,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -42,8 +44,10 @@ type SnapshotsCfg struct {
 	snapshotDownloader proto_downloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	dbEventNotifier    snapshotsync.DBEventNotifier
-	historyV3          bool
-	agg                *state.Aggregator22
+	engine             consensus.Engine
+
+	historyV3 bool
+	agg       *state.AggregatorV3
 }
 
 func StageSnapshotsCfg(
@@ -55,8 +59,9 @@ func StageSnapshotsCfg(
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	dbEventNotifier snapshotsync.DBEventNotifier,
+	engine consensus.Engine,
 	historyV3 bool,
-	agg *state.Aggregator22,
+	agg *state.AggregatorV3,
 ) SnapshotsCfg {
 	return SnapshotsCfg{
 		db:                 db,
@@ -69,6 +74,7 @@ func StageSnapshotsCfg(
 		dbEventNotifier:    dbEventNotifier,
 		historyV3:          historyV3,
 		agg:                agg,
+		engine:             engine,
 	}
 }
 
@@ -174,13 +180,14 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		}
 		s.BlockNumber = blocksAvailable
 	}
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs.Tmp, cfg.snapshots, cfg.blockReader); err != nil {
+
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpdir string, sn *snapshotsync.RoSnapshots, blockReader services.HeaderAndCanonicalReader) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig params.ChainConfig, engine consensus.Engine) error {
 	blocksAvailable := sn.BlocksAvailable()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -199,13 +206,15 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 		}
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollector("Snapshots", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+			h2n := etl.NewCollector(logPrefix, dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 			defer h2n.Close()
 			h2n.LogLvl(log.LvlDebug)
 
 			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
 			// for now easier just store them in db
 			td := big.NewInt(0)
+			blockNumBytes := make([]byte, 8)
+			chainReader := &ChainReaderImpl{config: &chainConfig, tx: tx, blockReader: blockReader}
 			if err := snapshotsync.ForEachHeader(ctx, sn, func(header *types.Header) error {
 				blockNum, blockHash := header.Number.Uint64(), header.Hash()
 				td.Add(td, header.Difficulty)
@@ -216,8 +225,24 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
 					return err
 				}
-				if err := h2n.Collect(blockHash[:], libcommon.EncodeTs(blockNum)); err != nil {
+				binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
+				}
+
+				if engine != nil {
+					// consensus may have own database, let's fill it
+					// different consensuses may have some conditions for validators snapshots
+					need := false
+					switch engine.(type) {
+					case *parlia.Parlia:
+						need = (blockNum-1)%(100*parlia.CheckpointInterval) == 0
+					}
+					if need {
+						if err := engine.VerifyHeader(chainReader, header, true /* seal */); err != nil {
+							return err
+						}
+					}
 				}
 				select {
 				case <-ctx.Done():
@@ -240,6 +265,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
 				return err
 			}
+
 		case stages.Bodies:
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			ok, err := sn.ViewTxs(blocksAvailable, func(sn *snapshotsync.TxnSegment) error {
@@ -267,6 +293,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, tmpd
 				}
 				toBlock = cmp.Max(toBlock, progress)
 
+				_ = tx.ClearBucket(kv.MaxTxNum)
 				if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
 				}
@@ -510,7 +537,7 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 }
 
 // retiring blocks in a single thread in the brackground
-func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.Aggregator22, ctx context.Context, tx kv.RwTx) (err error) {
+func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.AggregatorV3, ctx context.Context, tx kv.RwTx) (err error) {
 	// if something already happens in background - noop
 	if blockRetire.Working() {
 		return nil

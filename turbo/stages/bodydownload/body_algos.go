@@ -41,7 +41,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.requestedLow = bodyProgress + 1
 	bd.lowWaitUntil = 0
 	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
-	bd.requestedMap = make(map[DoubleHash]uint64)
+	bd.requestedMap = make(map[TripleHash]uint64)
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
@@ -159,14 +159,20 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			} else {
 				bd.deliveriesH[blockNum] = header
-				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
+				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
+					(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
 					// Perhaps we already have this block
 					block := rawdb.ReadBlock(tx, hash, blockNum)
 					if block == nil {
-						var doubleHash DoubleHash
-						copy(doubleHash[:], header.UncleHash.Bytes())
-						copy(doubleHash[length.Hash:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = blockNum
+						var tripleHash TripleHash
+						copy(tripleHash[:], header.UncleHash.Bytes())
+						copy(tripleHash[length.Hash:], header.TxHash.Bytes())
+						if header.WithdrawalsHash != nil {
+							copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
+						} else {
+							copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
+						}
+						bd.requestedMap[tripleHash] = blockNum
 					} else {
 						err = bd.addBodyToBucket(tx, blockNum, block.RawBody())
 						if err != nil {
@@ -188,7 +194,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
-			// Both uncleHash and txHash are empty (or block is prefetched), no need to request
+			// uncleHash, txHash, and withdrawalsHash are all empty (or block is prefetched), no need to request
 			bd.delivered.Add(blockNum)
 		}
 	}
@@ -204,28 +210,28 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
 func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
-	block := bd.prefetchedBlocks.Pop(hash)
+	header, body := bd.prefetchedBlocks.Get(hash)
 
-	if block == nil {
+	if body == nil {
 		return false
 	}
 
 	// Block is prefetched, no need to request
-	bd.deliveriesH[blockNum] = block.Header()
+	bd.deliveriesH[blockNum] = header
 
 	// make sure we have the body in the bucket for later use
-	bd.addBodyToBucket(tx, blockNum, block.RawBody())
+	bd.addBodyToBucket(tx, blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
-		log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
+	if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
+		log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
 	} else if parent != nil {
-		if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
-			td := new(big.Int).Add(block.Difficulty(), parent)
-			go blockPropagator(context.Background(), block, td)
+		if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
+			td := new(big.Int).Add(header.Difficulty, parent)
+			go blockPropagator(context.Background(), header, body, td)
 		}
 	} else {
-		log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
+		log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 	}
 
 	return true
@@ -245,8 +251,8 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs *[][][]byte, uncles *[][]*types.Header, lenOfP2PMsg uint64, peerID [64]byte) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals, lenOfP2PMsg uint64, peerID [64]byte) {
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -302,24 +308,29 @@ Loop:
 		if delivery.uncles == nil {
 			log.Warn("nil uncles delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
-		if delivery.txs == nil || delivery.uncles == nil {
+		if delivery.withdrawals == nil {
+			log.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+		}
+		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil {
 			log.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
 
 		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
+		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
 
 		for i := range txs {
 			uncleHash := types.CalcUncleHash(uncles[i])
 			txHash := types.DeriveSha(RawTransactions(txs[i]))
-			var doubleHash DoubleHash
-			copy(doubleHash[:], uncleHash.Bytes())
-			copy(doubleHash[length.Hash:], txHash.Bytes())
+			withdrawalsHash := types.DeriveSha(withdrawals[i])
+			var tripleHash TripleHash
+			copy(tripleHash[:], uncleHash.Bytes())
+			copy(tripleHash[length.Hash:], txHash.Bytes())
+			copy(tripleHash[2*length.Hash:], withdrawalsHash.Bytes())
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
-			blockNum, ok := bd.requestedMap[doubleHash]
+			blockNum, ok := bd.requestedMap[tripleHash]
 			if !ok {
 				undelivered++
 				continue
@@ -330,9 +341,9 @@ Loop:
 					reqMap[req.BlockNums[0]] = req
 				}
 			}
-			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+			delete(bd.requestedMap, tripleHash) // Delivered, cleaning up
 
-			err := bd.addBodyToBucket(tx, blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i]})
+			err := bd.addBodyToBucket(tx, blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
 			if err != nil {
 				return 0, 0, err
 			}
@@ -390,21 +401,8 @@ func (bd *BodyDownload) PrintPeerMap() {
 	bd.peerMap = make(map[[64]byte]int)
 }
 
-func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
-	if hash := types.CalcUncleHash(block.Uncles()); hash != block.UncleHash() {
-		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", block.UncleHash())
-		return
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != block.TxHash() {
-		log.Warn("Propagated block has invalid body", "have", hash, "exp", block.TxHash())
-		return
-	}
-	bd.prefetchedBlocks.Add(block)
-}
-
-func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
-	bd.AddToPrefetch(block)
-	return nil
+func (bd *BodyDownload) AddToPrefetch(header *types.Header, body *types.RawBody) {
+	bd.prefetchedBlocks.Add(header, body)
 }
 
 // GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies

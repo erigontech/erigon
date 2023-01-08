@@ -541,6 +541,12 @@ type BodyForStorage struct {
 	Withdrawals []*Withdrawal
 }
 
+// Alternative representation of the Block.
+type HeaderAndBody struct {
+	Header *Header
+	Body   *RawBody
+}
+
 // Block represents an entire block in the Ethereum blockchain.
 type Block struct {
 	header       *Header
@@ -1480,6 +1486,26 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
+// HashCheck checks that uncle, transaction, and withdrawals hashes are correct.
+func (b *Block) HashCheck() error {
+	if hash := CalcUncleHash(b.Uncles()); hash != b.UncleHash() {
+		return fmt.Errorf("block has invalid uncle hash: have %x, exp: %x", hash, b.UncleHash())
+	}
+	if hash := DeriveSha(b.Transactions()); hash != b.TxHash() {
+		return fmt.Errorf("block has invalid transaction hash: have %x, exp: %x", hash, b.TxHash())
+	}
+	if b.WithdrawalsHash() == nil {
+		if b.Withdrawals() != nil {
+			return errors.New("header missing WithdrawalsHash")
+		}
+		return nil
+	}
+	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
+		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
+	}
+	return nil
+}
+
 type writeCounter common.StorageSize
 
 func (c *writeCounter) Write(b []byte) (int, error) {
@@ -1494,20 +1520,28 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	return rlpHash(uncles)
 }
 
+func CopyTxs(in Transactions) Transactions {
+	transactionsData, err := MarshalTransactionsBinary(in)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	out, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+	for i := 0; i < len(in); i++ {
+		if s, ok := in[i].GetSender(); ok {
+			out[i].SetSender(s)
+		}
+	}
+	return out
+}
+
 // Copy creates a deep copy of the Block.
 func (b *Block) Copy() *Block {
 	uncles := make([]*Header, 0, len(b.uncles))
 	for _, uncle := range b.uncles {
 		uncles = append(uncles, CopyHeader(uncle))
-	}
-
-	transactionsData, err := MarshalTransactionsBinary(b.transactions)
-	if err != nil {
-		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
-	}
-	transactions, err := DecodeTransactions(transactionsData)
-	if err != nil {
-		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
 
 	var withdrawals []*Withdrawal
@@ -1534,7 +1568,7 @@ func (b *Block) Copy() *Block {
 	return &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
-		transactions: transactions,
+		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		hash:         hashValue,
 		size:         sizeValue,

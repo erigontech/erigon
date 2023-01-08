@@ -233,11 +233,11 @@ func (ot *opcodeTracer) captureEndOrExit(err error) {
 	}
 }
 
-func (ot *opcodeTracer) CaptureEnd(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *opcodeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 	ot.captureEndOrExit(err)
 }
 
-func (ot *opcodeTracer) CaptureExit(output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ot *opcodeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	ot.captureEndOrExit(err)
 	ot.depth--
 }
@@ -382,15 +382,6 @@ func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, 
 	// CaptureState might have already recorded the opcode before it failed. Let's centralize the processing there.
 	ot.CaptureState(pc, op, gas, cost, scope, nil, opDepth, err)
 
-}
-
-func (ot *opcodeTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-}
-func (ot *opcodeTracer) CaptureAccountRead(account common.Address) error {
-	return nil
-}
-func (ot *opcodeTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
 }
 
 type segPrefix struct {
@@ -580,7 +571,6 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 		dbstate := state.NewPlainState(historyTx, block.NumberU64(), systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		intraBlockState := state.New(dbstate)
-		intraBlockState.SetTracer(ot)
 
 		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
 		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false)
