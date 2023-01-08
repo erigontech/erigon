@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // Slashing requires 2 blocks with the same signer as proof
@@ -36,24 +37,6 @@ type ExecutionPayload struct {
 	BaseFeePerGas []byte   `ssz-size:"32"`
 	BlockHash     [32]byte `ssz-size:"32"`
 	Transactions  [][]byte `ssz-size:"?,?" ssz-max:"1048576,1073741824"`
-}
-
-// we will send this to Erigon once validation is done.
-type ExecutionHeader struct {
-	ParentHash      [32]byte `ssz-size:"32"`
-	FeeRecipient    [20]byte `ssz-size:"20"`
-	StateRoot       [32]byte `ssz-size:"32"`
-	ReceiptsRoot    [32]byte `ssz-size:"32"`
-	LogsBloom       []byte   `ssz-size:"256"`
-	PrevRandao      [32]byte `ssz-size:"32"`
-	BlockNumber     uint64
-	GasLimit        uint64
-	GasUsed         uint64
-	Timestamp       uint64
-	ExtraData       []byte   `ssz-max:"32"`
-	BaseFeePerGas   []byte   `ssz-size:"32"`
-	BlockHash       [32]byte `ssz-size:"32"`
-	TransactionRoot [32]byte `ssz-size:"32"`
 }
 
 /*
@@ -283,7 +266,7 @@ type BeaconStateBellatrix struct {
 	InactivityScores             []uint64 `ssz-max:"1099511627776"`
 	CurrentSyncCommittee         *SyncCommittee
 	NextSyncCommittee            *SyncCommittee
-	LatestExecutionPayloadHeader *ExecutionHeader
+	LatestExecutionPayloadHeader *types.Header
 }
 
 // BlockRoot retrieves a the state block root from the state.

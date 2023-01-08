@@ -3,6 +3,8 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/core/types"
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
@@ -691,246 +693,6 @@ func (e *ExecutionPayload) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			hh.MerkleizeWithMixin(subIndx, num, 1048576)
 		}
 	}
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
-// MarshalSSZ ssz marshals the ExecutionHeader object
-func (e *ExecutionHeader) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(e)
-}
-
-// MarshalSSZTo ssz marshals the ExecutionHeader object to a target array
-func (e *ExecutionHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-	offset := int(536)
-
-	// Field (0) 'ParentHash'
-	dst = append(dst, e.ParentHash[:]...)
-
-	// Field (1) 'FeeRecipient'
-	dst = append(dst, e.FeeRecipient[:]...)
-
-	// Field (2) 'StateRoot'
-	dst = append(dst, e.StateRoot[:]...)
-
-	// Field (3) 'ReceiptsRoot'
-	dst = append(dst, e.ReceiptsRoot[:]...)
-
-	// Field (4) 'LogsBloom'
-	if size := len(e.LogsBloom); size != 256 {
-		err = ssz.ErrBytesLengthFn("--.LogsBloom", size, 256)
-		return
-	}
-	dst = append(dst, e.LogsBloom...)
-
-	// Field (5) 'PrevRandao'
-	dst = append(dst, e.PrevRandao[:]...)
-
-	// Field (6) 'BlockNumber'
-	dst = ssz.MarshalUint64(dst, e.BlockNumber)
-
-	// Field (7) 'GasLimit'
-	dst = ssz.MarshalUint64(dst, e.GasLimit)
-
-	// Field (8) 'GasUsed'
-	dst = ssz.MarshalUint64(dst, e.GasUsed)
-
-	// Field (9) 'Timestamp'
-	dst = ssz.MarshalUint64(dst, e.Timestamp)
-
-	// Offset (10) 'ExtraData'
-	dst = ssz.WriteOffset(dst, offset)
-	offset += len(e.ExtraData)
-
-	// Field (11) 'BaseFeePerGas'
-	if size := len(e.BaseFeePerGas); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.BaseFeePerGas", size, 32)
-		return
-	}
-	dst = append(dst, e.BaseFeePerGas...)
-
-	// Field (12) 'BlockHash'
-	dst = append(dst, e.BlockHash[:]...)
-
-	// Field (13) 'TransactionRoot'
-	dst = append(dst, e.TransactionRoot[:]...)
-
-	// Field (10) 'ExtraData'
-	if size := len(e.ExtraData); size > 32 {
-		err = ssz.ErrBytesLengthFn("--.ExtraData", size, 32)
-		return
-	}
-	dst = append(dst, e.ExtraData...)
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the ExecutionHeader object
-func (e *ExecutionHeader) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size < 536 {
-		return ssz.ErrSize
-	}
-
-	tail := buf
-	var o10 uint64
-
-	// Field (0) 'ParentHash'
-	copy(e.ParentHash[:], buf[0:32])
-
-	// Field (1) 'FeeRecipient'
-	copy(e.FeeRecipient[:], buf[32:52])
-
-	// Field (2) 'StateRoot'
-	copy(e.StateRoot[:], buf[52:84])
-
-	// Field (3) 'ReceiptsRoot'
-	copy(e.ReceiptsRoot[:], buf[84:116])
-
-	// Field (4) 'LogsBloom'
-	if cap(e.LogsBloom) == 0 {
-		e.LogsBloom = make([]byte, 0, len(buf[116:372]))
-	}
-	e.LogsBloom = append(e.LogsBloom, buf[116:372]...)
-
-	// Field (5) 'PrevRandao'
-	copy(e.PrevRandao[:], buf[372:404])
-
-	// Field (6) 'BlockNumber'
-	e.BlockNumber = ssz.UnmarshallUint64(buf[404:412])
-
-	// Field (7) 'GasLimit'
-	e.GasLimit = ssz.UnmarshallUint64(buf[412:420])
-
-	// Field (8) 'GasUsed'
-	e.GasUsed = ssz.UnmarshallUint64(buf[420:428])
-
-	// Field (9) 'Timestamp'
-	e.Timestamp = ssz.UnmarshallUint64(buf[428:436])
-
-	// Offset (10) 'ExtraData'
-	if o10 = ssz.ReadOffset(buf[436:440]); o10 > size {
-		return ssz.ErrOffset
-	}
-
-	if o10 < 536 {
-		return ssz.ErrInvalidVariableOffset
-	}
-
-	// Field (11) 'BaseFeePerGas'
-	if cap(e.BaseFeePerGas) == 0 {
-		e.BaseFeePerGas = make([]byte, 0, len(buf[440:472]))
-	}
-	e.BaseFeePerGas = append(e.BaseFeePerGas, buf[440:472]...)
-
-	// Field (12) 'BlockHash'
-	copy(e.BlockHash[:], buf[472:504])
-
-	// Field (13) 'TransactionRoot'
-	copy(e.TransactionRoot[:], buf[504:536])
-
-	// Field (10) 'ExtraData'
-	{
-		buf = tail[o10:]
-		if len(buf) > 32 {
-			return ssz.ErrBytesLength
-		}
-		if cap(e.ExtraData) == 0 {
-			e.ExtraData = make([]byte, 0, len(buf))
-		}
-		e.ExtraData = append(e.ExtraData, buf...)
-	}
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the ExecutionHeader object
-func (e *ExecutionHeader) SizeSSZ() (size int) {
-	size = 536
-
-	// Field (10) 'ExtraData'
-	size += len(e.ExtraData)
-
-	return
-}
-
-// HashTreeRoot ssz hashes the ExecutionHeader object
-func (e *ExecutionHeader) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(e)
-}
-
-// HashTreeRootWith ssz hashes the ExecutionHeader object with a hasher
-func (e *ExecutionHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'ParentHash'
-	hh.PutBytes(e.ParentHash[:])
-
-	// Field (1) 'FeeRecipient'
-	hh.PutBytes(e.FeeRecipient[:])
-
-	// Field (2) 'StateRoot'
-	hh.PutBytes(e.StateRoot[:])
-
-	// Field (3) 'ReceiptsRoot'
-	hh.PutBytes(e.ReceiptsRoot[:])
-
-	// Field (4) 'LogsBloom'
-	if size := len(e.LogsBloom); size != 256 {
-		err = ssz.ErrBytesLengthFn("--.LogsBloom", size, 256)
-		return
-	}
-	hh.PutBytes(e.LogsBloom)
-
-	// Field (5) 'PrevRandao'
-	hh.PutBytes(e.PrevRandao[:])
-
-	// Field (6) 'BlockNumber'
-	hh.PutUint64(e.BlockNumber)
-
-	// Field (7) 'GasLimit'
-	hh.PutUint64(e.GasLimit)
-
-	// Field (8) 'GasUsed'
-	hh.PutUint64(e.GasUsed)
-
-	// Field (9) 'Timestamp'
-	hh.PutUint64(e.Timestamp)
-
-	// Field (10) 'ExtraData'
-	{
-		elemIndx := hh.Index()
-		byteLen := uint64(len(e.ExtraData))
-		if byteLen > 32 {
-			err = ssz.ErrIncorrectListSize
-			return
-		}
-		hh.PutBytes(e.ExtraData)
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(elemIndx, byteLen, (32+31)/32)
-		} else {
-			hh.MerkleizeWithMixin(elemIndx, byteLen, (32+31)/32)
-		}
-	}
-
-	// Field (11) 'BaseFeePerGas'
-	if size := len(e.BaseFeePerGas); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.BaseFeePerGas", size, 32)
-		return
-	}
-	hh.PutBytes(e.BaseFeePerGas)
-
-	// Field (12) 'BlockHash'
-	hh.PutBytes(e.BlockHash[:])
-
-	// Field (13) 'TransactionRoot'
-	hh.PutBytes(e.TransactionRoot[:])
 
 	if ssz.EnableVectorizedHTR {
 		hh.MerkleizeVectorizedHTR(indx)
@@ -4569,9 +4331,9 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	// Offset (24) 'LatestExecutionPayloadHeader'
 	dst = ssz.WriteOffset(dst, offset)
 	if b.LatestExecutionPayloadHeader == nil {
-		b.LatestExecutionPayloadHeader = new(ExecutionHeader)
+		b.LatestExecutionPayloadHeader = new(types.Header)
 	}
-	offset += b.LatestExecutionPayloadHeader.SizeSSZ()
+	offset += b.LatestExecutionPayloadHeader.SizeSSZ(clparams.BellatrixVersion)
 
 	// Field (7) 'HistoricalRoots'
 	if size := len(b.HistoricalRoots); size > 16777216 {
@@ -4636,10 +4398,7 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 		dst = ssz.MarshalUint64(dst, b.InactivityScores[ii])
 	}
 
-	// Field (24) 'LatestExecutionPayloadHeader'
-	if dst, err = b.LatestExecutionPayloadHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	dst = append(dst, b.LatestExecutionPayloadHeader.MarshallSSZ()...)
 
 	return
 }
@@ -4908,9 +4667,9 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	{
 		buf = tail[o24:]
 		if b.LatestExecutionPayloadHeader == nil {
-			b.LatestExecutionPayloadHeader = new(ExecutionHeader)
+			b.LatestExecutionPayloadHeader = new(types.Header)
 		}
-		if err = b.LatestExecutionPayloadHeader.UnmarshalSSZ(buf); err != nil {
+		if err = b.LatestExecutionPayloadHeader.UnmarshalSSZ(buf, clparams.BellatrixVersion); err != nil {
 			return err
 		}
 	}
@@ -4944,9 +4703,9 @@ func (b *BeaconStateBellatrix) SizeSSZ() (size int) {
 
 	// Field (24) 'LatestExecutionPayloadHeader'
 	if b.LatestExecutionPayloadHeader == nil {
-		b.LatestExecutionPayloadHeader = new(ExecutionHeader)
+		b.LatestExecutionPayloadHeader = new(types.Header)
 	}
-	size += b.LatestExecutionPayloadHeader.SizeSSZ()
+	size += b.LatestExecutionPayloadHeader.SizeSSZ(clparams.BellatrixVersion)
 
 	return
 }
@@ -5222,10 +4981,13 @@ func (b *BeaconStateBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		return
 	}
 
-	// Field (24) 'LatestExecutionPayloadHeader'
-	if err = b.LatestExecutionPayloadHeader.HashTreeRootWith(hh); err != nil {
-		return
+
+	headerRoot, err := b.LatestBlockHeader.HashTreeRoot()
+	if err != nil {
+		return err
 	}
+
+	hh.PutBytes(headerRoot[:])
 
 	if ssz.EnableVectorizedHTR {
 		hh.MerkleizeVectorizedHTR(indx)

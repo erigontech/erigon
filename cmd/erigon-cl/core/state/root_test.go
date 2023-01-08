@@ -1,10 +1,12 @@
 package state_test
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func getTestBeaconState() *cltypes.BeaconStateBellatrix {
@@ -20,9 +22,9 @@ func getTestBeaconState() *cltypes.BeaconStateBellatrix {
 		NextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
-		LatestExecutionPayloadHeader: &cltypes.ExecutionHeader{
-			LogsBloom:     make([]byte, 256),
-			BaseFeePerGas: make([]byte, 32),
+		LatestExecutionPayloadHeader: &types.Header{
+			Bloom:   types.Bloom{},
+			BaseFee: big.NewInt(0),
 		},
 		LatestBlockHeader: &cltypes.BeaconBlockHeader{
 			Root: [32]byte{},

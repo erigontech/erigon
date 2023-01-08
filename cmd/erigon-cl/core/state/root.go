@@ -222,7 +222,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(24): LatestExecutionPayloadHeader
 	if b.isLeafDirty(LatestExecutionPayloadHeaderLeafIndex) {
-		headerRoot, err := b.latestExecutionPayloadHeader.HashTreeRoot()
+		headerRoot, err := b.latestExecutionPayloadHeader.HashSSZ()
 		if err != nil {
 			return err
 		}
