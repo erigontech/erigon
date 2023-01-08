@@ -129,6 +129,12 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
+func (rs *StateV3) QueueLen() int {
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
+	return rs.queue.Len()
+}
+
 func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
