@@ -6,26 +6,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-/*
- * BeaconBlockHeader is the message we validate in the lightclient.
- * It contains the hash of the block body, and state root data.
- */
-type BeaconBlockHeader struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	Root          [32]byte `ssz-size:"32"`
-	BodyRoot      [32]byte `ssz-size:"32"`
-}
-
-/*
- * SignedBeaconBlockHeader is a beacon block header + validator signature.
- */
-type SignedBeaconBlockHeader struct {
-	Header    *BeaconBlockHeader
-	Signature [96]byte `ssz-size:"96"`
-}
-
 // Slashing requires 2 blocks with the same signer as proof
 type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader
@@ -38,28 +18,6 @@ type ProposerSlashing struct {
 type AttesterSlashing struct {
 	Attestation_1 *IndexedAttestation
 	Attestation_2 *IndexedAttestation
-}
-
-/*
- * SyncAggregate, Determines successfull committee, bits shows active participants,
- * and signature is the aggregate BLS signature of the committee.
- */
-type SyncAggregate struct {
-	SyncCommiteeBits      []byte   `ssz-size:"64"`
-	SyncCommiteeSignature [96]byte `ssz-size:"96"`
-}
-
-// return sum of the committee bits
-func (agg *SyncAggregate) Sum() int {
-	ret := 0
-	for i := range agg.SyncCommiteeBits {
-		for bit := 1; bit <= 128; bit *= 2 {
-			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
-				ret++
-			}
-		}
-	}
-	return ret
 }
 
 // we will send this to Erigon once validation is done.

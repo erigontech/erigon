@@ -2,6 +2,8 @@ package cltypes
 
 import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 /*
@@ -82,4 +84,54 @@ func (a *SignedAggregateAndProof) UnmarshalSSZ(buf []byte) error {
 
 func (a *SignedAggregateAndProof) SizeSSZ() int {
 	return 100 + a.Message.SizeSSZ()
+}
+
+/*
+ * SyncAggregate, Determines successfull committee, bits shows active participants,
+ * and signature is the aggregate BLS signature of the committee.
+ */
+type SyncAggregate struct {
+	SyncCommiteeBits      [64]byte
+	SyncCommiteeSignature [96]byte
+}
+
+// return sum of the committee bits
+func (agg *SyncAggregate) Sum() int {
+	ret := 0
+	for i := range agg.SyncCommiteeBits {
+		for bit := 1; bit <= 128; bit *= 2 {
+			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
+				ret++
+			}
+		}
+	}
+	return ret
+}
+
+func (agg *SyncAggregate) MarshalSSZ() ([]byte, error) {
+	return append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...), nil
+}
+
+func (agg *SyncAggregate) UnmarshalSSZ(buf []byte) error {
+	copy(agg.SyncCommiteeBits[:], buf)
+	copy(agg.SyncCommiteeSignature[:], buf[64:])
+	return nil
+}
+
+func (agg *SyncAggregate) SizeSSZ() int {
+	return 160
+}
+
+func (agg *SyncAggregate) HashTreeRoot() ([32]byte, error) {
+	var (
+		leaves = make([][32]byte, 2)
+		err    error
+	)
+	leaves[0] = utils.Keccak256(agg.SyncCommiteeBits[:])
+	leaves[1], err = merkle_tree.SignatureRoot(agg.SyncCommiteeSignature)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	return merkle_tree.ArraysRoot(leaves, 2)
 }

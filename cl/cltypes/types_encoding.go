@@ -6,170 +6,46 @@ import (
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
-// MarshalSSZ ssz marshals the BeaconBlockHeader object
-func (b *BeaconBlockHeader) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(b)
-}
-
 // MarshalSSZTo ssz marshals the BeaconBlockHeader object to a target array
 func (b *BeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
-
-	// Field (0) 'Slot'
-	dst = ssz.MarshalUint64(dst, b.Slot)
-
-	// Field (1) 'ProposerIndex'
-	dst = ssz.MarshalUint64(dst, b.ProposerIndex)
-
-	// Field (2) 'ParentRoot'
-	dst = append(dst, b.ParentRoot[:]...)
-
-	// Field (3) 'Root'
-	dst = append(dst, b.Root[:]...)
-
-	// Field (4) 'BodyRoot'
-	dst = append(dst, b.BodyRoot[:]...)
+	
+	m, _ := b.MarshalSSZ()
+	dst = append(dst, m...)
 
 	return
-}
-
-// UnmarshalSSZ ssz unmarshals the BeaconBlockHeader object
-func (b *BeaconBlockHeader) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 112 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'Slot'
-	b.Slot = ssz.UnmarshallUint64(buf[0:8])
-
-	// Field (1) 'ProposerIndex'
-	b.ProposerIndex = ssz.UnmarshallUint64(buf[8:16])
-
-	// Field (2) 'ParentRoot'
-	copy(b.ParentRoot[:], buf[16:48])
-
-	// Field (3) 'Root'
-	copy(b.Root[:], buf[48:80])
-
-	// Field (4) 'BodyRoot'
-	copy(b.BodyRoot[:], buf[80:112])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the BeaconBlockHeader object
-func (b *BeaconBlockHeader) SizeSSZ() (size int) {
-	size = 112
-	return
-}
-
-// HashTreeRoot ssz hashes the BeaconBlockHeader object
-func (b *BeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(b)
 }
 
 // HashTreeRootWith ssz hashes the BeaconBlockHeader object with a hasher
 func (b *BeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
 
-	// Field (0) 'Slot'
-	hh.PutUint64(b.Slot)
-
-	// Field (1) 'ProposerIndex'
-	hh.PutUint64(b.ProposerIndex)
-
-	// Field (2) 'ParentRoot'
-	hh.PutBytes(b.ParentRoot[:])
-
-	// Field (3) 'Root'
-	hh.PutBytes(b.Root[:])
-
-	// Field (4) 'BodyRoot'
-	hh.PutBytes(b.BodyRoot[:])
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
+	root, err := b.HashTreeRoot()
+	if err != nil {
+		return err
 	}
-	return
-}
 
-// MarshalSSZ ssz marshals the SignedBeaconBlockHeader object
-func (s *SignedBeaconBlockHeader) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(s)
+	hh.PutBytes(root[:])
+	return
 }
 
 // MarshalSSZTo ssz marshals the SignedBeaconBlockHeader object to a target array
 func (s *SignedBeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
-
-	// Field (0) 'Header'
-	if s.Header == nil {
-		s.Header = new(BeaconBlockHeader)
-	}
-	if dst, err = s.Header.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
-	// Field (1) 'Signature'
-	dst = append(dst, s.Signature[:]...)
+	
+	m, _ := s.MarshalSSZ()
+	dst = append(dst, m...)
 
 	return
-}
-
-// UnmarshalSSZ ssz unmarshals the SignedBeaconBlockHeader object
-func (s *SignedBeaconBlockHeader) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 208 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'Header'
-	if s.Header == nil {
-		s.Header = new(BeaconBlockHeader)
-	}
-	if err = s.Header.UnmarshalSSZ(buf[0:112]); err != nil {
-		return err
-	}
-
-	// Field (1) 'Signature'
-	copy(s.Signature[:], buf[112:208])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the SignedBeaconBlockHeader object
-func (s *SignedBeaconBlockHeader) SizeSSZ() (size int) {
-	size = 208
-	return
-}
-
-// HashTreeRoot ssz hashes the SignedBeaconBlockHeader object
-func (s *SignedBeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(s)
 }
 
 // HashTreeRootWith ssz hashes the SignedBeaconBlockHeader object with a hasher
 func (s *SignedBeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Header'
-	if err = s.Header.HashTreeRootWith(hh); err != nil {
-		return
+	root, err := s.HashTreeRoot()
+	if err != nil {
+		return err
 	}
 
-	// Field (1) 'Signature'
-	hh.PutBytes(s.Signature[:])
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
+	hh.PutBytes(root[:])
 	return
 }
 
@@ -476,78 +352,28 @@ func (s *SignedVoluntaryExit) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	return
 }
 
-// MarshalSSZ ssz marshals the SyncAggregate object
-func (s *SyncAggregate) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(s)
-}
-
 // MarshalSSZTo ssz marshals the SyncAggregate object to a target array
 func (s *SyncAggregate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
 
-	// Field (0) 'SyncCommiteeBits'
-	if size := len(s.SyncCommiteeBits); size != 64 {
-		err = ssz.ErrBytesLengthFn("--.SyncCommiteeBits", size, 64)
-		return
+	m, err := s.MarshalSSZ()
+	if err != nil {
+		return nil, err
 	}
-	dst = append(dst, s.SyncCommiteeBits...)
 
-	// Field (1) 'SyncCommiteeSignature'
-	dst = append(dst, s.SyncCommiteeSignature[:]...)
-
+	dst = append(dst, m...)
 	return
 }
-
-// UnmarshalSSZ ssz unmarshals the SyncAggregate object
-func (s *SyncAggregate) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 160 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'SyncCommiteeBits'
-	if cap(s.SyncCommiteeBits) == 0 {
-		s.SyncCommiteeBits = make([]byte, 0, len(buf[0:64]))
-	}
-	s.SyncCommiteeBits = append(s.SyncCommiteeBits, buf[0:64]...)
-
-	// Field (1) 'SyncCommiteeSignature'
-	copy(s.SyncCommiteeSignature[:], buf[64:160])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the SyncAggregate object
-func (s *SyncAggregate) SizeSSZ() (size int) {
-	size = 160
-	return
-}
-
-// HashTreeRoot ssz hashes the SyncAggregate object
-func (s *SyncAggregate) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(s)
-}
-
 // HashTreeRootWith ssz hashes the SyncAggregate object with a hasher
 func (s *SyncAggregate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
 	// Field (0) 'SyncCommiteeBits'
-	if size := len(s.SyncCommiteeBits); size != 64 {
-		err = ssz.ErrBytesLengthFn("--.SyncCommiteeBits", size, 64)
-		return
+	root, err := s.HashTreeRoot()
+	if err != nil {
+		return err
 	}
-	hh.PutBytes(s.SyncCommiteeBits)
+	hh.PutBytes(root[:])
 
-	// Field (1) 'SyncCommiteeSignature'
-	hh.PutBytes(s.SyncCommiteeSignature[:])
 
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
 	return
 }
 

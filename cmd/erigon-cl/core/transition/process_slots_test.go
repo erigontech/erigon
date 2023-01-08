@@ -74,11 +74,9 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
 		Block: &cltypes.BeaconBlockBellatrix{
 			ProposerIndex: 0,
 			Body: &cltypes.BeaconBodyBellatrix{
-				Eth1Data: &cltypes.Eth1Data{},
-				Graffiti: make([]byte, 32),
-				SyncAggregate: &cltypes.SyncAggregate{
-					SyncCommiteeBits: make([]byte, 64),
-				},
+				Eth1Data:      &cltypes.Eth1Data{},
+				Graffiti:      make([]byte, 32),
+				SyncAggregate: &cltypes.SyncAggregate{},
 				ExecutionPayload: &cltypes.ExecutionPayload{
 					LogsBloom:     make([]byte, 256),
 					BaseFeePerGas: make([]byte, 32),
