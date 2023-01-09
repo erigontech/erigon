@@ -57,10 +57,8 @@ func TestProcessProposerSlashing(t *testing.T) {
 		PublicKey:         testPublicKeySlashing,
 	})
 	successBalances := []uint64{}
-	wantBalances := []uint64{}
 	for i := 0; i < len(successState.Validators()); i++ {
 		successBalances = append(successBalances, uint64(i+1))
-		wantBalances = append(wantBalances, uint64(i+1))
 	}
 	successState.SetBalances(successBalances)
 
