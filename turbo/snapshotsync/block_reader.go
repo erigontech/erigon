@@ -722,7 +722,6 @@ func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv
 	}
 
 	if ok {
-		fmt.Printf("txn: i=%d, amount=%d\n", i, b.TxAmount)
 		// if block has no transactions, or requested txNum out of non-system transactions length
 		if b.TxAmount == 2 || i == -1 || i >= int(b.TxAmount-2) {
 			return nil, nil
