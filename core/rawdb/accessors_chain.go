@@ -390,6 +390,9 @@ func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(v) == 0 {
+		return nil, nil
+	}
 	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), uint64(len(v))))
 	if err != nil {
 		return nil, err
@@ -660,6 +663,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err != nil {
 		return false, 0, err
 	}
+	fmt.Printf("append2: number=%d, txs=%d,%d\n", number, uint64(len(body.Transactions)), baseTxId)
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxId,
 		TxAmount:    uint32(len(body.Transactions)) + 2,
@@ -673,7 +677,7 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
 		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
-	return true, lastTxnNum, nil
+	return true, lastTxnNum - 1, nil
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
@@ -1800,7 +1804,7 @@ func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 			return 0, nil
 		}
 	}
-	return binary.BigEndian.Uint64(v) + 1, nil
+	return binary.BigEndian.Uint64(v), nil
 }
 
 func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {

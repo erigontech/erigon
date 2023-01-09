@@ -46,9 +46,6 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 }
 
 func TestCallTraceOneByOne(t *testing.T) {
-	if ethconfig.EnableHistoryV3InTest {
-		t.Skip("history.v3 doesn't store receipts in db")
-	}
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
