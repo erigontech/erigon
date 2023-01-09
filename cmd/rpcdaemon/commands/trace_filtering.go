@@ -840,6 +840,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteMore()
 			}
 			stream.WriteObjectStart()
+			fmt.Printf("err: %s, %d, %d\n", err, blockNum, txNum)
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
 			continue
