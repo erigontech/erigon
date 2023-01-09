@@ -260,11 +260,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	if fromBlock > toBlock {
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
-	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 
 	if api.historyV3(dbtx) {
 		return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
 	}
+	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))

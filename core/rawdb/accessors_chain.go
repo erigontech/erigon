@@ -663,7 +663,6 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err != nil {
 		return false, 0, err
 	}
-	fmt.Printf("append2: number=%d, txs=%d,%d\n", number, uint64(len(body.Transactions)), baseTxId)
 	data := types.BodyForStorage{
 		BaseTxId:    baseTxId,
 		TxAmount:    uint32(len(body.Transactions)) + 2,
