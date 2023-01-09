@@ -6,6 +6,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -47,7 +48,7 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
-		signingRoot, err := ComputeSigningRoot(signedHeader.Header, domain)
+		signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
 		if err != nil {
 			return fmt.Errorf("unable to compute signing root: %v", err)
 		}
