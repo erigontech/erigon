@@ -134,7 +134,6 @@ func TestProcessProposerSlashing(t *testing.T) {
 			wantErr:     true,
 		},
 	}
-
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			err := ProcessProposerSlashing(tc.state, tc.slashing)
