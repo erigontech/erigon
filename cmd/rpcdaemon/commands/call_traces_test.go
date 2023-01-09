@@ -10,7 +10,6 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -193,10 +192,6 @@ func TestFilterNoAddresses(t *testing.T) {
 }
 
 func TestFilterAddressIntersection(t *testing.T) {
-	if ethconfig.EnableHistoryV3InTest {
-		t.Skip("history.v3 doesn't store receipts in db")
-	}
-
 	m := stages.Mock(t)
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)

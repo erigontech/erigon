@@ -178,8 +178,8 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if err != nil {
 				return nil, false, err
 			}
-			if !ok {
-				return nil, ok, nil
+			if !ok || len(v) == 0 {
+				return v, ok, nil
 			}
 			v, err = tx.db.convertV3toV2(v)
 			if err != nil {
