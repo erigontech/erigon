@@ -352,7 +352,6 @@ func startHandlingForkChoice(
 		}
 	}
 
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint, err := forkingPoint(ctx, tx, headerInserter, cfg.blockReader, header)
 	if err != nil {
 		return nil, err
@@ -476,7 +475,6 @@ func handleNewPayload(
 	headerHash := block.Hash()
 
 	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
