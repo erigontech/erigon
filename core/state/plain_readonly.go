@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -200,11 +201,22 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
-		if err != nil {
+		if len(enc) == 0 {
+			if s.trace {
+				fmt.Printf("ReadAccountData [%x] => []\n", address)
+			}
+			return nil, nil
+		}
+		var a accounts.Account
+		if err = a.DecodeForStorage(enc); err != nil {
 			return nil, err
 		}
+		return &a, nil
+	}
+
+	enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	if err != nil {
+		return nil, err
 	}
 	if len(enc) == 0 {
 		if s.trace {
@@ -245,7 +257,7 @@ func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint
 		if s.histV3 {
 			ts = s.txNr
 		}
-		enc, _, err = ttx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes(), ts)
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), common2.EncodeTs(incarnation)...), key.Bytes(), ts)
 		if err != nil {
 			return nil, err
 		}
