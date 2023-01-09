@@ -8,6 +8,7 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -139,6 +140,15 @@ func ComputeSigningRootEpoch(epoch uint64, domain []byte) ([32]byte, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
 	hash := utils.Keccak256(b)
+	return utils.Keccak256(hash[:], domain), nil
+}
+
+func ComputeSigningRoot(obj ssz_utils.ObjectSSZ, domain []byte) ([32]byte, error) {
+	root, err := obj.HashTreeRoot()
+	if err != nil {
+		return [32]byte{}, fmt.Errorf("unable to get hash tree root: %v", err)
+	}
+	hash := utils.Keccak256(root[:])
 	return utils.Keccak256(hash[:], domain), nil
 }
 
