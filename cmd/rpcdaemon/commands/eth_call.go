@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -27,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
@@ -300,10 +302,50 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
-// GetProof not implemented
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
-	var stub interface{}
-	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
+// GetProof is partially implemented; no Storage proofs; only for the latest block
+func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	} else if blockNr != latestBlock {
+		return nil, fmt.Errorf(NotImplemented, "eth_getProof for block != latest")
+	} else if len(storageKeys) != 0 {
+		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
+	} else {
+		addrHash, err := common.HashData(address[:])
+		if err != nil {
+			return nil, err
+		}
+
+		rl := trie.NewRetainList(0)
+		rl.AddKey(addrHash[:])
+
+		loader := trie.NewFlatDBTrieLoader("getProof")
+		trace := true
+		if err := loader.Reset(rl, nil, nil, trace); err != nil {
+			return nil, err
+		}
+
+		var accProof accounts.AccProofResult
+
+		_, err = loader.CalcTrieRoot(tx, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &accProof, nil
+	}
 }
 
 func (api *APIImpl) tryBlockFromLru(hash common.Hash) *types.Block {
