@@ -343,7 +343,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var skipAnalysis bool
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
-	//stateReader.SetAc(ac)
 	ibs := state.New(stateReader)
 
 	//stateReader.SetTrace(true)
