@@ -41,7 +41,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 	var ok bool
 	var err error
 	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), hr.txNum)
+		enc, ok, err = hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
 		if err != nil || !ok || len(enc) == 0 {
 			if hr.trace {
 				fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -101,7 +101,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	if hr.ttx != nil {
-		enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), key.Bytes()...), hr.txNum)
+		enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), key.Bytes()...), nil, hr.txNum)
 		return enc, err
 	}
 
@@ -134,7 +134,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 		return nil, nil
 	}
 	if hr.ttx != nil {
-		enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), hr.txNum)
+		enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 		return enc, err
 	}
 
@@ -156,7 +156,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation u
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	if hr.ttx != nil {
-		enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), hr.txNum)
+		enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 		return len(enc), err
 	}
 	enc, ok, err := hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
