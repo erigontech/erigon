@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -75,4 +76,14 @@ func VerifyEip4844Header(config *params.ChainConfig, parent, header *types.Heade
 // GetDataGasPrice implements get_data_gas_price from EIP-4844
 func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
 	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
+}
+
+func HeaderSetExcessDataGas(chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions) {
+	if chain.Config().IsSharding(header.Time) {
+		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
+			header.SetExcessDataGas(CalcExcessDataGas(parent.ExcessDataGas, CountBlobs(txs)))
+		} else {
+			header.SetExcessDataGas(new(big.Int))
+		}
+	}
 }

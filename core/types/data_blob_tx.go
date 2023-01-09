@@ -708,3 +708,13 @@ func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.GetDataHashes() }
 
 // func (stx *SignedBlobTx) WrapData() TxWrapData      { return nil }
+
+func (stx *SignedBlobTx) DataGas() *big.Int {
+	r := new(big.Int)
+	l := int64(len(stx.DataHashes()))
+	if l != 0 {
+		r.SetInt64(l)
+		r.Mul(r, big.NewInt(params.DataGasPerBlob))
+	}
+	return r
+}

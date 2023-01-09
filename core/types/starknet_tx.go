@@ -474,3 +474,13 @@ func (tx StarknetTransaction) EncodingSize() int {
 }
 
 func (tx StarknetTransaction) DataHashes() []common.Hash { return nil }
+
+func (tx StarknetTransaction) DataGas() *big.Int {
+	r := new(big.Int)
+	l := int64(len(tx.DataHashes()))
+	if l != 0 {
+		r.SetInt64(l)
+		r.Mul(r, big.NewInt(params.DataGasPerBlob))
+	}
+	return r
+}

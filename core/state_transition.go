@@ -263,6 +263,7 @@ func (st *StateTransition) to() common.Address {
 func (st *StateTransition) buyGas(gasBailout bool) error {
 	mgval := st.sharedBuyGas
 	mgval.SetUint64(st.msg.Gas())
+	st.msg.GasPrice()
 	mgval, overflow := mgval.MulOverflow(mgval, st.gasPrice)
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
@@ -306,6 +307,12 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	st.initialGas = st.msg.Gas()
 	if subBalance {
+		// deduct the total gas fee (regular + data) from the sender's balance
+		x, overflow := uint256.FromBig(dgval)
+		if overflow {
+			// TODO
+		}
+		mgval.Add(mgval, x)
 		st.state.SubBalance(st.msg.From(), mgval)
 	}
 	return nil
@@ -348,7 +355,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 				st.msg.From().Hex(), codeHash)
 		}
 	}
-
 	// Make sure the transaction gasFeeCap is greater than the block's baseFee.
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
@@ -358,7 +364,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-
 	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
 		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
 		if dataGasPrice.Cmp(st.msg.MaxFeePerDataGas().ToBig()) > 0 {

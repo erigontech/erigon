@@ -110,7 +110,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 		vmenv.Reset(TxContext, statedb)
 		// Not yet the searched for transaction, execute on top of the current state
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.DataGas().Uint64()), true /* refunds */, false /* gasBailout */); err != nil {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
@@ -190,7 +190,7 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddDataGas(message.DataGas()), refunds, false /* gasBailout */)
 	if err != nil {
 		if streaming {
 			stream.WriteArrayEnd()

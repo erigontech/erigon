@@ -367,7 +367,7 @@ func filterBadTransactions(transactions []types.Transaction, config params.Chain
 func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64) (types.Logs, bool, error) {
 	header := current.Header
 	tcount := 0
-	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed) // TODO see how much dataGas is needed here
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), 0)
 
 	var coalescedLogs types.Logs
@@ -376,6 +376,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
+		dataGas := gasPool.DataGas()
 		snap := ibs.Snapshot()
 		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
 		var excessDataGas *big.Int
@@ -386,7 +387,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, excessDataGas)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
-			gasPool = new(core.GasPool).AddGas(gasSnap) // restore gasPool as well as ibs
+			gasPool = new(core.GasPool).AddGas(gasSnap).AddDataGas(dataGas) // restore gasPool as well as ibs
 			return nil, err
 		}
 

@@ -1266,7 +1266,10 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 	var excessDataGas *big.Int
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(p.snapshots)
 	dbrw, _ := p.chainDb.BeginRw(context.Background())
-	ph, _ := blockReader.HeaderByHash(nil, dbrw, header.ParentHash)
+	ph, err := blockReader.HeaderByHash(nil, dbrw, header.ParentHash)
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}

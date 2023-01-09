@@ -93,6 +93,9 @@ type Transaction interface {
 
 	// eip-4844. DataHashes returns the blob versioned hashes of the transaction.
 	DataHashes() []common.Hash
+	// DataGas implements get_total_data_gas from EIP-4844. While this returns a big.Int for
+	// convenience, it should never exceed math.MaxUint64.
+	DataGas() *big.Int
 }
 
 // TxBlobWrapData returns the blob and kzg data, if any.

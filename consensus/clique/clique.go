@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -370,6 +371,7 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
+	misc.HeaderSetExcessDataGas(chain, header, txs)
 	return txs, r, nil
 }
 
@@ -381,7 +383,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *ty
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-
+	misc.HeaderSetExcessDataGas(chain, header, txs)
 	// Assemble and return the final block for sealing
 	return types.NewBlock(header, txs, nil, receipts, withdrawals), txs, receipts, nil
 }

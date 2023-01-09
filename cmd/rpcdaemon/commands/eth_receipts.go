@@ -44,7 +44,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 	}
 
 	usedGas := new(uint64)
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	noopWriter := state.NewNoopWriter()
 
@@ -395,7 +395,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
-			parent, _ = api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
+			parent, err = api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
+			if err != nil {
+				// TODO log, panic or return?
+			}
 			if parent != nil {
 				excessDataGas = parent.ExcessDataGas
 			}
@@ -437,7 +440,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		evm.ResetBetweenBlocks(blockCtx, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, blockNum, txNum, ibs.Error())

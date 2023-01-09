@@ -486,3 +486,13 @@ func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address,
 }
 
 func (tx *DynamicFeeTransaction) DataHashes() []common.Hash { return nil }
+
+func (tx *DynamicFeeTransaction) DataGas() *big.Int {
+	r := new(big.Int)
+	l := int64(len(tx.DataHashes()))
+	if l != 0 {
+		r.SetInt64(l)
+		r.Mul(r, big.NewInt(params.DataGasPerBlob))
+	}
+	return r
+}

@@ -467,3 +467,13 @@ func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
 }
 
 func (tx *LegacyTx) DataHashes() []common.Hash { return nil }
+
+func (tx *LegacyTx) DataGas() *big.Int {
+	r := new(big.Int)
+	l := int64(len(tx.DataHashes()))
+	if l != 0 {
+		r.SetInt64(l)
+		r.Mul(r, big.NewInt(params.DataGasPerBlob))
+	}
+	return r
+}

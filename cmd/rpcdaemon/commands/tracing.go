@@ -84,7 +84,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	var excessDataGas *big.Int
-	ph, _ := api._blockReader.HeaderByHash(ctx, tx, block.ParentHash())
+	ph, err := api._blockReader.HeaderByHash(ctx, tx, block.ParentHash())
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -273,7 +276,10 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
 	var excessDataGas *big.Int
-	ph, _ := api._blockReader.HeaderByHash(ctx, dbtx, header.ParentHash)
+	ph, err := api._blockReader.HeaderByHash(ctx, dbtx, header.ParentHash)
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -399,7 +405,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
-	gp := new(core.GasPool).AddGas(math.MaxUint64)
+	gp := new(core.GasPool).AddGas(math.MaxUint64).AddDataGas(math.MaxUint64)
 	for _, txn := range replayTransactions {
 		msg, err := txn.AsMessage(*signer, nil, rules)
 		if err != nil {

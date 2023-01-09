@@ -83,7 +83,10 @@ func DoCall(
 		return nil, err
 	}
 	var excessDataGas *big.Int
-	ph, _ := headerReader.HeaderByHash(ctx, tx, header.ParentHash)
+	ph, err := headerReader.HeaderByHash(ctx, tx, header.ParentHash)
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -99,7 +102,7 @@ func DoCall(
 		evm.Cancel()
 	}()
 
-	gp := new(core.GasPool).AddGas(msg.Gas())
+	gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 	result, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, err
@@ -165,7 +168,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 		timedOut = true
 	}()
 
-	gp := new(core.GasPool).AddGas(r.message.Gas())
+	gp := new(core.GasPool).AddGas(r.message.Gas()).AddDataGas(r.message.DataGas())
 
 	result, err := core.ApplyMessage(r.evm, r.message, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
@@ -215,7 +218,10 @@ func NewReusableCaller(
 		return nil, err
 	}
 	var excessDataGas *big.Int
-	ph, _ := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	ph, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}

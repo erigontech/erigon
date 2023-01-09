@@ -163,7 +163,8 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = chain.Blocks[0]
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
-	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
+	// TODO see if AddDataGas has correct amount of dataGas
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit).AddDataGas(params.MaxDataGasPerBlock)
 	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
 	b.pendingState = state.New(b.pendingReader)
 }
@@ -669,7 +670,10 @@ func (b *SimulatedBackend) callContract(ctx context.Context, call ethereum.CallM
 
 	var excessDataGas *big.Int
 	// Get the last block header
-	ph, _ := b.HeaderByHash(ctx, block.ParentHash())
+	ph, err := b.HeaderByHash(ctx, block.ParentHash())
+	if err != nil {
+		// TODO log or panic?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}

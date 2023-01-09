@@ -688,7 +688,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
-	gp := new(core.GasPool).AddGas(block.GasLimit())
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {

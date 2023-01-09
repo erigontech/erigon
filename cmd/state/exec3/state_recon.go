@@ -345,7 +345,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 				return
 			}
 		}
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddDataGas(txTask.Tx.DataGas().Uint64())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage

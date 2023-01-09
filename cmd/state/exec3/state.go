@@ -189,7 +189,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 			}
 		}
 		txHash := txTask.Tx.Hash()
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddDataGas(txTask.Tx.DataGas().Uint64())
 		ct := NewCallTracer()
 		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
@@ -202,9 +202,6 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		} else {
 			blockContext := txTask.EvmBlockContext
 			if !rw.background {
-				var excessDataGas *big.Int
-				// TODO: Get the last block header
-
 				getHashFn := core.GetHashFn(header, rw.getHeader)
 				blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, excessDataGas)
 			}

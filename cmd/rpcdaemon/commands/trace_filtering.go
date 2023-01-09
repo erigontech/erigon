@@ -651,7 +651,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 				stream.WriteObjectEnd()
 				continue
 			}
-			ph, _ := api._blockReader.HeaderByHash(ctx, dbtx, lastHeader.ParentHash)
+			ph, err := api._blockReader.HeaderByHash(ctx, dbtx, lastHeader.ParentHash)
+			if err != nil {
+				// TODO log, panic or return?
+			}
 			if ph != nil {
 				excessDataGas = ph.ExcessDataGas
 			}
@@ -821,7 +824,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)

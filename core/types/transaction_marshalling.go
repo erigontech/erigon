@@ -34,7 +34,12 @@ type txJSON struct {
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
+	// Blob transaction fields:
+	MaxFeePerDataGas    *hexutil.Big  `json:"maxFeePerDataGas,omitempty"`
 	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
+	Blobs               Blobs         `json:"blobs,omitempty"`
+	BlobKzgs            BlobKzgs      `json:"blobKzgs,omitempty"`
+	KzgAggregatedProof  KZGProof      `json:"kzgAggregatedProof,omitempty"`
 
 	// Only used for encoding:
 	Hash common.Hash `json:"hash"`
@@ -111,7 +116,15 @@ func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	enc.V = (*hexutil.Big)(v.ToBig())
 	enc.R = (*hexutil.Big)(r.ToBig())
 	enc.S = (*hexutil.Big)(s.ToBig())
+	enc.MaxFeePerDataGas = (*hexutil.Big)(u256ToBig(&tx.Message.MaxFeePerDataGas))
 	enc.BlobVersionedHashes = tx.Message.BlobVersionedHashes
+
+	// tx.WrapData is temp solution, this will require more detailed research + possible refactoring
+	if tx.WrapData != nil {
+		enc.Blobs = tx.WrapData.blobs()
+		enc.BlobKzgs = tx.WrapData.kzgs()
+		enc.KzgAggregatedProof = tx.WrapData.aggregatedProof()
+	}
 	return json.Marshal(&enc)
 }
 
@@ -148,6 +161,12 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 			return nil, err
 		}
 		return tx, nil
+	case BlobTxType:
+		tx := &SignedBlobTx{}
+		if err = tx.UnmarshalJSON(input); err != nil {
+			return nil, err
+		}
+		return tx, err
 	default:
 		return nil, fmt.Errorf("unknown transaction type: %v", txType)
 	}
@@ -448,15 +467,31 @@ func (tx *SignedBlobTx) UnmarshalJSON(input []byte) error {
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	tx.Signature.S.SetFromBig((*big.Int)(dec.S))
 
+	tx.Signature.S.SetFromBig((*big.Int)(dec.S))
 	withSignature := (*big.Int)(dec.V).Sign() != 0 || (*big.Int)(dec.R).Sign() != 0 || (*big.Int)(dec.S).Sign() != 0
 	if withSignature {
 		if err := sanityCheckSignature(uint256.NewInt(uint64(tx.Signature.V)), (*uint256.Int)(&tx.Signature.R), (*uint256.Int)(&tx.Signature.S), false); err != nil {
 			return err
 		}
 	}
+	tx.Message.MaxFeePerDataGas.SetFromBig((*big.Int)(dec.MaxFeePerDataGas))
+	if dec.MaxFeePerDataGas == nil {
+		return errors.New("missing required field 'maxFeePerDataGas' for txdata")
+	}
 	tx.Message.BlobVersionedHashes = dec.BlobVersionedHashes
+	// A BlobTx may not contain data
+	if len(dec.Blobs) != 0 || len(dec.BlobKzgs) != 0 {
+		tx.WrapData = &BlobTxWrapData{
+			BlobKzgs:           dec.BlobKzgs,
+			Blobs:              dec.Blobs,
+			KzgAggregatedProof: dec.KzgAggregatedProof,
+		}
+		// Verify that versioned hashes match kzgs, and kzgs match blobs.
+		if err := tx.WrapData.validateBlobTransactionWrapper(tx); err != nil {
+			return fmt.Errorf("blob wrapping data is invalid: %v", err)
+		}
+	}
 
 	return nil
 }

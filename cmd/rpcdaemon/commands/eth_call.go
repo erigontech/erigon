@@ -344,7 +344,10 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(bNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
 	var excessDataGas *big.Int
-	ph, _ := api.BaseAPI.headerByRPCNumber(rpc.BlockNumber(blockNumber)-1, tx)
+	ph, err := api.BaseAPI.headerByRPCNumber(rpc.BlockNumber(blockNumber)-1, tx)
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -445,7 +448,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
-		gp := new(core.GasPool).AddGas(msg.Gas())
+		gp := new(core.GasPool).AddGas(msg.Gas()).AddDataGas(msg.DataGas())
 		res, err := core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			return nil, err

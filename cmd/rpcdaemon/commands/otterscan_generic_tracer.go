@@ -54,7 +54,10 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 
 	var excessDataGas *big.Int
 	// Get the last block header
-	ph, _ := api._blockReader.HeaderByHash(ctx, dbtx, block.ParentHash())
+	ph, err := api._blockReader.HeaderByHash(ctx, dbtx, block.ParentHash())
+	if err != nil {
+		// TODO log, panic or return?
+	}
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -68,7 +71,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
-		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()), true /* refunds */, false /* gasBailout */); err != nil {
+		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.DataGas().Uint64()), true /* refunds */, false /* gasBailout */); err != nil {
 			return err
 		}
 		_ = ibs.FinalizeTx(rules, cachedWriter)
