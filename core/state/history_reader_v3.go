@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/common"
@@ -101,7 +102,7 @@ func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Ac
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	if hr.ttx != nil {
-		enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), key.Bytes()...), nil, hr.txNum)
+		enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), common2.EncodeTs(incarnation)...), key.Bytes(), hr.txNum)
 		return enc, err
 	}
 

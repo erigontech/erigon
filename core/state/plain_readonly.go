@@ -234,15 +234,15 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 }
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.StorageDomain, compositeKey, nil, s.txNr)
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes(), s.txNr)
 		if err != nil {
 			return nil, err
 		}
 	} else {
+		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 		enc, err = historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 		if err != nil {
 			return nil, err
