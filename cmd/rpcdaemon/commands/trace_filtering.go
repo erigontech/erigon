@@ -643,7 +643,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return err
 		}
 		if !ok {
-			return nil
+			break
 		}
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
