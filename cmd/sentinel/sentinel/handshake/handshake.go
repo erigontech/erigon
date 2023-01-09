@@ -86,6 +86,5 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(response), responseStatus); err != nil {
 		return false
 	}
-
 	return h.rule(responseStatus, status, h.genesisConfig, h.beaconConfig)
 }

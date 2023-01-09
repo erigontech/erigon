@@ -143,7 +143,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 					"blk/sec", fmt.Sprintf("%.1f", speed),
 					"peers", peerCount)
 				if currentSlot > destinationSlot {
-					logArgs = append(logArgs, "remaining", currentSlot-destinationSlot)
+					logArgs = append(logArgs, "remaining", currProgress-destinationSlot)
 				}
 				log.Info(fmt.Sprintf("[%s] Backwards downloading phase", s.LogPrefix()), logArgs...)
 			case <-finishCh:

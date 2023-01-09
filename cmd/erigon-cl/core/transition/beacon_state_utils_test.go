@@ -52,11 +52,9 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 		ProposerIndex: 1947,
 		ParentRoot:    headerArr,
 		Body: &cltypes.BeaconBodyBellatrix{
-			Graffiti: make([]byte, 32),
-			Eth1Data: &cltypes.Eth1Data{},
-			SyncAggregate: &cltypes.SyncAggregate{
-				SyncCommiteeBits: make([]byte, 64),
-			},
+			Graffiti:      make([]byte, 32),
+			Eth1Data:      &cltypes.Eth1Data{},
+			SyncAggregate: &cltypes.SyncAggregate{},
 			ExecutionPayload: &cltypes.ExecutionPayload{
 				LogsBloom:     make([]byte, 256),
 				BaseFeePerGas: make([]byte, 32),
