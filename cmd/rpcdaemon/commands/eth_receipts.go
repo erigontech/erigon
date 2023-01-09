@@ -314,13 +314,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-		for it.HasNext() {
-			n, err := it.NextBatch()
-			if err != nil {
-				return nil, err
-			}
-			bitmapForORing.AddMany(n)
-		}
+		bitmapForORing.Or(it.(bitmapdb.ToBitamp).ToBitmap())
 		if addrBitmap == nil {
 			addrBitmap = &bitmapForORing
 			continue
@@ -480,13 +474,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return nil, err
-				}
-				bitmapForORing.AddMany(n)
-			}
+			bitmapForORing.Or(it.(bitmapdb.ToBitamp).ToBitmap())
 		}
 
 		if bitmapForORing.GetCardinality() == 0 {

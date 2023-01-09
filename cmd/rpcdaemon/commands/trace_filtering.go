@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -262,7 +263,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 
 	if api.historyV3(dbtx) {
-		return api.filterV3(ctx, dbtx, fromBlock, toBlock, req, stream)
+		return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
 	}
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
@@ -526,7 +527,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	return stream.Flush()
 }
 
-func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
+func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsoniter.Stream) error {
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
@@ -547,18 +548,15 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 		allTxs roaring64.Bitmap
 		txsTo  roaring64.Bitmap
 	)
-	ac := api._agg.MakeContext()
-	ac.SetTx(dbtx)
 
 	for _, addr := range req.FromAddress {
 		if addr != nil {
-			it := ac.TraceFromIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
+			it, err := dbtx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), fromTxNum, toTxNum)
+			if err != nil {
+				return err
+			}
 			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return err
-				}
-				allTxs.AddMany(n)
+				allTxs.Or(it.(bitmapdb.ToBitamp).ToBitmap())
 			}
 			fromAddresses[*addr] = struct{}{}
 		}
@@ -566,14 +564,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
-			it := ac.TraceToIterator(addr.Bytes(), fromTxNum, toTxNum, dbtx)
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return err
-				}
-				txsTo.AddMany(n)
+			it, err := dbtx.IndexRange(temporal.TracesToIdx, addr.Bytes(), fromTxNum, toTxNum)
+			if err != nil {
+				return err
 			}
+			txsTo.Or(it.(bitmapdb.ToBitamp).ToBitmap())
 			toAddresses[*addr] = struct{}{}
 		}
 	}
@@ -626,7 +621,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.Tx, fromBlock, to
 	var lastRules *params.Rules
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
-	stateReader.SetAc(ac)
+	//stateReader.SetAc(ac)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()

@@ -235,7 +235,7 @@ type Cursor struct {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.U64Stream, err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopicIdx:
@@ -275,6 +275,6 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		if err != nil {
 			return nil, err
 		}
-		return kv.StreamArray(bm.ToArray()), nil
+		return bitmapdb.NewBitmapStream(bm), nil
 	}
 }

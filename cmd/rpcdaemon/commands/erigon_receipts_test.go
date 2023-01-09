@@ -50,7 +50,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		})
 	}
 	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
-		LogCount: uint64((len(expectedLogs))),
+		LogCount: uint64(len(expectedLogs)),
 	})
 	if err != nil {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
