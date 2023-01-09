@@ -110,7 +110,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	var accData []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], s.txNr)
+		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, s.txNr)
 		if err != nil {
 			return err
 		}
@@ -192,7 +192,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], s.txNr)
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, s.txNr)
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.StorageDomain, compositeKey, s.txNr)
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, compositeKey, nil, s.txNr)
 		if err != nil {
 			return nil, err
 		}
@@ -280,7 +280,7 @@ func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, err
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], s.txNr+1)
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, s.txNr+1)
 		if err != nil {
 			return 0, err
 		}

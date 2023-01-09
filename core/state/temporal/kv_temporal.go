@@ -129,7 +129,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsDomain:
 		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)
@@ -160,10 +160,10 @@ func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 			if ok {
 				return v, true, nil
 			}
-			v, err = tx.GetOne(kv.Code, key)
+			v, err = tx.GetOne(kv.Code, key2)
 			return v, v != nil, err
 		}
-		v, err = tx.GetOne(kv.Code, key)
+		v, err = tx.GetOne(kv.Code, key2)
 		return v, v != nil, err
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
