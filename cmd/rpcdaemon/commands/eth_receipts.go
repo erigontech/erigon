@@ -419,7 +419,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		//stateReader.SetTxNum(txNum - 1)
+		stateReader.SetTxNum(txNum - 1)
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
