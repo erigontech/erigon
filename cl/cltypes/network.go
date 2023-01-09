@@ -1,37 +1,83 @@
 package cltypes
 
-type MetadataV1 struct {
+import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/common"
+)
+
+type Metadata struct {
 	SeqNumber uint64
 	Attnets   uint64
+	Syncnets  *uint64
 }
 
-type MetadataV2 struct {
-	SeqNumber uint64
-	Attnets   uint64
-	Syncnets  uint64
+func (m *Metadata) MarshalSSZ() ([]byte, error) {
+	ret := make([]byte, 24)
+	ssz_utils.MarshalUint64SSZ(ret, m.SeqNumber)
+	ssz_utils.MarshalUint64SSZ(ret[8:], m.Attnets)
+
+	if m.Syncnets == nil {
+		return ret[:16], nil
+	}
+	ssz_utils.MarshalUint64SSZ(ret[16:], *m.Syncnets)
+	return ret, nil
 }
 
-// ENRForkID contains current fork id for ENR entries.
-type ENRForkID struct {
-	CurrentForkDigest [4]byte `ssz-size:"4" `
-	NextForkVersion   [4]byte `ssz-size:"4" `
-	NextForkEpoch     uint64
+func (m *Metadata) UnmarshalSSZ(buf []byte) error {
+	m.SeqNumber = ssz_utils.UnmarshalUint64SSZ(buf)
+	m.Attnets = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	if len(buf) < 24 {
+		return nil
+	}
+	m.Syncnets = new(uint64)
+	*m.Syncnets = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	return nil
 }
 
-// ForkData contains current fork id for gossip subscription.
-type ForkData struct {
-	CurrentVersion        [4]byte  `ssz-size:"4" `
-	GenesisValidatorsRoot [32]byte `ssz-size:"32" `
+func (m *Metadata) SizeSSZ() (ret int) {
+	ret = common.BlockNumberLength * 2
+	if m.Syncnets != nil {
+		ret += 8
+	}
+	return
 }
 
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.
 type Ping struct {
-	Id uint64 `json:"id" `
+	Id uint64
+}
+
+func (p *Ping) MarshalSSZ() ([]byte, error) {
+	ret := make([]byte, p.SizeSSZ())
+	ssz_utils.MarshalUint64SSZ(ret, p.Id)
+	return ret, nil
+}
+
+func (p *Ping) UnmarshalSSZ(buf []byte) error {
+	p.Id = ssz_utils.UnmarshalUint64SSZ(buf)
+	return nil
+}
+
+func (p *Ping) SizeSSZ() int {
+	return common.BlockNumberLength
 }
 
 // P2P Message for bootstrap
 type SingleRoot struct {
-	Root [32]byte `ssz-size:"32" `
+	Root [32]byte
+}
+
+func (s *SingleRoot) MarshalSSZ() ([]byte, error) {
+	return s.Root[:], nil
+}
+
+func (s *SingleRoot) UnmarshalSSZ(buf []byte) error {
+	copy(s.Root[:], buf)
+	return nil
+}
+
+func (s *SingleRoot) SizeSSZ() int {
+	return common.HashLength
 }
 
 /*
@@ -43,6 +89,23 @@ type LightClientUpdatesByRangeRequest struct {
 	Count  uint64
 }
 
+func (l *LightClientUpdatesByRangeRequest) MarshalSSZ() ([]byte, error) {
+	buf := make([]byte, l.SizeSSZ())
+	ssz_utils.MarshalUint64SSZ(buf, l.Period)
+	ssz_utils.MarshalUint64SSZ(buf[8:], l.Count)
+	return buf, nil
+}
+
+func (l *LightClientUpdatesByRangeRequest) UnmarshalSSZ(buf []byte) error {
+	l.Period = ssz_utils.UnmarshalUint64SSZ(buf)
+	l.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	return nil
+}
+
+func (l *LightClientUpdatesByRangeRequest) SizeSSZ() int {
+	return 2 * common.BlockNumberLength
+}
+
 /*
  * BeaconBlocksByRangeRequest is the request for getting a range of blocks.
  */
@@ -50,6 +113,25 @@ type BeaconBlocksByRangeRequest struct {
 	StartSlot uint64
 	Count     uint64
 	Step      uint64 // Deprecated, must be set to 1
+}
+
+func (b *BeaconBlocksByRangeRequest) MarshalSSZ() ([]byte, error) {
+	buf := make([]byte, b.SizeSSZ())
+	ssz_utils.MarshalUint64SSZ(buf, b.StartSlot)
+	ssz_utils.MarshalUint64SSZ(buf[8:], b.Count)
+	ssz_utils.MarshalUint64SSZ(buf[16:], b.Step)
+	return buf, nil
+}
+
+func (b *BeaconBlocksByRangeRequest) UnmarshalSSZ(buf []byte) error {
+	b.StartSlot = ssz_utils.UnmarshalUint64SSZ(buf)
+	b.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	b.Step = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	return nil
+}
+
+func (b *BeaconBlocksByRangeRequest) SizeSSZ() int {
+	return 3 * common.BlockNumberLength
 }
 
 /*
@@ -64,12 +146,25 @@ type Status struct {
 	HeadSlot       uint64
 }
 
-/*
- * SigningData is the message we want to verify against the sync committee signature.
- * Root is the HastTreeRoot() of the beacon block header,
- * while the domain is the sync committee identifier.
- */
-type SigningData struct {
-	Root   [32]byte `ssz-size:"32"`
-	Domain []byte   `ssz-size:"32"`
+func (s *Status) MarshalSSZ() ([]byte, error) {
+	buf := make([]byte, s.SizeSSZ())
+	copy(buf, s.ForkDigest[:])
+	copy(buf[4:], s.FinalizedRoot[:])
+	ssz_utils.MarshalUint64SSZ(buf[36:], s.FinalizedEpoch)
+	copy(buf[44:], s.HeadRoot[:])
+	ssz_utils.MarshalUint64SSZ(buf[76:], s.HeadSlot)
+	return buf, nil
+}
+
+func (s *Status) UnmarshalSSZ(buf []byte) error {
+	copy(s.ForkDigest[:], buf)
+	copy(s.FinalizedRoot[:], buf[4:])
+	s.FinalizedEpoch = ssz_utils.UnmarshalUint64SSZ(buf[36:])
+	copy(s.HeadRoot[:], buf[44:])
+	s.HeadSlot = ssz_utils.UnmarshalUint64SSZ(buf[76:])
+	return nil
+}
+
+func (s *Status) SizeSSZ() int {
+	return 84
 }

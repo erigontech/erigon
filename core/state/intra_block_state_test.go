@@ -124,9 +124,9 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			},
 		},
 		{
-			name: "Suicide",
+			name: "Selfdestruct",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.Suicide(addr)
+				s.Selfdestruct(addr)
 			},
 		},
 		{
@@ -225,7 +225,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 	var (
-		ds           = NewPlainState(tx, 1)
+		ds           = NewPlainState(tx, 1, nil)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
@@ -240,7 +240,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainState(tx, 1)
+		checkds := NewPlainState(tx, 1, nil)
 		checkstate := New(checkds)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
@@ -277,7 +277,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
 			return err
 		}
-		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
+		checkeq("HasSelfdestructed", state.HasSelfdestructed(addr), checkstate.HasSelfdestructed(addr))
 		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
 		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))

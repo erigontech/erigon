@@ -44,6 +44,7 @@ const MaxBuilders = 128
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
+var ErrWithdrawalsNotSupported = rpc.CustomError{Code: -38004, Message: "Withdrawals not supported"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -640,6 +641,17 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 
 	if headHeader.Time >= payloadAttributes.Timestamp {
 		return nil, &InvalidPayloadAttributesErr
+	}
+
+	// If pre-Shanghai and there are withdrawals, we should error
+	if reqWithdrawals != nil && !s.config.IsShanghai(payloadAttributes.Timestamp) {
+		return &remote.EngineForkChoiceUpdatedReply{
+			PayloadStatus: &remote.EnginePayloadStatus{
+				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+			},
+			PayloadId: s.payloadId,
+		}, &ErrWithdrawalsNotSupported
 	}
 
 	// Initiate payload building

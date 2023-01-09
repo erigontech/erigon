@@ -45,7 +45,7 @@ import (
 
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
-	data, err := db.GetOne(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number))
+	data, err := db.GetOne(kv.HeaderCanonical, common2.EncodeTs(number))
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("failed ReadCanonicalHash: %w, number=%d", err, number)
 	}
@@ -57,7 +57,7 @@ func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 
 // WriteCanonicalHash stores the hash assigned to a canonical block number.
 func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
-	if err := db.Put(kv.HeaderCanonical, dbutils.EncodeBlockNumber(number), hash.Bytes()); err != nil {
+	if err := db.Put(kv.HeaderCanonical, common2.EncodeTs(number), hash.Bytes()); err != nil {
 		return fmt.Errorf("failed to store number to hash mapping: %w", err)
 	}
 	return nil
@@ -65,7 +65,7 @@ func WriteCanonicalHash(db kv.Putter, hash common.Hash, number uint64) error {
 
 // TruncateCanonicalHash removes all the number to hash canonical mapping from block number N
 func TruncateCanonicalHash(tx kv.RwTx, blockFrom uint64, deleteHeaders bool) error {
-	if err := tx.ForEach(kv.HeaderCanonical, dbutils.EncodeBlockNumber(blockFrom), func(k, v []byte) error {
+	if err := tx.ForEach(kv.HeaderCanonical, common2.EncodeTs(blockFrom), func(k, v []byte) error {
 		if deleteHeaders {
 			deleteHeader(tx, common.BytesToHash(v), blockFrom)
 		}
@@ -108,7 +108,7 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 
 // WriteHeaderNumber stores the hash->number mapping.
 func WriteHeaderNumber(db kv.Putter, hash common.Hash, number uint64) error {
-	if err := db.Put(kv.HeaderNumber, hash[:], dbutils.EncodeBlockNumber(number)); err != nil {
+	if err := db.Put(kv.HeaderNumber, hash[:], common2.EncodeTs(number)); err != nil {
 		return err
 	}
 	return nil
@@ -296,7 +296,7 @@ func ReadHeadersByNumber(db kv.Tx, number uint64) ([]*types.Header, error) {
 		return nil, err
 	}
 	defer c.Close()
-	prefix := dbutils.EncodeBlockNumber(number)
+	prefix := common2.EncodeTs(number)
 	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return nil, err
@@ -320,7 +320,7 @@ func WriteHeader(db kv.Putter, header *types.Header) {
 	var (
 		hash    = header.Hash()
 		number  = header.Number.Uint64()
-		encoded = dbutils.EncodeBlockNumber(number)
+		encoded = common2.EncodeTs(number)
 	)
 	if err := db.Put(kv.HeaderNumber, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
@@ -624,6 +624,7 @@ func ReadBody(db kv.Getter, hash common.Hash, number uint64) (*types.Body, uint6
 	}
 	body := new(types.Body)
 	body.Uncles = bodyForStorage.Uncles
+	body.Withdrawals = bodyForStorage.Withdrawals
 
 	if bodyForStorage.TxAmount < 2 {
 		panic(fmt.Sprintf("block body hash too few txs amount: %d, %d", number, bodyForStorage.TxAmount))
@@ -660,9 +661,10 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 		return false, 0, err
 	}
 	data := types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)) + 2,
-		Uncles:   body.Uncles,
+		BaseTxId:    baseTxId,
+		TxAmount:    uint32(len(body.Transactions)) + 2,
+		Uncles:      body.Uncles,
+		Withdrawals: body.Withdrawals,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, 0, fmt.Errorf("WriteBodyForStorage: %w", err)
@@ -682,9 +684,10 @@ func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) er
 		return err
 	}
 	data := types.BodyForStorage{
-		BaseTxId: baseTxId,
-		TxAmount: uint32(len(body.Transactions)) + 2,
-		Uncles:   body.Uncles,
+		BaseTxId:    baseTxId,
+		TxAmount:    uint32(len(body.Transactions)) + 2,
+		Uncles:      body.Uncles,
+		Withdrawals: body.Withdrawals,
 	}
 	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
@@ -740,9 +743,9 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
-		if err := tx.ForAmount(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+		if err := tx.ForAmount(kv.NonCanonicalTxs, common2.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
 			id := newBaseId + 1 + i
-			if err := tx.Put(kv.EthTx, dbutils.EncodeBlockNumber(id), v); err != nil {
+			if err := tx.Put(kv.EthTx, common2.EncodeTs(id), v); err != nil {
 				return err
 			}
 			if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
@@ -812,10 +815,10 @@ func MakeBodiesNonCanonical(tx kv.RwTx, from uint64, deleteBodies bool, ctx cont
 		}
 		// next loop does move only non-system txs. need move system-txs manually (because they may not exist)
 		i := uint64(0)
-		if err := tx.ForAmount(kv.EthTx, dbutils.EncodeBlockNumber(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
+		if err := tx.ForAmount(kv.EthTx, common2.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
 			if !deleteBodies {
 				id := newBaseId + 1 + i
-				if err := tx.Put(kv.NonCanonicalTxs, dbutils.EncodeBlockNumber(id), v); err != nil {
+				if err := tx.Put(kv.NonCanonicalTxs, common2.EncodeTs(id), v); err != nil {
 					return err
 				}
 			}
@@ -905,7 +908,7 @@ func WriteTd(db kv.Putter, hash common.Hash, number uint64, td *big.Int) error {
 
 // TruncateTd removes all block total difficulty from block number N
 func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
-	if err := tx.ForEach(kv.HeaderTD, dbutils.EncodeBlockNumber(blockFrom), func(k, _ []byte) error {
+	if err := tx.ForEach(kv.HeaderTD, common2.EncodeTs(blockFrom), func(k, _ []byte) error {
 		return tx.Delete(kv.HeaderTD, k)
 	}); err != nil {
 		return fmt.Errorf("TruncateTd: %w", err)
@@ -916,7 +919,7 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 // HasReceipts verifies the existence of all the transaction receipts belonging
 // to a block.
 func HasReceipts(db kv.Has, hash common.Hash, number uint64) bool {
-	if has, err := db.Has(kv.Receipts, dbutils.EncodeBlockNumber(number)); !has || err != nil {
+	if has, err := db.Has(kv.Receipts, common2.EncodeTs(number)); !has || err != nil {
 		return false
 	}
 	return true
@@ -927,7 +930,7 @@ func HasReceipts(db kv.Has, hash common.Hash, number uint64) bool {
 // should not be used. Use ReadReceipts instead if the metadata is needed.
 func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 	// Retrieve the flattened receipt slice
-	data, err := db.GetOne(kv.Receipts, dbutils.EncodeBlockNumber(blockNum))
+	data, err := db.GetOne(kv.Receipts, common2.EncodeTs(blockNum))
 	if err != nil {
 		log.Error("ReadRawReceipts failed", "err", err)
 	}
@@ -942,10 +945,23 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 
 	prefix := make([]byte, 8)
 	binary.BigEndian.PutUint64(prefix, blockNum)
-	if err := db.ForPrefix(kv.Log, prefix, func(k, v []byte) error {
+
+	it, err := db.Prefix(kv.Log, prefix)
+	if err != nil {
+		log.Error("logs fetching failed", "err", err)
+		return nil
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			log.Error("logs fetching failed", "err", err)
+			return nil
+		}
 		var logs types.Logs
 		if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-			return fmt.Errorf("receipt unmarshal failed:  %w", err)
+			err = fmt.Errorf("receipt unmarshal failed:  %w", err)
+			log.Error("logs fetching failed", "err", err)
+			return nil
 		}
 
 		txIndex := int(binary.BigEndian.Uint32(k[8:]))
@@ -954,11 +970,6 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 		if txIndex < len(receipts) {
 			receipts[txIndex].Logs = logs
 		}
-
-		return nil
-	}); err != nil {
-		log.Error("logs fetching failed", "err", err)
-		return nil
 	}
 
 	return receipts
@@ -1038,7 +1049,7 @@ func WriteReceipts(tx kv.Putter, number uint64, receipts types.Receipts) error {
 		return fmt.Errorf("encode block receipts for block %d: %w", number, err)
 	}
 
-	if err = tx.Put(kv.Receipts, dbutils.EncodeBlockNumber(number), buf.Bytes()); err != nil {
+	if err = tx.Put(kv.Receipts, common2.EncodeTs(number), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %w", number, err)
 	}
 	return nil
@@ -1070,7 +1081,7 @@ func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.R
 		return fmt.Errorf("encode block receipts for block %d: %w", blockNumber, err)
 	}
 
-	if err = tx.Append(kv.Receipts, dbutils.EncodeBlockNumber(blockNumber), buf.Bytes()); err != nil {
+	if err = tx.Append(kv.Receipts, common2.EncodeTs(blockNumber), buf.Bytes()); err != nil {
 		return fmt.Errorf("writing receipts for block %d: %w", blockNumber, err)
 	}
 	return nil
@@ -1078,7 +1089,7 @@ func AppendReceipts(tx kv.StatelessWriteTx, blockNumber uint64, receipts types.R
 
 // TruncateReceipts removes all receipt for given block number or newer
 func TruncateReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.Receipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
+	if err := db.ForEach(kv.Receipts, common2.EncodeTs(number), func(k, _ []byte) error {
 		return db.Delete(kv.Receipts, k)
 	}); err != nil {
 		return err
@@ -1194,7 +1205,7 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	defer c.Close()
 
 	// find first non-genesis block
-	firstK, _, err := c.Seek(dbutils.EncodeBlockNumber(1))
+	firstK, _, err := c.Seek(common2.EncodeTs(1))
 	if err != nil {
 		return
 	}
@@ -1261,7 +1272,7 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	return
 }
 
-// LastKey - candidate on move to kv.Tx interface
+// LastKey
 func LastKey(tx kv.Tx, table string) ([]byte, error) {
 	c, err := tx.Cursor(table)
 	if err != nil {
@@ -1273,6 +1284,20 @@ func LastKey(tx kv.Tx, table string) ([]byte, error) {
 		return nil, err
 	}
 	return k, nil
+}
+
+// Last - candidate on move to kv.Tx interface
+func Last(tx kv.Tx, table string) ([]byte, []byte, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close()
+	k, v, err := c.Last()
+	if err != nil {
+		return nil, nil, err
+	}
+	return k, v, nil
 }
 
 // SecondKey - useful if table always has zero-key (for example genesis block)
@@ -1332,7 +1357,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 			if !isCanonical {
 				bucket = kv.NonCanonicalTxs
 			}
-			if err := tx.ForEach(bucket, dbutils.EncodeBlockNumber(b.BaseTxId), func(k, _ []byte) error {
+			if err := tx.ForEach(bucket, common2.EncodeTs(b.BaseTxId), func(k, _ []byte) error {
 				if err := tx.Delete(bucket, k); err != nil {
 					return err
 				}
@@ -1402,7 +1427,7 @@ func ReadBlockByHash(db kv.Tx, hash common.Hash) (*types.Block, error) {
 }
 
 func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, dbutils.EncodeBlockNumber(number))
+	data, err := db.GetOne(kv.Issuance, common2.EncodeTs(number))
 	if err != nil {
 		return nil, err
 	}
@@ -1411,11 +1436,11 @@ func ReadTotalIssued(db kv.Getter, number uint64) (*big.Int, error) {
 }
 
 func WriteTotalIssued(db kv.Putter, number uint64, totalIssued *big.Int) error {
-	return db.Put(kv.Issuance, dbutils.EncodeBlockNumber(number), totalIssued.Bytes())
+	return db.Put(kv.Issuance, common2.EncodeTs(number), totalIssued.Bytes())
 }
 
 func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...))
+	data, err := db.GetOne(kv.Issuance, append([]byte("burnt"), common2.EncodeTs(number)...))
 	if err != nil {
 		return nil, err
 	}
@@ -1424,11 +1449,11 @@ func ReadTotalBurnt(db kv.Getter, number uint64) (*big.Int, error) {
 }
 
 func WriteTotalBurnt(db kv.Putter, number uint64, totalBurnt *big.Int) error {
-	return db.Put(kv.Issuance, append([]byte("burnt"), dbutils.EncodeBlockNumber(number)...), totalBurnt.Bytes())
+	return db.Put(kv.Issuance, append([]byte("burnt"), common2.EncodeTs(number)...), totalBurnt.Bytes())
 }
 
 func ReadCumulativeGasUsed(db kv.Getter, number uint64) (*big.Int, error) {
-	data, err := db.GetOne(kv.CumulativeGasIndex, dbutils.EncodeBlockNumber(number))
+	data, err := db.GetOne(kv.CumulativeGasIndex, common2.EncodeTs(number))
 	if err != nil {
 		return nil, err
 	}
@@ -1440,7 +1465,7 @@ func ReadCumulativeGasUsed(db kv.Getter, number uint64) (*big.Int, error) {
 }
 
 func WriteCumulativeGasUsed(db kv.Putter, number uint64, cumulativeGasUsed *big.Int) error {
-	return db.Put(kv.CumulativeGasIndex, dbutils.EncodeBlockNumber(number), cumulativeGasUsed.Bytes())
+	return db.Put(kv.CumulativeGasIndex, common2.EncodeTs(number), cumulativeGasUsed.Bytes())
 }
 
 func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
@@ -1517,12 +1542,12 @@ func ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNo
 }
 
 func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
-	if err := tx.ForEach(kv.PendingEpoch, dbutils.EncodeBlockNumber(number), func(k, v []byte) error {
+	if err := tx.ForEach(kv.PendingEpoch, common2.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.Epoch, k)
 	}); err != nil {
 		return err
 	}
-	return tx.ForEach(kv.Epoch, dbutils.EncodeBlockNumber(number), func(k, v []byte) error {
+	return tx.ForEach(kv.Epoch, common2.EncodeTs(number), func(k, v []byte) error {
 		return tx.Delete(kv.Epoch, k)
 	})
 }
@@ -1538,7 +1563,7 @@ func FindEpochBeforeOrEqualNumber(tx kv.Tx, n uint64) (blockNum uint64, blockHas
 		return 0, common.Hash{}, nil, err
 	}
 	defer c.Close()
-	seek := dbutils.EncodeBlockNumber(n)
+	seek := common2.EncodeTs(n)
 	k, v, err := c.Seek(seek)
 	if err != nil {
 		return 0, common.Hash{}, nil, err
@@ -1655,13 +1680,6 @@ func WriteSnapshots(tx kv.RwTx, list, histList []string) error {
 	}
 	return nil
 }
-func WriteHistorySnapshots(tx kv.RwTx, list []string) error {
-	res, err := json.Marshal(list)
-	if err != nil {
-		return err
-	}
-	return tx.Put(kv.DatabaseInfo, SnapshotsHistoryKey, res)
-}
 
 // PruneTable has `limit` parameter to avoid too large data deletes per one sync cycle - better delete by small portions to reduce db.FreeList size
 func PruneTable(tx kv.RwTx, table string, pruneTo uint64, ctx context.Context, limit int) error {
@@ -1731,30 +1749,56 @@ type txNums struct{}
 
 var TxNums txNums
 
-func (txNums) Max(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+// Min - returns maxTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v), nil
 }
-func (txNums) Min(tx kv.Getter, blockNum uint64) (maxTxNum uint64, err error) {
+
+// Min - returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
 	}
 	var k [8]byte
 	binary.BigEndian.PutUint64(k[:], blockNum-1)
-	v, err := tx.GetOne(kv.MaxTxNum, k[:])
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	_, v, err := c.SeekExact(k[:])
 	if err != nil {
 		return 0, err
 	}
 	if len(v) == 0 {
-		return 0, nil
+		_, v, err = c.Last()
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, nil
+		}
 	}
 	return binary.BigEndian.Uint64(v) + 1, nil
 }
@@ -1766,7 +1810,7 @@ func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {
 	}
 	if len(lastK) != 0 {
 		lastBlockNum := binary.BigEndian.Uint64(lastK)
-		if lastBlockNum+1 != blockNum {
+		if lastBlockNum > 1 && lastBlockNum+1 != blockNum { //allow genesis
 			return fmt.Errorf("append with gap blockNum=%d, but current heigh=%d", blockNum, lastBlockNum)
 		}
 	}
@@ -1833,7 +1877,7 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 }
 
 func ReadVerkleRoot(tx kv.Tx, blockNum uint64) (common.Hash, error) {
-	root, err := tx.GetOne(kv.VerkleRoots, dbutils.EncodeBlockNumber(blockNum))
+	root, err := tx.GetOne(kv.VerkleRoots, common2.EncodeTs(blockNum))
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -1842,7 +1886,7 @@ func ReadVerkleRoot(tx kv.Tx, blockNum uint64) (common.Hash, error) {
 }
 
 func WriteVerkleRoot(tx kv.RwTx, blockNum uint64, root common.Hash) error {
-	return tx.Put(kv.VerkleRoots, dbutils.EncodeBlockNumber(blockNum), root[:])
+	return tx.Put(kv.VerkleRoots, common2.EncodeTs(blockNum), root[:])
 }
 
 func WriteVerkleNode(tx kv.RwTx, node verkle.VerkleNode) error {

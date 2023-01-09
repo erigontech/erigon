@@ -303,7 +303,6 @@ type HeaderDownload struct {
 	headerReader          services.HeaderReader
 
 	// Proof of Stake (PoS)
-	topSeenHeightPoS     uint64
 	firstSeenHeightPoS   *uint64
 	requestId            int
 	posAnchor            *Anchor

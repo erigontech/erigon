@@ -68,7 +68,7 @@ func TestAccessList(t *testing.T) {
 	slot := common.HexToHash
 
 	_, tx := memdb.NewTestTx(t)
-	state := New(NewPlainState(tx, 1))
+	state := New(NewPlainState(tx, 1, nil))
 	state.accessList = newAccessList()
 
 	state.AddAddressToAccessList(addr("aa"))          // 1

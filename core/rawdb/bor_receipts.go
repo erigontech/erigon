@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -230,7 +231,7 @@ func computeBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transact
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer
 func TruncateBorReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.BorReceipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
+	if err := db.ForEach(kv.BorReceipts, common2.EncodeTs(number), func(k, _ []byte) error {
 		return db.Delete(kv.BorReceipts, k)
 	}); err != nil {
 		return err

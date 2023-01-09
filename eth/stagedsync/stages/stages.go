@@ -52,8 +52,10 @@ var (
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
 	// Beacon chain stages
-	BeaconBlocks SyncStage = "BeaconBlocks" // BeaconBlocks are downloaded, no verification
-	BeaconState  SyncStage = "BeaconState"  // Beacon blocks are sent to the state transition function
+	BeaconHistoryReconstruction SyncStage = "BeaconHistoryReconstruction" // BeaconHistoryReconstruction reconstruct missing history.
+	BeaconBlocks                SyncStage = "BeaconBlocks"                // BeaconBlocks are downloaded, no verification
+	BeaconState                 SyncStage = "BeaconState"                 // Beacon blocks are sent to the state transition function
+	BeaconIndexes               SyncStage = "BeaconIndexes"               // Fills up Beacon indexes
 
 )
 

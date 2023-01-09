@@ -3,8 +3,8 @@ package network
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/common"
 	"golang.org/x/net/context"
@@ -15,7 +15,7 @@ import (
 type ProcessFn func(
 	highestSlotProcessed uint64,
 	highestBlockRootProcessed common.Hash,
-	blocks []*cltypes.SignedBeaconBlockBellatrix) (
+	blocks []*cltypes.SignedBeaconBlock) (
 	newHighestSlotProcessed uint64,
 	newHighestBlockRootProcessed common.Hash,
 	err error)
@@ -25,29 +25,29 @@ type ForwardBeaconDownloader struct {
 	highestSlotProcessed      uint64
 	highestBlockRootProcessed common.Hash
 	targetSlot                uint64
-	sentinel                  sentinel.SentinelClient // Sentinel
+	rpc                       *rpc.BeaconRpcP2P
 	process                   ProcessFn
 	isDownloading             bool // Should be set to true to set the blocks to download
 	limitSegmentsLength       int  // Limit how many blocks we store in the downloader without processing
 
-	segments []*cltypes.SignedBeaconBlockBellatrix // Unprocessed downloaded segments
+	segments []*cltypes.SignedBeaconBlock // Unprocessed downloaded segments
 	mu       sync.Mutex
 }
 
-func NewForwardBeaconDownloader(ctx context.Context, sentinel sentinel.SentinelClient) *ForwardBeaconDownloader {
+func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *ForwardBeaconDownloader {
 	return &ForwardBeaconDownloader{
 		ctx:           ctx,
-		segments:      []*cltypes.SignedBeaconBlockBellatrix{},
-		sentinel:      sentinel,
+		segments:      []*cltypes.SignedBeaconBlock{},
+		rpc:           rpc,
 		isDownloading: false,
 	}
 }
 
 // Start begins the gossip listening process.
-func (f *ForwardBeaconDownloader) ReceiveGossip(obj cltypes.ObjectSSZ) {
+func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz_utils.Unmarshaler) {
 	signedBlock := obj.(*cltypes.SignedBeaconBlockBellatrix)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		f.addSegment(signedBlock)
+		f.addSegment(cltypes.NewSignedBeaconBlock(obj))
 	}
 }
 
@@ -101,7 +101,7 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() common.Hash {
 }
 
 // addSegment process new block segment.
-func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBellatrix) {
+func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlock) {
 	// Skip if it is not downloading or limit was reached
 	if !f.isDownloading || len(f.segments) >= f.limitSegmentsLength {
 		return
@@ -113,30 +113,18 @@ func (f *ForwardBeaconDownloader) addSegment(block *cltypes.SignedBeaconBlockBel
 }
 
 func (f *ForwardBeaconDownloader) RequestMore() {
-	go func() {
-		count := uint64(10)
-		if f.highestSlotProcessed-1 >= f.targetSlot {
-			return
+	count := uint64(64)
+
+	responses, err := f.rpc.SendBeaconBlocksByRangeReq(f.highestSlotProcessed+1, count)
+	if err != nil {
+		return
+	}
+	for _, response := range responses {
+		if segment, ok := response.(*cltypes.SignedBeaconBlock); ok {
+			f.addSegment(segment)
 		}
-		// count must match the target slot
-		if f.highestSlotProcessed+count+1 > f.targetSlot {
-			count = f.targetSlot - f.highestSlotProcessed
-		}
-		responses, err := rpc.SendBeaconBlocksByRangeReq(
-			f.ctx,
-			f.highestSlotProcessed+1,
-			count,
-			f.sentinel,
-		)
-		if err != nil {
-			return
-		}
-		for _, response := range responses {
-			if segment, ok := response.(*cltypes.SignedBeaconBlockBellatrix); ok {
-				f.addSegment(segment)
-			}
-		}
-	}()
+	}
+
 }
 
 // ProcessBlocks processes blocks we accumulated.

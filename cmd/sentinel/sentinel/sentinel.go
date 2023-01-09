@@ -48,7 +48,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV2 *cltypes.MetadataV2
+	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
 	db kv.RoDB
@@ -132,10 +132,10 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.MetadataV2{
+	s.metadataV2 = &cltypes.Metadata{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
-		Syncnets:  0,
+		Syncnets:  new(uint64),
 	}
 
 	// Start stream handlers
@@ -254,14 +254,14 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return len(s.host.Network().Peers()) >= peers.DefaultMaxPeers
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
 func (s *Sentinel) GetPeersCount() int {
 	// Check how many peers are subscribed to beacon block
 	var sub *GossipSubscription
 	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(LightClientFinalityUpdateTopic)) {
+		if strings.Contains(topic, string(BeaconBlockTopic)) {
 			sub = currSub
 		}
 	}
@@ -270,4 +270,12 @@ func (s *Sentinel) GetPeersCount() int {
 		return len(s.host.Network().Peers())
 	}
 	return len(sub.topic.ListPeers())
+}
+
+func (s *Sentinel) Host() host.Host {
+	return s.host
+}
+
+func (s *Sentinel) Peers() *peers.Peers {
+	return s.peers
 }

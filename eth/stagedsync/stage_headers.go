@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -175,7 +174,7 @@ func HeadersPOS(
 	}
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
@@ -353,7 +352,6 @@ func startHandlingForkChoice(
 		}
 	}
 
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint, err := forkingPoint(ctx, tx, headerInserter, cfg.blockReader, header)
 	if err != nil {
 		return nil, err
@@ -477,7 +475,6 @@ func handleNewPayload(
 	headerHash := block.Hash()
 
 	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
@@ -525,7 +522,7 @@ func handleNewPayload(
 	}
 
 	if cfg.bodyDownload != nil {
-		cfg.bodyDownload.AddToPrefetch(block)
+		cfg.bodyDownload.AddToPrefetch(header, block.RawBody())
 	}
 
 	return response, nil
@@ -782,7 +779,7 @@ func HeadersPOW(
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	var sentToPeer bool
 	stopped := false
@@ -989,7 +986,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 		defer headerCursor.Close()
 		var k, v []byte
-		for k, v, err = headerCursor.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+		for k, v, err = headerCursor.Seek(libcommon.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
@@ -1092,22 +1089,26 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	return now
 }
 
-type chainReader struct {
+type ChainReaderImpl struct {
 	config      *params.ChainConfig
-	tx          kv.RwTx
+	tx          kv.Getter
 	blockReader services.FullBlockReader
 }
 
-func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
-func (cr chainReader) CurrentHeader() *types.Header { panic("") }
-func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+func NewChainReaderImpl(config *params.ChainConfig, tx kv.Getter, blockReader services.FullBlockReader) *ChainReaderImpl {
+	return &ChainReaderImpl{config, tx, blockReader}
+}
+
+func (cr ChainReaderImpl) Config() *params.ChainConfig  { return cr.config }
+func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReaderImpl) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 		return h
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
-func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 		return h
@@ -1115,7 +1116,7 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 
 }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
 	if cr.blockReader != nil {
 		number := rawdb.ReadHeaderNumber(cr.tx, hash)
 		if number == nil {
@@ -1126,7 +1127,7 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		log.Error("ReadTd failed", "err", err)
@@ -1135,23 +1136,23 @@ func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	return td
 }
 
-type epochReader struct {
+type EpochReaderImpl struct {
 	tx kv.RwTx
 }
 
-func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
 }
-func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
 	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
 }
-func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 

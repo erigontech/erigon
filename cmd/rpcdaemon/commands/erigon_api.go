@@ -32,6 +32,8 @@ type ErigonAPI interface {
 	//GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error)
 	GetLogs(ctx context.Context, crit ethFilters.FilterCriteria) (types.ErigonLogs, error)
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions ethFilters.LogFilterOptions) (types.ErigonLogs, error)
+	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
+	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
 
 	// WatchTheBurn / reward related (see ./erigon_issuance.go)
 	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
