@@ -367,6 +367,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockNum uint64
 	var ok bool
 	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		txNum := iter.Next()
 
 		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
