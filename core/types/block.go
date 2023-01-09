@@ -31,6 +31,9 @@ import (
 	"github.com/gballet/go-verkle"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -99,6 +102,10 @@ type Header struct {
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+	// ETH2 fields
+	// This is the block hash given by the CL,we cannot validate in the context of the state.
+	BlockHashCL common.Hash
+	TxHashSSZ   common.Hash // They decided to hash txs differently than EL :(
 }
 
 func bitsToBytes(bitLen int) (byteLen int) {
@@ -515,6 +522,194 @@ func (h *Header) SanityCheck() error {
 		}
 	}
 	return nil
+}
+
+func (h *Header) MarshallSSZ() []byte {
+	buf := make([]byte, h.SizeSSZ(clparams.Phase0Version))
+	pos := len(h.ParentHash)
+	copy(buf, h.ParentHash[:])
+
+	copy(buf[pos:], h.Coinbase[:])
+	pos += len(h.Coinbase)
+
+	copy(buf[pos:], h.Root[:])
+	pos += len(h.Root)
+
+	copy(buf[pos:], h.ReceiptHash[:])
+	pos += len(h.ReceiptHash)
+
+	copy(buf[pos:], h.Bloom[:])
+	pos += len(h.Bloom)
+
+	copy(buf[pos:], h.MixDigest[:])
+	pos += len(h.MixDigest)
+
+	ssz_utils.MarshalUint64SSZ(buf[pos:], h.Number.Uint64())
+	ssz_utils.MarshalUint64SSZ(buf[pos+8:], h.GasLimit)
+	ssz_utils.MarshalUint64SSZ(buf[pos+16:], h.GasUsed)
+	ssz_utils.MarshalUint64SSZ(buf[pos+24:], h.Time)
+
+	pos += 32
+	// Compute the offset
+	offset := 504
+
+	if h.WithdrawalsHash != nil {
+		offset += 32
+	}
+
+	if h.BaseFee != nil {
+		offset += 32
+	}
+
+	ssz_utils.EncodeOffset(buf[pos:], uint32(offset))
+	pos += 4
+
+	// Add Base Fee
+	baseFeeBytes := h.BaseFee.Bytes()
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	copy(buf[pos:], baseFeeBytes)
+	pos += 32
+
+	copy(buf[pos:], h.BlockHashCL[:])
+	pos += len(h.BlockHashCL)
+
+	copy(buf[pos:], h.TxHashSSZ[:])
+	pos += len(h.TxHashSSZ)
+
+	if h.WithdrawalsHash != nil {
+		copy(buf[pos:], h.WithdrawalsHash[:])
+		pos += len(h.WithdrawalsHash)
+	}
+
+	copy(buf[pos:], h.Extra)
+	return buf
+}
+
+func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
+	if len(buf) < h.SizeSSZ(version) {
+		return fmt.Errorf("Header SSZ: invalid length")
+	}
+	copy(h.ParentHash[:], buf)
+	pos := len(h.ParentHash)
+
+	copy(h.Coinbase[:], buf[pos:])
+	pos += len(h.Coinbase)
+
+	copy(h.Root[:], buf[pos:])
+	pos += len(h.Root)
+
+	copy(h.ReceiptHash[:], buf[pos:])
+	pos += len(h.ReceiptHash)
+
+	h.Bloom.SetBytes(buf[pos : pos+BloomByteLength])
+	pos += BloomByteLength
+
+	copy(h.MixDigest[:], buf[pos:])
+	pos += len(h.MixDigest)
+
+	h.Number = new(big.Int).SetUint64(ssz_utils.UnmarshalUint64SSZ(buf[pos:]))
+	h.GasLimit = ssz_utils.UnmarshalUint64SSZ(buf[pos+8:])
+	h.GasUsed = ssz_utils.UnmarshalUint64SSZ(buf[pos+16:])
+	h.Time = ssz_utils.UnmarshalUint64SSZ(buf[pos+24:])
+	pos += 36
+	// Add Base Fee
+	baseFeeBytes := common.CopyBytes(buf[pos : pos+32])
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	h.BaseFee = new(big.Int).SetBytes(baseFeeBytes)
+	pos += 32
+	copy(h.BlockHashCL[:], buf[pos:pos+32])
+	pos += 32
+
+	copy(h.TxHashSSZ[:], buf[pos:pos+32])
+	pos += len(h.TxHashSSZ)
+
+	if version >= clparams.CapellaVersion {
+		h.WithdrawalsHash = new(common.Hash)
+		copy((*h.WithdrawalsHash)[:], buf[pos:])
+		pos += len(h.WithdrawalsHash)
+	} else {
+		h.WithdrawalsHash = nil
+	}
+	h.Difficulty = common.Big0
+	h.UncleHash = EmptyUncleHash
+	h.Extra = common.CopyBytes(buf[pos:])
+
+	return nil
+}
+
+// SizeSSZ returns the ssz encoded size in bytes for the Header object
+func (h *Header) SizeSSZ(version clparams.StateVersion) int {
+	size := 536
+
+	if h.WithdrawalsHash != nil || version >= clparams.CapellaVersion {
+		size += 32
+	}
+
+	return size + len(h.Extra)
+}
+
+func (h *Header) HashSSZ() ([32]byte, error) {
+	// Compute coinbase leaf
+	var coinbase32 [32]byte
+	copy(coinbase32[:], h.Coinbase[:])
+	// Compute Bloom leaf
+	bloomLeaf, err := merkle_tree.ArraysRoot([][32]byte{
+		common.BytesToHash(h.Bloom[:32]),
+		common.BytesToHash(h.Bloom[32:64]),
+		common.BytesToHash(h.Bloom[64:96]),
+		common.BytesToHash(h.Bloom[96:128]),
+		common.BytesToHash(h.Bloom[128:160]),
+		common.BytesToHash(h.Bloom[160:192]),
+		common.BytesToHash(h.Bloom[192:224]),
+		common.BytesToHash(h.Bloom[224:]),
+	}, 8)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	// Compute baseFee leaf
+	baseFeeBytes := h.BaseFee.Bytes()
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	var baseFeeLeaf common.Hash
+	copy(baseFeeLeaf[:], baseFeeBytes)
+	// Compute extra data leaf
+	var extraLeaf common.Hash
+
+	var baseExtraLeaf [32]byte
+	copy(baseExtraLeaf[:], h.Extra)
+
+	extraLeaf, err = merkle_tree.ArraysRoot([][32]byte{
+		baseExtraLeaf,
+		merkle_tree.Uint64Root(uint64(len(h.Extra)))}, 2)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	leaves := [][32]byte{
+		h.ParentHash,
+		coinbase32,
+		h.Root,
+		h.ReceiptHash,
+		bloomLeaf,
+		h.MixDigest,
+		merkle_tree.Uint64Root(h.Number.Uint64()),
+		merkle_tree.Uint64Root(h.GasLimit),
+		merkle_tree.Uint64Root(h.GasUsed),
+		merkle_tree.Uint64Root(h.Time),
+		extraLeaf,
+		baseFeeLeaf,
+		h.BlockHashCL,
+		h.TxHashSSZ,
+	}
+	if h.WithdrawalsHash != nil {
+		leaves = append(leaves, *h.WithdrawalsHash)
+	}
+	return merkle_tree.ArraysRoot(leaves, 16)
 }
 
 // Body is a simple (mutable, non-safe) data container for storing and moving
@@ -1520,20 +1715,28 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	return rlpHash(uncles)
 }
 
+func CopyTxs(in Transactions) Transactions {
+	transactionsData, err := MarshalTransactionsBinary(in)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	out, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+	for i := 0; i < len(in); i++ {
+		if s, ok := in[i].GetSender(); ok {
+			out[i].SetSender(s)
+		}
+	}
+	return out
+}
+
 // Copy creates a deep copy of the Block.
 func (b *Block) Copy() *Block {
 	uncles := make([]*Header, 0, len(b.uncles))
 	for _, uncle := range b.uncles {
 		uncles = append(uncles, CopyHeader(uncle))
-	}
-
-	transactionsData, err := MarshalTransactionsBinary(b.transactions)
-	if err != nil {
-		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
-	}
-	transactions, err := DecodeTransactions(transactionsData)
-	if err != nil {
-		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
 
 	var withdrawals []*Withdrawal
@@ -1560,7 +1763,7 @@ func (b *Block) Copy() *Block {
 	return &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
-		transactions: transactions,
+		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		hash:         hashValue,
 		size:         sizeValue,

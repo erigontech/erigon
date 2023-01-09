@@ -18,12 +18,14 @@ var (
 	Bsc        = fromToml(snapshothashes.Bsc)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
+	Gnosis     = fromToml(snapshothashes.Gnosis)
 
 	MainnetHistory    = fromToml(snapshothashes.MainnetHistory)
 	GoerliHistory     = fromToml(snapshothashes.GoerliHistory)
 	BscHistory        = fromToml(snapshothashes.BscHistory)
 	MumbaiHistory     = fromToml(snapshothashes.MumbaiHistory)
 	BorMainnetHistory = fromToml(snapshothashes.BorMainnetHistory)
+	GnosisHistory     = fromToml(snapshothashes.GnosisHistory)
 )
 
 type PreverifiedItem struct {
@@ -55,6 +57,7 @@ var (
 	BscChainSnapshotCfg        = newCfg(Bsc, BscHistory)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai, MumbaiHistory)
 	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, BorMainnetHistory)
+	GnosisChainSnapshotCfg     = newCfg(Gnosis, GnosisHistory)
 )
 
 func newCfg(preverified, preverifiedHistory Preverified) *Cfg {
@@ -103,6 +106,7 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.BSCChainName:        BscChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
+	networkname.GnosisChainName:     GnosisChainSnapshotCfg,
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty

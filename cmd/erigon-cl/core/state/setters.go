@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // Below are setters. Note that they also dirty the state.
@@ -141,7 +142,7 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 	b.nextSyncCommittee = nextSyncCommittee
 }
 
-func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.ExecutionHeader) {
+func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
 }

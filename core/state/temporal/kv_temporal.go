@@ -129,7 +129,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsDomain:
 		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)
@@ -142,14 +142,24 @@ func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 		v, err = tx.GetOne(kv.PlainState, key)
 		return v, v != nil, err
 	case StorageDomain:
-		v, ok, err = tx.HistoryGet(StorageHistory, key, ts)
-		if err != nil {
-			return nil, false, err
+		if tx.hitoryV3 {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
+		} else {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key, key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
 		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, key)
+		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
 		return v, v != nil, err
 	case CodeDomain:
 		if tx.hitoryV3 {
@@ -160,10 +170,10 @@ func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 			if ok {
 				return v, true, nil
 			}
-			v, err = tx.GetOne(kv.Code, key)
+			v, err = tx.GetOne(kv.Code, key2)
 			return v, v != nil, err
 		}
-		v, err = tx.GetOne(kv.Code, key)
+		v, err = tx.GetOne(kv.Code, key2)
 		return v, v != nil, err
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
@@ -178,8 +188,8 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if err != nil {
 				return nil, false, err
 			}
-			if !ok {
-				return nil, ok, nil
+			if !ok || len(v) == 0 {
+				return v, ok, nil
 			}
 			v, err = tx.db.convertV3toV2(v)
 			if err != nil {
@@ -204,8 +214,8 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if err != nil {
 				return nil, false, err
 			}
-			if !ok {
-				return nil, ok, nil
+			if !ok || len(v) == 0 {
+				return v, ok, nil
 			}
 			v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
 			if err != nil {

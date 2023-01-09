@@ -509,15 +509,18 @@ Loop:
 			}
 
 			func() {
-				rwsLock.RLock()
-				needWait := rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
-				rwsLock.RUnlock()
+				needWait := rs.QueueLen() > queueSize
+				if !needWait {
+					rwsLock.RLock()
+					needWait = rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
+					rwsLock.RUnlock()
+				}
 				if !needWait {
 					return
 				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rs.QueueLen() > queueSize || rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -562,13 +565,23 @@ Loop:
 
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
+				} else {
+					sender, err := signer.Sender(txTask.Tx)
+					if err != nil {
+						return err
+					}
+					txTask.Sender = &sender
+					log.Warn("[Execution] expencive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
+						currentQueueSize := rs.AddWork(txTask)
+						if currentQueueSize > queueSize {
+							time.Sleep(10 * time.Microsecond)
+						}
 					}
 				} else {
 					rs.AddWork(txTask)
