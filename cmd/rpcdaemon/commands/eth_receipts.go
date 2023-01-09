@@ -379,7 +379,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 		}
 		if !ok {
-			return nil, nil
+			break
 		}
 
 		// if block number changed, calculate all related field
