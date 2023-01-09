@@ -675,7 +675,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 		}
 
+		fmt.Printf("txNum: %d, %d\n", txNum, maxTxNum)
 		if txNum == maxTxNum {
+			fmt.Printf("reward\n")
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -776,6 +778,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 		}
 		txIndex := txNum - startTxNum - 1
+		if txIndex < 0 {
+			continue
+		}
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, int(txIndex))
 		if err != nil {
