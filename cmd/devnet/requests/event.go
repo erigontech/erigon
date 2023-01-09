@@ -10,7 +10,7 @@ import (
 )
 
 func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpctest.Log) error {
-	fmt.Println("Entered the GETLOGS()")
+	fmt.Printf("\nGETTING AND COMPARING LOGS\n")
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetLogs
 
@@ -23,16 +23,24 @@ func GetAndCompareLogs(reqId int, fromBlock uint64, toBlock uint64, expected rpc
 	}
 
 	eventLog := b.Result[0]
-	fmt.Printf("Result: %+v\n", eventLog)
 
-	actual := devnetutils.BuildLog(eventLog.TxHash, strconv.FormatUint(uint64(eventLog.BlockNumber), 10), eventLog.Address)
-	fmt.Printf("Actual Log: %+v\n", actual)
-	devnetutils.CompareLogEvents(expected, actual)
+	actual := devnetutils.BuildLog(eventLog.TxHash, strconv.FormatUint(uint64(eventLog.BlockNumber), 10),
+		eventLog.Address, eventLog.Topics, eventLog.Data, eventLog.TxIndex, eventLog.BlockHash, eventLog.Index,
+		eventLog.Removed)
+
+	// compare the log events
+	errs, ok := devnetutils.CompareLogEvents(expected, actual)
+	if !ok {
+		fmt.Printf("FAILURE => log result is incorrect: %v\n", errs)
+		return fmt.Errorf("incorrect logs: %v", errs)
+	}
 
 	_, err := devnetutils.ParseResponse(b)
 	if err != nil {
 		return fmt.Errorf("error parsing response: %v", err)
 	}
+
+	fmt.Println("SUCCESS => Logs compared successfully, no discrepancies")
 
 	return nil
 }

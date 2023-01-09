@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/crypto"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -99,7 +100,7 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func CompareHashSlices(s1, s2 []common.Hash) bool {
+func HashSlicesAreEqual(s1, s2 []common.Hash) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
@@ -113,17 +114,17 @@ func CompareHashSlices(s1, s2 []common.Hash) bool {
 	return true
 }
 
-func BuildLog(hash common.Hash, blockNum string, address common.Address) rpctest.Log {
+func BuildLog(hash common.Hash, blockNum string, address common.Address, topics []common.Hash, data hexutil.Bytes, txIndex hexutil.Uint, blockHash common.Hash, index hexutil.Uint, removed bool) rpctest.Log {
 	return rpctest.Log{
 		Address:     address,
-		Topics:      nil,
-		Data:        nil,
+		Topics:      topics,
+		Data:        data,
 		BlockNumber: hexutil.Uint64(HexToInt(blockNum)),
 		TxHash:      hash,
-		TxIndex:     0,
-		BlockHash:   common.Hash{},
-		Index:       0,
-		Removed:     false,
+		TxIndex:     txIndex,
+		BlockHash:   blockHash,
+		Index:       index,
+		Removed:     removed,
 	}
 }
 
@@ -141,9 +142,14 @@ func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
 		errs = append(errs, fmt.Errorf("expected blockNumber: %v, actual blockNumber %v", expected.BlockNumber, actual.BlockNumber))
 	case expected.TxIndex != actual.TxIndex:
 		errs = append(errs, fmt.Errorf("expected txIndex: %v, actual txIndex %v", expected.TxIndex, actual.TxIndex))
-	case CompareHashSlices(expected.Topics, actual.Topics):
+	case !HashSlicesAreEqual(expected.Topics, actual.Topics):
 		errs = append(errs, fmt.Errorf("expected topics: %v, actual topics %v", expected.Topics, actual.Topics))
 	}
 
 	return errs, len(errs) == 0
+}
+
+func GenerateTopic(signature string) []common.Hash {
+	hashed := crypto.Keccak256([]byte(signature))
+	return []common.Hash{common.BytesToHash(hashed)}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 const (
@@ -88,7 +89,16 @@ func callContractTx() (*common.Hash, error) {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
 
-	expectedLog := devnetutils.BuildLog(*eventHash, (*txToBlockMap)[*eventHash], address)
+	blockNum := (*txToBlockMap)[*eventHash]
+
+	block, err := requests.GetBlockByNumber(models.ReqId, devnetutils.HexToInt(blockNum), true)
+	if err != nil {
+		return nil, err
+	}
+
+	expectedLog := devnetutils.BuildLog(*eventHash, blockNum, address,
+		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutil.Bytes{}, hexutil.Uint(1),
+		block.Result.Hash, hexutil.Uint(0), false)
 
 	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog); err != nil {
 		return nil, fmt.Errorf("failed to get logs: %v", err)

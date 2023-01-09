@@ -110,8 +110,6 @@ func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber
 		return uint64(0), 0, fmt.Errorf("failed to get block by number: %v", err)
 	}
 
-	fmt.Printf("Block Deets => %+v\n", currBlock)
-
 	for _, txnHash := range currBlock.Transactions {
 		// check if tx is in the hash set and remove it from the set if it is present
 		if _, ok := hashmap[txnHash]; ok {
@@ -128,21 +126,6 @@ func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber
 
 	return uint64(0), 0, nil
 }
-
-//func checkOldHeads(client *rpc.Client, hashmap map[common.Hash]bool) (uint64, int, error) {
-//
-//	for _, blockNumber := range models.OldHeads {
-//		num, numFound, foundErr := txHashInBlock(client, hashmap, blockNumber)
-//		if foundErr != nil {
-//			return uint64(0), 0, foundErr
-//		}
-//		if numFound > 0 {
-//			models.OldHeads = []string{}
-//			return num, numFound, nil
-//		}
-//	}
-//	return uint64(0), 0, nil
-//}
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
 func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) (*common.Hash, error) {

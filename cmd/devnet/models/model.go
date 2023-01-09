@@ -97,6 +97,9 @@ const (
 	// ContractTx is the transaction type for sending ether
 	ContractTx TransactionType = "contract"
 
+	// SolContractMethodSignature is the function signature for the event in the solidity contract definition
+	SolContractMethodSignature = "SubscriptionEvent()"
+
 	// ETHGetTransactionCount represents the eth_getTransactionCount method
 	ETHGetTransactionCount RPCMethod = "eth_getTransactionCount"
 	// ETHGetBalance represents the eth_getBalance method
