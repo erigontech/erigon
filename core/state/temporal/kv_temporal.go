@@ -142,14 +142,24 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 		v, err = tx.GetOne(kv.PlainState, key)
 		return v, v != nil, err
 	case StorageDomain:
-		v, ok, err = tx.HistoryGet(StorageHistory, key, ts)
-		if err != nil {
-			return nil, false, err
+		if tx.hitoryV3 {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
+		} else {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key, key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
 		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, key)
+		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
 		return v, v != nil, err
 	case CodeDomain:
 		if tx.hitoryV3 {
