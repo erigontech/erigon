@@ -414,7 +414,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock)
-		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
