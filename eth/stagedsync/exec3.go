@@ -191,7 +191,7 @@ func ExecV3(ctx context.Context,
 	var rwsLock sync.RWMutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
-	queueSize := workerCount * 2
+	queueSize := workerCount
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
