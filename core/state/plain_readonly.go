@@ -192,7 +192,11 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, s.txNr)
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, ts)
 		if err != nil {
 			return nil, err
 		}
@@ -201,6 +205,7 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("b: %x, %x\n", address.Bytes(), enc)
 	}
 	if len(enc) == 0 {
 		if s.trace {
@@ -237,7 +242,11 @@ func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes(), s.txNr)
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, address.Bytes(), key.Bytes(), ts)
 		if err != nil {
 			return nil, err
 		}
@@ -261,14 +270,30 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := s.tx.GetOne(kv.Code, codeHash[:])
-	if s.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+	var code []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		code, _, err = ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), ts)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		code, err = s.tx.GetOne(kv.Code, codeHash[:])
+		if s.trace {
+			fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(code) == 0 {
 		return nil, nil
 	}
-	return code, err
+	return code, nil
 }
 
 func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
@@ -280,7 +305,11 @@ func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, err
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, s.txNr+1)
+		ts := s.blockNr + 1
+		if s.histV3 {
+			ts = s.txNr + 1
+		}
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, ts)
 		if err != nil {
 			return 0, err
 		}

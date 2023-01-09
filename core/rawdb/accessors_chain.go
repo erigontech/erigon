@@ -390,6 +390,9 @@ func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(v) == 0 {
+		return nil, nil
+	}
 	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(v), uint64(len(v))))
 	if err != nil {
 		return nil, err
