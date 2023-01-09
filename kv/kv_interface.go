@@ -403,7 +403,7 @@ type TemporalRoDb interface {
 }
 type TemporalTx interface {
 	Tx
-	DomainGet(name Domain, k []byte, ts uint64) (v []byte, ok bool, err error)
+	DomainGet(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps UnaryStream[uint64], err error)
 }
