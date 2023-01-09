@@ -10,7 +10,7 @@ import (
 )
 
 type GossipReceiver interface {
-	ReceiveGossip(ssz_utils.ObjectSSZ)
+	ReceiveGossip(ssz_utils.Unmarshaler)
 }
 
 type GossipManager struct {
@@ -52,7 +52,7 @@ func (g *GossipManager) Loop() {
 		//If the deserialization fails, an error is logged and the loop continues to the next iteration.
 		//If the deserialization is successful, the object is set to the deserialized value and the loop continues to the next iteration.
 		receivers := g.receivers[data.Type]
-		var object ssz_utils.ObjectSSZ
+		var object ssz_utils.Unmarshaler
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlockBellatrix{}
@@ -84,7 +84,6 @@ func (g *GossipManager) Loop() {
 				log.Warn("[Beacon Gossip] Failure in decoding proof", "err", err)
 				continue
 			}
-
 		}
 		// If we received a valid object give it to our receiver
 		if object != nil {

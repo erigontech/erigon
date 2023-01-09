@@ -4,27 +4,8 @@ import (
 	"bytes"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 )
-
-/*
- * BeaconBlockHeader is the message we validate in the lightclient.
- * It contains the hash of the block body, and state root data.
- */
-type BeaconBlockHeader struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	Root          [32]byte `ssz-size:"32"`
-	BodyRoot      [32]byte `ssz-size:"32"`
-}
-
-/*
- * SignedBeaconBlockHeader is a beacon block header + validator signature.
- */
-type SignedBeaconBlockHeader struct {
-	Header    *BeaconBlockHeader
-	Signature [96]byte `ssz-size:"96"`
-}
 
 // Slashing requires 2 blocks with the same signer as proof
 type ProposerSlashing struct {
@@ -38,52 +19,6 @@ type ProposerSlashing struct {
 type AttesterSlashing struct {
 	Attestation_1 *IndexedAttestation
 	Attestation_2 *IndexedAttestation
-}
-
-type DepositData struct {
-	PubKey                [48]byte `ssz-size:"48"`
-	WithdrawalCredentials []byte   `ssz-size:"32"`
-	Amount                uint64
-	Signature             [96]byte `ssz-size:"96"`
-	Root                  [32]byte `ssz:"-"`
-}
-
-type Deposit struct {
-	// Merkle proof is used for deposits
-	Proof [][]byte `ssz-size:"33,32"`
-	Data  *DepositData
-}
-
-type VoluntaryExit struct {
-	Epoch          uint64
-	ValidatorIndex uint64
-}
-
-type SignedVoluntaryExit struct {
-	VolunaryExit *VoluntaryExit
-	Signature    [96]byte `ssz-size:"96"`
-}
-
-/*
- * SyncAggregate, Determines successfull committee, bits shows active participants,
- * and signature is the aggregate BLS signature of the committee.
- */
-type SyncAggregate struct {
-	SyncCommiteeBits      []byte   `ssz-size:"64"`
-	SyncCommiteeSignature [96]byte `ssz-size:"96"`
-}
-
-// return sum of the committee bits
-func (agg *SyncAggregate) Sum() int {
-	ret := 0
-	for i := range agg.SyncCommiteeBits {
-		for bit := 1; bit <= 128; bit *= 2 {
-			if agg.SyncCommiteeBits[i]&byte(bit) > 0 {
-				ret++
-			}
-		}
-	}
-	return ret
 }
 
 // we will send this to Erigon once validation is done.
@@ -102,24 +37,6 @@ type ExecutionPayload struct {
 	BaseFeePerGas []byte   `ssz-size:"32"`
 	BlockHash     [32]byte `ssz-size:"32"`
 	Transactions  [][]byte `ssz-size:"?,?" ssz-max:"1048576,1073741824"`
-}
-
-// we will send this to Erigon once validation is done.
-type ExecutionHeader struct {
-	ParentHash      [32]byte `ssz-size:"32"`
-	FeeRecipient    [20]byte `ssz-size:"20"`
-	StateRoot       [32]byte `ssz-size:"32"`
-	ReceiptsRoot    [32]byte `ssz-size:"32"`
-	LogsBloom       []byte   `ssz-size:"256"`
-	PrevRandao      [32]byte `ssz-size:"32"`
-	BlockNumber     uint64
-	GasLimit        uint64
-	GasUsed         uint64
-	Timestamp       uint64
-	ExtraData       []byte   `ssz-max:"32"`
-	BaseFeePerGas   []byte   `ssz-size:"32"`
-	BlockHash       [32]byte `ssz-size:"32"`
-	TransactionRoot [32]byte `ssz-size:"32"`
 }
 
 /*
@@ -323,21 +240,6 @@ type Validator struct {
 	WithdrawableEpoch          uint64
 }
 
-/*
- * AggregateAndProof contains the index of the aggregator, the attestation
- * to be aggregated and the BLS signature of the attestation.
- */
-type AggregateAndProof struct {
-	AggregatorIndex uint64
-	Aggregate       *Attestation
-	SelectionProof  [96]byte `ssz-size:"96"`
-}
-
-type SignedAggregateAndProof struct {
-	Message   *AggregateAndProof
-	Signature [96]byte `ssz-size:"96"`
-}
-
 // BellatrixBeaconState is the bellatrix beacon state.
 type BeaconStateBellatrix struct {
 	GenesisTime                  uint64
@@ -364,7 +266,7 @@ type BeaconStateBellatrix struct {
 	InactivityScores             []uint64 `ssz-max:"1099511627776"`
 	CurrentSyncCommittee         *SyncCommittee
 	NextSyncCommittee            *SyncCommittee
-	LatestExecutionPayloadHeader *ExecutionHeader
+	LatestExecutionPayloadHeader *types.Header
 }
 
 // BlockRoot retrieves a the state block root from the state.
