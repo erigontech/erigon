@@ -580,7 +580,7 @@ Loop:
 					if ok := rs.RegisterSender(txTask); ok {
 						currentQueueSize := rs.AddWork(txTask)
 						if currentQueueSize > queueSize {
-							time.Sleep(100 * time.Microsecond)
+							time.Sleep(1 * time.Millisecond)
 						}
 					}
 				} else {
