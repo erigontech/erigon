@@ -407,6 +407,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
+			fmt.Printf("miminTxNumInBlock: %d, %d\n", minTxNumInBlock, maxTxNumInBlock)
 			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 		}
 
