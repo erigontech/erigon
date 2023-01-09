@@ -672,11 +672,11 @@ func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBo
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, 0, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	lastTxnNum = baseTxId + uint64(len(body.Transactions)) + 2
+	lastTxnNum = baseTxId + uint64(len(body.Transactions)) + 2 - 1
 	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
 		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
-	return true, lastTxnNum - 1, nil
+	return true, lastTxnNum, nil
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
@@ -1777,7 +1777,7 @@ func (txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	return binary.BigEndian.Uint64(v), nil
 }
 
-// Min - returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+// Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
 func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
@@ -1803,7 +1803,7 @@ func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 			return 0, nil
 		}
 	}
-	return binary.BigEndian.Uint64(v), nil
+	return binary.BigEndian.Uint64(v) + 1, nil
 }
 
 func (txNums) Append(tx kv.RwTx, blockNum, maxTxNum uint64) (err error) {

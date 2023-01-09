@@ -83,9 +83,6 @@ func TestCallTraceOneByOne(t *testing.T) {
 }
 
 func TestCallTraceUnwind(t *testing.T) {
-	if ethconfig.EnableHistoryV3InTest {
-		t.Skip("history.v3 doesn't store receipts in db")
-	}
 	m := stages.Mock(t)
 	var chainA, chainB *core.ChainPack
 	var err error

@@ -127,13 +127,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	prom := NewPromoter(tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, true); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, true, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
 			return err
 		}
 		return nil
@@ -494,6 +494,7 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return err
 		}
 		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
+			fmt.Printf("un: %x, %x, %d, %d, %d\n", k, v, acc.Nonce, acc.Incarnation, acc.Balance.Uint64())
 			return next(dbKey, newK, v)
 		}
 
@@ -697,9 +698,9 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 }
 
 func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo-1, "storage", storage, "codes", codes)
+	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
+	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo+1)
 	if err != nil {
 		return err
 	}
