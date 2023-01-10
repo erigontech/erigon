@@ -18,11 +18,14 @@ package types
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/holiman/uint256"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -76,6 +79,43 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	return obj.Amount.EncodeRLP(w)
 }
 
+func (obj *Withdrawal) EncodeSSZ() []byte {
+	buf := make([]byte, obj.EncodingSizeSSZ())
+	ssz_utils.MarshalUint64SSZ(buf, obj.Index)
+	ssz_utils.MarshalUint64SSZ(buf[8:], obj.Validator)
+	copy(buf[16:], obj.Address[:])
+	// Supports only GWEI format.
+	ssz_utils.MarshalUint64SSZ(buf[36:], obj.Amount.Uint64())
+	return buf
+}
+
+func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
+	if len(buf) < obj.EncodingSizeSSZ() {
+		return errors.New("invalid buffer size")
+	}
+	obj.Index = ssz_utils.UnmarshalUint64SSZ(buf)
+	obj.Validator = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	copy(obj.Address[:], buf[16:])
+	obj.Amount = *uint256.NewInt(ssz_utils.UnmarshalUint64SSZ(buf[36:]))
+	return nil
+}
+
+func (obj *Withdrawal) EncodingSizeSSZ() int {
+	// Validator Index (8 bytes) + Index (8 bytes) + Amount (8 bytes) + address length
+	return 24 + common.AddressLength
+}
+
+func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary
+	var addressLeaf [32]byte
+	copy(addressLeaf[:], obj.Address[:])
+	return merkle_tree.ArraysRoot([][32]byte{
+		merkle_tree.Uint64Root(obj.Index),
+		merkle_tree.Uint64Root(obj.Validator),
+		addressLeaf,
+		merkle_tree.Uint64Root(obj.Amount.Uint64()),
+	}, 4)
+}
+
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
@@ -123,4 +163,27 @@ func (s Withdrawals) Len() int { return len(s) }
 // constructed by decoding or via public API in this package.
 func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
 	rlp.Encode(w, s[i])
+}
+
+// HashSSZ hash a serie of withdrawals together given certain limit (16 for ETH1).
+func (obj Withdrawals) HashSSZ(limit uint64) ([32]byte, error) { // the [32]byte is temporary
+	leaves := make([][32]byte, len(obj))
+	var err error
+	// Compute trees of each withdrawal.
+	for i, withdrawal := range obj {
+		leaves[i], err = withdrawal.HashSSZ()
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	// Compute merklized base root.
+	baseRoot, err := merkle_tree.MerkleizeVector(leaves, limit)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	// Mix with length
+	return merkle_tree.ArraysRoot([][32]byte{
+		baseRoot,
+		merkle_tree.Uint64Root(uint64(len(obj))),
+	}, 2)
 }

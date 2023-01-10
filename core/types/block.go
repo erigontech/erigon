@@ -776,23 +776,15 @@ func (b *Body) SendersFromTxs() []common.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _, _, _ := rb.payloadSize()
+	payloadSize, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int, transactionsSizes []int) {
-	transactionsSizes = make([]int, len(rb.Transactions))
-
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	payloadSize++
-	for idx, tx := range rb.Transactions {
-		txsLen++
-		var txLen = len(tx)
-		transactionsSizes[idx] = txLen
-		if txLen >= 56 {
-			txsLen += bitsToBytes(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
+	for _, tx := range rb.Transactions {
+		txsLen += len(tx)
 	}
 	if txsLen >= 56 {
 		payloadSize += bitsToBytes(bits.Len(uint(txsLen)))
@@ -831,11 +823,11 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 		payloadSize += withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, transactionsSizes
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, txSizes := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -845,10 +837,7 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	for idx, tx := range rb.Transactions {
-		if err := EncodeStructSizePrefix(txSizes[idx], w, b[:]); err != nil {
-			return err
-		}
+	for _, tx := range rb.Transactions {
 		if _, err := w.Write(tx); err != nil {
 			return nil
 		}
@@ -888,11 +877,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	}
 	var tx []byte
 	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		_, txContent, _, err := rlp.Split(tx)
-		if err != nil {
-			return err
+		if tx == nil {
+			return errors.New("RawBody.DecodeRLP tx nil\n")
 		}
-		rb.Transactions = append(rb.Transactions, txContent)
+		rb.Transactions = append(rb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -1664,7 +1652,7 @@ func (b *Block) RawBody() *RawBody {
 }
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
-// and returning it, or returning a previsouly cached value.
+// and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
 	if size := b.size.Load(); size != nil {
 		return size.(common.StorageSize)

@@ -540,7 +540,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	// Send all the bodies
 	packet := make(eth.BlockBodiesPacket, n)
 	for i, block := range chain.Blocks[0:n] {
-		packet[i] = (*eth.BlockBody)(block.Body())
+		packet[i] = block.Body()
 	}
 	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
 		RequestId:         1,

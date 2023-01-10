@@ -11,7 +11,7 @@ import (
 // MarshalSSZTo ssz marshals the BeaconBlockHeader object to a target array
 func (b *BeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
-	
+
 	m, _ := b.MarshalSSZ()
 	dst = append(dst, m...)
 
@@ -33,7 +33,7 @@ func (b *BeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 // MarshalSSZTo ssz marshals the SignedBeaconBlockHeader object to a target array
 func (s *SignedBeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
-	
+
 	m, _ := s.MarshalSSZ()
 	dst = append(dst, m...)
 
@@ -366,6 +366,7 @@ func (s *SyncAggregate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = append(dst, m...)
 	return
 }
+
 // HashTreeRootWith ssz hashes the SyncAggregate object with a hasher
 func (s *SyncAggregate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	// Field (0) 'SyncCommiteeBits'
@@ -374,7 +375,6 @@ func (s *SyncAggregate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		return err
 	}
 	hh.PutBytes(root[:])
-
 
 	return
 }
@@ -4980,7 +4980,6 @@ func (b *BeaconStateBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	if err = b.NextSyncCommittee.HashTreeRootWith(hh); err != nil {
 		return
 	}
-
 
 	headerRoot, err := b.LatestBlockHeader.HashTreeRoot()
 	if err != nil {
