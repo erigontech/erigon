@@ -70,7 +70,6 @@ type Transaction interface {
 	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash
 	SigningHash(chainID *big.Int) common.Hash
-	Size() common.StorageSize
 	GetData() []byte
 	GetAccessList() AccessList
 	Protected() bool
