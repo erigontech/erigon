@@ -497,7 +497,6 @@ func getUnwindExtractAccounts(db kv.Tx, changeSetBucket string) etl.ExtractFunc 
 			return err
 		}
 		if !(acc.Incarnation > 0 && acc.IsEmptyCodeHash()) {
-			fmt.Printf("un: %x, %x, %d, %d, %d\n", k, v, acc.Nonce, acc.Incarnation, acc.Balance.Uint64())
 			return next(dbKey, newK, v)
 		}
 

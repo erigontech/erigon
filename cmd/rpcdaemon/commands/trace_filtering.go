@@ -675,9 +675,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 		}
 
-		fmt.Printf("txNum: %d, %d\n", txNum, maxTxNum)
 		if txNum == maxTxNum {
-			fmt.Printf("reward\n")
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -840,7 +838,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteMore()
 			}
 			stream.WriteObjectStart()
-			fmt.Printf("err: %s, %d, %d\n", err, blockNum, txNum)
 			rpc.HandleError(err, stream)
 			stream.WriteObjectEnd()
 			continue
