@@ -347,7 +347,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 	//stateReader.SetTrace(true)
 	iter := txNumbers.Iterator()
-	fmt.Printf("txNumbers: %d, %d\n", txNumbers.GetCardinality(), txNumbers.ToArray())
+	//fmt.Printf("txNumbers: %d, %d\n", txNumbers.GetCardinality(), txNumbers.ToArray())
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
