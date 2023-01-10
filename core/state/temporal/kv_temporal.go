@@ -139,6 +139,7 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 		if ok {
 			return v, true, nil
 		}
+		fmt.Printf("domain: get from state: %s, %x\n", name, key)
 		v, err = tx.GetOne(kv.PlainState, key)
 		return v, v != nil, err
 	case StorageDomain:
