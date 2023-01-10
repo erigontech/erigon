@@ -68,11 +68,15 @@ type MdbxOpts struct {
 
 func NewMDBX(log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
-		bucketsCfg:     WithChaindataTables,
-		flags:          mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
-		log:            log,
-		pageSize:       kv.DefaultPageSize(),
-		dirtySpace:     2 * (memory.TotalMemory() / 42),
+		bucketsCfg: WithChaindataTables,
+		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
+		log:        log,
+		pageSize:   kv.DefaultPageSize(),
+
+		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
+		// but for reproducibility of benchmarks - please don't rely on Available RAM
+		dirtySpace: 2 * (memory.TotalMemory() / 42),
+
 		growthStep:     2 * datasize.GB,
 		mergeThreshold: 3 * 8192,
 	}
@@ -131,6 +135,7 @@ func (opts MdbxOpts) InMem(tmpDir string) MdbxOpts {
 	opts.inMem = true
 	opts.flags = mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.LifoReclaim | mdbx.NoMemInit
 	opts.mapSize = 512 * datasize.MB
+	opts.label = kv.InMem
 	return opts
 }
 
@@ -229,10 +234,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			}
 		}
 
-		const MAX_AUGMENT_LIMIT = 0x7fffFFFF
-		if err = env.SetOption(mdbx.OptRpAugmentLimit, MAX_AUGMENT_LIMIT); err != nil {
-			return nil, err
-		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
@@ -252,6 +253,7 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
 		}
 	}
+
 	opts.pageSize = uint64(in.PageSize)
 
 	//nolint
@@ -282,8 +284,6 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 			return nil, err
 		}
 
-		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
-		// but for reproducibility of benchmarks - please don't rely on Available RAM
 		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
@@ -702,7 +702,11 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.DbPgopsSpill.Set(info.PageOps.Spill)
 	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
 	kv.DbPgopsWops.Set(info.PageOps.Wops)
-	kv.DbPgopsGcrtime.Update(info.PageOps.Gcrtime.Seconds())
+	kv.DbPgopsPrefault.Set(info.PageOps.Prefault)
+	kv.DbPgopsMinicore.Set(info.PageOps.Minicore)
+	kv.DbPgopsMsync.Set(info.PageOps.Msync)
+	kv.DbPgopsFsync.Set(info.PageOps.Fsync)
+	kv.DbMiLastPgNo.Set(info.MiLastPgNo * tx.db.opts.pageSize)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
@@ -909,25 +913,42 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.label == kv.ChainDB {
 		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
-		kv.DbCommitGc.Update(latency.GC.Seconds())
+		kv.DbGCWallClock.Update(latency.GCWallClock.Seconds())
+		kv.DbGCCpuTime.Update(latency.GCCpuTime.Seconds())
 		kv.DbCommitAudit.Update(latency.Audit.Seconds())
 		kv.DbCommitWrite.Update(latency.Write.Seconds())
 		kv.DbCommitSync.Update(latency.Sync.Seconds())
 		kv.DbCommitEnding.Update(latency.Ending.Seconds())
 		kv.DbCommitTotal.Update(latency.Whole.Seconds())
-	}
 
-	//if latency.Whole > slowTx {
-	//	log.Info("Commit",
-	//		"preparation", latency.Preparation,
-	//		"gc", latency.GC,
-	//		"audit", latency.Audit,
-	//		"write", latency.Write,
-	//		"fsync", latency.Sync,
-	//		"ending", latency.Ending,
-	//		"whole", latency.Whole,
-	//	)
-	//}
+		kv.DbGcWorkRtime.Update(latency.GCDetails.WorkRtime.Seconds())
+		kv.DbGcSelfRtime.Update(latency.GCDetails.SelfRtime.Seconds())
+		kv.DbGcSelfXtime.Update(latency.GCDetails.SelfXtime.Seconds())
+		kv.DbGcWorkXtime.Update(latency.GCDetails.WorkXtime.Seconds())
+
+		kv.DbGcWorkRsteps.Set(uint64(latency.GCDetails.WorkRsteps))
+		kv.DbGcSelfRsteps.Set(uint64(latency.GCDetails.SelfRsteps))
+
+		kv.DbGcWorkRxpages.Set(uint64(latency.GCDetails.WorkRxpages))
+		kv.DbGcSelfXpages.Set(uint64(latency.GCDetails.SelfXpages))
+		kv.DbGcWloops.Set(uint64(latency.GCDetails.Wloops))
+		kv.DbGcCoalescences.Set(uint64(latency.GCDetails.Coalescences))
+		kv.DbGcWipes.Set(uint64(latency.GCDetails.Wipes))
+		kv.DbGcFlushes.Set(uint64(latency.GCDetails.Flushes))
+		kv.DbGcKicks.Set(uint64(latency.GCDetails.Kicks))
+		kv.DbGcWorkMajflt.Set(uint64(latency.GCDetails.WorkMajflt))
+		kv.DbGcSelfMajflt.Set(uint64(latency.GCDetails.SelfMajflt))
+		kv.DbGcWorkCounter.Set(uint64(latency.GCDetails.WorkCounter))
+		kv.DbGcSelfCounter.Set(uint64(latency.GCDetails.SelfCounter))
+
+		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
+		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
+		//kv.DbGcWorkPnlMergeCalls.Set(uint64(latency.GCDetails.WorkPnlMergeCalls))
+		//
+		//kv.DbGcSelfPnlMergeTime.Update(latency.GCDetails.SelfPnlMergeTime.Seconds())
+		//kv.DbGcSelfPnlMergeVolume.Set(uint64(latency.GCDetails.SelfPnlMergeVolume))
+		//kv.DbGcSelfPnlMergeCalls.Set(uint64(latency.GCDetails.SelfPnlMergeCalls))
+	}
 
 	return nil
 }

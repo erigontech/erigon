@@ -1597,9 +1597,8 @@ func (bph *BinPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 	return rootHash, branchNodeUpdates, nil
 }
 
-//nolint
 // Hashes provided key and expands resulting hash into nibbles (each byte split into two nibbles by 4 bits)
-func (bph *BinPatriciaHashed) hashAndNibblizeKey2(key []byte) []byte {
+func (bph *BinPatriciaHashed) hashAndNibblizeKey2(key []byte) []byte { //nolint
 	hashedKey := make([]byte, length.Hash)
 
 	bph.keccak.Reset()

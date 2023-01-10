@@ -59,23 +59,53 @@ var (
 	TxUnspill = metrics.NewCounter(`tx_unspill`) //nolint
 	TxDirty   = metrics.NewCounter(`tx_dirty`)   //nolint
 
-	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`) //nolint
-	DbCommitGc          = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc"}`)          //nolint
-	DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)       //nolint
-	DbCommitWrite       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)       //nolint
-	DbCommitSync        = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)        //nolint
-	DbCommitEnding      = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`)      //nolint
-	DbCommitTotal       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)       //nolint
+	DbCommitPreparation = metrics.GetOrCreateSummary(`db_commit_seconds{phase="preparation"}`)   //nolint
+	DbGCWallClock       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_wall_clock"}`) //nolint
+	DbGCCpuTime         = metrics.GetOrCreateSummary(`db_commit_seconds{phase="gc_cpu_time"}`)   //nolint
+	DbCommitAudit       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="audit"}`)         //nolint
+	DbCommitWrite       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="write"}`)         //nolint
+	DbCommitSync        = metrics.GetOrCreateSummary(`db_commit_seconds{phase="sync"}`)          //nolint
+	DbCommitEnding      = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`)        //nolint
+	DbCommitTotal       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)         //nolint
 
-	DbPgopsNewly   = metrics.NewCounter(`db_pgops_newly`)           //nolint
-	DbPgopsCow     = metrics.NewCounter(`db_pgops_cow`)             //nolint
-	DbPgopsClone   = metrics.NewCounter(`db_pgops_clone`)           //nolint
-	DbPgopsSplit   = metrics.NewCounter(`db_pgops_split`)           //nolint
-	DbPgopsMerge   = metrics.NewCounter(`db_pgops_merge`)           //nolint
-	DbPgopsSpill   = metrics.NewCounter(`db_pgops_spill`)           //nolint
-	DbPgopsUnspill = metrics.NewCounter(`db_pgops_unspill`)         //nolint
-	DbPgopsWops    = metrics.NewCounter(`db_pgops_wops`)            //nolint
-	DbPgopsGcrtime = metrics.GetOrCreateSummary(`db_pgops_gcrtime`) //nolint
+	DbPgopsNewly    = metrics.NewCounter(`db_pgops{phase="newly"}`)    //nolint
+	DbPgopsCow      = metrics.NewCounter(`db_pgops{phase="cow"}`)      //nolint
+	DbPgopsClone    = metrics.NewCounter(`db_pgops{phase="clone"}`)    //nolint
+	DbPgopsSplit    = metrics.NewCounter(`db_pgops{phase="split"}`)    //nolint
+	DbPgopsMerge    = metrics.NewCounter(`db_pgops{phase="merge"}`)    //nolint
+	DbPgopsSpill    = metrics.NewCounter(`db_pgops{phase="spill"}`)    //nolint
+	DbPgopsUnspill  = metrics.NewCounter(`db_pgops{phase="unspill"}`)  //nolint
+	DbPgopsWops     = metrics.NewCounter(`db_pgops{phase="wops"}`)     //nolint
+	DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
+	DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
+	DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
+	DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
+	DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
+
+	DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
+	DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
+	DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
+	DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
+	DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
+	DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
+	DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
+	DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
+	DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
+	DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
+	DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
+	DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
+	DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
+	DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
+	DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
+	DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
+	DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
+
+	//DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
+	//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
+	//DbGcWorkPnlMergeCalls  = metrics.NewCounter(`db_gc{phase="work_merge_calls"}`)                    //nolint
+	//DbGcSelfPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="slef_merge_time"}`) //nolint
+	//DbGcSelfPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="self_merge_volume"}`)               //nolint
+	//DbGcSelfPnlMergeCalls  = metrics.NewCounter(`db_gc_pnl{phase="slef_merge_calls"}`)                //nolint
 
 	GcLeafMetric     = metrics.NewCounter(`db_gc_leaf`)     //nolint
 	GcOverflowMetric = metrics.NewCounter(`db_gc_overflow`) //nolint
@@ -92,6 +122,7 @@ const (
 	SentryDB     Label = 2
 	ConsensusDB  Label = 3
 	DownloaderDB Label = 4
+	InMem        Label = 5
 )
 
 func (l Label) String() string {
@@ -106,6 +137,8 @@ func (l Label) String() string {
 		return "consensus"
 	case DownloaderDB:
 		return "downloader"
+	case InMem:
+		return "inMem"
 	default:
 		return "unknown"
 	}

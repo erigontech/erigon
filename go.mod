@@ -7,7 +7,7 @@ require (
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0
-	github.com/torquem-ch/mdbx-go v0.27.5
+	github.com/torquem-ch/mdbx-go v0.28.1
 )
 
 require (
@@ -26,7 +26,7 @@ require (
 	github.com/holiman/uint256 v1.2.1
 	github.com/matryer/moq v0.3.0
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/quasilyte/go-ruleguard/dsl v0.3.21
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.1
 	github.com/tidwall/btree v1.5.0
