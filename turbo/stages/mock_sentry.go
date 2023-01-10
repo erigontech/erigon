@@ -218,7 +218,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	db := memdb.New()
+	db := memdb.NewTestDB(t)
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
