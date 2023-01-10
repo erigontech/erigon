@@ -143,3 +143,19 @@ func TestHexToInt(t *testing.T) {
 		require.EqualValues(t, testCase.expected, got)
 	}
 }
+
+func TestGenerateTopic(t *testing.T) {
+	testCases := []struct {
+		signature string
+		expected  string
+	}{
+		{"random string", "0x0d9d89437ff2d48ce95779dc9457bc48287b75a573eddbf50954efac5a97c4b9"},
+		{"SubscriptionEvent()", "0x67abc7edb0ab50964ef0e90541d39366b9c69f6f714520f2ff4570059ee8ad80"},
+		{"", "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"},
+	}
+
+	for _, testCase := range testCases {
+		got := GenerateTopic(testCase.signature)
+		require.EqualValues(t, testCase.expected, fmt.Sprintf("%s", got[0]))
+	}
+}
