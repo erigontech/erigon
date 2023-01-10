@@ -96,7 +96,6 @@ type TransactionMisc struct {
 
 	// caches
 	hash atomic.Value //nolint:structcheck
-	size atomic.Value //nolint:structcheck
 	from atomic.Value
 }
 
