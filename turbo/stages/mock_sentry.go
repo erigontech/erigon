@@ -105,7 +105,10 @@ func (ms *MockSentry) Close() {
 	if ms.Engine != nil {
 		ms.Engine.Close()
 	}
-	if ms.HistoryV3 {
+	if ms.BlockSnapshots != nil {
+		ms.BlockSnapshots.Close()
+	}
+	if ms.agg != nil {
 		ms.agg.Close()
 	}
 	if ms.DB != nil {
