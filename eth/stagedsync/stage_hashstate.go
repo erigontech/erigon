@@ -307,6 +307,9 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 }
 
 func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) error {
+	if db == nil || ctx == nil || workers == 0 {
+		return nil
+	}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	for i := 0; i < 256; i++ {
