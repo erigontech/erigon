@@ -314,7 +314,6 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else if typ == vm.SELFDESTRUCT {
-		trace := &ParityTrace{}
 		trace.Type = SUICIDE
 		action := &SuicideTraceAction{}
 		action.Address = from
