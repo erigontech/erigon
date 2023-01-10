@@ -92,6 +92,9 @@ type FlatDBTrieLoader struct {
 	defaultReceiver *RootHashAggregator
 	hc              HashCollector2
 	shc             StorageHashCollector2
+
+	// Optionally construct an Account Proof for an account key specified in 'rd'
+	accProofResult *accounts.AccProofResult
 }
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
@@ -124,6 +127,10 @@ type RootHashAggregator struct {
 	a              accounts.Account
 	leafData       GenStructStepLeafData
 	accData        GenStructStepAccountData
+
+	// Used to construct an Account proof while calculating the tree root.
+	proofMatch RetainDecider
+	cutoff     bool
 }
 
 type StreamReceiver interface {
@@ -168,7 +175,14 @@ func (l *FlatDBTrieLoader) Reset(rd RetainDeciderWithMarker, hc HashCollector2, 
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")
 	}
+	l.accProofResult = nil
 	return nil
+}
+
+func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
+	l.accProofResult = accProofResult
+	l.defaultReceiver.proofMatch = l.rd
+	l.defaultReceiver.hb.SetProofReturn(accProofResult)
 }
 
 func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {

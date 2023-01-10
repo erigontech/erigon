@@ -39,6 +39,9 @@ type HashBuilder struct {
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
 	topHashesCopy []byte
+
+	// If an Account proof was requested in trie_root.go, nodes will be written here.
+	accProofResult *accounts.AccProofResult
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -59,6 +62,12 @@ func (hb *HashBuilder) Reset() {
 		hb.nodeStack = hb.nodeStack[:0]
 	}
 	hb.topHashesCopy = hb.topHashesCopy[:0]
+	hb.accProofResult = nil
+}
+
+func (hb *HashBuilder) SetProofReturn(accProofResult *accounts.AccProofResult) {
+	accProofResult.AccountProof = make([]string,0)
+	hb.accProofResult = accProofResult
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
