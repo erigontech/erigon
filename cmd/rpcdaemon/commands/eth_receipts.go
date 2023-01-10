@@ -414,8 +414,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 
 			//temporary hack for `e3_invalid_txnum`
-			minTxNumInBlock--
-			maxTxNumInBlock--
+			//minTxNumInBlock--
+			//maxTxNumInBlock--
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -427,9 +427,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		stateReader.SetTxNum(txNum + 1)
+		//stateReader.SetTxNum(txNum + 1)
 		//stateReader.SetTxNum(txNum - 1)
-		//stateReader.SetTxNum(txNum)
+		stateReader.SetTxNum(txNum)
 		txHash := txn.Hash()
 		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 		if err != nil {
