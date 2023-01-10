@@ -395,9 +395,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			signer = types.MakeSigner(chainConfig, blockNum)
 			if chainConfig == nil {
 				log.Warn("chainConfig is nil")
+				continue
 			}
 			if header == nil {
-				log.Warn("header is nil")
+				log.Warn("header is nil", "blockNum", blockNum)
+				continue
 			}
 			rules = chainConfig.Rules(blockNum, header.Time)
 			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
