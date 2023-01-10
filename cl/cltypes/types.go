@@ -52,7 +52,7 @@ type BeaconBodyBellatrix struct {
 	Deposits          []*Deposit             `ssz-max:"16"`
 	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 	SyncAggregate     *SyncAggregate
-	ExecutionPayload  *ExecutionPayload
+	ExecutionPayload  *types.Block
 }
 
 /*

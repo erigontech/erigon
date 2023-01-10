@@ -4,6 +4,7 @@ import (
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/prysmaticlabs/gohashtree"
 )
 
@@ -131,4 +132,29 @@ func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	}
 	res := dst[:newLen]
 	return res, size
+}
+
+func TransactionsListRoot(transactions [][]byte) (common.Hash, error) {
+	txCount := uint64(len(transactions))
+
+	leaves := [][32]byte{}
+	for _, transaction := range transactions {
+		transactionLength := uint64(len(transaction))
+		packedTransactions := packBits(transaction) // Pack transactions
+		transactionsBaseRoot, err := MerkleizeVector(packedTransactions, 33554432)
+		if err != nil {
+			return common.Hash{}, err
+		}
+
+		lengthRoot := Uint64Root(transactionLength)
+		leaves = append(leaves, utils.Keccak256(transactionsBaseRoot[:], lengthRoot[:]))
+	}
+	transactionsBaseRoot, err := MerkleizeVector(leaves, 1048576)
+	if err != nil {
+		return common.Hash{}, err
+	}
+
+	countRoot := Uint64Root(txCount)
+
+	return utils.Keccak256(transactionsBaseRoot[:], countRoot[:]), nil
 }

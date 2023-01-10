@@ -40,8 +40,10 @@ import (
 )
 
 var (
-	EmptyRootHash  = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-	EmptyUncleHash = rlpHash([]*Header(nil))
+	EmptyRootHash                = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyUncleHash               = rlpHash([]*Header(nil))
+	baseExtraDataSSZOffsetHeader = 536
+	baseExtraDataSSZOffsetBlock  = 508
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -524,9 +526,8 @@ func (h *Header) SanityCheck() error {
 	return nil
 }
 
-func (h *Header) MarshallSSZ() []byte {
-	buf := make([]byte, h.SizeSSZ(clparams.Phase0Version))
-	pos := len(h.ParentHash)
+func (h *Header) encodeHeaderMetadataForSSZ(buf []byte, extraDataOffset int) (pos int) {
+	pos = len(h.ParentHash)
 	copy(buf, h.ParentHash[:])
 
 	copy(buf[pos:], h.Coinbase[:])
@@ -548,20 +549,9 @@ func (h *Header) MarshallSSZ() []byte {
 	ssz_utils.MarshalUint64SSZ(buf[pos+8:], h.GasLimit)
 	ssz_utils.MarshalUint64SSZ(buf[pos+16:], h.GasUsed)
 	ssz_utils.MarshalUint64SSZ(buf[pos+24:], h.Time)
-
 	pos += 32
-	// Compute the offset
-	offset := 504
 
-	if h.WithdrawalsHash != nil {
-		offset += 32
-	}
-
-	if h.BaseFee != nil {
-		offset += 32
-	}
-
-	ssz_utils.EncodeOffset(buf[pos:], uint32(offset))
+	ssz_utils.EncodeOffset(buf[pos:], uint32(extraDataOffset))
 	pos += 4
 
 	// Add Base Fee
@@ -574,7 +564,18 @@ func (h *Header) MarshallSSZ() []byte {
 
 	copy(buf[pos:], h.BlockHashCL[:])
 	pos += len(h.BlockHashCL)
+	return
+}
 
+func (h *Header) EncodeSSZ() []byte {
+	buf := make([]byte, h.EncodingSizeSSZ(clparams.Phase0Version)) // does not matter the version in encoding
+	offset := baseExtraDataSSZOffsetHeader
+
+	if h.WithdrawalsHash != nil {
+		offset += 32
+	}
+
+	pos := h.encodeHeaderMetadataForSSZ(buf, offset)
 	copy(buf[pos:], h.TxHashSSZ[:])
 	pos += len(h.TxHashSSZ)
 
@@ -587,12 +588,13 @@ func (h *Header) MarshallSSZ() []byte {
 	return buf
 }
 
-func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
-	if len(buf) < h.SizeSSZ(version) {
-		return fmt.Errorf("Header SSZ: invalid length")
-	}
+// NOTE: it is skipping extra data
+func (h *Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int) {
+	h.UncleHash = EmptyUncleHash
+	h.Difficulty = common.Big0
+
 	copy(h.ParentHash[:], buf)
-	pos := len(h.ParentHash)
+	pos = len(h.ParentHash)
 
 	copy(h.Coinbase[:], buf[pos:])
 	pos += len(h.Coinbase)
@@ -623,7 +625,14 @@ func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
 	pos += 32
 	copy(h.BlockHashCL[:], buf[pos:pos+32])
 	pos += 32
+	return
+}
 
+func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
+	if len(buf) < h.EncodingSizeSSZ(version) {
+		return ssz_utils.ErrLowBufferSize
+	}
+	pos := h.decodeHeaderMetadataForSSZ(buf)
 	copy(h.TxHashSSZ[:], buf[pos:pos+32])
 	pos += len(h.TxHashSSZ)
 
@@ -634,15 +643,12 @@ func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
 	} else {
 		h.WithdrawalsHash = nil
 	}
-	h.Difficulty = common.Big0
-	h.UncleHash = EmptyUncleHash
 	h.Extra = common.CopyBytes(buf[pos:])
-
 	return nil
 }
 
 // SizeSSZ returns the ssz encoded size in bytes for the Header object
-func (h *Header) SizeSSZ(version clparams.StateVersion) int {
+func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 	size := 536
 
 	if h.WithdrawalsHash != nil || version >= clparams.CapellaVersion {
@@ -752,6 +758,198 @@ type Block struct {
 	// caches
 	hash atomic.Value
 	size atomic.Value
+}
+
+func (b *Block) HashSSZ() ([32]byte, error) {
+	return b.header.HashSSZ()
+}
+
+func (b *Block) EncodeSSZ(buf []byte) ([]byte, error) {
+	buf := make([]byte, b.EncodingSizeSSZ())
+	fmt.Println(len(buf))
+
+	currentOffset := baseExtraDataSSZOffsetBlock
+
+	pos := b.header.encodeHeaderMetadataForSSZ(buf, currentOffset)
+	currentOffset += len(b.header.Extra)
+	// use raw body for encoded txs and offsets.
+	rawBody := b.RawBody()
+	// Write transaction offset
+	ssz_utils.EncodeOffset(buf[pos:], uint32(currentOffset))
+	pos += 4
+	for _, tx := range rawBody.Transactions {
+		currentOffset += len(tx) + 4
+	}
+	// Write withdrawals offset if exist
+	if b.header.WithdrawalsHash != nil {
+		ssz_utils.EncodeOffset(buf[pos:], uint32(currentOffset))
+		pos += 4
+	}
+	// Sanity check for extra data then write it.
+	if len(b.header.Extra) > 32 {
+		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.header.Extra))
+	}
+	copy(buf[pos:], b.header.Extra)
+	pos += len(b.header.Extra)
+	// Write all tx offsets
+	txOffset := len(b.transactions) * 4
+	for _, tx := range rawBody.Transactions {
+		ssz_utils.EncodeOffset(buf[pos:], uint32(txOffset))
+		pos += 4
+		txOffset += len(tx)
+	}
+	// Write all transactions
+	for _, tx := range rawBody.Transactions {
+		copy(buf[pos:], tx)
+		pos += len(tx)
+	}
+
+	if b.header.WithdrawalsHash != nil {
+		// Append all withdrawals SSZ
+		for _, withdrawal := range b.withdrawals {
+			copy(buf[pos:], withdrawal.EncodeSSZ())
+			pos += withdrawal.EncodingSizeSSZ()
+		}
+	}
+	return buf, nil
+}
+
+func (b *Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
+	if len(buf) < b.EncodingSizeSSZ() {
+		return ssz_utils.ErrLowBufferSize
+	}
+
+	if b.header == nil {
+		b.header = new(Header)
+	}
+
+	pos := b.header.decodeHeaderMetadataForSSZ(buf)
+	// Compute block SSZ offsets.
+	extraDataOffset := baseExtraDataSSZOffsetBlock
+	transactionsOffset := ssz_utils.DecodeOffset(buf[pos : pos+4])
+	pos += 4
+	var withdrawalOffset *uint32
+	if version >= clparams.CapellaVersion {
+		withdrawalOffset = new(uint32)
+		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos : pos+4])
+	}
+	// Compute extra data.
+	b.header.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
+	if len(b.header.Extra) > 32 {
+		return fmt.Errorf("Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.header.Extra))
+	}
+	// Compute transactions
+	var transactionsBuffer []byte
+	if withdrawalOffset == nil {
+		transactionsBuffer = buf[transactionsOffset:]
+	} else {
+		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
+	}
+
+	length := uint32(0)
+	transactionsPosition := 4
+	var txOffset uint32
+	if len(transactionsBuffer) == 0 {
+		length = 0
+	} else {
+		if len(transactionsBuffer) < 4 {
+			return ssz_utils.ErrLowBufferSize
+		}
+		txOffset = ssz_utils.DecodeOffset(transactionsBuffer)
+		length = txOffset / 4
+		// Retrieve tx length
+		if txOffset%4 != 0 {
+			return ssz_utils.ErrBadDynamicLength
+		}
+	}
+
+	// Initialize rlp decoding
+	reader := bytes.NewReader(nil)
+	stream := rlp.NewStream(reader, 0)
+	b.transactions = make(Transactions, length)
+	transactionsBytes := make([][]byte, length)
+	txIdx := 0
+	// Loop through each transaction
+	for length > 0 {
+		var txEndOffset uint32
+		if length == 1 {
+			txEndOffset = uint32(len(transactionsBuffer))
+		} else {
+			txEndOffset = ssz_utils.DecodeOffset(transactionsBuffer[transactionsPosition:])
+		}
+		transactionsPosition += 4
+		if txOffset > txEndOffset {
+			return ssz_utils.ErrBadOffset
+		}
+		rlpTx := transactionsBuffer[txOffset:txEndOffset]
+		transactionsBytes[txIdx] = common.CopyBytes(rlpTx)
+		// Decode RLP and put it in the tx list.
+		var decodeErr error
+		reader.Reset(rlpTx)
+		stream.Reset(reader, 0)
+		if b.transactions[txIdx], decodeErr = DecodeTransaction(stream); decodeErr != nil {
+			return decodeErr
+		}
+		// Update parameters for next iteration
+		txOffset = txEndOffset
+		txIdx++
+		length--
+	}
+	// Cache transaction ssz root.
+	var err error
+	b.header.TxHashSSZ, err = merkle_tree.TransactionsListRoot(transactionsBytes)
+	if err != nil {
+		return err
+	}
+	// Cache transaction rlp hash.
+	b.header.TxHash = DeriveSha(BinaryTransactions(transactionsBytes))
+	// If withdrawals are enabled, process them.
+	if withdrawalOffset != nil {
+		withdrawalsCount := (uint32(len(buf)) - *withdrawalOffset) / 44
+		if withdrawalsCount > 16 {
+			return fmt.Errorf("Decode(SSZ): Withdrawals field length should be less or equal to 16, got %d", withdrawalsCount)
+		}
+		b.withdrawals = make([]*Withdrawal, withdrawalsCount)
+		for i := range b.withdrawals {
+			b.withdrawals[i].DecodeSSZ(buf[(*withdrawalOffset)+uint32(i)*44:])
+		}
+		// Cache withdrawal root.
+		b.header.WithdrawalsHash = new(common.Hash)
+		withdrawalRoot, err := b.Withdrawals().HashSSZ(16)
+		if err != nil {
+			return err
+		}
+		*b.header.WithdrawalsHash = withdrawalRoot
+	}
+	if b.Hash() != b.header.BlockHashCL {
+		//j, _ := b.header.MarshalJSON()
+		//fmt.Println(string(j))
+		fmt.Println(len(transactionsBytes))
+		fmt.Println(b.header.Number.Uint64())
+	}
+	return nil
+}
+
+func (b *Block) EncodingSizeSSZ() (size int) {
+	size = 508
+
+	if b.header == nil {
+		return
+	}
+	// Field (10) 'ExtraData'
+	size += len(b.Extra())
+	txs := b.RawBody().Transactions
+	// Field (13) 'Transactions'
+	for _, tx := range txs {
+		size += 4
+		size += len(tx)
+	}
+
+	if b.withdrawals != nil {
+		size += len(b.withdrawals) * 44
+	}
+
+	return
 }
 
 // Copy transaction senders from body into the transactions

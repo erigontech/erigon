@@ -18,7 +18,6 @@ package types
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 
@@ -91,7 +90,7 @@ func (obj *Withdrawal) EncodeSSZ() []byte {
 
 func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return errors.New("invalid buffer size")
+		return ssz_utils.ErrLowBufferSize
 	}
 	obj.Index = ssz_utils.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz_utils.UnmarshalUint64SSZ(buf[8:])

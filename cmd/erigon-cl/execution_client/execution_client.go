@@ -8,7 +8,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -81,7 +80,7 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []c
 }
 
 // InsertExecutionPayloads insert a segment of execution payloads
-func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.ExecutionPayload) error {
+func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*types.Block) error {
 	headers := make([]*types.Header, 0, len(payloads))
 	bodies := make([]*types.RawBody, 0, len(payloads))
 	blockHashes := make([]common.Hash, 0, len(payloads))
@@ -89,9 +88,9 @@ func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Execution
 
 	for _, payload := range payloads {
 		headers = append(headers, payload.Header())
-		bodies = append(bodies, payload.BlockBody())
-		blockHashes = append(blockHashes, payload.BlockHash)
-		blockNumbers = append(blockNumbers, payload.BlockNumber)
+		bodies = append(bodies, payload.RawBody())
+		blockHashes = append(blockHashes, payload.Header().BlockHashCL)
+		blockNumbers = append(blockNumbers, payload.NumberU64())
 	}
 
 	if err := ec.InsertHeaders(headers); err != nil {
