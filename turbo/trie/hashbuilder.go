@@ -146,6 +146,10 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	var writer io.Writer
 	var reader io.Reader
 
+	// Collect a copy of the hash input if needed for an eth_getProof
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(hb.sha, &proofBuf)
+
 	if totalLen+pt < length2.Hash {
 		// Embedded node
 		hb.byteArrayWriter.Setup(hb.hashBuf[:], 0)
@@ -156,10 +160,10 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		reader = hb.sha
 	}
 
-	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
+	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	if _, err := writer.Write(hb.keyPrefix[:kp]); err != nil {
+	if _, err := mWriter.Write(hb.keyPrefix[:kp]); err != nil {
 		return err
 	}
 	hb.b[0] = compact0
@@ -168,13 +172,13 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	}
 	for i := 1; i < compactLen; i++ {
 		hb.b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(hb.b[:]); err != nil {
+		if _, err := mWriter.Write(hb.b[:]); err != nil {
 			return err
 		}
 		ni += 2
 	}
 
-	if err := val.ToDoubleRLP(writer, hb.prefixBuf[:]); err != nil {
+	if err := val.ToDoubleRLP(mWriter, hb.prefixBuf[:]); err != nil {
 		return err
 	}
 
@@ -405,26 +409,30 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	totalLen := kp + kl + 33
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
+
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(hb.sha, &proofBuf)
+
 	hb.sha.Reset()
-	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
+	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	if _, err := hb.sha.Write(hb.keyPrefix[:kp]); err != nil {
+	if _, err := mWriter.Write(hb.keyPrefix[:kp]); err != nil {
 		return err
 	}
 	hb.b[0] = compact0
-	if _, err := hb.sha.Write(hb.b[:]); err != nil {
+	if _, err := mWriter.Write(hb.b[:]); err != nil {
 		return err
 	}
 	for i := 1; i < compactLen; i++ {
 		hb.b[0] = key[ni]*16 + key[ni+1]
-		if _, err := hb.sha.Write(hb.b[:]); err != nil {
+		if _, err := mWriter.Write(hb.b[:]); err != nil {
 			return err
 		}
 		ni += 2
 	}
 	//capture := common.CopyBytes(branchHash[:length2.Hash+1])
-	if _, err := hb.sha.Write(branchHash[:length2.Hash+1]); err != nil {
+	if _, err := mWriter.Write(branchHash[:length2.Hash+1]); err != nil {
 		return err
 	}
 	// Replace previous hash with the new one
@@ -501,9 +509,13 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 			i++
 		}
 	}
+
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(hb.sha, &proofBuf)
+
 	hb.sha.Reset()
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
-	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
+	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
 	// Output hasState hashes or embedded RLPs
@@ -513,21 +525,21 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	for digit := uint(0); digit < 17; digit++ {
 		if ((1 << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == byte(0x80+length2.Hash) {
-				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
+				if _, err := mWriter.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
 				}
 				//fmt.Printf("%x: [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+hashStackStride])
 			} else {
 				// Embedded node
 				size := int(hashes[hashStackStride*i]) - rlp.EmptyListCode
-				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+size+1]); err != nil {
+				if _, err := mWriter.Write(hashes[hashStackStride*i : hashStackStride*i+size+1]); err != nil {
 					return err
 				}
 				//fmt.Printf("%x: embedded [%x]\n", digit, hashes[hashStackStride*i:hashStackStride*i+size+1])
 			}
 			i++
 		} else {
-			if _, err := hb.sha.Write(hb.b[:]); err != nil {
+			if _, err := mWriter.Write(hb.b[:]); err != nil {
 				return err
 			}
 			//fmt.Printf("%x: empty\n", digit)
