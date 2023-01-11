@@ -134,8 +134,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return api.getLogsV3(ctx, tx.(kv.TemporalTx), begin, end, crit)
 	}
 
-	blockNumbers := bitmapdb.NewBitmap()
-	defer bitmapdb.ReturnToPool(blockNumbers)
+	blockNumbers := bitmapdb.NewBitmap64()
+	defer bitmapdb.ReturnToPool64(blockNumbers)
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
@@ -228,7 +228,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
@@ -254,9 +254,9 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 
 		result = roaring.And(bitmapForORing, result)
 	}
-	return result, nil
+	return bitmapdb.CastBitmapTo64(result), nil
 }
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
+func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -273,10 +273,10 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		}
 		rx[idx] = m
 	}
-	return roaring.FastOr(rx...), nil
+	return bitmapdb.CastBitmapTo64(roaring.FastOr(rx...)), nil
 }
 
-func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
+func applyFilters(out *roaring64.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
 	out.AddRange(begin, end+1) // [from,to)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
