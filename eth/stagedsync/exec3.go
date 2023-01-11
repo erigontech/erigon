@@ -581,6 +581,13 @@ Loop:
 						currentQueueSize := rs.AddWork(txTask)
 						if currentQueueSize > queueSize {
 							time.Sleep(1 * time.Millisecond)
+						} else {
+							rwsLock.RLock()
+							needWait := rws.Len() > queueSize
+							rwsLock.RUnlock()
+							if needWait {
+								time.Sleep(1 * time.Millisecond)
+							}
 						}
 					}
 				} else {
