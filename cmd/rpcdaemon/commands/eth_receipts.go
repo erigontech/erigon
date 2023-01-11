@@ -465,7 +465,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
-			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			bm, err := it.ToBitmap()
 			if err != nil {
 				return nil, err
 			}
@@ -493,15 +493,10 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		if err != nil {
 			return nil, err
 		}
-		m := roaring64.New()
-		for it.HasNext() {
-			n, err := it.NextBatch()
-			if err != nil {
-				return nil, err
-			}
-			m.AddMany(n)
+		rx[idx], err = it.ToBitmap()
+		if err != nil {
+			return nil, err
 		}
-		rx[idx] = m
 	}
 	return roaring64.FastOr(rx...), nil
 }

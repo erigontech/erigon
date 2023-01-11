@@ -556,7 +556,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if err != nil {
 				return err
 			}
-			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			bm, err := it.ToBitmap()
 			if err != nil {
 				return err
 			}
@@ -571,7 +571,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if err != nil {
 				return err
 			}
-			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			bm, err := it.ToBitmap()
 			if err != nil {
 				return err
 			}
