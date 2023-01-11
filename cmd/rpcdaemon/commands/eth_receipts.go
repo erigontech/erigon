@@ -272,7 +272,6 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 }
 
 func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
-	//out.Clear()
 	out.AddRange(begin, end+1) // [from,to)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
