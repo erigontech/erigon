@@ -224,6 +224,13 @@ func ExecV3(ctx context.Context,
 			case <-ctx.Done():
 				return ctx.Err()
 			case txTask := <-resultCh:
+				if txTask.BlockNum > lastBlockNum {
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = txTask.BlockNum
+					t = time.Now()
+				}
 				if err := func() error {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -237,13 +244,6 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if txTask.BlockNum > lastBlockNum {
-					if lastBlockNum > 0 {
-						core.BlockExecutionTimer.UpdateDuration(t)
-					}
-					lastBlockNum = txTask.BlockNum
-					t = time.Now()
-				}
 				syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 			}
 		}
