@@ -41,6 +41,10 @@ type structInfoReceiver interface {
 	topHash() []byte
 	topHashes(prefix []byte, branches, children uint16) []byte
 	printTopHashes(prefix []byte, branches, children uint16)
+
+	// eth_getProof extensions
+	branchEx(set uint16, doProof bool) error
+	branchHashEx(set uint16, doProof bool) error
 }
 
 // hashCollector gets called whenever there might be a need to create intermediate hash record
@@ -169,7 +173,7 @@ func GenStructStepEx(
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				if retain(curr[:maxLen]) {
+				if retain(curr[:maxLen]) || (wantProof != nil && wantProof(curr[:len(curr)-1])) {
 					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
 						return nil, nil, nil, err
 					}
@@ -272,11 +276,21 @@ func GenStructStepEx(
 				}
 			}
 
+			var doProof bool
+			if wantProof != nil {
+				if maxLen > 0 && wantProof(curr[:maxLen]) {
+					doProof = true
+				}
+				if len(succ) == 0 && maxLen == 0 && cutoff {
+					doProof = true
+				}
+			}
+
 			if trace {
 				e.printTopHashes(curr[:maxLen], 0, groups[maxLen])
 			}
-			if retain(curr[:maxLen]) {
-				if err := e.branch(groups[maxLen]); err != nil {
+			if retain(curr[:maxLen]) || doProof {
+				if err := e.branchEx(groups[maxLen], doProof); err != nil {
 					return nil, nil, nil, err
 				}
 			} else {

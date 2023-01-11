@@ -339,6 +339,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		}
 
 		var accProof accounts.AccProofResult
+		accProof.Address = address
 		loader.SetProofReturn(&accProof)
 
 		_, err = loader.CalcTrieRoot(tx, nil, nil)

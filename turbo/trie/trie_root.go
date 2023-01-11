@@ -362,6 +362,7 @@ func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2,
 	r.root = common.Hash{}
 	r.trace = trace
 	r.hb.trace = trace
+	r.proofMatch = nil
 }
 
 func (r *RootHashAggregator) Receive(itemType StreamItem,

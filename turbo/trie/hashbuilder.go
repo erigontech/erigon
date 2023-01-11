@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -66,7 +67,8 @@ func (hb *HashBuilder) Reset() {
 }
 
 func (hb *HashBuilder) SetProofReturn(accProofResult *accounts.AccProofResult) {
-	accProofResult.AccountProof = make([]string,0)
+	accProofResult.AccountProof = make([]string, 0)
+	accProofResult.StorageProof = make([]accounts.StorProofResult, 0)
 	hb.accProofResult = accProofResult
 }
 
@@ -126,7 +128,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 		kl = 1
 	}
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val, false)
 	if err != nil {
 		return err
 	}
@@ -139,16 +141,12 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlphacks.RlpSerializable, doProof bool) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
-
-	// Collect a copy of the hash input if needed for an eth_getProof
-	var proofBuf bytes.Buffer
-	mWriter := io.MultiWriter(hb.sha, &proofBuf)
 
 	if totalLen+pt < length2.Hash {
 		// Embedded node
@@ -159,6 +157,9 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		writer = hb.sha
 		reader = hb.sha
 	}
+	// Collect a copy of the hash input if needed for an eth_getProof
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(writer, &proofBuf)
 
 	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -167,7 +168,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		return err
 	}
 	hb.b[0] = compact0
-	if _, err := writer.Write(hb.b[:]); err != nil {
+	if _, err := mWriter.Write(hb.b[:]); err != nil {
 		return err
 	}
 	for i := 1; i < compactLen; i++ {
@@ -180,6 +181,11 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 
 	if err := val.ToDoubleRLP(mWriter, hb.prefixBuf[:]); err != nil {
 		return err
+	}
+
+	if hb.accProofResult != nil && doProof {
+		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
+		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
 	}
 
 	if reader != nil {
@@ -255,7 +261,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	s := &shortNode{Key: common.CopyBytes(key), Val: a}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
-	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
+	if err = hb.accountLeafHashWithKey(key, popped, true); err != nil {
 		return err
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
@@ -264,6 +270,17 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
+	if hb.accProofResult != nil {
+		// The 'Initialized' and 'Incarnation' fields are presently ignored
+		hb.accProofResult.Balance = (*hexutil.Big)(a.Balance.ToBig())
+		hb.accProofResult.CodeHash = a.CodeHash
+		hb.accProofResult.Nonce = hexutil.Uint64(a.Nonce)
+		if a.storage != nil {
+			hb.accProofResult.StorageHash = common.BytesToHash(a.storage.reference())
+		} else {
+			hb.accProofResult.StorageHash = EmptyRoot
+		}
 	}
 	return nil
 }
@@ -293,11 +310,11 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, balance *uint2
 		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
 	}
 
-	return hb.accountLeafHashWithKey(key, popped)
+	return hb.accountLeafHashWithKey(key, popped, false)
 }
 
 // To be called internally
-func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
+func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int, doProof bool) error {
 	// Compute the total length of binary representation
 	var kp, kl int
 	// Write key
@@ -329,7 +346,8 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	valLen := hb.acc.EncodingLengthForHashing()
 	hb.acc.EncodeForHashing(hb.valBuf[:])
 	val := rlphacks.RlpEncodedBytes(hb.valBuf[:valLen])
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
+
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val, doProof)
 	if err != nil {
 		return err
 	}
@@ -374,6 +392,9 @@ func (hb *HashBuilder) extension(key []byte) error {
 }
 
 func (hb *HashBuilder) extensionHash(key []byte) error {
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(hb.sha, &proofBuf)
+
 	if hb.trace {
 		fmt.Printf("EXTENSIONHASH %x\n", key)
 	}
@@ -409,10 +430,6 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	totalLen := kp + kl + 33
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
-
-	var proofBuf bytes.Buffer
-	mWriter := io.MultiWriter(hb.sha, &proofBuf)
-
 	hb.sha.Reset()
 	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
@@ -439,6 +456,12 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
+
+	if hb.accProofResult != nil {
+		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
+		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
+	}
+
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
 	//fmt.Printf("extensionHash [%x]=>[%x]\nHash [%x]\n", key, capture, hb.hashStack[len(hb.hashStack)-hashStackStride:len(hb.hashStack)])
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
@@ -447,7 +470,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	return nil
 }
 
-func (hb *HashBuilder) branch(set uint16) error {
+func (hb *HashBuilder) branchEx(set uint16, doProof bool) error {
 	if hb.trace {
 		fmt.Printf("BRANCH (%b)\n", set)
 	}
@@ -474,7 +497,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	}
 	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
 	hb.nodeStack[len(hb.nodeStack)-1] = f
-	if err := hb.branchHash(set); err != nil {
+	if err := hb.branchHashEx(set, doProof); err != nil {
 		return err
 	}
 	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-length2.Hash:])
@@ -485,8 +508,14 @@ func (hb *HashBuilder) branch(set uint16) error {
 
 	return nil
 }
+func (hb *HashBuilder) branch(set uint16) error {
+	return hb.branchEx(set, false)
+}
 
-func (hb *HashBuilder) branchHash(set uint16) error {
+func (hb *HashBuilder) branchHashEx(set uint16, doProof bool) error {
+	var proofBuf bytes.Buffer
+	mWriter := io.MultiWriter(hb.sha, &proofBuf)
+
 	if hb.trace {
 		fmt.Printf("BRANCHHASH (%b)\n", set)
 	}
@@ -509,18 +538,16 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 			i++
 		}
 	}
-
-	var proofBuf bytes.Buffer
-	mWriter := io.MultiWriter(hb.sha, &proofBuf)
-
 	hb.sha.Reset()
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
 	if _, err := mWriter.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
+
 	// Output hasState hashes or embedded RLPs
 	i = 0
 	//fmt.Printf("branchHash {\n")
+
 	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((1 << digit) & set) != 0 {
@@ -550,6 +577,12 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-length2.Hash:]); err != nil {
 		return err
 	}
+
+	if doProof && (hb.accProofResult != nil) {
+		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
+		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
+	}
+
 	//fmt.Printf("} [%x]\n", hb.hashStack[len(hb.hashStack)-hashStackStride:])
 
 	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
@@ -563,6 +596,9 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
+}
+func (hb *HashBuilder) branchHash(set uint16) error {
+	return hb.branchHashEx(set, false)
 }
 
 func (hb *HashBuilder) hash(hash []byte) error {
