@@ -217,6 +217,8 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(tx)
 
 		notifyReceived := func() { rwsReceiveCond.Signal() }
+		var t time.Time
+		var lastBlockNum uint64
 		for outputTxNum.Load() < maxTxNum.Load() {
 			select {
 			case <-ctx.Done():
@@ -230,11 +232,19 @@ func ExecV3(ctx context.Context,
 					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 						return err
 					}
-					syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					return nil
 				}(); err != nil {
 					return err
 				}
+
+				if lastBlockNum != txTask.BlockNum {
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = txTask.BlockNum
+					t = time.Now()
+				}
+				syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 			}
 		}
 		return nil
@@ -475,8 +485,6 @@ func ExecV3(ctx context.Context,
 	var blockNum uint64
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		t := time.Now()
-
 		inputBlockNum.Store(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
@@ -640,7 +648,6 @@ Loop:
 			inputTxNum++
 		}
 
-		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
 
