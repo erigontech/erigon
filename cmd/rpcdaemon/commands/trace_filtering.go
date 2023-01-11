@@ -233,6 +233,59 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
+func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, fromBlock, toBlock uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
+	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
+	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
+	allBlocks = roaring64.New()
+	var blocksTo roaring64.Bitmap
+	for _, addr := range req.FromAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				return nil, nil, nil, err
+			}
+			allBlocks.Or(b)
+			fromAddresses[*addr] = struct{}{}
+		}
+	}
+
+	for _, addr := range req.ToAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
+			if err != nil {
+				if errors.Is(err, ethdb.ErrKeyNotFound) {
+					continue
+				}
+				return nil, nil, nil, err
+			}
+			blocksTo.Or(b)
+			toAddresses[*addr] = struct{}{}
+		}
+	}
+
+	switch req.Mode {
+	case TraceFilterModeIntersection:
+		allBlocks.And(&blocksTo)
+	case TraceFilterModeUnion:
+		fallthrough
+	default:
+		allBlocks.Or(&blocksTo)
+	}
+
+	// Special case - if no addresses specified, take all traces
+	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
+		allBlocks.AddRange(fromBlock, toBlock)
+	} else {
+		allBlocks.RemoveRange(0, fromBlock)
+		allBlocks.RemoveRange(toBlock, uint64(0x100000000))
+	}
+
+	return fromAddresses, toAddresses, allBlocks, nil
+}
+
 // Filter implements trace_filter
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
@@ -265,59 +318,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
 	}
 	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
-
-	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
-	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
-
-	var (
-		allBlocks roaring64.Bitmap
-		blocksTo  roaring64.Bitmap
-	)
-
-	for _, addr := range req.FromAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-				return err
-			}
-			allBlocks.Or(b)
-			fromAddresses[*addr] = struct{}{}
-		}
-	}
-
-	for _, addr := range req.ToAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(dbtx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
-				if errors.Is(err, ethdb.ErrKeyNotFound) {
-					continue
-				}
-
-				return err
-			}
-			blocksTo.Or(b)
-			toAddresses[*addr] = struct{}{}
-		}
-	}
-
-	switch req.Mode {
-	case TraceFilterModeIntersection:
-		allBlocks.And(&blocksTo)
-	case TraceFilterModeUnion:
-		fallthrough
-	default:
-		allBlocks.Or(&blocksTo)
-	}
-
-	// Special case - if no addresses specified, take all traces
-	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks.AddRange(fromBlock, toBlock)
-	} else {
-		allBlocks.RemoveRange(0, fromBlock)
-		allBlocks.RemoveRange(toBlock, uint64(0x100000000))
+	fromAddresses, toAddresses, allBlocks, err := traceFilterBitmaps(dbtx, req, fromBlock, toBlock)
+	if err != nil {
+		return err
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
