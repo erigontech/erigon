@@ -229,7 +229,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
 func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
-	var result *roaring.Bitmap
+	//var result *roaring.Bitmap
+	result := bitmapdb.NewBitmap()
+	defer bitmapdb.ReturnToPool(result)
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
@@ -285,6 +287,7 @@ func applyFilters(out *roaring64.Bitmap, tx kv.Tx, begin, end uint64, crit filte
 	if topicsBitmap != nil {
 		out.And(topicsBitmap)
 	}
+	bitmapdb.ReturnToPool64(topicsBitmap)
 	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
 	if err != nil {
 		return err
@@ -292,6 +295,7 @@ func applyFilters(out *roaring64.Bitmap, tx kv.Tx, begin, end uint64, crit filte
 	if addrBitmap != nil {
 		out.And(addrBitmap)
 	}
+	bitmapdb.ReturnToPool64(addrBitmap)
 	return nil
 }
 
