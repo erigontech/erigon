@@ -78,7 +78,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inpu
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
-		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
+		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"pipe", fmt.Sprintf("%d/%d->%d/%d->%d/%d", queueLen, queueSize, rwsLen, queueSize, len(resultCh), cap(resultCh)),
@@ -88,6 +88,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inpu
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
 		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	//var txNums []string
