@@ -245,3 +245,19 @@ func StopAfterStage() string {
 	stopAfterStageFlag.Do(f)
 	return stopAfterStage
 }
+
+var (
+	stopAfterReconst     bool
+	stopAfterReconstOnce sync.Once
+)
+
+func StopAfterReconst() bool {
+	stopAfterReconstOnce.Do(func() {
+		v, _ := os.LookupEnv("STOP_AFTER_RECONSTITUTE")
+		if v == "true" {
+			stopAfterReconst = true
+			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", writeMap)
+		}
+	})
+	return stopAfterReconst
+}
