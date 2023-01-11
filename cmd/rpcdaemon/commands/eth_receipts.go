@@ -136,22 +136,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(begin, end+1) // [min,max)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
-	if err != nil {
-		return nil, err
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
+		return logs, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
-	if err != nil {
-		return nil, err
-	}
-	if addrBitmap != nil {
-		blockNumbers.And(addrBitmap)
-	}
-
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
@@ -161,7 +148,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -284,41 +271,76 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 	return roaring.FastOr(rx...), nil
 }
 
-func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
-	logs := []*types.Log{}
+func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
+	out.Clear()
+	out.AddRange(begin, end+1) // [from,to)
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
+	if err != nil {
+		return err
+	}
+	if topicsBitmap != nil {
+		out.And(topicsBitmap)
+	}
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
+	if err != nil {
+		return err
+	}
+	if addrBitmap != nil {
+		out.And(addrBitmap)
+	}
+	return nil
+}
 
+func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
+	//[from,to)
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
 		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(tx, end)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	toTxNum++
 
-	txNumbers := roaring64.New()
-	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
-
+	out.Clear()
+	out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if topicsBitmap != nil {
-		txNumbers.And(topicsBitmap)
+		out.And(topicsBitmap)
 	}
 	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if addrBitmap != nil {
-		txNumbers.And(addrBitmap)
+		out.And(addrBitmap)
+	}
+	return nil
+}
+
+func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
+	txNumbers := bitmapdb.NewBitmap64()
+	defer bitmapdb.ReturnToPool64(txNumbers)
+
+	logs := []*types.Log{}
+	if err := applyFiltersV3(txNumbers, tx, begin, end, crit); err != nil {
+		return logs, err
 	}
 	if txNumbers.IsEmpty() {
 		return logs, nil
+	}
+
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	for _, v := range crit.Addresses {
+		addrMap[v] = struct{}{}
 	}
 
 	var lastBlockNum uint64
@@ -327,23 +349,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var signer *types.Signer
 	var rules *params.Rules
 	var skipAnalysis bool
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx)
-	ibs := state.New(stateReader)
-
-	//stateReader.SetTrace(true)
-	iter := txNumbers.Iterator()
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 	engine := api.engine()
-
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
 
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
 	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
@@ -352,7 +363,15 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx)
+	ibs := state.New(stateReader)
+
+	iter := txNumbers.Iterator()
 	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		txNum := iter.Next()
 
 		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
@@ -365,7 +384,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 		}
 		if !ok {
-			return nil, nil
+			break
 		}
 
 		// if block number changed, calculate all related field
