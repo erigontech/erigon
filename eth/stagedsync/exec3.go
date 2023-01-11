@@ -589,13 +589,13 @@ Loop:
 					if ok := rs.RegisterSender(txTask); ok {
 						currentQueueSize := rs.AddWork(txTask)
 						if currentQueueSize > queueSize {
-							time.Sleep(1 * time.Millisecond)
+							time.Sleep(100 * time.Microsecond)
 						} else {
 							rwsLock.RLock()
 							needWait := rws.Len() > queueSize
 							rwsLock.RUnlock()
 							if needWait {
-								time.Sleep(1 * time.Millisecond)
+								time.Sleep(100 * time.Microsecond)
 							}
 						}
 					}
