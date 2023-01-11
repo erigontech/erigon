@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -277,13 +276,13 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 			if err != nil {
 				return nil, err
 			}
-			bm = castBitmapTo64(bm32)
+			bm = bitmapdb.CastBitmapTo64(bm32)
 		case LogAddrIdx:
 			bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
 			if err != nil {
 				return nil, err
 			}
-			bm = castBitmapTo64(bm32)
+			bm = bitmapdb.CastBitmapTo64(bm32)
 		case TracesFromIdx:
 			bm, err = bitmapdb.Get64(tx, kv.TracesFromIdx, key, fromTs, toTs)
 			if err != nil {
@@ -299,12 +298,4 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		}
 		return bitmapdb.NewBitmapStream(bm), nil
 	}
-}
-
-func castBitmapTo64(in *roaring.Bitmap) *roaring64.Bitmap {
-	bm := roaring64.New()
-	for _, v := range in.ToArray() {
-		bm.Add(uint64(v))
-	}
-	return bm
 }
