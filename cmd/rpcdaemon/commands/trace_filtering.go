@@ -775,10 +775,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				return err
 			}
 		}
-		txIndex := txNum - startTxNum - 1
-		if txIndex < 0 {
+		if txNum == startTxNum { //is system tx
 			continue
 		}
+		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, int(txIndex))
 		if err != nil {
