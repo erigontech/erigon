@@ -311,7 +311,6 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	}
 	toTxNum++
 
-	out.Clear()
 	out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
