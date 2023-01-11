@@ -28,12 +28,8 @@ func InitSubscriptions(methods []models.SubMethod) {
 			return
 		}
 
-		for {
-			select {
-			case block := <-methodSub.SubChan:
-				models.NewHeadsChan <- block
-			}
-		}
+		block := <-methodSub.SubChan
+		models.NewHeadsChan <- block
 	}()
 }
 
@@ -163,23 +159,21 @@ func searchBlockForHashes(hashesmap map[common.Hash]bool) (*map[common.Hash]stri
 
 	var blockCount int
 	for {
-		select {
 		// get a block from the new heads channel
-		case block := <-models.NewHeadsChan:
-			blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
-			blockNum := block.(map[string]interface{})["number"].(string)
-			_, numFound, foundErr := txHashInBlock(methodSub.Client, hashesmap, blockNum, txToBlock)
-			if foundErr != nil {
-				return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
-			}
-			toFind -= numFound // remove the amount of found txs from the amount we're looking for
-			if toFind == 0 {   // this means we have found all the txs we're looking for
-				fmt.Printf("All the transactions created have been mined\n")
-				return &txToBlock, nil
-			}
-			if blockCount == models.MaxNumberOfBlockChecks {
-				return nil, fmt.Errorf("timeout when searching for tx")
-			}
+		block := <-models.NewHeadsChan
+		blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
+		blockNum := block.(map[string]interface{})["number"].(string)
+		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashesmap, blockNum, txToBlock)
+		if foundErr != nil {
+			return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
+		}
+		toFind -= numFound // remove the amount of found txs from the amount we're looking for
+		if toFind == 0 {   // this means we have found all the txs we're looking for
+			fmt.Printf("All the transactions created have been mined\n")
+			return &txToBlock, nil
+		}
+		if blockCount == models.MaxNumberOfBlockChecks {
+			return nil, fmt.Errorf("timeout when searching for tx")
 		}
 	}
 }

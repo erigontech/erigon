@@ -102,10 +102,18 @@ func (ms *MockSentry) Close() {
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
-	if ms.HistoryV3 {
+	if ms.Engine != nil {
+		ms.Engine.Close()
+	}
+	if ms.BlockSnapshots != nil {
+		ms.BlockSnapshots.Close()
+	}
+	if ms.agg != nil {
 		ms.agg.Close()
 	}
-	ms.DB.Close()
+	if ms.DB != nil {
+		ms.DB.Close()
+	}
 }
 
 // Stream returns stream, waiting if necessary
