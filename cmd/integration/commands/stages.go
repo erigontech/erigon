@@ -489,7 +489,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
-			return nil
+			return rawdb.WriteSnapshots(tx, sn.Files(), agg.Files())
 		}
 
 		progress, err := stages.GetStageProgress(tx, stages.Headers)
