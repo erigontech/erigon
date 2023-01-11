@@ -136,22 +136,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(begin, end+1) // [min,max)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
-	if err != nil {
-		return nil, err
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
+		return logs, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
-	if err != nil {
-		return nil, err
-	}
-	if addrBitmap != nil {
-		blockNumbers.And(addrBitmap)
-	}
-
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
@@ -161,7 +148,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -282,6 +269,25 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		rx[idx] = m
 	}
 	return roaring.FastOr(rx...), nil
+}
+
+func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
+	out.AddRange(begin, end+1) // [from,to)
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
+	if err != nil {
+		return err
+	}
+	if topicsBitmap != nil {
+		out.And(topicsBitmap)
+	}
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
+	if err != nil {
+		return err
+	}
+	if addrBitmap != nil {
+		out.And(addrBitmap)
+	}
+	return nil
 }
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {

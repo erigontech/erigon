@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/RoaringBitmap/roaring"
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -268,23 +270,41 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
 	} else {
-		var table string
+		var bm *roaring64.Bitmap
 		switch name {
 		case LogTopicIdx:
-			table = kv.LogTopicIndex
+			bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
+			if err != nil {
+				return nil, err
+			}
+			bm = castBitmapTo64(bm32)
 		case LogAddrIdx:
-			table = kv.LogAddressIdx
+			bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
+			if err != nil {
+				return nil, err
+			}
+			bm = castBitmapTo64(bm32)
 		case TracesFromIdx:
-			table = kv.TracesFromIdx
+			bm, err = bitmapdb.Get64(tx, kv.TracesFromIdx, key, fromTs, toTs)
+			if err != nil {
+				return nil, err
+			}
 		case TracesToIdx:
-			table = kv.TracesToIdx
+			bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
-		bm, err := bitmapdb.Get64(tx, table, key, fromTs, toTs)
-		if err != nil {
-			return nil, err
-		}
 		return kv.StreamArray(bm.ToArray()), nil
 	}
+}
+
+func castBitmapTo64(in *roaring.Bitmap) *roaring64.Bitmap {
+	bm := roaring64.New()
+	for _, v := range in.ToArray() {
+		bm.Add(uint64(v))
+	}
+	return bm
 }
