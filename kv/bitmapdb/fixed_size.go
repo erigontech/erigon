@@ -236,11 +236,12 @@ func (w *FixedSizeBitmapsWriter) AddArray(item uint64, listOfValues []uint64) er
 	if item > w.amount {
 		return fmt.Errorf("too big item number: %d > %d", item, w.amount)
 	}
+	offset := item * w.bitsPerBitmap
 	for _, v := range listOfValues {
 		if v > w.bitsPerBitmap {
 			return fmt.Errorf("too big value: %d > %d", v, w.bitsPerBitmap)
 		}
-		n := item*w.bitsPerBitmap + v
+		n := offset + v
 		blkAt, bitAt := int(n/64), int(n%64)
 		if blkAt > len(w.data) {
 			return fmt.Errorf("too big value: %d, %d, max: %d", item, listOfValues, len(w.data))
