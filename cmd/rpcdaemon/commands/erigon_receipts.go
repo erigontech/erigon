@@ -103,29 +103,22 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(begin, end+1) // [min,max)
 
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
 		return nil, err
 	}
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
+	if err != nil {
+		return nil, err
 	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
+	if addrBitmap != nil {
 		blockNumbers.And(addrBitmap)
 	}
 
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 
@@ -258,29 +251,21 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(0, latest)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, latest)
 	if err != nil {
 		return nil, err
 	}
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(0), uint32(latest))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, 0, latest)
+	if err != nil {
+		return nil, err
 	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
+	if addrBitmap != nil {
 		blockNumbers.And(addrBitmap)
 	}
-
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 
