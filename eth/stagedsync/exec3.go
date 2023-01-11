@@ -237,7 +237,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 
-				if lastBlockNum != txTask.BlockNum {
+				if txTask.BlockNum > lastBlockNum {
 					if lastBlockNum > 0 {
 						core.BlockExecutionTimer.UpdateDuration(t)
 					}
