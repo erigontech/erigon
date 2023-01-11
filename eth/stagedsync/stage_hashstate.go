@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -18,14 +19,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 type HashStateCfg struct {
@@ -151,17 +153,28 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
-	if err := promotePlainState(
+	err := promotePlainState(
 		logPrefix,
 		cfg.db,
 		tx,
 		cfg.dirs.Tmp,
 		ctx,
-	); err != nil {
+	)
+	if err != nil {
 		return err
 	}
 
-	go parallelWarmup(ctx, cfg.db, kv.PlainContractCode, 2)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		err = parallelWarmup(ctx, cfg.db, kv.PlainContractCode, 2)
+		wg.Done()
+	}()
+	wg.Wait()
+	if err != nil {
+		return err
+	}
+
 	return etl.Transform(
 		logPrefix,
 		tx,
