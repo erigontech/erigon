@@ -478,7 +478,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing roaring64.Bitmap
+		bitmapForORing := bitmapdb.NewBitmap64()
+		defer bitmapdb.ReturnToPool64(bitmapForORing)
+
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
 			if err != nil {
@@ -495,10 +497,10 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			continue
 		}
 		if result == nil {
-			result = &bitmapForORing
+			result = bitmapForORing.Clone()
 			continue
 		}
-		result = roaring64.And(&bitmapForORing, result)
+		result = roaring64.And(bitmapForORing, result)
 	}
 	return result, nil
 }
