@@ -137,31 +137,22 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
 	blockNumbers.AddRange(begin, end+1) // [min,max)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
 		return nil, err
 	}
-
 	if topicsBitmap != nil {
 		blockNumbers.And(topicsBitmap)
 	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
+	if err != nil {
+		return nil, err
 	}
-
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
+	if addrBitmap != nil {
 		blockNumbers.And(addrBitmap)
 	}
 
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
@@ -250,12 +241,12 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
 		for _, topic := range sub {
-			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], from, to)
+			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], uint32(from), uint32(to))
 			if err != nil {
 				return nil, err
 			}
@@ -277,6 +268,20 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint32) (*roaring
 		result = roaring.And(bitmapForORing, result)
 	}
 	return result, nil
+}
+func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
+	if len(addrs) == 0 {
+		return nil, nil
+	}
+	rx := make([]*roaring.Bitmap, len(addrs))
+	for idx, addr := range addrs {
+		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
+		if err != nil {
+			return nil, err
+		}
+		rx[idx] = m
+	}
+	return roaring.FastOr(rx...), nil
 }
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
@@ -302,33 +307,20 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-
 	if topicsBitmap != nil {
 		txNumbers.And(topicsBitmap)
 	}
-
-	var addrBitmap *roaring64.Bitmap
-	for _, addr := range crit.Addresses {
-		var bitmapForORing roaring64.Bitmap
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr.Bytes(), fromTxNum, toTxNum)
-		if err != nil {
-			return nil, err
-		}
-		bitmapForORing.Or(it.(bitmapdb.ToBitamp).ToBitmap())
-		if addrBitmap == nil {
-			addrBitmap = &bitmapForORing
-			continue
-		}
-		addrBitmap = roaring64.Or(addrBitmap, &bitmapForORing)
+	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
+	if err != nil {
+		return nil, err
 	}
-
 	if addrBitmap != nil {
 		txNumbers.And(addrBitmap)
 	}
-
-	if txNumbers.GetCardinality() == 0 {
+	if txNumbers.IsEmpty() {
 		return logs, nil
 	}
+
 	var lastBlockNum uint64
 	var blockHash common.Hash
 	var header *types.Header
@@ -337,7 +329,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var skipAnalysis bool
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
-	//stateReader.SetAc(ac)
 	ibs := state.New(stateReader)
 
 	//stateReader.SetTrace(true)
@@ -487,6 +478,28 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 		result = roaring64.And(&bitmapForORing, result)
 	}
 	return result, nil
+}
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
+	if len(addrs) == 0 {
+		return nil, nil
+	}
+	rx := make([]*roaring64.Bitmap, len(addrs))
+	for idx, addr := range addrs {
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
+		if err != nil {
+			return nil, err
+		}
+		m := roaring64.New()
+		for it.HasNext() {
+			n, err := it.NextBatch()
+			if err != nil {
+				return nil, err
+			}
+			m.AddMany(n)
+		}
+		rx[idx] = m
+	}
+	return roaring64.FastOr(rx...), nil
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.

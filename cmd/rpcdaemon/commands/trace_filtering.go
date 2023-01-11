@@ -257,7 +257,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	} else {
 		toBlock = uint64(*req.ToBlock)
 	}
-
 	if fromBlock > toBlock {
 		return fmt.Errorf("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
@@ -265,6 +264,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	if api.historyV3(dbtx) {
 		return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
 	}
+	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
@@ -314,10 +314,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks.AddRange(fromBlock, toBlock+1)
+		allBlocks.AddRange(fromBlock, toBlock)
 	} else {
 		allBlocks.RemoveRange(0, fromBlock)
-		allBlocks.RemoveRange(toBlock+1, uint64(0x100000000))
+		allBlocks.RemoveRange(toBlock, uint64(0x100000000))
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
@@ -540,6 +540,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
+	toTxNum++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 
 	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
@@ -556,7 +557,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				return err
 			}
 			for it.HasNext() {
-				allTxs.Or(it.(bitmapdb.ToBitamp).ToBitmap())
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				allTxs.AddMany(n)
 			}
 			fromAddresses[*addr] = struct{}{}
 		}
@@ -567,6 +572,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			it, err := dbtx.IndexRange(temporal.TracesToIdx, addr.Bytes(), fromTxNum, toTxNum)
 			if err != nil {
 				return err
+			}
+			for it.HasNext() {
+				n, err := it.NextBatch()
+				if err != nil {
+					return err
+				}
+				txsTo.AddMany(n)
 			}
 			txsTo.Or(it.(bitmapdb.ToBitamp).ToBitmap())
 			toAddresses[*addr] = struct{}{}
@@ -619,9 +631,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *params.Rules
+	var maxTxNum uint64
+
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
-	//stateReader.SetAc(ac)
 	noop := state.NewNoopWriter()
 	for it.HasNext() {
 		txNum := it.Next()
@@ -631,7 +644,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			return err
 		}
 		if !ok {
-			return nil
+			break
 		}
 		if blockNum > lastBlockNum {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
@@ -649,18 +662,18 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
-		}
-		maxTxNum, err := rawdb.TxNums.Max(dbtx, blockNum)
-		if err != nil {
-			if first {
-				first = false
-			} else {
-				stream.WriteMore()
+			maxTxNum, err = rawdb.TxNums.Max(dbtx, blockNum)
+			if err != nil {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
 			}
-			stream.WriteObjectStart()
-			rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			continue
 		}
 		if txNum+1 == maxTxNum {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)

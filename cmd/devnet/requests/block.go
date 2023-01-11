@@ -10,6 +10,24 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBlockByNumber, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b rpctest.EthBlockByNumber
+
+	req := reqGen.GetBlockByNumber(blockNum, withTxs)
+
+	res := reqGen.Erigon(models.ETHGetBlockByNumber, req, &b)
+	if res.Err != nil {
+		return b, fmt.Errorf("error getting block by number: %v", res.Err)
+	}
+
+	if b.Error != nil {
+		return b, fmt.Errorf("error populating response object: %v", b.Error)
+	}
+
+	return b, nil
+}
+
 func GetTransactionCount(reqId int, address common.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount

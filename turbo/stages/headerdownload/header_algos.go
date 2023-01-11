@@ -1063,24 +1063,6 @@ func (hd *HeaderDownload) SetFirstPoSHeight(blockHeight uint64) {
 	}
 }
 
-func (hd *HeaderDownload) TopSeenHeight() uint64 {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	if hd.topSeenHeightPoW > hd.topSeenHeightPoS {
-		return hd.topSeenHeightPoW
-	} else {
-		return hd.topSeenHeightPoS
-	}
-}
-
-func (hd *HeaderDownload) UpdateTopSeenHeightPoS(blockHeight uint64) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	if blockHeight > hd.topSeenHeightPoS {
-		hd.topSeenHeightPoS = blockHeight
-	}
-}
-
 func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderReader) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()

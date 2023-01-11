@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -115,8 +114,8 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
-	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	stream := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(stream)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -129,12 +128,12 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, buf.Bytes()))
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 
 	if err = m.InsertChain(chainB.Slice(0, 12)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
-	buf.Reset()
+	stream.Reset(nil)
 	toBlock = 12
 	traceReq2 := TraceFilterRequest{
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
@@ -144,12 +143,12 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq2, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, buf.Bytes()))
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 11, 12}, blockNumbersFromTraces(t, stream.Buffer()))
 
 	if err = m.InsertChain(chainB.Slice(12, 20)); err != nil {
 		t.Fatalf("inserting chainB: %v", err)
 	}
-	buf.Reset()
+	stream.Reset(nil)
 	fromBlock = 12
 	toBlock = 20
 	traceReq3 := TraceFilterRequest{
@@ -160,7 +159,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq3, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-	assert.Equal(t, []int{12, 13, 14, 15, 16, 17, 18, 19, 20}, blockNumbersFromTraces(t, buf.Bytes()))
+	assert.Equal(t, []int{12, 13, 14, 15, 16, 17, 18, 19, 20}, blockNumbersFromTraces(t, stream.Buffer()))
 }
 
 func TestFilterNoAddresses(t *testing.T) {
@@ -183,8 +182,8 @@ func TestFilterNoAddresses(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	var buf bytes.Buffer
-	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+	stream := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(stream)
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
@@ -195,7 +194,7 @@ func TestFilterNoAddresses(t *testing.T) {
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
 	}
-	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, buf.Bytes()))
+	assert.Equal(t, []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 }
 
 func TestFilterAddressIntersection(t *testing.T) {

@@ -106,15 +106,6 @@ func (tx DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
 }
 
-func (tx *DynamicFeeTransaction) Size() common.StorageSize {
-	if size := tx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := tx.EncodingSize()
-	tx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
-}
-
 func (tx DynamicFeeTransaction) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()
 	envelopeSize := payloadSize

@@ -239,7 +239,7 @@ func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
 func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
 
 func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	//fmt.Printf("CaptureStart depth %d, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", depth, from, to, create, input, gas, value, precompile)
+	//fmt.Printf("captureStartOrEnter deep %t, typ %s, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", deep, typ.String(), from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
@@ -314,20 +314,13 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 		action.Value.ToInt().Set(value.ToBig())
 		trace.Action = &action
 	} else if typ == vm.SELFDESTRUCT {
-		trace := &ParityTrace{}
 		trace.Type = SUICIDE
+		trace.Result = nil
 		action := &SuicideTraceAction{}
 		action.Address = from
 		action.RefundAddress = to
 		action.Balance.ToInt().Set(value.ToBig())
 		trace.Action = action
-		topTrace := ot.traceStack[len(ot.traceStack)-1]
-		traceIdx := topTrace.Subtraces
-		ot.traceAddr = append(ot.traceAddr, traceIdx)
-		topTrace.Subtraces++
-		trace.TraceAddress = make([]int, len(ot.traceAddr))
-		copy(trace.TraceAddress, ot.traceAddr)
-		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
 	} else {
 		action := CallTraceAction{}
 		switch typ {
