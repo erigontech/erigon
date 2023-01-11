@@ -16,8 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	cmath "github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
@@ -402,12 +400,7 @@ func getTxValueForBlockValue(transaction []byte, baseFee *big.Int) (*big.Int, er
 		return nil, fmt.Errorf("baseFee overflow")
 	}
 
-	effectiveTip := uint256.NewInt(t.GetGas())
-	if t.GetFeeCap().Gt(baseFeeUint256) {
-		effectiveTip = cmath.Min256(t.GetTip(), new(uint256.Int).Sub(t.GetFeeCap(), baseFeeUint256))
-	} else {
-		effectiveTip = u256.Num0
-	}
+	effectiveTip := t.GetEffectiveGasTip(baseFeeUint256)
 	amount := new(uint256.Int).SetUint64(t.GetGas())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
 
