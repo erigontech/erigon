@@ -25,6 +25,7 @@ func TestFixedSizeBitmaps(t *testing.T) {
 	must(wr.AddArray(5, []uint64{1, 13}))
 	must(wr.AddArray(6, []uint64{0, 9, 13}))
 	must(wr.AddArray(7, []uint64{7}))
+
 	require.Error(wr.AddArray(8, []uint64{8}))
 	err = wr.Build()
 	require.NoError(err)

@@ -63,8 +63,8 @@ func OpenFixedSizeBitmaps(indexFile string, bitsPerBitmap int) (*FixedSizeBitmap
 	if err != nil {
 		return nil, err
 	}
-	idx.metaData = idx.m[:64]
-	idx.data = castToArrU64(idx.m[64:])
+	idx.metaData = idx.m[:MetaHeaderSize]
+	idx.data = castToArrU64(idx.m[MetaHeaderSize:])
 
 	idx.version = idx.metaData[0]
 	idx.amount = binary.BigEndian.Uint64(idx.metaData[1 : 8+1])
@@ -157,10 +157,12 @@ type FixedSizeBitmapsWriter struct {
 	bitsPerBitmap uint64
 }
 
+const MetaHeaderSize = 64
+
 func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint64) (*FixedSizeBitmapsWriter, error) {
 	pageSize := os.Getpagesize()
 	//TODO: use math.SafeMul()
-	bytesAmount := (bitsPerBitmap * int(amount)) / 8
+	bytesAmount := MetaHeaderSize * (bitsPerBitmap * int(amount)) / 8
 	size := (bytesAmount/pageSize + 1) * pageSize // must be page-size-aligned
 	idx := &FixedSizeBitmapsWriter{
 		indexFile:      indexFile,
@@ -188,8 +190,8 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint6
 		return nil, err
 	}
 
-	idx.metaData = idx.m[:64]
-	idx.data = castToArrU64(idx.m[64:])
+	idx.metaData = idx.m[:MetaHeaderSize]
+	idx.data = castToArrU64(idx.m[MetaHeaderSize:])
 	//if err := mmap.MadviseNormal(idx.m); err != nil {
 	//	return nil, err
 	//}
@@ -220,8 +222,8 @@ func growFileToSize(f *os.File, size int) error {
 	return nil
 }
 
+// Create a []uint64 view of the file
 func castToArrU64(in []byte) []uint64 {
-	// The file is now memory-mapped. Create a []uint64 view of the file.
 	var view []uint64
 	header := (*reflect.SliceHeader)(unsafe.Pointer(&view))
 	header.Data = (*reflect.SliceHeader)(unsafe.Pointer(&in)).Data
@@ -235,6 +237,9 @@ func (w *FixedSizeBitmapsWriter) AddArray(item uint64, listOfValues []uint64) er
 		return fmt.Errorf("too big item number: %d > %d", item, w.amount)
 	}
 	for _, v := range listOfValues {
+		if v > w.bitsPerBitmap {
+			return fmt.Errorf("too big value: %d > %d", v, w.bitsPerBitmap)
+		}
 		n := item*w.bitsPerBitmap + v
 		blkAt, bitAt := int(n/64), int(n%64)
 		if blkAt > len(w.data) {
