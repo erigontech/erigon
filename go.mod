@@ -3,12 +3,12 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230106045459-2011bf9d3397
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20221223003841-487873d31492
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230111040929-6688504b7109
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230106211435-2670b273bb55
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.5
+	github.com/torquem-ch/mdbx-go v0.28.1
 )
 
 require (
@@ -40,7 +40,6 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.4.3
 	github.com/golang/snappy v0.0.4
 	github.com/google/btree v1.1.2
-	github.com/google/go-cmp v0.5.9
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
@@ -66,7 +65,7 @@ require (
 	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/gohashtree v0.0.0-20220517220438-192ee5ae6982
-	github.com/quasilyte/go-ruleguard/dsl v0.3.21
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.8.2
 	github.com/spf13/cobra v1.6.1
 	github.com/spf13/pflag v1.0.5

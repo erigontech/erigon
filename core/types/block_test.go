@@ -300,10 +300,10 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 		},
 		Transactions: [][]byte{
 			{
-				10, 20, 30,
+				0xc0 + 3, 10, 20, 30,
 			},
 			{
-				40, 50, 60,
+				0xc0 + 3, 40, 50, 60,
 			},
 		},
 	}
@@ -338,10 +338,10 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	if len(rawBody.Transactions) != 2 {
 		t.Fatalf("expected there to be 1 transaction once decoded")
 	}
-	if rawBody.Transactions[0][0] != 10 {
+	if rawBody.Transactions[0][1] != 10 {
 		t.Fatal("expected first element in transactions to be 10")
 	}
-	if rawBody.Transactions[1][2] != 60 {
+	if rawBody.Transactions[1][3] != 60 {
 		t.Fatal("expected 2nd element in transactions to end in 60")
 	}
 	if rawBody.Uncles[0].GasLimit != 50 {

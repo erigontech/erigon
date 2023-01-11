@@ -45,7 +45,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
@@ -94,7 +94,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer

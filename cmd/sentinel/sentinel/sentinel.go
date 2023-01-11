@@ -48,7 +48,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV2 *cltypes.MetadataV2
+	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
 	db kv.RoDB
@@ -132,10 +132,10 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.MetadataV2{
+	s.metadataV2 = &cltypes.Metadata{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
-		Syncnets:  0,
+		Syncnets:  new(uint64),
 	}
 
 	// Start stream handlers

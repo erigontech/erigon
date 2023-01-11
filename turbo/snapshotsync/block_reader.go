@@ -704,7 +704,7 @@ func (back *BlockReaderWithSnapshots) txnByHash(txnHash common.Hash, segments []
 }
 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
-// return nil if 0 < i < body.TxAmoun
+// return nil if 0 < i < body.TxAmount
 func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
 	var b *types.BodyForStorage
 	ok, err := back.sn.ViewBodies(blockNum, func(segment *BodySegment) error {

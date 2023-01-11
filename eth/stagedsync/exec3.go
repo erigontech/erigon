@@ -509,15 +509,18 @@ Loop:
 			}
 
 			func() {
-				rwsLock.RLock()
-				needWait := rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
-				rwsLock.RUnlock()
+				needWait := rs.QueueLen() > queueSize
+				if !needWait {
+					rwsLock.RLock()
+					needWait = rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
+					rwsLock.RUnlock()
+				}
 				if !needWait {
 					return
 				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rs.QueueLen() > queueSize || rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -562,13 +565,23 @@ Loop:
 
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
+				} else {
+					sender, err := signer.Sender(txTask.Tx)
+					if err != nil {
+						return err
+					}
+					txTask.Sender = &sender
+					log.Warn("[Execution] expencive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
+						currentQueueSize := rs.AddWork(txTask)
+						if currentQueueSize > queueSize {
+							time.Sleep(10 * time.Microsecond)
+						}
 					}
 				} else {
 					rs.AddWork(txTask)
@@ -1221,24 +1234,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
+	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
-	}
-	if blockNum == 0 {
-		return fmt.Errorf("not enough transactions in the history data")
-	}
-	blockNum--
-	var txNum uint64
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		if !ok {
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
+		}
+		if blockNum == 0 {
+			return fmt.Errorf("not enough transactions in the history data")
+		}
+		blockNum--
 		txNum, err = rawdb.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return err
@@ -1257,8 +1265,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		Flags(func(u uint) uint {
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
-		WriteMergeThreshold(2 * 8192).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {

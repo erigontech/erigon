@@ -10,13 +10,13 @@ import (
 )
 
 func TestSSZSnappy(t *testing.T) {
-	verySussyMessage := &cltypes.MetadataV1{
+	verySussyMessage := &cltypes.Metadata{
 		SeqNumber: 69, // :D
 		Attnets:   96, // :(
 	}
 	sussyEncoded, err := utils.EncodeSSZSnappy(verySussyMessage)
 	require.NoError(t, err)
-	sussyDecoded := &cltypes.MetadataV1{}
+	sussyDecoded := &cltypes.Metadata{}
 	require.NoError(t, utils.DecodeSSZSnappy(sussyDecoded, sussyEncoded))
 	require.Equal(t, verySussyMessage.SeqNumber, sussyDecoded.SeqNumber)
 	require.Equal(t, verySussyMessage.Attnets, sussyDecoded.Attnets)

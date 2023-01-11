@@ -3,6 +3,10 @@ package devnetutils
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/crypto"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -94,4 +98,58 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid string to split")
 	}
 	return parts[0], parts[1], nil
+}
+
+func HashSlicesAreEqual(s1, s2 []common.Hash) bool {
+	if len(s1) != len(s2) {
+		return false
+	}
+
+	for i := 0; i < len(s1); i++ {
+		if s1[i] != s2[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func BuildLog(hash common.Hash, blockNum string, address common.Address, topics []common.Hash, data hexutil.Bytes, txIndex hexutil.Uint, blockHash common.Hash, index hexutil.Uint, removed bool) rpctest.Log {
+	return rpctest.Log{
+		Address:     address,
+		Topics:      topics,
+		Data:        data,
+		BlockNumber: hexutil.Uint64(HexToInt(blockNum)),
+		TxHash:      hash,
+		TxIndex:     txIndex,
+		BlockHash:   blockHash,
+		Index:       index,
+		Removed:     removed,
+	}
+}
+
+func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
+	var errs []error
+
+	switch {
+	case expected.Address != actual.Address:
+		errs = append(errs, fmt.Errorf("expected address: %v, actual address %v", expected.Address, actual.Address))
+	case expected.TxHash != actual.TxHash:
+		errs = append(errs, fmt.Errorf("expected txhash: %v, actual txhash %v", expected.TxHash, actual.TxHash))
+	case expected.BlockHash != actual.BlockHash:
+		errs = append(errs, fmt.Errorf("expected blockHash: %v, actual blockHash %v", expected.BlockHash, actual.BlockHash))
+	case expected.BlockNumber != actual.BlockNumber:
+		errs = append(errs, fmt.Errorf("expected blockNumber: %v, actual blockNumber %v", expected.BlockNumber, actual.BlockNumber))
+	case expected.TxIndex != actual.TxIndex:
+		errs = append(errs, fmt.Errorf("expected txIndex: %v, actual txIndex %v", expected.TxIndex, actual.TxIndex))
+	case !HashSlicesAreEqual(expected.Topics, actual.Topics):
+		errs = append(errs, fmt.Errorf("expected topics: %v, actual topics %v", expected.Topics, actual.Topics))
+	}
+
+	return errs, len(errs) == 0
+}
+
+func GenerateTopic(signature string) []common.Hash {
+	hashed := crypto.Keccak256([]byte(signature))
+	return []common.Hash{common.BytesToHash(hashed)}
 }
