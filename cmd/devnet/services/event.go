@@ -28,12 +28,8 @@ func InitSubscriptions(methods []models.SubMethod) {
 			return
 		}
 
-		for {
-			select {
-			case block := <-methodSub.SubChan:
-				models.NewHeadsChan <- block
-			}
-		}
+		block := <-methodSub.SubChan
+		models.NewHeadsChan <- block
 	}()
 }
 
