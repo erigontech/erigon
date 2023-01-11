@@ -11,11 +11,14 @@ var (
 	BaseExtraDataSSZOffsetBlock  = 508
 )
 
+type HashableSSZ interface {
+	HashTreeRoot() ([32]byte, error)
+}
+
 type ObjectSSZ interface {
 	ssz.Marshaler
 	ssz.Unmarshaler
-
-	HashTreeRoot() ([32]byte, error)
+	HashableSSZ
 }
 
 type EncodableSSZ interface {

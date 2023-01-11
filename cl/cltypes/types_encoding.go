@@ -8,38 +8,6 @@ import (
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
-// MarshalSSZTo ssz marshals the BeaconBlockHeader object to a target array
-func (b *BeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	m, _ := b.MarshalSSZ()
-	dst = append(dst, m...)
-
-	return
-}
-
-// HashTreeRootWith ssz hashes the BeaconBlockHeader object with a hasher
-func (b *BeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-
-	root, err := b.HashTreeRoot()
-	if err != nil {
-		return err
-	}
-
-	hh.PutBytes(root[:])
-	return
-}
-
-// MarshalSSZTo ssz marshals the SignedBeaconBlockHeader object to a target array
-func (s *SignedBeaconBlockHeader) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	m, _ := s.MarshalSSZ()
-	dst = append(dst, m...)
-
-	return
-}
-
 // HashTreeRootWith ssz hashes the SignedBeaconBlockHeader object with a hasher
 func (s *SignedBeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	root, err := s.HashTreeRoot()
@@ -48,94 +16,6 @@ func (s *SignedBeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	}
 
 	hh.PutBytes(root[:])
-	return
-}
-
-// MarshalSSZ ssz marshals the ProposerSlashing object
-func (p *ProposerSlashing) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(p)
-}
-
-// MarshalSSZTo ssz marshals the ProposerSlashing object to a target array
-func (p *ProposerSlashing) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'Header1'
-	if p.Header1 == nil {
-		p.Header1 = new(SignedBeaconBlockHeader)
-	}
-	if dst, err = p.Header1.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
-	// Field (1) 'Header2'
-	if p.Header2 == nil {
-		p.Header2 = new(SignedBeaconBlockHeader)
-	}
-	if dst, err = p.Header2.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the ProposerSlashing object
-func (p *ProposerSlashing) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 416 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'Header1'
-	if p.Header1 == nil {
-		p.Header1 = new(SignedBeaconBlockHeader)
-	}
-	if err = p.Header1.UnmarshalSSZ(buf[0:208]); err != nil {
-		return err
-	}
-
-	// Field (1) 'Header2'
-	if p.Header2 == nil {
-		p.Header2 = new(SignedBeaconBlockHeader)
-	}
-	if err = p.Header2.UnmarshalSSZ(buf[208:416]); err != nil {
-		return err
-	}
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the ProposerSlashing object
-func (p *ProposerSlashing) SizeSSZ() (size int) {
-	size = 416
-	return
-}
-
-// HashTreeRoot ssz hashes the ProposerSlashing object
-func (p *ProposerSlashing) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(p)
-}
-
-// HashTreeRootWith ssz hashes the ProposerSlashing object with a hasher
-func (p *ProposerSlashing) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Header1'
-	if err = p.Header1.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (1) 'Header2'
-	if err = p.Header2.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
 	return
 }
 
@@ -453,9 +333,7 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		return
 	}
 	for ii := 0; ii < len(b.ProposerSlashings); ii++ {
-		if dst, err = b.ProposerSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.ProposerSlashings[ii].EncodeSSZ(dst);
 	}
 
 	// Field (4) 'AttesterSlashings'
@@ -605,7 +483,7 @@ func (b *BeaconBodyBellatrix) UnmarshalSSZ(buf []byte) error {
 			if b.ProposerSlashings[ii] == nil {
 				b.ProposerSlashings[ii] = new(ProposerSlashing)
 			}
-			if err = b.ProposerSlashings[ii].UnmarshalSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
+			if err = b.ProposerSlashings[ii].DecodeSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
 				return err
 			}
 		}
@@ -771,9 +649,11 @@ func (b *BeaconBodyBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.ProposerSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 16)
@@ -967,9 +847,7 @@ func (b *BeaconBlockForStorage) MarshalSSZTo(buf []byte) (dst []byte, err error)
 		return
 	}
 	for ii := 0; ii < len(b.ProposerSlashings); ii++ {
-		if dst, err = b.ProposerSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.ProposerSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (9) 'AttesterSlashings'
@@ -1111,7 +989,7 @@ func (b *BeaconBlockForStorage) UnmarshalSSZ(buf []byte) error {
 			if b.ProposerSlashings[ii] == nil {
 				b.ProposerSlashings[ii] = new(ProposerSlashing)
 			}
-			if err = b.ProposerSlashings[ii].UnmarshalSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
+			if err = b.ProposerSlashings[ii].DecodeSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
 				return err
 			}
 		}
@@ -1247,9 +1125,12 @@ func (b *BeaconBlockForStorage) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.ProposerSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
+			var root [32]byte
+			if root, err = elem.HashSSZ(); err != nil {
 				return
 			}
+			hh.PutBytes(root[:])
+
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 16)
@@ -1870,9 +1751,7 @@ func (b *BeaconBodyAltair) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		return
 	}
 	for ii := 0; ii < len(b.ProposerSlashings); ii++ {
-		if dst, err = b.ProposerSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst  = b.ProposerSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (4) 'AttesterSlashings'
@@ -2013,7 +1892,7 @@ func (b *BeaconBodyAltair) UnmarshalSSZ(buf []byte) error {
 			if b.ProposerSlashings[ii] == nil {
 				b.ProposerSlashings[ii] = new(ProposerSlashing)
 			}
-			if err = b.ProposerSlashings[ii].UnmarshalSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
+			if err = b.ProposerSlashings[ii].DecodeSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
 				return err
 			}
 		}
@@ -2162,9 +2041,11 @@ func (b *BeaconBodyAltair) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.ProposerSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
+			var root [32]byte
+			if root, err = elem.HashSSZ(); err != nil {
 				return
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 16)
@@ -2557,9 +2438,7 @@ func (b *BeaconBodyPhase0) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		return
 	}
 	for ii := 0; ii < len(b.ProposerSlashings); ii++ {
-		if dst, err = b.ProposerSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.ProposerSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (4) 'AttesterSlashings'
@@ -2692,7 +2571,7 @@ func (b *BeaconBodyPhase0) UnmarshalSSZ(buf []byte) error {
 			if b.ProposerSlashings[ii] == nil {
 				b.ProposerSlashings[ii] = new(ProposerSlashing)
 			}
-			if err = b.ProposerSlashings[ii].UnmarshalSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
+			if err = b.ProposerSlashings[ii].DecodeSSZ(buf[ii*416 : (ii+1)*416]); err != nil {
 				return err
 			}
 		}
@@ -2841,9 +2720,11 @@ func (b *BeaconBodyPhase0) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.ProposerSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 16)
@@ -3041,10 +2922,7 @@ func (l *LightClientBootstrap) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	if l.Header == nil {
 		l.Header = new(BeaconBlockHeader)
 	}
-	if dst, err = l.Header.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
+	dst = l.Header.EncodeSSZ(dst)
 	// Field (1) 'CurrentSyncCommittee'
 	if l.CurrentSyncCommittee == nil {
 		l.CurrentSyncCommittee = new(SyncCommittee)
@@ -3081,7 +2959,7 @@ func (l *LightClientBootstrap) UnmarshalSSZ(buf []byte) error {
 	if l.Header == nil {
 		l.Header = new(BeaconBlockHeader)
 	}
-	if err = l.Header.UnmarshalSSZ(buf[0:112]); err != nil {
+	if err = l.Header.DecodeSSZ(buf[0:112]); err != nil {
 		return err
 	}
 
@@ -3111,55 +2989,6 @@ func (l *LightClientBootstrap) SizeSSZ() (size int) {
 	return
 }
 
-// HashTreeRoot ssz hashes the LightClientBootstrap object
-func (l *LightClientBootstrap) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(l)
-}
-
-// HashTreeRootWith ssz hashes the LightClientBootstrap object with a hasher
-func (l *LightClientBootstrap) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Header'
-	if err = l.Header.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (1) 'CurrentSyncCommittee'
-	if err = l.CurrentSyncCommittee.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (2) 'CurrentSyncCommitteeBranch'
-	{
-		if size := len(l.CurrentSyncCommitteeBranch); size != 5 {
-			err = ssz.ErrVectorLengthFn("--.CurrentSyncCommitteeBranch", size, 5)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range l.CurrentSyncCommitteeBranch {
-			if len(i) != 32 {
-				err = ssz.ErrBytesLength
-				return
-			}
-			hh.Append(i)
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
 // MarshalSSZ ssz marshals the LightClientUpdate object
 func (l *LightClientUpdate) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(l)
@@ -3173,10 +3002,7 @@ func (l *LightClientUpdate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = l.AttestedHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
+	dst = l.AttestedHeader.EncodeSSZ(dst)
 	// Field (1) 'NextSyncCommitee'
 	if l.NextSyncCommitee == nil {
 		l.NextSyncCommitee = new(SyncCommittee)
@@ -3202,9 +3028,7 @@ func (l *LightClientUpdate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	if l.FinalizedHeader == nil {
 		l.FinalizedHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = l.FinalizedHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	dst = l.FinalizedHeader.EncodeSSZ(dst)
 
 	// Field (4) 'FinalityBranch'
 	if size := len(l.FinalityBranch); size != 6 {
@@ -3245,7 +3069,7 @@ func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if err = l.AttestedHeader.UnmarshalSSZ(buf[0:112]); err != nil {
+	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
 		return err
 	}
 
@@ -3270,7 +3094,7 @@ func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
 	if l.FinalizedHeader == nil {
 		l.FinalizedHeader = new(BeaconBlockHeader)
 	}
-	if err = l.FinalizedHeader.UnmarshalSSZ(buf[24896:25008]); err != nil {
+	if err = l.FinalizedHeader.DecodeSSZ(buf[24896:25008]); err != nil {
 		return err
 	}
 
@@ -3312,10 +3136,12 @@ func (l *LightClientUpdate) HashTreeRoot() ([32]byte, error) {
 func (l *LightClientUpdate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	indx := hh.Index()
 
+	root, err := l.AttestedHeader.HashTreeRoot()
 	// Field (0) 'AttestedHeader'
-	if err = l.AttestedHeader.HashTreeRootWith(hh); err != nil {
-		return
+	if err != nil {
+		return err
 	}
+	hh.PutBytes(root[:])
 
 	// Field (1) 'NextSyncCommitee'
 	if err = l.NextSyncCommitee.HashTreeRootWith(hh); err != nil {
@@ -3344,10 +3170,13 @@ func (l *LightClientUpdate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		}
 	}
 
-	// Field (3) 'FinalizedHeader'
-	if err = l.FinalizedHeader.HashTreeRootWith(hh); err != nil {
-		return
+
+	root2, err := l.FinalizedHeader.HashTreeRoot()
+	// Field (0) 'AttestedHeader'
+	if err != nil {
+		return err
 	}
+	hh.PutBytes(root2[:])
 
 	// Field (4) 'FinalityBranch'
 	{
@@ -3400,18 +3229,13 @@ func (l *LightClientFinalityUpdate) MarshalSSZTo(buf []byte) (dst []byte, err er
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = l.AttestedHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	dst =  l.AttestedHeader.EncodeSSZ(dst)
 
 	// Field (1) 'FinalizedHeader'
 	if l.FinalizedHeader == nil {
 		l.FinalizedHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = l.FinalizedHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
+	dst = l.FinalizedHeader.EncodeSSZ(dst)
 	// Field (2) 'FinalityBranch'
 	if size := len(l.FinalityBranch); size != 6 {
 		err = ssz.ErrVectorLengthFn("--.FinalityBranch", size, 6)
@@ -3451,7 +3275,7 @@ func (l *LightClientFinalityUpdate) UnmarshalSSZ(buf []byte) error {
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if err = l.AttestedHeader.UnmarshalSSZ(buf[0:112]); err != nil {
+	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
 		return err
 	}
 
@@ -3459,7 +3283,7 @@ func (l *LightClientFinalityUpdate) UnmarshalSSZ(buf []byte) error {
 	if l.FinalizedHeader == nil {
 		l.FinalizedHeader = new(BeaconBlockHeader)
 	}
-	if err = l.FinalizedHeader.UnmarshalSSZ(buf[112:224]); err != nil {
+	if err = l.FinalizedHeader.DecodeSSZ(buf[112:224]); err != nil {
 		return err
 	}
 
@@ -3492,63 +3316,6 @@ func (l *LightClientFinalityUpdate) SizeSSZ() (size int) {
 	return
 }
 
-// HashTreeRoot ssz hashes the LightClientFinalityUpdate object
-func (l *LightClientFinalityUpdate) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(l)
-}
-
-// HashTreeRootWith ssz hashes the LightClientFinalityUpdate object with a hasher
-func (l *LightClientFinalityUpdate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'AttestedHeader'
-	if err = l.AttestedHeader.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (1) 'FinalizedHeader'
-	if err = l.FinalizedHeader.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (2) 'FinalityBranch'
-	{
-		if size := len(l.FinalityBranch); size != 6 {
-			err = ssz.ErrVectorLengthFn("--.FinalityBranch", size, 6)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range l.FinalityBranch {
-			if len(i) != 32 {
-				err = ssz.ErrBytesLength
-				return
-			}
-			hh.Append(i)
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	// Field (3) 'SyncAggregate'
-	if err = l.SyncAggregate.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (4) 'SignatureSlot'
-	hh.PutUint64(l.SignatureSlot)
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
 // MarshalSSZ ssz marshals the LightClientOptimisticUpdate object
 func (l *LightClientOptimisticUpdate) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(l)
@@ -3562,10 +3329,7 @@ func (l *LightClientOptimisticUpdate) MarshalSSZTo(buf []byte) (dst []byte, err 
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = l.AttestedHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
+	dst = l.AttestedHeader.EncodeSSZ(dst)
 	// Field (1) 'SyncAggregate'
 	if l.SyncAggregate == nil {
 		l.SyncAggregate = new(SyncAggregate)
@@ -3592,7 +3356,7 @@ func (l *LightClientOptimisticUpdate) UnmarshalSSZ(buf []byte) error {
 	if l.AttestedHeader == nil {
 		l.AttestedHeader = new(BeaconBlockHeader)
 	}
-	if err = l.AttestedHeader.UnmarshalSSZ(buf[0:112]); err != nil {
+	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
 		return err
 	}
 
@@ -3616,35 +3380,6 @@ func (l *LightClientOptimisticUpdate) SizeSSZ() (size int) {
 	return
 }
 
-// HashTreeRoot ssz hashes the LightClientOptimisticUpdate object
-func (l *LightClientOptimisticUpdate) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(l)
-}
-
-// HashTreeRootWith ssz hashes the LightClientOptimisticUpdate object with a hasher
-func (l *LightClientOptimisticUpdate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'AttestedHeader'
-	if err = l.AttestedHeader.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (1) 'SyncAggregate'
-	if err = l.SyncAggregate.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (2) 'SignatureSlot'
-	hh.PutUint64(l.SignatureSlot)
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
 
 // MarshalSSZ ssz marshals the Fork object
 func (f *Fork) MarshalSSZ() ([]byte, error) {
@@ -3879,9 +3614,7 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	if b.LatestBlockHeader == nil {
 		b.LatestBlockHeader = new(BeaconBlockHeader)
 	}
-	if dst, err = b.LatestBlockHeader.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	dst = b.LatestBlockHeader.EncodeSSZ(dst)
 
 	// Field (5) 'BlockRoots'
 	if size := len(b.BlockRoots); size != 8192 {
@@ -4111,7 +3844,7 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	if b.LatestBlockHeader == nil {
 		b.LatestBlockHeader = new(BeaconBlockHeader)
 	}
-	if err = b.LatestBlockHeader.UnmarshalSSZ(buf[64:176]); err != nil {
+	if err = b.LatestBlockHeader.DecodeSSZ(buf[64:176]); err != nil {
 		return err
 	}
 
@@ -4409,11 +4142,12 @@ func (b *BeaconStateBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 		return
 	}
 
+	var r [32]byte
 	// Field (4) 'LatestBlockHeader'
-	if err = b.LatestBlockHeader.HashTreeRootWith(hh); err != nil {
+	if r, err = b.LatestBlockHeader.HashTreeRoot(); err != nil {
 		return
 	}
-
+	hh.PutBytes(r[:])
 	// Field (5) 'BlockRoots'
 	{
 		if size := len(b.BlockRoots); size != 8192 {

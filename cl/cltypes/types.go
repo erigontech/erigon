@@ -7,20 +7,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// Slashing requires 2 blocks with the same signer as proof
-type ProposerSlashing struct {
-	Header1 *SignedBeaconBlockHeader
-	Header2 *SignedBeaconBlockHeader
-}
-
-/*
- * AttesterSlashing, slashing data for attester, needs to provide valid duplicates as proof.
- */
-type AttesterSlashing struct {
-	Attestation_1 *IndexedAttestation
-	Attestation_2 *IndexedAttestation
-}
-
 /*
  * Block body for Consensus Layer, we only care about its hash and execution payload.
  */
