@@ -233,36 +233,68 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
-func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, fromBlock, toBlock uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
+func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
 	allBlocks = roaring64.New()
 	var blocksTo roaring64.Bitmap
-	for _, addr := range req.FromAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
+	if ttx, casted := tx.(kv.TemporalTx); casted {
+		for _, addr := range req.FromAddress {
+			if addr != nil {
+				it, err := ttx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), from, to)
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				return nil, nil, nil, err
+				b, err := it.ToBitmap()
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				allBlocks.Or(b)
+				fromAddresses[*addr] = struct{}{}
 			}
-			allBlocks.Or(b)
-			fromAddresses[*addr] = struct{}{}
 		}
-	}
 
-	for _, addr := range req.ToAddress {
-		if addr != nil {
-			b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), fromBlock, toBlock)
-			if err != nil {
+		for _, addr := range req.ToAddress {
+			if addr != nil {
+				it, err := ttx.IndexRange(temporal.TracesToIdx, addr.Bytes(), from, to)
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				return nil, nil, nil, err
+				b, err := it.ToBitmap()
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				blocksTo.Or(b)
+				toAddresses[*addr] = struct{}{}
 			}
-			blocksTo.Or(b)
-			toAddresses[*addr] = struct{}{}
+		}
+	} else {
+		for _, addr := range req.FromAddress {
+			if addr != nil {
+				b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), from, to)
+				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
+					return nil, nil, nil, err
+				}
+				allBlocks.Or(b)
+				fromAddresses[*addr] = struct{}{}
+			}
+		}
+
+		for _, addr := range req.ToAddress {
+			if addr != nil {
+				b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), from, to)
+				if err != nil {
+					if errors.Is(err, ethdb.ErrKeyNotFound) {
+						continue
+					}
+					return nil, nil, nil, err
+				}
+				blocksTo.Or(b)
+				toAddresses[*addr] = struct{}{}
+			}
 		}
 	}
 
@@ -277,10 +309,10 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, fromBlock, toBlock uin
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allBlocks.AddRange(fromBlock, toBlock)
+		allBlocks.AddRange(from, to)
 	} else {
-		allBlocks.RemoveRange(0, fromBlock)
-		allBlocks.RemoveRange(toBlock, uint64(0x100000000))
+		allBlocks.RemoveRange(0, from)
+		allBlocks.RemoveRange(to, uint64(0x100000000))
 	}
 
 	return fromAddresses, toAddresses, allBlocks, nil
@@ -544,60 +576,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		return err
 	}
 	toTxNum++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
-
-	fromAddresses := make(map[common.Address]struct{}, len(req.FromAddress))
-	toAddresses := make(map[common.Address]struct{}, len(req.ToAddress))
-
-	var (
-		allTxs roaring64.Bitmap
-		txsTo  roaring64.Bitmap
-	)
-
-	for _, addr := range req.FromAddress {
-		if addr != nil {
-			it, err := dbtx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), fromTxNum, toTxNum)
-			if err != nil {
-				return err
-			}
-			bm, err := it.ToBitmap()
-			if err != nil {
-				return err
-			}
-			allTxs.Or(bm)
-			fromAddresses[*addr] = struct{}{}
-		}
-	}
-
-	for _, addr := range req.ToAddress {
-		if addr != nil {
-			it, err := dbtx.IndexRange(temporal.TracesToIdx, addr.Bytes(), fromTxNum, toTxNum)
-			if err != nil {
-				return err
-			}
-			bm, err := it.ToBitmap()
-			if err != nil {
-				return err
-			}
-			txsTo.Or(bm)
-			toAddresses[*addr] = struct{}{}
-		}
-	}
-
-	switch req.Mode {
-	case TraceFilterModeIntersection:
-		allTxs.And(&txsTo)
-	case TraceFilterModeUnion:
-		fallthrough
-	default:
-		allTxs.Or(&txsTo)
-	}
-
-	// Special case - if no addresses specified, take all traces
-	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
-		allTxs.AddRange(fromTxNum, toTxNum+1)
-	} else {
-		allTxs.RemoveRange(0, fromTxNum)
-		allTxs.RemoveRange(toTxNum, uint64(0x1000000000000))
+	fromAddresses, toAddresses, allTxs, err := traceFilterBitmaps(dbtx, req, fromTxNum, toTxNum)
+	if err != nil {
+		return err
 	}
 
 	chainConfig, err := api.chainConfig(dbtx)
