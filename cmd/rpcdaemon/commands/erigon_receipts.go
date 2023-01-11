@@ -326,11 +326,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				blockLogs = append(blockLogs, filtered[i])
 				logCount++
 			}
+			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+				continue
+			}
 		}
 		blockCount++
-		if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-			continue
-		}
 		if len(blockLogs) == 0 {
 			continue
 		}
