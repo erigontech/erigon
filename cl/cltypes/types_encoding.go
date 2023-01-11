@@ -443,7 +443,7 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	// Offset (9) 'ExecutionPayload'
 	dst = ssz.WriteOffset(dst, offset)
 	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = new(types.Block)
+		b.ExecutionPayload = new(Eth1Block)
 	}
 	offset += b.ExecutionPayload.EncodingSizeSSZ()
 
@@ -516,12 +516,10 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		}
 	}
 
-	var d []byte
-	d, err = b.ExecutionPayload.EncodeSSZ()
+	dst, err = b.ExecutionPayload.EncodeSSZ(dst)
 	if err != nil {
 		return
 	}
-	dst = append(dst, d...)
 	return
 }
 
@@ -697,7 +695,7 @@ func (b *BeaconBodyBellatrix) UnmarshalSSZ(buf []byte) error {
 	{
 		buf = tail[o9:]
 		if b.ExecutionPayload == nil {
-			b.ExecutionPayload = new(types.Block)
+			b.ExecutionPayload = new(Eth1Block)
 		}
 		if err = b.ExecutionPayload.DecodeSSZ(buf, clparams.BellatrixVersion); err != nil {
 			return err
@@ -733,7 +731,7 @@ func (b *BeaconBodyBellatrix) SizeSSZ() (size int) {
 
 	// Field (9) 'ExecutionPayload'
 	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = new(types.Block)
+		b.ExecutionPayload = new(Eth1Block)
 	}
 	size += b.ExecutionPayload.EncodingSizeSSZ()
 
@@ -4076,8 +4074,7 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	for ii := 0; ii < len(b.InactivityScores); ii++ {
 		dst = ssz.MarshalUint64(dst, b.InactivityScores[ii])
 	}
-
-	dst = append(dst, b.LatestExecutionPayloadHeader.EncodeSSZ()...)
+	dst = b.LatestExecutionPayloadHeader.EncodeSSZ(dst)
 
 	return
 }

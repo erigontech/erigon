@@ -8,23 +8,23 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	types2 "github.com/ledgerwatch/erigon/core/types"
 )
 
-func convertLightrpcExecutionPayloadToEthbacked(e *types2.Block) *types.ExecutionPayload {
+func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.ExecutionPayload {
 	var baseFee *uint256.Int
+	var (
+		header = e.Header
+		body   = e.Body
+	)
 
-	if e.BaseFee() != nil {
+	if e.Header.BaseFee != nil {
 		var overflow bool
-		baseFee, overflow = uint256.FromBig(e.BaseFee())
+		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
 			panic("NewPayload BaseFeePerGas overflow")
 		}
 	}
-	var (
-		header = e.Header()
-		body   = e.RawBody()
-	)
+
 	return &types.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
@@ -58,7 +58,7 @@ func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatr
 	// Save as recent
 	l.recentHashesCache.Add(bcRoot, struct{}{})
 
-	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Body.ExecutionPayload.Header().BlockHashCL)
+	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Body.ExecutionPayload.Header.BlockHashCL)
 
 	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
 

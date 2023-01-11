@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -112,7 +111,8 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			if foundLatestEth1ValidHash {
 				return slot <= destinationSlot, nil
 			}
-			encodedPayload, err := payload.EncodeSSZ()
+			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
+			encodedPayload, err = payload.EncodeSSZ(encodedPayload)
 			if err != nil {
 				return false, err
 			}
@@ -167,7 +167,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
 	// Send in ordered manner EL blocks to Execution Layer
 	if err := executionPayloadsCollector.Load(tx, kv.BeaconBlocks, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		payload := &types.Block{}
+		payload := &cltypes.Eth1Block{}
 		if err := payload.DecodeSSZ(v, clparams.BellatrixVersion); err != nil {
 			return err
 		}

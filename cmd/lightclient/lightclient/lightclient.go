@@ -250,7 +250,7 @@ func (l *LightClient) importBlockIfPossible() {
 		return
 	}
 	if finalizedEth2Root == currentRoot {
-		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header().BlockHashCL
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
 	}
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
 		l.lastEth2ParentRoot = curr.ParentRoot

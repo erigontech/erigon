@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -48,7 +47,6 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *For
 func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz_utils.Unmarshaler) {
 	signedBlock := obj.(*cltypes.SignedBeaconBlockBellatrix)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		fmt.Println(signedBlock.Block.Body.ExecutionPayload.Header())
 		f.addSegment(cltypes.NewSignedBeaconBlock(obj))
 	}
 }

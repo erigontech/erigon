@@ -19,9 +19,12 @@ func TestBytes2(t *testing.T) {
 	require.Equal(t, len, rawdb.LengthFromBytes2(buf))
 }
 
-var emptyBlock = types.NewBlock(&types.Header{
-	BaseFee: big.NewInt(0),
-}, nil, nil, nil, nil)
+var emptyBlock = &cltypes.Eth1Block{
+	Header: &types.Header{
+		BaseFee: big.NewInt(0),
+		Number:  big.NewInt(0),
+	},
+}
 
 func TestBeaconBlock(t *testing.T) {
 	signedBeaconBlockRaw := &cltypes.SignedBeaconBlockBellatrix{}
