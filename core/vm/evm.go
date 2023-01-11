@@ -325,7 +325,7 @@ func (c *codeAndHash) Hash() common.Hash {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce, isCallerEOF bool) ([]byte, common.Address, uint64, error) {
+func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address common.Address, typ OpCode, incrementNonce, fromEOF bool) ([]byte, common.Address, uint64, error) {
 	var ret []byte
 	var err error
 	// Depth check execution. Fail if we're trying to execute above the
@@ -336,6 +336,32 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		return nil, common.Address{}, gas, ErrInsufficientBalance
 	}
+
+	// Initialise a new contract and set the code that is to be used by the EVM.
+	// The contract is a scoped environment for this execution context only. If
+	// the initcode is EOF, contract.Container will be set.
+	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
+	contract.SetCodeOptionalHash(&address, codeAndHash)
+
+	// Validate initcode per EOF rules. If caller is EOF and initcode is legacy, fail.
+	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
+	if evm.chainRules.IsCancun {
+		if isInitcodeEOF {
+			// If the initcode is EOF, verify it is well-formed.
+			var c Container
+			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
+				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+			}
+			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
+				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+			}
+			contract.Container = &c
+		} else if fromEOF {
+			// Don't allow EOF contract to execute legacy initcode.
+			return nil, common.Address{}, gas, ErrLegacyCode
+		}
+	}
+
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
@@ -353,29 +379,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
 		return nil, common.Address{}, 0, err
-	}
-
-	// Initialise a new contract and set the code that is to be used by the EVM.
-	// The contract is a scoped environment for this execution context only.
-	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
-	contract.SetCodeOptionalHash(&address, codeAndHash)
-
-	isInitcodeEOF := hasEOFMagic(codeAndHash.code)
-	if evm.chainRules.IsCancun {
-		if isCallerEOF && !isInitcodeEOF {
-			// Don't allow EOF contract to run legacy initcode.
-			return nil, common.Address{}, gas, ErrLegacyCode
-		} else if isInitcodeEOF {
-			// If the initcode is EOF, verify it is well-formed.
-			var c Container
-			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
-				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
-			}
-			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
-			}
-			contract.Container = &c
-		}
 	}
 
 	// Create a new account on the state
