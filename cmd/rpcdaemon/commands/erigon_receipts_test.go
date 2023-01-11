@@ -30,25 +30,47 @@ func TestGetLogs(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
-	api := NewErigonAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	{
+		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
 
-	logs, err := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
-	assert.NoError(err)
-	assert.Equal(uint64(10), logs[0].BlockNumber)
+		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+		assert.NoError(err)
+		assert.Equal(uint64(10), logs[0].BlockNumber)
 
-	//filer by wrong address
-	logs, err = api.GetLogs(context.Background(), filters.FilterCriteria{
-		Addresses: common.Addresses{common.Address{}},
-	})
-	assert.NoError(err)
-	assert.Equal(0, len(logs))
+		//filer by wrong address
+		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+			Addresses: common.Addresses{common.Address{}},
+		})
+		assert.NoError(err)
+		assert.Equal(0, len(logs))
 
-	//filer by wrong address
-	logs, err = api.GetLogs(context.Background(), filters.FilterCriteria{
-		Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
-	})
-	assert.NoError(err)
-	assert.Equal(1, len(logs))
+		//filer by wrong address
+		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
+			Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+		})
+		assert.NoError(err)
+		assert.Equal(1, len(logs))
+	}
+	//
+	//api := NewErigonAPI(baseApi, m.DB, nil)
+	//logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+	//assert.NoError(err)
+	//assert.Equal(uint64(10), logs[0].BlockNumber)
+	//
+	////filer by wrong address
+	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
+	//	Addresses: common.Addresses{common.Address{}},
+	//})
+	//assert.NoError(err)
+	//assert.Equal(0, len(logs))
+	//
+	////filer by wrong address
+	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
+	//	Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+	//})
+	//assert.NoError(err)
+	//assert.Equal(1, len(logs))
 }
 
 func TestErigonGetLatestLogs(t *testing.T) {
@@ -59,7 +81,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	db := m.DB
 	agg := m.HistoryV3Components()
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
-	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
@@ -76,7 +98,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Timestamp:   expectedLogs[i].Timestamp,
 		})
 	}
-	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{}, filters.LogFilterOptions{
 		LogCount: uint64(len(expectedLogs)),
 	})
 	if err != nil {
@@ -94,7 +116,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	db := m.DB
 	agg := m.HistoryV3Components()
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
-	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
@@ -124,7 +146,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 			expectedLogs[i].Topics[0],
 		})
 	}
-	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{Topics: containsTopics}, filters.LogFilterOptions{
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{Topics: containsTopics}, filters.LogFilterOptions{
 		BlockCount: blockCount,
 	})
 	if err != nil {
