@@ -62,18 +62,19 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
+	queueLen := rs.QueueLen()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(count-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
 	//speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
 	var repeatRatio float64
-	if count > p.prevCount {
-		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
+	if doneCount > p.prevCount {
+		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
@@ -81,8 +82,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlo
 		"inBlk", atomic.LoadUint64(&inputBlockNum),
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
-		"resultQueue", fmt.Sprintf("%d/%d", rwsLen, queueSize),
+		"pipe", fmt.Sprintf("%d/%d->%d/%d->%d/%d", queueLen, queueSize, rwsLen, queueSize, len(resultCh), cap(resultCh)),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"workers", p.workersCount,
@@ -98,7 +98,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlo
 	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
-	p.prevCount = count
+	p.prevCount = doneCount
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
