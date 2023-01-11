@@ -319,6 +319,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
 	fromAddresses, toAddresses, allBlocks, err := traceFilterBitmaps(dbtx, req, fromBlock, toBlock)
+	if err != nil {
+		return err
+	}
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
