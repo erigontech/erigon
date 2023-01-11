@@ -253,7 +253,6 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			return err
 		}
 
-		log.Info("reconst", "reconstituteToBlock", reconstituteToBlock, "current", s.BlockNumber, "minMax", cfg.agg.EndTxNumMinimax())
 		if found && reconstituteToBlock > s.BlockNumber+1 {
 			reconWorkers := cfg.syncCfg.ReconWorkerCount
 			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
