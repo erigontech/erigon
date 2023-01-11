@@ -67,7 +67,7 @@ func (g *GossipManager) Loop() {
 				log.Warn("[Beacon Gossip] Failure in decoding exit", "err", err)
 				continue
 			}
-		case sentinel.GossipType_ProposerSlashingGossipType:
+		/*case sentinel.GossipType_ProposerSlashingGossipType:
 			object = &cltypes.ProposerSlashing{}
 			if err := object.UnmarshalSSZ(data.Data); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
@@ -78,7 +78,7 @@ func (g *GossipManager) Loop() {
 			if err := object.UnmarshalSSZ(data.Data); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
 				continue
-			}
+			}*/
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
 			if err := object.UnmarshalSSZ(data.Data); err != nil {

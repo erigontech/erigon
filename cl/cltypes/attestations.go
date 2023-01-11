@@ -2,6 +2,7 @@ package cltypes
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
@@ -264,38 +265,16 @@ func rebuildAggregationBits(buf []byte) (n int, ret []byte) {
 	return
 }
 
-// MarshalSSZ ssz marshals the Attestation object
-func (a *Attestation) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(a)
-}
-
 // MarshalSSZTo ssz marshals the Attestation object to a target array
-func (a *Attestation) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
-	offset := int(228)
+	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
 
-	// Offset (0) 'AggregationBits'
-	dst = ssz.WriteOffset(dst, offset)
+	dst = a.Data.EncodeSSZ(dst)
 
-	// Field (1) 'Data'
-	if a.Data == nil {
-		a.Data = new(AttestationData)
-	}
-
-	var attData []byte
-	attData, err = a.Data.MarshalSSZ()
-	if err != nil {
-		return
-	}
-	dst = append(dst, attData...)
-
-	// Field (2) 'Signature'
 	dst = append(dst, a.Signature[:]...)
-
-	// Field (0) 'AggregationBits'
-	if size := len(a.AggregationBits); size > 2048 {
-		err = ssz.ErrBytesLengthFn("--.AggregationBits", size, 2048)
-		return
+	if len(a.AggregationBits) > 2048 {
+		return nil, fmt.Errorf("too many aggregation bits in attestation")
 	}
 	dst = append(dst, a.AggregationBits...)
 
@@ -303,30 +282,20 @@ func (a *Attestation) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 }
 
 // UnmarshalSSZ ssz unmarshals the Attestation object
-func (a *Attestation) UnmarshalSSZ(buf []byte) error {
+func (a *Attestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz.ErrSize
+		return ssz_utils.ErrLowBufferSize
 	}
 
 	tail := buf
-	var o0 uint64
-
-	// Offset (0) 'AggregationBits'
-	if o0 = ssz.ReadOffset(buf[0:4]); o0 > size {
-		return ssz.ErrOffset
-	}
-
-	if o0 < 228 {
-		return ssz.ErrInvalidVariableOffset
-	}
 
 	// Field (1) 'Data'
 	if a.Data == nil {
 		a.Data = new(AttestationData)
 	}
-	if err = a.Data.UnmarshalSSZ(buf[4:132]); err != nil {
+	if err = a.Data.DecodeSSZ(buf[4:132]); err != nil {
 		return err
 	}
 
@@ -335,7 +304,7 @@ func (a *Attestation) UnmarshalSSZ(buf []byte) error {
 
 	// Field (0) 'AggregationBits'
 	{
-		buf = tail[o0:]
+		buf = tail[228:]
 		if err = ssz.ValidateBitlist(buf, 2048); err != nil {
 			return err
 		}
@@ -348,12 +317,12 @@ func (a *Attestation) UnmarshalSSZ(buf []byte) error {
 }
 
 // SizeSSZ returns the ssz encoded size in bytes for the Attestation object
-func (a *Attestation) SizeSSZ() int {
+func (a *Attestation) EncodingSizeSSZ() int {
 	return 228 + len(a.AggregationBits)
 }
 
 // HashTreeRoot ssz hashes the Attestation object
-func (a *Attestation) HashTreeRoot() ([32]byte, error) {
+func (a *Attestation) HashSSZ() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
 	if a.Data == nil {
@@ -377,17 +346,6 @@ func (a *Attestation) HashTreeRoot() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
-// HashTreeRootWith ssz hashes the IndexedAttestation object with a hasher
-func (a *Attestation) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	root, err := a.HashTreeRoot()
-	if err != nil {
-		return err
-	}
-	hh.PutBytes(root[:])
-
-	return
-}
-
 /*
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
@@ -397,94 +355,62 @@ type IndexedAttestation struct {
 	Signature        [96]byte `ssz-size:"96"`
 }
 
-// MarshalSSZ ssz marshals the IndexedAttestation object
-func (i *IndexedAttestation) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(i)
-}
-
-// MarshalSSZTo ssz marshals the IndexedAttestation object to a target array
-func (i *IndexedAttestation) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
-	offset := int(228)
+	// Write indicies offset.
+	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
 
-	// Offset (0) 'AttestingIndices'
-	dst = ssz.WriteOffset(dst, offset)
-
-	// Field (1) 'Data'
-	if i.Data == nil {
-		i.Data = new(AttestationData)
-	}
-
-	var dataMarshalled []byte
-	dataMarshalled, err = i.Data.MarshalSSZ()
-	if err != nil {
-		return
-	}
-	dst = append(dst, dataMarshalled...)
-
-	// Field (2) 'Signature'
+	// Process data field.
+	i.Data = new(AttestationData)
+	dst = i.Data.EncodeSSZ(dst)
+	// Write signature
 	dst = append(dst, i.Signature[:]...)
 
 	// Field (0) 'AttestingIndices'
-	if size := len(i.AttestingIndices); size > 2048 {
-		err = ssz.ErrListTooBigFn("--.AttestingIndices", size, 2048)
-		return
+	if len(i.AttestingIndices) > 2048 {
+		return nil, errors.New("Too bing attesting indices")
 	}
-	for ii := 0; ii < len(i.AttestingIndices); ii++ {
-		dst = ssz.MarshalUint64(dst, i.AttestingIndices[ii])
+	for _, index := range i.AttestingIndices {
+		dst = append(dst, ssz_utils.Uint64SSZ(index)...)
 	}
 
 	return
 }
 
 // UnmarshalSSZ ssz unmarshals the IndexedAttestation object
-func (i *IndexedAttestation) UnmarshalSSZ(buf []byte) error {
+func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz.ErrSize
+		return ssz_utils.ErrLowBufferSize
 	}
 
-	tail := buf
-	var o0 uint64
-
-	// Offset (0) 'AttestingIndices'
-	if o0 = ssz.ReadOffset(buf[0:4]); o0 > size {
-		return ssz.ErrOffset
-	}
-
-	if o0 < 228 {
-		return ssz.ErrInvalidVariableOffset
-	}
-
-	// Field (1) 'Data'
-	if i.Data == nil {
-		i.Data = new(AttestationData)
-	}
-	if err = i.Data.UnmarshalSSZ(buf[4:132]); err != nil {
+	i.Data = new(AttestationData)
+	if err = i.Data.DecodeSSZ(buf[4:132]); err != nil {
 		return err
 	}
 
-	// Field (2) 'Signature'
 	copy(i.Signature[:], buf[132:228])
-
-	// Field (0) 'AttestingIndices'
-	{
-		buf = tail[o0:]
-		num, err := ssz.DivideInt2(len(buf), 8, 2048)
-		if err != nil {
-			return err
-		}
-		i.AttestingIndices = ssz.ExtendUint64(i.AttestingIndices, num)
-		for ii := 0; ii < num; ii++ {
-			i.AttestingIndices[ii] = ssz.UnmarshallUint64(buf[ii*8 : (ii+1)*8])
-		}
+	bitsBuf := buf[228:]
+	num := len(bitsBuf) / 8
+	if len(bitsBuf)%8 != 0 {
+		return ssz_utils.ErrBufferNotRounded
 	}
-	return err
+	if num > 2048 {
+		return ssz_utils.ErrBadDynamicLength
+	}
+	pos := 228
+	i.AttestingIndices = make([]uint64, num)
+
+	for index := 0; index < num; index++ {
+		i.AttestingIndices[index] = ssz.UnmarshallUint64(buf[pos:])
+		pos += 8
+	}
+	return nil
 }
 
 // SizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object
-func (i *IndexedAttestation) SizeSSZ() int {
+func (i *IndexedAttestation) EncodingSizeSSZ() int {
 	return 228 + len(i.AttestingIndices)*8
 }
 
@@ -509,17 +435,6 @@ func (i *IndexedAttestation) HashTreeRoot() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
-// HashTreeRootWith ssz hashes the IndexedAttestation object with a hasher
-func (i *IndexedAttestation) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	root, err := i.HashTreeRoot()
-	if err != nil {
-		return err
-	}
-	hh.PutBytes(root[:])
-
-	return
-}
-
 // AttestantionData contains information about attestantion, including finalized/attested checkpoints.
 type AttestationData struct {
 	Slot            uint64
@@ -530,47 +445,35 @@ type AttestationData struct {
 }
 
 // MarshalSSZ ssz marshals the AttestationData object
-func (a *AttestationData) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, a.SizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, a.Slot)
-	ssz_utils.MarshalUint64SSZ(buf[8:], a.Index)
-	copy(buf[16:], a.BeaconBlockHash[:])
-	source, err := a.Source.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	target, err := a.Target.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	copy(buf[48:], source)
-	copy(buf[88:], target)
-	return buf, nil
+func (a *AttestationData) EncodeSSZ(dst []byte) []byte {
+	buf := dst
+	buf = append(buf, ssz_utils.Uint64SSZ(a.Slot)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(a.Index)...)
+	buf = append(buf, a.BeaconBlockHash[:]...)
+	buf = a.Source.EncodeSSZ(buf)
+	buf = a.Target.EncodeSSZ(buf)
+	return buf
 }
 
 // UnmarshalSSZ ssz unmarshals the AttestationData object
-func (a *AttestationData) UnmarshalSSZ(buf []byte) error {
+func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size != uint64(a.SizeSSZ()) {
-		return ssz.ErrSize
+		return ssz_utils.ErrLowBufferSize
 	}
 
 	a.Slot = ssz_utils.UnmarshalUint64SSZ(buf)
 	a.Index = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	copy(a.BeaconBlockHash[:], buf[16:48])
 
-	if a.Source == nil {
-		a.Source = new(Checkpoint)
-	}
-	if err = a.Source.UnmarshalSSZ(buf[48:88]); err != nil {
+	a.Source = new(Checkpoint)
+	a.Target = new(Checkpoint)
+
+	if err = a.Source.DecodeSSZ(buf[48:88]); err != nil {
 		return err
 	}
-
-	if a.Target == nil {
-		a.Target = new(Checkpoint)
-	}
-	if err = a.Target.UnmarshalSSZ(buf[88:]); err != nil {
+	if err = a.Target.DecodeSSZ(buf[88:]); err != nil {
 		return err
 	}
 
@@ -579,16 +482,16 @@ func (a *AttestationData) UnmarshalSSZ(buf []byte) error {
 
 // SizeSSZ returns the ssz encoded size in bytes for the AttestationData object
 func (a *AttestationData) SizeSSZ() int {
-	return 2*common.BlockNumberLength + common.HashLength + a.Source.SizeSSZ()*2
+	return 2*common.BlockNumberLength + common.HashLength + a.Source.EncodingSizeSSZ()*2
 }
 
 // HashTreeRoot ssz hashes the AttestationData object
 func (a *AttestationData) HashTreeRoot() ([32]byte, error) {
-	sourceRoot, err := a.Source.HashTreeRoot()
+	sourceRoot, err := a.Source.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	targetRoot, err := a.Target.HashTreeRoot()
+	targetRoot, err := a.Target.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

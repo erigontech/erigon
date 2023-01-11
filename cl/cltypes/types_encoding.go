@@ -19,138 +19,6 @@ func (s *SignedBeaconBlockHeader) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 	return
 }
 
-// MarshalSSZ ssz marshals the AttesterSlashing object
-func (a *AttesterSlashing) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(a)
-}
-
-// MarshalSSZTo ssz marshals the AttesterSlashing object to a target array
-func (a *AttesterSlashing) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-	offset := int(8)
-
-	// Offset (0) 'Attestation_1'
-	dst = ssz.WriteOffset(dst, offset)
-	if a.Attestation_1 == nil {
-		a.Attestation_1 = new(IndexedAttestation)
-	}
-	offset += a.Attestation_1.SizeSSZ()
-
-	// Offset (1) 'Attestation_2'
-	dst = ssz.WriteOffset(dst, offset)
-	if a.Attestation_2 == nil {
-		a.Attestation_2 = new(IndexedAttestation)
-	}
-	offset += a.Attestation_2.SizeSSZ()
-
-	// Field (0) 'Attestation_1'
-	if dst, err = a.Attestation_1.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
-	// Field (1) 'Attestation_2'
-	if dst, err = a.Attestation_2.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the AttesterSlashing object
-func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size < 8 {
-		return ssz.ErrSize
-	}
-
-	tail := buf
-	var o0, o1 uint64
-
-	// Offset (0) 'Attestation_1'
-	if o0 = ssz.ReadOffset(buf[0:4]); o0 > size {
-		return ssz.ErrOffset
-	}
-
-	if o0 < 8 {
-		return ssz.ErrInvalidVariableOffset
-	}
-
-	// Offset (1) 'Attestation_2'
-	if o1 = ssz.ReadOffset(buf[4:8]); o1 > size || o0 > o1 {
-		return ssz.ErrOffset
-	}
-
-	// Field (0) 'Attestation_1'
-	{
-		buf = tail[o0:o1]
-		if a.Attestation_1 == nil {
-			a.Attestation_1 = new(IndexedAttestation)
-		}
-		if err = a.Attestation_1.UnmarshalSSZ(buf); err != nil {
-			return err
-		}
-	}
-
-	// Field (1) 'Attestation_2'
-	{
-		buf = tail[o1:]
-		if a.Attestation_2 == nil {
-			a.Attestation_2 = new(IndexedAttestation)
-		}
-		if err = a.Attestation_2.UnmarshalSSZ(buf); err != nil {
-			return err
-		}
-	}
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the AttesterSlashing object
-func (a *AttesterSlashing) SizeSSZ() (size int) {
-	size = 8
-
-	// Field (0) 'Attestation_1'
-	if a.Attestation_1 == nil {
-		a.Attestation_1 = new(IndexedAttestation)
-	}
-	size += a.Attestation_1.SizeSSZ()
-
-	// Field (1) 'Attestation_2'
-	if a.Attestation_2 == nil {
-		a.Attestation_2 = new(IndexedAttestation)
-	}
-	size += a.Attestation_2.SizeSSZ()
-
-	return
-}
-
-// HashTreeRoot ssz hashes the AttesterSlashing object
-func (a *AttesterSlashing) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(a)
-}
-
-// HashTreeRootWith ssz hashes the AttesterSlashing object with a hasher
-func (a *AttesterSlashing) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'Attestation_1'
-	if err = a.Attestation_1.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (1) 'Attestation_2'
-	if err = a.Attestation_2.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
 // MarshalSSZTo ssz marshals the Deposit object to a target array
 func (d *Deposit) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
@@ -294,14 +162,14 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		offset += 4
-		offset += b.AttesterSlashings[ii].SizeSSZ()
+		offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (5) 'Attestations'
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		offset += 4
-		offset += b.Attestations[ii].SizeSSZ()
+		offset += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (6) 'Deposits'
@@ -345,13 +213,11 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.AttesterSlashings)
 		for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.AttesterSlashings[ii].SizeSSZ()
+			offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
-		if dst, err = b.AttesterSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		 dst= b.AttesterSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (5) 'Attestations'
@@ -363,11 +229,11 @@ func (b *BeaconBodyBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.Attestations)
 		for ii := 0; ii < len(b.Attestations); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.Attestations[ii].SizeSSZ()
+			offset += b.Attestations[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.Attestations); ii++ {
-		if dst, err = b.Attestations[ii].MarshalSSZTo(dst); err != nil {
+		if dst, err = b.Attestations[ii].EncodeSSZ(dst); err != nil {
 			return
 		}
 	}
@@ -501,7 +367,7 @@ func (b *BeaconBodyBellatrix) UnmarshalSSZ(buf []byte) error {
 			if b.AttesterSlashings[indx] == nil {
 				b.AttesterSlashings[indx] = new(AttesterSlashing)
 			}
-			if err = b.AttesterSlashings[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.AttesterSlashings[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -523,7 +389,7 @@ func (b *BeaconBodyBellatrix) UnmarshalSSZ(buf []byte) error {
 			if b.Attestations[indx] == nil {
 				b.Attestations[indx] = new(Attestation)
 			}
-			if err = b.Attestations[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.Attestations[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -592,13 +458,13 @@ func (b *BeaconBodyBellatrix) SizeSSZ() (size int) {
 	// Field (4) 'AttesterSlashings'
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		size += 4
-		size += b.AttesterSlashings[ii].SizeSSZ()
+		size += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Field (5) 'Attestations'
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		size += 4
-		size += b.Attestations[ii].SizeSSZ()
+		size += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Field (6) 'Deposits'
@@ -671,9 +537,11 @@ func (b *BeaconBodyBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.AttesterSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 2)
@@ -691,9 +559,11 @@ func (b *BeaconBodyBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.Attestations {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 128)
@@ -813,7 +683,7 @@ func (b *BeaconBlockForStorage) MarshalSSZTo(buf []byte) (dst []byte, err error)
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		offset += 4
-		offset += b.AttesterSlashings[ii].SizeSSZ()
+		offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (10) 'Deposits'
@@ -859,13 +729,11 @@ func (b *BeaconBlockForStorage) MarshalSSZTo(buf []byte) (dst []byte, err error)
 		offset = 4 * len(b.AttesterSlashings)
 		for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.AttesterSlashings[ii].SizeSSZ()
+			offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
-		if dst, err = b.AttesterSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.AttesterSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (10) 'Deposits'
@@ -1007,7 +875,7 @@ func (b *BeaconBlockForStorage) UnmarshalSSZ(buf []byte) error {
 			if b.AttesterSlashings[indx] == nil {
 				b.AttesterSlashings[indx] = new(AttesterSlashing)
 			}
-			if err = b.AttesterSlashings[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.AttesterSlashings[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -1065,7 +933,7 @@ func (b *BeaconBlockForStorage) SizeSSZ() (size int) {
 	// Field (9) 'AttesterSlashings'
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		size += 4
-		size += b.AttesterSlashings[ii].SizeSSZ()
+		size += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Field (10) 'Deposits'
@@ -1148,9 +1016,11 @@ func (b *BeaconBlockForStorage) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.AttesterSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 2)
@@ -1719,14 +1589,14 @@ func (b *BeaconBodyAltair) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		offset += 4
-		offset += b.AttesterSlashings[ii].SizeSSZ()
+		offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (5) 'Attestations'
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		offset += 4
-		offset += b.Attestations[ii].SizeSSZ()
+		offset += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (6) 'Deposits'
@@ -1763,15 +1633,12 @@ func (b *BeaconBodyAltair) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.AttesterSlashings)
 		for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.AttesterSlashings[ii].SizeSSZ()
+			offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
-		if dst, err = b.AttesterSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.AttesterSlashings[ii].EncodeSSZ(dst)
 	}
-
 	// Field (5) 'Attestations'
 	if size := len(b.Attestations); size > 128 {
 		err = ssz.ErrListTooBigFn("--.Attestations", size, 128)
@@ -1781,11 +1648,11 @@ func (b *BeaconBodyAltair) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.Attestations)
 		for ii := 0; ii < len(b.Attestations); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.Attestations[ii].SizeSSZ()
+			offset += b.Attestations[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.Attestations); ii++ {
-		if dst, err = b.Attestations[ii].MarshalSSZTo(dst); err != nil {
+		if dst, err = b.Attestations[ii].EncodeSSZ(dst); err != nil {
 			return
 		}
 	}
@@ -1910,7 +1777,7 @@ func (b *BeaconBodyAltair) UnmarshalSSZ(buf []byte) error {
 			if b.AttesterSlashings[indx] == nil {
 				b.AttesterSlashings[indx] = new(AttesterSlashing)
 			}
-			if err = b.AttesterSlashings[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.AttesterSlashings[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -1932,7 +1799,7 @@ func (b *BeaconBodyAltair) UnmarshalSSZ(buf []byte) error {
 			if b.Attestations[indx] == nil {
 				b.Attestations[indx] = new(Attestation)
 			}
-			if err = b.Attestations[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.Attestations[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -1990,13 +1857,13 @@ func (b *BeaconBodyAltair) SizeSSZ() (size int) {
 	// Field (4) 'AttesterSlashings'
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		size += 4
-		size += b.AttesterSlashings[ii].SizeSSZ()
+		size += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Field (5) 'Attestations'
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		size += 4
-		size += b.Attestations[ii].SizeSSZ()
+		size += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Field (6) 'Deposits'
@@ -2063,9 +1930,11 @@ func (b *BeaconBodyAltair) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.AttesterSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 2)
@@ -2083,9 +1952,11 @@ func (b *BeaconBodyAltair) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.Attestations {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 128)
@@ -2414,14 +2285,14 @@ func (b *BeaconBodyPhase0) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		offset += 4
-		offset += b.AttesterSlashings[ii].SizeSSZ()
+		offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (5) 'Attestations'
 	dst = ssz.WriteOffset(dst, offset)
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		offset += 4
-		offset += b.Attestations[ii].SizeSSZ()
+		offset += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Offset (6) 'Deposits'
@@ -2450,13 +2321,11 @@ func (b *BeaconBodyPhase0) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.AttesterSlashings)
 		for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.AttesterSlashings[ii].SizeSSZ()
+			offset += b.AttesterSlashings[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
-		if dst, err = b.AttesterSlashings[ii].MarshalSSZTo(dst); err != nil {
-			return
-		}
+		dst = b.AttesterSlashings[ii].EncodeSSZ(dst)
 	}
 
 	// Field (5) 'Attestations'
@@ -2468,11 +2337,11 @@ func (b *BeaconBodyPhase0) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 		offset = 4 * len(b.Attestations)
 		for ii := 0; ii < len(b.Attestations); ii++ {
 			dst = ssz.WriteOffset(dst, offset)
-			offset += b.Attestations[ii].SizeSSZ()
+			offset += b.Attestations[ii].EncodingSizeSSZ()
 		}
 	}
 	for ii := 0; ii < len(b.Attestations); ii++ {
-		if dst, err = b.Attestations[ii].MarshalSSZTo(dst); err != nil {
+		if dst, err = b.Attestations[ii].EncodeSSZ(dst); err != nil {
 			return
 		}
 	}
@@ -2589,7 +2458,7 @@ func (b *BeaconBodyPhase0) UnmarshalSSZ(buf []byte) error {
 			if b.AttesterSlashings[indx] == nil {
 				b.AttesterSlashings[indx] = new(AttesterSlashing)
 			}
-			if err = b.AttesterSlashings[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.AttesterSlashings[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -2611,7 +2480,7 @@ func (b *BeaconBodyPhase0) UnmarshalSSZ(buf []byte) error {
 			if b.Attestations[indx] == nil {
 				b.Attestations[indx] = new(Attestation)
 			}
-			if err = b.Attestations[indx].UnmarshalSSZ(buf); err != nil {
+			if err = b.Attestations[indx].DecodeSSZ(buf); err != nil {
 				return err
 			}
 			return nil
@@ -2669,13 +2538,13 @@ func (b *BeaconBodyPhase0) SizeSSZ() (size int) {
 	// Field (4) 'AttesterSlashings'
 	for ii := 0; ii < len(b.AttesterSlashings); ii++ {
 		size += 4
-		size += b.AttesterSlashings[ii].SizeSSZ()
+		size += b.AttesterSlashings[ii].EncodingSizeSSZ()
 	}
 
 	// Field (5) 'Attestations'
 	for ii := 0; ii < len(b.Attestations); ii++ {
 		size += 4
-		size += b.Attestations[ii].SizeSSZ()
+		size += b.Attestations[ii].EncodingSizeSSZ()
 	}
 
 	// Field (6) 'Deposits'
@@ -2742,9 +2611,11 @@ func (b *BeaconBodyPhase0) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.AttesterSlashings {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 2)
@@ -2762,9 +2633,11 @@ func (b *BeaconBodyPhase0) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 			return
 		}
 		for _, elem := range b.Attestations {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
+			root, err := elem.HashSSZ()
+			if err != nil {
+				return err
 			}
+			hh.PutBytes(root[:])
 		}
 		if ssz.EnableVectorizedHTR {
 			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 128)
@@ -3698,25 +3571,18 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	if b.PreviousJustifiedCheckpoint == nil {
 		b.PreviousJustifiedCheckpoint = new(Checkpoint)
 	}
-	if dst, err = b.PreviousJustifiedCheckpoint.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	 dst = b.PreviousJustifiedCheckpoint.EncodeSSZ(dst)
 
 	// Field (19) 'CurrentJustifiedCheckpoint'
 	if b.CurrentJustifiedCheckpoint == nil {
 		b.CurrentJustifiedCheckpoint = new(Checkpoint)
 	}
-	if dst, err = b.CurrentJustifiedCheckpoint.MarshalSSZTo(dst); err != nil {
-		return
-	}
-
+	dst = b.CurrentJustifiedCheckpoint.EncodeSSZ(dst);
 	// Field (20) 'FinalizedCheckpoint'
 	if b.FinalizedCheckpoint == nil {
 		b.FinalizedCheckpoint = new(Checkpoint)
 	}
-	if dst, err = b.FinalizedCheckpoint.MarshalSSZTo(dst); err != nil {
-		return
-	}
+	dst = b.FinalizedCheckpoint.EncodeSSZ(dst)
 
 	// Offset (21) 'InactivityScores'
 	dst = ssz.WriteOffset(dst, offset)
@@ -3927,7 +3793,7 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	if b.PreviousJustifiedCheckpoint == nil {
 		b.PreviousJustifiedCheckpoint = new(Checkpoint)
 	}
-	if err = b.PreviousJustifiedCheckpoint.UnmarshalSSZ(buf[2687257:2687297]); err != nil {
+	if err = b.PreviousJustifiedCheckpoint.DecodeSSZ(buf[2687257:2687297]); err != nil {
 		return err
 	}
 
@@ -3935,7 +3801,7 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	if b.CurrentJustifiedCheckpoint == nil {
 		b.CurrentJustifiedCheckpoint = new(Checkpoint)
 	}
-	if err = b.CurrentJustifiedCheckpoint.UnmarshalSSZ(buf[2687297:2687337]); err != nil {
+	if err = b.CurrentJustifiedCheckpoint.DecodeSSZ(buf[2687297:2687337]); err != nil {
 		return err
 	}
 
@@ -3943,7 +3809,7 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	if b.FinalizedCheckpoint == nil {
 		b.FinalizedCheckpoint = new(Checkpoint)
 	}
-	if err = b.FinalizedCheckpoint.UnmarshalSSZ(buf[2687337:2687377]); err != nil {
+	if err = b.FinalizedCheckpoint.DecodeSSZ(buf[2687337:2687377]); err != nil {
 		return err
 	}
 
@@ -4121,287 +3987,5 @@ func (b *BeaconStateBellatrix) SizeSSZ() (size int) {
 
 // HashTreeRoot ssz hashes the BeaconStateBellatrix object
 func (b *BeaconStateBellatrix) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(b)
-}
-
-// HashTreeRootWith ssz hashes the BeaconStateBellatrix object with a hasher
-func (b *BeaconStateBellatrix) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'GenesisTime'
-	hh.PutUint64(b.GenesisTime)
-
-	// Field (1) 'GenesisValidatorsRoot'
-	hh.PutBytes(b.GenesisValidatorsRoot[:])
-
-	// Field (2) 'Slot'
-	hh.PutUint64(b.Slot)
-
-	// Field (3) 'Fork'
-	if err = b.Fork.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	var r [32]byte
-	// Field (4) 'LatestBlockHeader'
-	if r, err = b.LatestBlockHeader.HashTreeRoot(); err != nil {
-		return
-	}
-	hh.PutBytes(r[:])
-	// Field (5) 'BlockRoots'
-	{
-		if size := len(b.BlockRoots); size != 8192 {
-			err = ssz.ErrVectorLengthFn("--.BlockRoots", size, 8192)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.BlockRoots {
-			hh.Append(i[:])
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	// Field (6) 'StateRoots'
-	{
-		if size := len(b.StateRoots); size != 8192 {
-			err = ssz.ErrVectorLengthFn("--.StateRoots", size, 8192)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.StateRoots {
-			hh.Append(i[:])
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	// Field (7) 'HistoricalRoots'
-	{
-		if size := len(b.HistoricalRoots); size > 16777216 {
-			err = ssz.ErrListTooBigFn("--.HistoricalRoots", size, 16777216)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.HistoricalRoots {
-			hh.Append(i[:])
-		}
-
-		numItems := uint64(len(b.HistoricalRoots))
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
-		} else {
-			hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(16777216, numItems, 32))
-		}
-	}
-
-	// Field (8) 'Eth1Data'
-	if err = b.Eth1Data.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (9) 'Eth1DataVotes'
-	{
-		subIndx := hh.Index()
-		num := uint64(len(b.Eth1DataVotes))
-		if num > 2048 {
-			err = ssz.ErrIncorrectListSize
-			return
-		}
-		for _, elem := range b.Eth1DataVotes {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
-			}
-		}
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 2048)
-		} else {
-			hh.MerkleizeWithMixin(subIndx, num, 2048)
-		}
-	}
-
-	// Field (10) 'Eth1DepositIndex'
-	hh.PutUint64(b.Eth1DepositIndex)
-
-	// Field (11) 'Validators'
-	{
-		subIndx := hh.Index()
-		num := uint64(len(b.Validators))
-		if num > 1099511627776 {
-			err = ssz.ErrIncorrectListSize
-			return
-		}
-		for _, elem := range b.Validators {
-			if err = elem.HashTreeRootWith(hh); err != nil {
-				return
-			}
-		}
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(subIndx, num, 1099511627776)
-		} else {
-			hh.MerkleizeWithMixin(subIndx, num, 1099511627776)
-		}
-	}
-
-	// Field (12) 'Balances'
-	{
-		if size := len(b.Balances); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("--.Balances", size, 1099511627776)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.Balances {
-			hh.AppendUint64(i)
-		}
-		hh.FillUpTo32()
-
-		numItems := uint64(len(b.Balances))
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
-		} else {
-			hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
-		}
-	}
-
-	// Field (13) 'RandaoMixes'
-	{
-		if size := len(b.RandaoMixes); size != 65536 {
-			err = ssz.ErrVectorLengthFn("--.RandaoMixes", size, 65536)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.RandaoMixes {
-			hh.Append(i[:])
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	// Field (14) 'Slashings'
-	{
-		if size := len(b.Slashings); size != 8192 {
-			err = ssz.ErrVectorLengthFn("--.Slashings", size, 8192)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.Slashings {
-			hh.AppendUint64(i)
-		}
-
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeVectorizedHTR(subIndx)
-		} else {
-			hh.Merkleize(subIndx)
-		}
-	}
-
-	// Field (15) 'PreviousEpochParticipation'
-	{
-		elemIndx := hh.Index()
-		byteLen := uint64(len(b.PreviousEpochParticipation))
-		if byteLen > 1099511627776 {
-			err = ssz.ErrIncorrectListSize
-			return
-		}
-		hh.PutBytes(b.PreviousEpochParticipation)
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(elemIndx, byteLen, (1099511627776+31)/32)
-		} else {
-			hh.MerkleizeWithMixin(elemIndx, byteLen, (1099511627776+31)/32)
-		}
-	}
-
-	// Field (16) 'CurrentEpochParticipation'
-	{
-		elemIndx := hh.Index()
-		byteLen := uint64(len(b.CurrentEpochParticipation))
-		if byteLen > 1099511627776 {
-			err = ssz.ErrIncorrectListSize
-			return
-		}
-		hh.PutBytes(b.CurrentEpochParticipation)
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(elemIndx, byteLen, (1099511627776+31)/32)
-		} else {
-			hh.MerkleizeWithMixin(elemIndx, byteLen, (1099511627776+31)/32)
-		}
-	}
-
-	// Field (17) 'JustificationBits'
-	if size := len(b.JustificationBits); size != 1 {
-		err = ssz.ErrBytesLengthFn("--.JustificationBits", size, 1)
-		return
-	}
-	hh.PutBytes(b.JustificationBits)
-
-	// Field (18) 'PreviousJustifiedCheckpoint'
-	if err = b.PreviousJustifiedCheckpoint.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (19) 'CurrentJustifiedCheckpoint'
-	if err = b.CurrentJustifiedCheckpoint.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (20) 'FinalizedCheckpoint'
-	if err = b.FinalizedCheckpoint.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (21) 'InactivityScores'
-	{
-		if size := len(b.InactivityScores); size > 1099511627776 {
-			err = ssz.ErrListTooBigFn("--.InactivityScores", size, 1099511627776)
-			return
-		}
-		subIndx := hh.Index()
-		for _, i := range b.InactivityScores {
-			hh.AppendUint64(i)
-		}
-		hh.FillUpTo32()
-
-		numItems := uint64(len(b.InactivityScores))
-		if ssz.EnableVectorizedHTR {
-			hh.MerkleizeWithMixinVectorizedHTR(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
-		} else {
-			hh.MerkleizeWithMixin(subIndx, numItems, ssz.CalculateLimit(1099511627776, numItems, 8))
-		}
-	}
-
-	// Field (22) 'CurrentSyncCommittee'
-	if err = b.CurrentSyncCommittee.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	// Field (23) 'NextSyncCommittee'
-	if err = b.NextSyncCommittee.HashTreeRootWith(hh); err != nil {
-		return
-	}
-
-	headerRoot, err := b.LatestBlockHeader.HashTreeRoot()
-	if err != nil {
-		return err
-	}
-
-	hh.PutBytes(headerRoot[:])
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
+	panic("Cannot use!")
 }

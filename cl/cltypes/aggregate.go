@@ -16,18 +16,17 @@ type AggregateAndProof struct {
 	SelectionProof  [96]byte
 }
 
-func (a *AggregateAndProof) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, a.SizeSSZ())
+func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
+	buf := dst
 
-	ssz_utils.MarshalUint64SSZ(buf, a.AggregatorIndex)
-	ssz_utils.EncodeOffset(buf[8:], 108)
-
-	marshalledAggregate, err := a.Aggregate.MarshalSSZ()
+	var err error
+	buf = append(buf, ssz_utils.Uint64SSZ(a.AggregatorIndex)...)
+	buf = append(buf, ssz_utils.OffsetSSZ(108)...)
+	buf = append(buf, a.SelectionProof[:]...)
+	buf, err = a.Aggregate.EncodeSSZ(buf)
 	if err != nil {
 		return nil, err
 	}
-	copy(buf[12:], a.SelectionProof[:])
-	copy(buf[108:], marshalledAggregate)
 	return buf, nil
 }
 
@@ -38,14 +37,14 @@ func (a *AggregateAndProof) UnmarshalSSZ(buf []byte) error {
 	}
 
 	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.UnmarshalSSZ(buf[108:]); err != nil {
+	if err := a.Aggregate.DecodeSSZ(buf[108:]); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (a *AggregateAndProof) SizeSSZ() int {
-	return 108 + a.Aggregate.SizeSSZ()
+	return 108 + a.Aggregate.EncodingSizeSSZ()
 }
 
 type SignedAggregateAndProof struct {
@@ -53,17 +52,16 @@ type SignedAggregateAndProof struct {
 	Signature [96]byte
 }
 
-func (a *SignedAggregateAndProof) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, a.SizeSSZ())
+func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
+	buf := dst
+	var err error
+	buf = append(buf, ssz_utils.OffsetSSZ(100)...)
 
-	marshalledAggregate, err := a.Message.MarshalSSZ()
+	buf = append(buf, a.Signature[:]...)
+	buf, err = a.Message.EncodeSSZ(buf)
 	if err != nil {
 		return nil, err
 	}
-
-	ssz_utils.EncodeOffset(buf, 100)
-	copy(buf[4:], a.Signature[:])
-	copy(buf[100:], marshalledAggregate)
 
 	return buf, nil
 }
