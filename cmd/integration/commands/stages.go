@@ -1039,7 +1039,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_ = printStages(tx, sn)
+		_ = printStages(tx, sn, agg)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
@@ -1107,7 +1107,7 @@ func printAllStages(db kv.RoDB, ctx context.Context) error {
 	sn, agg := allSnapshots(ctx, db)
 	defer sn.Close()
 	defer agg.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) })
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
