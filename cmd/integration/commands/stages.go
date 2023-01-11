@@ -490,7 +490,6 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 				return err
 			}
 			return nil
-			//return rawdb.WriteSnapshots(tx, sn.Files(), agg.Files())
 		}
 
 		progress, err := stages.GetStageProgress(tx, stages.Headers)
