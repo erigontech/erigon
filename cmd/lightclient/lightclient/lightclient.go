@@ -250,7 +250,7 @@ func (l *LightClient) importBlockIfPossible() {
 		return
 	}
 	if finalizedEth2Root == currentRoot {
-		l.finalizedEth1Hash = curr.Body.ExecutionPayload.BlockHash
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
 	}
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
 		l.lastEth2ParentRoot = curr.ParentRoot
@@ -259,12 +259,12 @@ func (l *LightClient) importBlockIfPossible() {
 	l.lastEth2ParentRoot = curr.ParentRoot
 	l.highestProcessedRoot = currentRoot
 
-	eth1Number := curr.Body.ExecutionPayload.BlockNumber
+	eth1Number := curr.Body.ExecutionPayload.NumberU64()
 	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
 		return
 	}
 	if l.verbose {
-		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
+		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.NumberU64())
 	}
 
 	// If all of the above is gud then do the push

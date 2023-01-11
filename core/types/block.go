@@ -524,75 +524,58 @@ func (h *Header) SanityCheck() error {
 	return nil
 }
 
-func (h *Header) MarshallSSZ() []byte {
-	buf := make([]byte, h.SizeSSZ(clparams.Phase0Version))
-	pos := len(h.ParentHash)
-	copy(buf, h.ParentHash[:])
-
-	copy(buf[pos:], h.Coinbase[:])
-	pos += len(h.Coinbase)
-
-	copy(buf[pos:], h.Root[:])
-	pos += len(h.Root)
-
-	copy(buf[pos:], h.ReceiptHash[:])
-	pos += len(h.ReceiptHash)
-
-	copy(buf[pos:], h.Bloom[:])
-	pos += len(h.Bloom)
-
-	copy(buf[pos:], h.MixDigest[:])
-	pos += len(h.MixDigest)
-
-	ssz_utils.MarshalUint64SSZ(buf[pos:], h.Number.Uint64())
-	ssz_utils.MarshalUint64SSZ(buf[pos+8:], h.GasLimit)
-	ssz_utils.MarshalUint64SSZ(buf[pos+16:], h.GasUsed)
-	ssz_utils.MarshalUint64SSZ(buf[pos+24:], h.Time)
-
-	pos += 32
-	// Compute the offset
-	offset := 504
-
-	if h.WithdrawalsHash != nil {
-		offset += 32
-	}
-
-	if h.BaseFee != nil {
-		offset += 32
-	}
-
-	ssz_utils.EncodeOffset(buf[pos:], uint32(offset))
-	pos += 4
+func (h *Header) EncodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]byte, error) {
+	buf := dst
+	buf = append(buf, h.ParentHash[:]...)
+	buf = append(buf, h.Coinbase[:]...)
+	buf = append(buf, h.Root[:]...)
+	buf = append(buf, h.ReceiptHash[:]...)
+	buf = append(buf, h.Bloom[:]...)
+	buf = append(buf, h.MixDigest[:]...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.Number.Uint64())...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.GasLimit)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.GasUsed)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.Time)...)
+	buf = append(buf, ssz_utils.OffsetSSZ(uint32(extraDataOffset))...)
 
 	// Add Base Fee
+	var baseFeeBytes32 [32]byte // Base fee is padded.
 	baseFeeBytes := h.BaseFee.Bytes()
 	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
 		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
 	}
-	copy(buf[pos:], baseFeeBytes)
-	pos += 32
-
-	copy(buf[pos:], h.BlockHashCL[:])
-	pos += len(h.BlockHashCL)
-
-	copy(buf[pos:], h.TxHashSSZ[:])
-	pos += len(h.TxHashSSZ)
-
-	if h.WithdrawalsHash != nil {
-		copy(buf[pos:], h.WithdrawalsHash[:])
-		pos += len(h.WithdrawalsHash)
-	}
-
-	copy(buf[pos:], h.Extra)
-	return buf
+	copy(baseFeeBytes32[:], baseFeeBytes)
+	buf = append(buf, baseFeeBytes32[:]...)
+	buf = append(buf, h.BlockHashCL[:]...)
+	return buf, nil
 }
 
-func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
-	if len(buf) < h.SizeSSZ(version) {
-		return fmt.Errorf("Header SSZ: invalid length")
+func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
+	buf = dst
+	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
+
+	if h.WithdrawalsHash != nil {
+		offset += 32
 	}
+
+	h.EncodeHeaderMetadataForSSZ(buf, offset)
+	buf = append(buf, h.TxHashSSZ[:]...)
+
+	if h.WithdrawalsHash != nil {
+		buf = append(buf, h.WithdrawalsHash[:]...)
+	}
+
+	buf = append(buf, h.Extra...)
+	return
+}
+
+// NOTE: it is skipping extra data
+func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
+	h.UncleHash = EmptyUncleHash
+	h.Difficulty = common.Big0
+
 	copy(h.ParentHash[:], buf)
-	pos := len(h.ParentHash)
+	pos = len(h.ParentHash)
 
 	copy(h.Coinbase[:], buf[pos:])
 	pos += len(h.Coinbase)
@@ -623,7 +606,14 @@ func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
 	pos += 32
 	copy(h.BlockHashCL[:], buf[pos:pos+32])
 	pos += 32
+	return
+}
 
+func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
+	if len(buf) < h.EncodingSizeSSZ(version) {
+		return ssz_utils.ErrLowBufferSize
+	}
+	pos := h.DecodeHeaderMetadataForSSZ(buf)
 	copy(h.TxHashSSZ[:], buf[pos:pos+32])
 	pos += len(h.TxHashSSZ)
 
@@ -634,15 +624,12 @@ func (h *Header) UnmarshalSSZ(buf []byte, version clparams.StateVersion) error {
 	} else {
 		h.WithdrawalsHash = nil
 	}
-	h.Difficulty = common.Big0
-	h.UncleHash = EmptyUncleHash
 	h.Extra = common.CopyBytes(buf[pos:])
-
 	return nil
 }
 
 // SizeSSZ returns the ssz encoded size in bytes for the Header object
-func (h *Header) SizeSSZ(version clparams.StateVersion) int {
+func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 	size := 536
 
 	if h.WithdrawalsHash != nil || version >= clparams.CapellaVersion {

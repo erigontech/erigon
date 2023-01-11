@@ -43,7 +43,7 @@ type BeaconBody struct {
 	// A summary of the current state of the beacon chain
 	SyncAggregate *SyncAggregate
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
-	ExecutionPayload *ExecutionPayload
+	ExecutionPayload *Eth1Block
 	// The version of the beacon chain
 	version clparams.StateVersion
 }
@@ -252,9 +252,11 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		Version:           uint8(b.Version()),
 		Eth2BlockRoot:     blockRoot,
 	}
+
 	if b.Version() >= clparams.BellatrixVersion {
-		storageObject.Eth1Number = b.Block.Body.ExecutionPayload.BlockNumber
-		storageObject.Eth1BlockHash = b.Block.Body.ExecutionPayload.BlockHash
+		eth1Block := b.Block.Body.ExecutionPayload
+		storageObject.Eth1Number = eth1Block.NumberU64()
+		storageObject.Eth1BlockHash = eth1Block.Header.BlockHashCL
 	}
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {
