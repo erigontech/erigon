@@ -101,23 +101,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(begin, end+1) // [min,max)
-
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
-	if err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
-	if err != nil {
-		return nil, err
-	}
-	if addrBitmap != nil {
-		blockNumbers.And(addrBitmap)
-	}
-
 	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
@@ -128,7 +114,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -250,20 +236,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(0, latest)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, latest)
-	if err != nil {
-		return nil, err
-	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, 0, latest)
-	if err != nil {
-		return nil, err
-	}
-	if addrBitmap != nil {
-		blockNumbers.And(addrBitmap)
+	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
+		return erigonLogs, err
 	}
 	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
