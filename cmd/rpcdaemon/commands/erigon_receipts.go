@@ -101,31 +101,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(begin, end+1) // [min,max)
-
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
-	if err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
-		blockNumbers.And(addrBitmap)
-	}
-
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 
@@ -135,7 +114,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -257,30 +236,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(0, latest)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
-	if err != nil {
-		return nil, err
+	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
+		return erigonLogs, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(0), uint32(latest))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
-		blockNumbers.And(addrBitmap)
-	}
-
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 

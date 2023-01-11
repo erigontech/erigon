@@ -151,12 +151,10 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	if b.Header.WithdrawalsHash != nil {
 		currentOffset += 4
 	}
-	fmt.Println(len(buf))
 	buf, err = b.Header.EncodeHeaderMetadataForSSZ(buf, currentOffset)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(len(buf))
 	currentOffset += len(b.Header.Extra)
 	// use raw body for encoded txs and offsets.
 	body := b.Body
