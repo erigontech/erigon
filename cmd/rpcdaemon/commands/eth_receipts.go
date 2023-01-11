@@ -465,7 +465,11 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
-			bitmapForORing.Or(it.(bitmapdb.ToBitamp).ToBitmap())
+			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			if err != nil {
+				return nil, err
+			}
+			bitmapForORing.Or(bm)
 		}
 
 		if bitmapForORing.GetCardinality() == 0 {

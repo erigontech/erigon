@@ -556,13 +556,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if err != nil {
 				return err
 			}
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return err
-				}
-				allTxs.AddMany(n)
+			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			if err != nil {
+				return err
 			}
+			allTxs.Or(bm)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -573,14 +571,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if err != nil {
 				return err
 			}
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return err
-				}
-				txsTo.AddMany(n)
+			bm, err := it.(bitmapdb.ToBitamp).ToBitamp()
+			if err != nil {
+				return err
 			}
-			txsTo.Or(it.(bitmapdb.ToBitamp).ToBitmap())
+			txsTo.Or(bm)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
