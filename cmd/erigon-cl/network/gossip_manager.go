@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -56,7 +57,7 @@ func (g *GossipManager) Loop() {
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlockBellatrix{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			if err := object.UnmarshalSSZ(common.CopyBytes(data.Data)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding block", "err", err)
 				continue
 			}

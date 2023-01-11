@@ -764,9 +764,8 @@ func (b *Block) HashSSZ() ([32]byte, error) {
 	return b.header.HashSSZ()
 }
 
-func (b *Block) EncodeSSZ(buf []byte) ([]byte, error) {
+func (b *Block) EncodeSSZ() ([]byte, error) {
 	buf := make([]byte, b.EncodingSizeSSZ())
-	fmt.Println(len(buf))
 
 	currentOffset := baseExtraDataSSZOffsetBlock
 
@@ -881,11 +880,10 @@ func (b *Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 		if txOffset > txEndOffset {
 			return ssz_utils.ErrBadOffset
 		}
-		rlpTx := transactionsBuffer[txOffset:txEndOffset]
-		transactionsBytes[txIdx] = common.CopyBytes(rlpTx)
+		transactionsBytes[txIdx] = transactionsBuffer[txOffset:txEndOffset]
 		// Decode RLP and put it in the tx list.
 		var decodeErr error
-		reader.Reset(rlpTx)
+		reader.Reset(transactionsBytes[txIdx])
 		stream.Reset(reader, 0)
 		if b.transactions[txIdx], decodeErr = DecodeTransaction(stream); decodeErr != nil {
 			return decodeErr
@@ -920,12 +918,6 @@ func (b *Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 			return err
 		}
 		*b.header.WithdrawalsHash = withdrawalRoot
-	}
-	if b.Hash() != b.header.BlockHashCL {
-		//j, _ := b.header.MarshalJSON()
-		//fmt.Println(string(j))
-		fmt.Println(len(transactionsBytes))
-		fmt.Println(b.header.Number.Uint64())
 	}
 	return nil
 }
