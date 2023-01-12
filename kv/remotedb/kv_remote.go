@@ -9,6 +9,7 @@ import (
 	"io"
 	"runtime"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -611,13 +612,15 @@ func (tx *remoteTx) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, 
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *remoteTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
+func (tx *remoteTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps kv.U64Stream, err error) {
 	//TODO: maybe add ctx.WithCancel
 	stream, err := tx.db.remoteKV.IndexRange(tx.ctx, &remote.IndexRangeReq{TxID: tx.id, Table: string(name), K: k, FromTs: fromTs, ToTs: toTs})
 	if err != nil {
 		return nil, err
 	}
-	it := &grpc2UnaryStream[*remote.IndexRangeReply, uint64]{stream: stream, unwrap: func(msg *remote.IndexRangeReply) []uint64 { return msg.Timestamps }}
+	it := &grpc2U64Stream[*remote.IndexRangeReply]{
+		grpc2UnaryStream[*remote.IndexRangeReply, uint64]{stream: stream, unwrap: func(msg *remote.IndexRangeReply) []uint64 { return msg.Timestamps }},
+	}
 	//tx.streams = append(tx.streams, it)
 	return it, nil
 }
@@ -692,6 +695,22 @@ func (it *grpc2Pairs[Msg]) Next() ([]byte, []byte, error) {
 	v := it.lastValues[it.i]
 	it.i++
 	return k, v, nil
+}
+
+type grpc2U64Stream[Msg any] struct {
+	grpc2UnaryStream[Msg, uint64]
+}
+
+func (it *grpc2U64Stream[Msg]) ToBitmap() (*roaring64.Bitmap, error) {
+	bm := roaring64.New()
+	for it.HasNext() {
+		batch, err := it.NextBatch()
+		if err != nil {
+			return nil, err
+		}
+		bm.AddMany(batch)
+	}
+	return bm, nil
 }
 
 type grpc2UnaryStream[Msg any, Res any] struct {

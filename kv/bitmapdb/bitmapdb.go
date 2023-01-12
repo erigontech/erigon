@@ -48,6 +48,9 @@ func NewBitmap() *roaring.Bitmap {
 	return a
 }
 func ReturnToPool(a *roaring.Bitmap) {
+	if a == nil {
+		return
+	}
 	roaringPool.Put(a)
 }
 
@@ -63,6 +66,9 @@ func NewBitmap64() *roaring64.Bitmap {
 	return a
 }
 func ReturnToPool64(a *roaring64.Bitmap) {
+	if a == nil {
+		return
+	}
 	roaring64Pool.Put(a)
 }
 
@@ -411,4 +417,8 @@ func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
 		mask = 0xff << (8 - shiftbits)
 	}
 	return fixedbytes, mask
+}
+
+type ToBitmap interface {
+	ToBitmap() (*roaring64.Bitmap, error)
 }

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/VictoriaMetrics/metrics"
 )
 
@@ -438,7 +439,7 @@ type TemporalTx interface {
 	Tx
 	DomainGet(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
-	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps UnaryStream[uint64], err error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64) (timestamps U64Stream, err error)
 }
 
 type TemporalRwDB interface {
@@ -458,7 +459,11 @@ type Stream[K, V any] interface {
 }
 type UnaryStream[V any] interface {
 	Next() (V, error)
-	NextBatch() ([]V, error)
+	//NextBatch() ([]V, error)
 	HasNext() bool
+}
+type U64Stream interface {
+	UnaryStream[uint64]
+	ToBitmap() (*roaring64.Bitmap, error)
 }
 type Pairs Stream[[]byte, []byte]

@@ -31,7 +31,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
@@ -465,12 +464,14 @@ type InvertedIterator struct {
 	res            []uint64
 	hasNextInFiles bool
 	hasNextInDb    bool
+	bm             *roaring64.Bitmap
 }
 
 func (it *InvertedIterator) Close() {
 	if it.cursor != nil {
 		it.cursor.Close()
 	}
+	bitmapdb.ReturnToPool64(it.bm)
 }
 
 func (it *InvertedIterator) advanceInFiles() {
@@ -580,25 +581,19 @@ func (it *InvertedIterator) next() uint64 {
 	it.advance()
 	return n
 }
-func (it *InvertedIterator) ToBitamp() (*roaring64.Bitmap, error) {
-	bm := bitmapdb.NewBitmap64()
-	for it.HasNext() {
-		bm.Add(it.next())
-	}
-	return bm, nil
-}
 func (it *InvertedIterator) ToArray() (res []uint64) {
 	for it.HasNext() {
 		res = append(res, it.next())
 	}
 	return res
 }
-func (it *InvertedIterator) ToBitamp32() *roaring.Bitmap {
-	bm := bitmapdb.NewBitmap()
+func (it *InvertedIterator) ToBitmap() (*roaring64.Bitmap, error) {
+	it.bm = bitmapdb.NewBitmap64()
+	bm := it.bm
 	for it.HasNext() {
-		bm.Add(uint32(it.next()))
+		bm.Add(it.next())
 	}
-	return bm
+	return bm, nil
 }
 
 type InvertedIndexContext struct {
@@ -656,6 +651,7 @@ func (it *InvertedIterator1) Close() {
 	if it.cursor != nil {
 		it.cursor.Close()
 	}
+
 }
 
 func (it *InvertedIterator1) advanceInFiles() {

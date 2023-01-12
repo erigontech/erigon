@@ -545,14 +545,12 @@ func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexR
 			if err != nil {
 				return err
 			}
-			for it.HasNext() {
-				batch, err := it.NextBatch()
-				if err != nil {
-					return err
-				}
-				if err := stream.Send(&remote.IndexRangeReply{Timestamps: batch}); err != nil {
-					return err
-				}
+			bm, err := it.ToBitmap()
+			if err != nil {
+				return err
+			}
+			if err := stream.Send(&remote.IndexRangeReply{Timestamps: bm.ToArray()}); err != nil {
+				return err
 			}
 			return nil
 		}); err != nil {
