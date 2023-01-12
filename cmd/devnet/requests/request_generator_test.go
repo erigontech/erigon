@@ -66,6 +66,40 @@ func TestRequestGenerator_GetBalance(t *testing.T) {
 	}
 }
 
+func TestRequestGenerator_GetBlockByNumber(t *testing.T) {
+	testCases := []struct {
+		reqId    int
+		blockNum uint64
+		withTxs  bool
+		expected string
+	}{
+		{
+			1,
+			2,
+			false,
+			`{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2",false],"id":1}`,
+		},
+		{
+			2,
+			16,
+			false,
+			`{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x10",false],"id":2}`,
+		},
+		{
+			3,
+			100,
+			true,
+			`{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x64",true],"id":3}`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		reqGen := MockRequestGenerator(testCase.reqId)
+		got := reqGen.GetBlockByNumber(testCase.blockNum, testCase.withTxs)
+		require.EqualValues(t, testCase.expected, got)
+	}
+}
+
 func TestRequestGenerator_GetLogs(t *testing.T) {
 	testCases := []struct {
 		reqId     int
