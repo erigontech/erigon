@@ -580,12 +580,12 @@ func (it *InvertedIterator) next() uint64 {
 	it.advance()
 	return n
 }
-func (it *InvertedIterator) ToBitamp() *roaring64.Bitmap {
+func (it *InvertedIterator) ToBitamp() (*roaring64.Bitmap, error) {
 	bm := bitmapdb.NewBitmap64()
 	for it.HasNext() {
 		bm.Add(it.next())
 	}
-	return bm
+	return bm, nil
 }
 func (it *InvertedIterator) ToArray() (res []uint64) {
 	for it.HasNext() {

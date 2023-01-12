@@ -1058,16 +1058,23 @@ type HistoryContext struct {
 	lr    *recsplit.IndexReader
 	locBm *bitmapdb.FixedSizeBitmaps
 
-	tx kv.Tx
+	tx    kv.Tx
+	trace bool
 }
 
 func (h *History) MakeContext() *HistoryContext {
-	var hc = HistoryContext{h: h}
-	hc.indexFiles = btree.NewG[ctxItem](32, ctxItemLess)
+	var hc = HistoryContext{
+		h:          h,
+		indexFiles: btree.NewG[ctxItem](32, ctxItemLess),
+		trace:      false,
+	}
 	h.InvertedIndex.files.Ascend(func(item *filesItem) bool {
 		if item.index == nil {
-			return false
+			return true
 		}
+		//if item.startTxNum > h.endTxNumMinimax() { //after this number: not all filles are built yet (data still in DB)
+		//	return true
+		//}
 		hc.indexFiles.ReplaceOrInsert(ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,
@@ -1079,8 +1086,11 @@ func (h *History) MakeContext() *HistoryContext {
 	hc.historyFiles = btree.NewG[ctxItem](32, ctxItemLess)
 	h.files.Ascend(func(item *filesItem) bool {
 		if item.index == nil {
-			return false
+			return true
 		}
+		//if item.startTxNum > h.endTxNumMinimax() {
+		//	return true
+		//}
 		it := ctxItem{
 			startTxNum: item.startTxNum,
 			endTxNum:   item.endTxNum,
@@ -1126,7 +1136,11 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		eliasVal, _ := g.NextUncompressed()
 		ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 		n, ok := ef.Search(txNum)
-
+		if hc.trace {
+			n2, _ := ef.Search(n + 1)
+			n3, _ := ef.Search(n - 1)
+			fmt.Printf("hist: files: %s %d<-%d->%d->%d, %x\n", hc.h.filenameBase, n3, txNum, n, n2, key)
+		}
 		if ok {
 			foundTxNum = n
 			foundEndTxNum = item.endTxNum
@@ -1167,7 +1181,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		search.startTxNum = foundStartTxNum
 		search.endTxNum = foundEndTxNum
 		if historyItem, ok = hc.historyFiles.Get(search); !ok {
-			return nil, false, fmt.Errorf("no %s file found for [%x]", hc.h.filenameBase, key)
+			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
 		}
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
@@ -1272,6 +1286,13 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 		return nil, false, err
 	}
 	if foundTxNumVal != nil {
+		if hc.trace {
+			_, vv, _ := indexCursor.NextDup()
+			indexCursor.Prev()
+			_, prevV, _ := indexCursor.Prev()
+			fmt.Printf("hist: db: %s, %d<-%d->%d->%d, %x\n", hc.h.filenameBase, u64or0(prevV), txNum, u64or0(foundTxNumVal), u64or0(vv), key)
+		}
+
 		var historyKeysCursor kv.CursorDupSort
 		if historyKeysCursor, err = tx.CursorDupSort(hc.h.indexKeysTable); err != nil {
 			return nil, false, err
@@ -1773,4 +1794,11 @@ func (hs *HistoryStep) Clone() *HistoryStep {
 			reader:     recsplit.NewIndexReader(hs.historyItem.index),
 		},
 	}
+}
+
+func u64or0(in []byte) (v uint64) {
+	if len(in) > 0 {
+		v = binary.BigEndian.Uint64(in)
+	}
+	return v
 }

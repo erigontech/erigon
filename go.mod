@@ -32,9 +32,9 @@ require (
 	github.com/tidwall/btree v1.5.0
 	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.4.0
-	golang.org/x/exp v0.0.0-20221217163422-3c43f8badb15
+	golang.org/x/exp v0.0.0-20230111222715-75897c7a292a
 	golang.org/x/sync v0.1.0
-	golang.org/x/sys v0.3.0
+	golang.org/x/sys v0.4.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.51.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
