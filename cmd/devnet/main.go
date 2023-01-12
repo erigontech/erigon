@@ -4,10 +4,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-
 	"github.com/ledgerwatch/erigon/cmd/devnet/commands"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
+	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/node"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 )
