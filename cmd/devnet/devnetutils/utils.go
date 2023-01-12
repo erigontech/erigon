@@ -3,13 +3,14 @@ package devnetutils
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"strconv"
+	"strings"
+
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
-	"os/exec"
-	"strconv"
-	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )

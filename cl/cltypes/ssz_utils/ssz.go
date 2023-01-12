@@ -6,6 +6,11 @@ import (
 	ssz "github.com/ferranbt/fastssz"
 )
 
+var (
+	BaseExtraDataSSZOffsetHeader = 536
+	BaseExtraDataSSZOffsetBlock  = 508
+)
+
 type ObjectSSZ interface {
 	ssz.Marshaler
 	ssz.Unmarshaler
@@ -29,6 +34,18 @@ type Unmarshaler interface {
 
 func MarshalUint64SSZ(buf []byte, x uint64) {
 	binary.LittleEndian.PutUint64(buf, x)
+}
+
+func Uint64SSZ(x uint64) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, x)
+	return b
+}
+
+func OffsetSSZ(x uint32) []byte {
+	b := make([]byte, 4)
+	binary.LittleEndian.PutUint32(b, x)
+	return b
 }
 
 // EncodeOffset marshals a little endian uint32 to buf

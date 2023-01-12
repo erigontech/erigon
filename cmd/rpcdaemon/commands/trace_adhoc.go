@@ -558,7 +558,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 				ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
 				ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
 			}
-		case vm.CREATE, vm.CREATE2:
+		case vm.CREATE, vm.CREATE2, vm.SELFDESTRUCT:
 			// Effectively disable memory output
 			ot.memOffStack = append(ot.memOffStack, 0)
 			ot.memLenStack = append(ot.memLenStack, 0)

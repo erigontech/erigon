@@ -13,7 +13,10 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -23,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
@@ -261,6 +263,11 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		return nil, nil
 	}
 	rx := make([]*roaring.Bitmap, len(addrs))
+	defer func() {
+		for _, bm := range rx {
+			bitmapdb.ReturnToPool(bm)
+		}
+	}()
 	for idx, addr := range addrs {
 		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
 		if err != nil {
@@ -290,75 +297,75 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
-	logs := []*types.Log{}
-
+func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
+	//[from,to)
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
 		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(tx, end) // end is an inclusive bound
+	toTxNum, err = rawdb.TxNums.Max(tx, end)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	toTxNum++
 
-	txNumbers := roaring64.New()
-	txNumbers.AddRange(fromTxNum, toTxNum) // [min,max)
-
+	out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if topicsBitmap != nil {
-		txNumbers.And(topicsBitmap)
+		out.And(topicsBitmap)
 	}
 	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if addrBitmap != nil {
-		txNumbers.And(addrBitmap)
+		out.And(addrBitmap)
+	}
+	return nil
+}
+
+func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
+	logs := []*types.Log{}
+
+	txNumbers := bitmapdb.NewBitmap64()
+	defer bitmapdb.ReturnToPool64(txNumbers)
+	if err := applyFiltersV3(txNumbers, tx, begin, end, crit); err != nil {
+		return logs, err
 	}
 	if txNumbers.IsEmpty() {
 		return logs, nil
 	}
-
-	var lastBlockNum uint64
-	var blockHash common.Hash
-	var header *types.Header
-	var signer *types.Signer
-	var rules *params.Rules
-	var skipAnalysis bool
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx)
-	ibs := state.New(stateReader)
-
-	//stateReader.SetTrace(true)
-	iter := txNumbers.Iterator()
-
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
-	engine := api.engine()
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
 
-	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
-	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
-	var blockCtx evmtypes.BlockContext
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
+	var lastBlockNum uint64
+	var blockHash common.Hash
+	var header *types.Header
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
+
+	iter := txNumbers.Iterator()
 	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		txNum := iter.Next()
 
 		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
@@ -371,7 +378,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			}
 		}
 		if !ok {
-			return nil, nil
+			break
 		}
 
 		// if block number changed, calculate all related field
@@ -379,18 +386,13 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
+			if header == nil {
+				log.Warn("header is nil", "blockNum", blockNum)
+				continue
+			}
 			lastBlockNum = blockNum
 			blockHash = header.Hash()
-			signer = types.MakeSigner(chainConfig, blockNum)
-			if chainConfig == nil {
-				log.Warn("chainConfig is nil")
-			}
-			if header == nil {
-				log.Warn("header is nil")
-			}
-			rules = chainConfig.Rules(blockNum, header.Time)
-			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
-
+			exec.changeBlock(header)
 			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
 			if err != nil {
 				return nil, err
@@ -399,11 +401,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
-			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -411,37 +412,22 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		stateReader.SetTxNum(txNum)
-		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+		rawLogs, err := exec.execTx(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
 
-		ibs.Reset()
-		ibs.Prepare(txHash, blockHash, txIndex)
-
-		evm.ResetBetweenBlocks(blockCtx, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
-
-		gp := new(core.GasPool).AddGas(msg.Gas())
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, blockNum, txNum, ibs.Error())
-		}
-
-		rawLogs := ibs.GetLogs(txHash)
-
 		//TODO: logIndex within the block! no way to calc it now
-		logIndex := uint(0)
-		for _, log := range rawLogs {
-			log.Index = logIndex
-			logIndex++
-		}
+		//logIndex := uint(0)
+		//for _, log := range rawLogs {
+		//	log.Index = logIndex
+		//	logIndex++
+		//}
 		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash
-			log.TxHash = txHash
+			log.TxHash = txn.Hash()
 		}
 		logs = append(logs, filtered...)
 	}
@@ -449,6 +435,67 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	//stats := api._agg.GetAndResetStats()
 	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
+}
+
+type intraBlockExec struct {
+	ibs         *state.IntraBlockState
+	stateReader *state.HistoryReaderV3
+	engine      consensus.EngineReader
+	tx          kv.TemporalTx
+	br          services.FullBlockReader
+	chainConfig *params.ChainConfig
+	evm         *vm.EVM
+
+	// calculated by .changeBlock()
+	blockHash common.Hash
+	blockNum  uint64
+	header    *types.Header
+	blockCtx  *evmtypes.BlockContext
+	rules     *params.Rules
+	signer    *types.Signer
+	vmConfig  *vm.Config
+}
+
+func newIntraBlockExec(tx kv.TemporalTx, chainConfig *params.ChainConfig, engine consensus.EngineReader) *intraBlockExec {
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx)
+	return &intraBlockExec{
+		engine:      engine,
+		chainConfig: chainConfig,
+		stateReader: stateReader,
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		vmConfig:    &vm.Config{},
+		ibs:         state.New(stateReader),
+	}
+}
+
+func (e *intraBlockExec) changeBlock(header *types.Header) {
+	e.blockNum = header.Number.Uint64()
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br)
+	e.blockCtx = &blockCtx
+	e.blockHash = header.Hash()
+	e.header = header
+	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum)
+	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
+}
+
+func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, error) {
+	e.stateReader.SetTxNum(txNum)
+	txHash := txn.Hash()
+	e.ibs.Reset()
+	e.ibs.Prepare(txHash, e.blockHash, txIndex)
+	gp := new(core.GasPool).AddGas(txn.GetGas())
+	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
+	if err != nil {
+		return nil, err
+	}
+	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
+	_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	if err != nil {
+		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+	}
+	return e.ibs.GetLogs(txHash), nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -465,51 +512,52 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing roaring64.Bitmap
+		bitmapForORing := bitmapdb.NewBitmap64()
+		defer bitmapdb.ReturnToPool64(bitmapForORing)
+
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
 			if err != nil {
 				return nil, err
 			}
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return nil, err
-				}
-				bitmapForORing.AddMany(n)
+			bm, err := it.ToBitmap()
+			if err != nil {
+				return nil, err
 			}
+			bitmapForORing.Or(bm)
 		}
 
 		if bitmapForORing.GetCardinality() == 0 {
 			continue
 		}
 		if result == nil {
-			result = &bitmapForORing
+			result = bitmapForORing.Clone()
 			continue
 		}
-		result = roaring64.And(&bitmapForORing, result)
+		result = roaring64.And(bitmapForORing, result)
 	}
 	return result, nil
 }
+
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
 	rx := make([]*roaring64.Bitmap, len(addrs))
+	defer func() {
+		for _, bm := range rx {
+			bitmapdb.ReturnToPool64(bm)
+		}
+	}()
 	for idx, addr := range addrs {
 		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
 		if err != nil {
 			return nil, err
 		}
-		m := roaring64.New()
-		for it.HasNext() {
-			n, err := it.NextBatch()
-			if err != nil {
-				return nil, err
-			}
-			m.AddMany(n)
+		rx[idx], err = it.ToBitmap()
+		if err != nil {
+			return nil, err
 		}
-		rx[idx] = m
 	}
 	return roaring64.FastOr(rx...), nil
 }

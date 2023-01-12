@@ -62,32 +62,33 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
+	queueLen := rs.QueueLen()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(count-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
 	//speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
 	var repeatRatio float64
-	if count > p.prevCount {
-		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
+	if doneCount > p.prevCount {
+		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
-		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
-		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
-		"resultQueue", fmt.Sprintf("%d/%d", rwsLen, queueSize),
+		"pipe", fmt.Sprintf("%d/%d->%d/%d->%d/%d", queueLen, queueSize, rwsLen, queueSize, len(resultCh), cap(resultCh)),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
+		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	//var txNums []string
@@ -98,7 +99,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlo
 	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
-	p.prevCount = count
+	p.prevCount = doneCount
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
@@ -191,7 +192,7 @@ func ExecV3(ctx context.Context,
 	var rwsLock sync.RWMutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
-	queueSize := workerCount * 4
+	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
@@ -216,11 +217,20 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(tx)
 
 		notifyReceived := func() { rwsReceiveCond.Signal() }
+		var t time.Time
+		var lastBlockNum uint64
 		for outputTxNum.Load() < maxTxNum.Load() {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case txTask := <-resultCh:
+				if txTask.BlockNum > lastBlockNum {
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = txTask.BlockNum
+					t = time.Now()
+				}
 				if err := func() error {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -229,11 +239,12 @@ func ExecV3(ctx context.Context,
 					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 						return err
 					}
-					syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					return nil
 				}(); err != nil {
 					return err
 				}
+
+				syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 			}
 		}
 		return nil
@@ -474,8 +485,6 @@ func ExecV3(ctx context.Context,
 	var blockNum uint64
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		t := time.Now()
-
 		inputBlockNum.Store(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
@@ -580,7 +589,14 @@ Loop:
 					if ok := rs.RegisterSender(txTask); ok {
 						currentQueueSize := rs.AddWork(txTask)
 						if currentQueueSize > queueSize {
-							time.Sleep(10 * time.Microsecond)
+							time.Sleep(100 * time.Microsecond)
+						} else {
+							rwsLock.RLock()
+							needWait := rws.Len() > queueSize
+							rwsLock.RUnlock()
+							if needWait {
+								time.Sleep(100 * time.Microsecond)
+							}
 						}
 					}
 				} else {
@@ -632,7 +648,6 @@ Loop:
 			inputTxNum++
 		}
 
-		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
 

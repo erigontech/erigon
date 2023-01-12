@@ -105,13 +105,14 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		// Collect Execution Payloads
 		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
-			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.BlockHash); err != nil {
+			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.Hash()); err != nil {
 				return false, err
 			}
 			if foundLatestEth1ValidHash {
 				return slot <= destinationSlot, nil
 			}
-			encodedPayload, err := payload.MarshalSSZ()
+			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
+			encodedPayload, err = payload.EncodeSSZ(encodedPayload)
 			if err != nil {
 				return false, err
 			}
@@ -166,8 +167,8 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
 	// Send in ordered manner EL blocks to Execution Layer
 	if err := executionPayloadsCollector.Load(tx, kv.BeaconBlocks, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		payload := &cltypes.ExecutionPayload{}
-		if err := payload.UnmarshalSSZ(v); err != nil {
+		payload := &cltypes.Eth1Block{}
+		if err := payload.DecodeSSZ(v, clparams.BellatrixVersion); err != nil {
 			return err
 		}
 		if err := executionPayloadInsertionBatch.WriteExecutionPayload(payload); err != nil {
