@@ -311,7 +311,6 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	}
 	toTxNum++
 
-	out.Clear()
 	out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
@@ -484,29 +483,29 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing roaring64.Bitmap
+		bitmapForORing := bitmapdb.NewBitmap64()
+		defer bitmapdb.ReturnToPool64(bitmapForORing)
+
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
 			if err != nil {
 				return nil, err
 			}
-			for it.HasNext() {
-				n, err := it.NextBatch()
-				if err != nil {
-					return nil, err
-				}
-				bitmapForORing.AddMany(n)
+			bm, err := it.ToBitmap()
+			if err != nil {
+				return nil, err
 			}
+			bitmapForORing.Or(bm)
 		}
 
 		if bitmapForORing.GetCardinality() == 0 {
 			continue
 		}
 		if result == nil {
-			result = &bitmapForORing
+			result = bitmapForORing.Clone()
 			continue
 		}
-		result = roaring64.And(&bitmapForORing, result)
+		result = roaring64.And(bitmapForORing, result)
 	}
 	return result, nil
 }
@@ -525,15 +524,10 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		if err != nil {
 			return nil, err
 		}
-		m := roaring64.New()
-		for it.HasNext() {
-			n, err := it.NextBatch()
-			if err != nil {
-				return nil, err
-			}
-			m.AddMany(n)
+		rx[idx], err = it.ToBitmap()
+		if err != nil {
+			return nil, err
 		}
-		rx[idx] = m
 	}
 	return roaring64.FastOr(rx...), nil
 }

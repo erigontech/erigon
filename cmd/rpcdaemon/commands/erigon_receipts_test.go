@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"testing"
 
@@ -24,6 +25,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGetLogs(t *testing.T) {
+	assert := assert.New(t)
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
+	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	{
+		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
+
+		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+		assert.NoError(err)
+		assert.Equal(uint64(10), logs[0].BlockNumber)
+
+		//filer by wrong address
+		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+			Addresses: common.Addresses{common.Address{}},
+		})
+		assert.NoError(err)
+		assert.Equal(0, len(logs))
+
+		//filer by wrong address
+		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
+			Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+		})
+		assert.NoError(err)
+		assert.Equal(1, len(logs))
+	}
+	//
+	//api := NewErigonAPI(baseApi, m.DB, nil)
+	//logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
+	//assert.NoError(err)
+	//assert.Equal(uint64(10), logs[0].BlockNumber)
+	//
+	////filer by wrong address
+	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
+	//	Addresses: common.Addresses{common.Address{}},
+	//})
+	//assert.NoError(err)
+	//assert.Equal(0, len(logs))
+	//
+	////filer by wrong address
+	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
+	//	Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+	//})
+	//assert.NoError(err)
+	//assert.Equal(1, len(logs))
+}
+
 func TestErigonGetLatestLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
@@ -32,7 +81,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	db := m.DB
 	agg := m.HistoryV3Components()
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
-	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
@@ -49,8 +98,8 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Timestamp:   expectedLogs[i].Timestamp,
 		})
 	}
-	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{}, filters.LogFilterOptions{
-		LogCount: uint64((len(expectedLogs))),
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{}, filters.LogFilterOptions{
+		LogCount: uint64(len(expectedLogs)),
 	})
 	if err != nil {
 		t.Errorf("calling erigon_getLatestLogs: %v", err)
@@ -67,7 +116,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	db := m.DB
 	agg := m.HistoryV3Components()
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil)
-	expectedLogs, _ := api.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for i := len(expectedLogs) - 1; i >= 0; i-- {
@@ -97,7 +146,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 			expectedLogs[i].Topics[0],
 		})
 	}
-	actual, err := api.GetLatestLogs(context.Background(), filters.FilterCriteria{Topics: containsTopics}, filters.LogFilterOptions{
+	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{Topics: containsTopics}, filters.LogFilterOptions{
 		BlockCount: blockCount,
 	})
 	if err != nil {
@@ -158,33 +207,24 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
-	if m.HistoryV3 {
-		t.Skip("ErigonV3 doesn't store receipts in DB. Can't use \"rawdb\" package in this case. need somehow change assertion")
+	expect := map[uint64]string{
+		0: `[]`,
+		1: `[{"blockHash":"0x63b978611c906a61e4a8333fedeea8d62a1c869fc9a19acf6ed0cc5139247eda","blockNumber":"0x1","contractAddress":null,"cumulativeGasUsed":"0x5208","effectiveGasPrice":"0x0","from":"0x71562b71999873db5b286df957af199ec94617f7","gasUsed":"0x5208","logs":[],"logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","status":"0x1","to":"0x703c4b2bd70c169f5717101caee543299fc946c7","transactionHash":"0x9ca7a9e6bf23353fc5ac37f5c5676db1accec4af83477ac64cdcaa37f3a837f9","transactionIndex":"0x0","type":"0x0"}]`,
+		2: `[{"blockHash":"0xd3294fcc342ff74be4ae07fb25cd3b2fbb6c2b7830f212ee0723da956e70e099","blockNumber":"0x2","contractAddress":null,"cumulativeGasUsed":"0x5208","effectiveGasPrice":"0x0","from":"0x71562b71999873db5b286df957af199ec94617f7","gasUsed":"0x5208","logs":[],"logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","status":"0x1","to":"0x703c4b2bd70c169f5717101caee543299fc946c7","transactionHash":"0xf190eed1578cdcfe69badd05b7ef183397f336dc3de37baa4adbfb4bc657c11e","transactionIndex":"0x0","type":"0x0"},{"blockHash":"0xd3294fcc342ff74be4ae07fb25cd3b2fbb6c2b7830f212ee0723da956e70e099","blockNumber":"0x2","contractAddress":null,"cumulativeGasUsed":"0xa410","effectiveGasPrice":"0x0","from":"0x703c4b2bd70c169f5717101caee543299fc946c7","gasUsed":"0x5208","logs":[],"logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","status":"0x1","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","transactionHash":"0x309a030e44058e435a2b01302006880953e2c9319009db97013eb130d7a24eab","transactionIndex":"0x1","type":"0x0"}]`,
+		3: `[]`,
+		4: `[]`,
 	}
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			block, err := rawdb.ReadBlockByNumber(tx, i)
-			if err != nil {
-				return err
-			}
-
-			r, err := rawdb.ReadReceiptsByHash(tx, block.Hash())
-			if err != nil {
-				return err
-			}
-
-			marshaledReceipts := make([]map[string]interface{}, 0, len(r))
-			for _, receipt := range r {
-				txn := block.Transactions()[receipt.TransactionIndex]
-				marshaledReceipts = append(marshaledReceipts, marshalReceipt(receipt, txn, m.ChainConfig, block, txn.Hash(), true))
-			}
+			block := rawdb.ReadHeaderByNumber(tx, i)
 
 			receiptsFromBlock, err := api.GetBlockReceiptsByBlockHash(context.Background(), block.Hash())
 			if err != nil {
 				return err
 			}
 
-			assert.EqualValues(t, marshaledReceipts, receiptsFromBlock)
+			a, _ := json.Marshal(receiptsFromBlock)
+			assert.Equal(t, expect[block.Number.Uint64()], string(a))
 		}
 		return nil
 	})
