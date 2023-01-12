@@ -20,7 +20,6 @@ type BackwardBeaconDownloader struct {
 	expectedRoot   common.Hash
 	rpc            *rpc.BeaconRpcP2P
 	onNewBlock     OnNewBlock
-	segments       []*cltypes.BeaconBlockBellatrix
 	finished       bool
 
 	mu sync.Mutex

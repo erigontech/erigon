@@ -127,7 +127,7 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 		return nil, err
 	}
 
-	responsePacket := []ssz_utils.ObjectSSZ{&cltypes.LightClientUpdate{}}
+	responsePacket := []ssz_utils.EncodableSSZ{&cltypes.LightClientUpdate{}}
 
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
@@ -229,13 +229,16 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			err = responseChunk.UnmarshalSSZ(raw, clparams.Phase0Version)
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.Phase0Version))
 		case utils.Bytes4ToUint32(altairForkDigest):
-			err = responseChunk.UnmarshalSSZ(raw, clparams.AltairVersion)
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.AltairVersion))
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			err = responseChunk.UnmarshalSSZ(raw, clparams.BellatrixVersion)
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.BellatrixVersion))
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
+		}
+		if err != nil {
+			return nil, err
 		}
 
 		responsePacket = append(responsePacket, responseChunk)

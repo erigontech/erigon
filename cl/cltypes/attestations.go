@@ -282,7 +282,7 @@ func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 }
 
 // UnmarshalSSZ ssz unmarshals the Attestation object
-func (a *Attestation) DecodeSSZ(buf []byte) error {
+func (a *Attestation) UnmarshalSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
@@ -314,6 +314,10 @@ func (a *Attestation) DecodeSSZ(buf []byte) error {
 		a.AggregationBits = append(a.AggregationBits, buf...)
 	}
 	return err
+}
+
+func (a *Attestation) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return a.UnmarshalSSZ(buf)
 }
 
 // SizeSSZ returns the ssz encoded size in bytes for the Attestation object

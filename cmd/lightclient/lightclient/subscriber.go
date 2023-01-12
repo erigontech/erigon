@@ -72,7 +72,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
 		block := &cltypes.SignedBeaconBlock{}
-		if err := block.UnmarshalSSZ(data.Data, clparams.BellatrixVersion); err != nil {
+		if err := block.UnmarshalSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 

@@ -45,9 +45,9 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *For
 
 // Start begins the gossip listening process.
 func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz_utils.Unmarshaler) {
-	signedBlock := obj.(*cltypes.SignedBeaconBlockBellatrix)
+	signedBlock := obj.(*cltypes.SignedBeaconBlock)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
-		f.addSegment(cltypes.NewSignedBeaconBlock(obj))
+		f.addSegment(signedBlock)
 	}
 }
 

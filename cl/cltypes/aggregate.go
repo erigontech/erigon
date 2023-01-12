@@ -37,7 +37,7 @@ func (a *AggregateAndProof) UnmarshalSSZ(buf []byte) error {
 	}
 
 	copy(a.SelectionProof[:], buf[12:])
-	if err := a.Aggregate.DecodeSSZ(buf[108:]); err != nil {
+	if err := a.Aggregate.UnmarshalSSZ(buf[108:]); err != nil {
 		return err
 	}
 	return nil
@@ -78,6 +78,9 @@ func (a *SignedAggregateAndProof) UnmarshalSSZ(buf []byte) error {
 	}
 
 	return nil
+}
+func (a *SignedAggregateAndProof) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return a.UnmarshalSSZ(buf)
 }
 
 func (a *SignedAggregateAndProof) SizeSSZ() int {

@@ -165,6 +165,10 @@ func (s *Status) UnmarshalSSZ(buf []byte) error {
 	return nil
 }
 
+func (s *Status) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return s.UnmarshalSSZ(buf)
+}
+
 func (s *Status) SizeSSZ() int {
 	return 84
 }

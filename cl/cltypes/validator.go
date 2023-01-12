@@ -142,7 +142,7 @@ func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
 	return append(buf, e.Signature[:]...)
 }
 
-func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
+func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
 	if e.VolunaryExit == nil {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
@@ -152,6 +152,10 @@ func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
 	}
 	copy(e.Signature[:], buf[16:])
 	return nil
+}
+
+func (e *SignedVoluntaryExit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return e.UnmarshalSSZ(buf)
 }
 
 func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {

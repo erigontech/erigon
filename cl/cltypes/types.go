@@ -51,74 +51,6 @@ type BeaconBlockForStorage struct {
 }
 
 /*
- * Bellatrix block structure.
- */
-type BeaconBlockBellatrix struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	StateRoot     [32]byte `ssz-size:"32"`
-	Body          *BeaconBodyBellatrix
-}
-
-/*
- * We get this object with gossip so we need to do proper decoding.
- */
-type SignedBeaconBlockBellatrix struct {
-	Block     *BeaconBlockBellatrix
-	Signature [96]byte `ssz-size:"96"`
-}
-
-type SignedBeaconBlockAltair struct {
-	Block     *BeaconBlockAltair
-	Signature [96]byte `ssz-size:"96"`
-}
-
-type BeaconBlockAltair struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	StateRoot     [32]byte `ssz-size:"32"`
-	Body          *BeaconBodyAltair
-}
-
-type BeaconBodyAltair struct {
-	RandaoReveal      [96]byte `ssz-size:"96"`
-	Eth1Data          *Eth1Data
-	Graffiti          []byte                 `ssz-size:"32"`
-	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
-	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
-	Attestations      []*Attestation         `ssz-max:"128"`
-	Deposits          []*Deposit             `ssz-max:"16"`
-	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
-	SyncAggregate     *SyncAggregate
-}
-
-type SignedBeaconBlockPhase0 struct {
-	Block     *BeaconBlockPhase0
-	Signature [96]byte `ssz-size:"96"`
-}
-
-type BeaconBlockPhase0 struct {
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	StateRoot     [32]byte `ssz-size:"32"`
-	Body          *BeaconBodyPhase0
-}
-
-type BeaconBodyPhase0 struct {
-	RandaoReveal      [96]byte `ssz-size:"96"`
-	Eth1Data          *Eth1Data
-	Graffiti          []byte                 `ssz-size:"32"`
-	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
-	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
-	Attestations      []*Attestation         `ssz-max:"128"`
-	Deposits          []*Deposit             `ssz-max:"16"`
-	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
-}
-
-/*
  * Sync committe public keys and their aggregate public keys, we use array of pubKeys.
  */
 type SyncCommittee struct {
@@ -148,6 +80,10 @@ type LightClientBootstrap struct {
 	CurrentSyncCommitteeBranch [][]byte `ssz-size:"5,32"`
 }
 
+func (l *LightClientBootstrap) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return l.UnmarshalSSZ(buf)
+}
+
 // LightClientUpdate is used to update the sync committee every 27 hours.
 type LightClientUpdate struct {
 	AttestedHeader          *BeaconBlockHeader
@@ -157,6 +93,10 @@ type LightClientUpdate struct {
 	FinalityBranch          [][]byte `ssz-size:"6,32"`
 	SyncAggregate           *SyncAggregate
 	SignatureSlot           uint64
+}
+
+func (l *LightClientUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return l.UnmarshalSSZ(buf)
 }
 
 func (l *LightClientUpdate) HasNextSyncCommittee() bool {
@@ -181,11 +121,19 @@ type LightClientFinalityUpdate struct {
 	SignatureSlot   uint64
 }
 
+func (l *LightClientFinalityUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return l.UnmarshalSSZ(buf)
+}
+
 // LightClientOptimisticUpdate is used for verifying N-1 block.
 type LightClientOptimisticUpdate struct {
 	AttestedHeader *BeaconBlockHeader
 	SyncAggregate  *SyncAggregate
 	SignatureSlot  uint64
+}
+
+func (l *LightClientOptimisticUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return l.UnmarshalSSZ(buf)
 }
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch. NOT USED.

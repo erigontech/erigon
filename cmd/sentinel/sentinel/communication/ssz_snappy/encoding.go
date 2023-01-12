@@ -99,7 +99,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.ObjectSSZ) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ) error {
 	objSize := list[0].SizeSSZ()
 
 	r := bytes.NewReader(data)

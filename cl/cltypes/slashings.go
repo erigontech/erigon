@@ -14,13 +14,17 @@ func (p *ProposerSlashing) EncodeSSZ(dst []byte) []byte {
 	return buf
 }
 
-func (p *ProposerSlashing) DecodeSSZ(buf []byte) error {
+func (p *ProposerSlashing) UnmarshalSSZ(buf []byte) error {
 	p.Header1 = new(SignedBeaconBlockHeader)
 	p.Header2 = new(SignedBeaconBlockHeader)
 	if err := p.Header1.DecodeSSZ(buf); err != nil {
 		return err
 	}
 	return p.Header2.DecodeSSZ(buf[p.Header1.EncodingSizeSSZ():])
+}
+
+func (p *ProposerSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return p.UnmarshalSSZ(buf)
 }
 
 func (p *ProposerSlashing) EncodingSizeSSZ() int {
@@ -51,13 +55,17 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) []byte {
 	return buf
 }
 
-func (a *AttesterSlashing) DecodeSSZ(buf []byte) error {
+func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
 	if err := a.Attestation_1.DecodeSSZ(buf); err != nil {
 		return err
 	}
 	return a.Attestation_2.DecodeSSZ(buf[a.Attestation_1.EncodingSizeSSZ():])
+}
+
+func (a *AttesterSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return a.UnmarshalSSZ(buf)
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {
