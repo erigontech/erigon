@@ -21,24 +21,6 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation
 }
 
-// we will send this to Erigon once validation is done.
-type ExecutionPayload struct {
-	ParentHash    [32]byte `ssz-size:"32"`
-	FeeRecipient  [20]byte `ssz-size:"20"`
-	StateRoot     [32]byte `ssz-size:"32"`
-	ReceiptsRoot  [32]byte `ssz-size:"32"`
-	LogsBloom     []byte   `ssz-size:"256"`
-	PrevRandao    [32]byte `ssz-size:"32"`
-	BlockNumber   uint64
-	GasLimit      uint64
-	GasUsed       uint64
-	Timestamp     uint64
-	ExtraData     []byte   `ssz-max:"32"`
-	BaseFeePerGas []byte   `ssz-size:"32"`
-	BlockHash     [32]byte `ssz-size:"32"`
-	Transactions  [][]byte `ssz-size:"?,?" ssz-max:"1048576,1073741824"`
-}
-
 /*
  * Block body for Consensus Layer, we only care about its hash and execution payload.
  */
@@ -52,7 +34,7 @@ type BeaconBodyBellatrix struct {
 	Deposits          []*Deposit             `ssz-max:"16"`
 	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 	SyncAggregate     *SyncAggregate
-	ExecutionPayload  *ExecutionPayload
+	ExecutionPayload  *Eth1Block
 }
 
 /*

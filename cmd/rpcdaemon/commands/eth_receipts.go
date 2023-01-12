@@ -261,6 +261,11 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		return nil, nil
 	}
 	rx := make([]*roaring.Bitmap, len(addrs))
+	defer func() {
+		for _, bm := range rx {
+			bitmapdb.ReturnToPool(bm)
+		}
+	}()
 	for idx, addr := range addrs {
 		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
 		if err != nil {
@@ -509,6 +514,11 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		return nil, nil
 	}
 	rx := make([]*roaring64.Bitmap, len(addrs))
+	defer func() {
+		for _, bm := range rx {
+			bitmapdb.ReturnToPool64(bm)
+		}
+	}()
 	for idx, addr := range addrs {
 		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
 		if err != nil {
