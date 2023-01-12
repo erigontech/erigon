@@ -724,7 +724,7 @@ type BodyForStorage struct {
 }
 
 // Alternative representation of the Block.
-type HeaderAndBody struct {
+type RawBlock struct {
 	Header *Header
 	Body   *RawBody
 }
@@ -1629,6 +1629,19 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
 	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
+}
+
+// RawBody creates a RawBody based on the body.
+func (b *Body) RawBody() *RawBody {
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	for i, tx := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
 		if err != nil {

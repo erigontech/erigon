@@ -23,8 +23,8 @@ func NewPrefetchedBlocks() *PrefetchedBlocks {
 
 func (pb *PrefetchedBlocks) Get(hash common.Hash) (*types.Header, *types.RawBody) {
 	if val, ok := pb.blocks.Get(hash); ok && val != nil {
-		if headerAndBody, ok := val.(types.HeaderAndBody); ok {
-			return headerAndBody.Header, headerAndBody.Body
+		if block, ok := val.(types.RawBlock); ok {
+			return block.Header, block.Body
 		}
 	}
 	return nil, nil
@@ -35,5 +35,5 @@ func (pb *PrefetchedBlocks) Add(h *types.Header, b *types.RawBody) {
 		return
 	}
 	hash := h.Hash()
-	pb.blocks.ContainsOrAdd(hash, types.HeaderAndBody{Header: h, Body: b})
+	pb.blocks.ContainsOrAdd(hash, types.RawBlock{Header: h, Body: b})
 }
