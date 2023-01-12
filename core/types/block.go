@@ -1638,8 +1638,7 @@ func (b *Block) RawBody() *RawBody {
 	return br
 }
 
-// RawBody creates a RawBody based on the body. It is not very efficient, so
-// will probably be removed in favour of RawBlock. Also it panics
+// RawBody creates a RawBody based on the body.
 func (b *Body) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
 	for i, tx := range b.Transactions {
