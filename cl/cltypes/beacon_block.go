@@ -235,23 +235,20 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	offsetDeposits := ssz_utils.DecodeOffset(buf[212:])
 	offsetExits := ssz_utils.DecodeOffset(buf[216:])
 	// Decode sync aggregate if we are past altair.
-	pos := 220
 	if version >= clparams.AltairVersion {
 		if len(buf) < 380 {
 			return ssz_utils.ErrLowBufferSize
 		}
 		b.SyncAggregate = new(SyncAggregate)
-		if err := b.SyncAggregate.DecodeSSZ(buf[pos:380]); err != nil {
+		if err := b.SyncAggregate.DecodeSSZ(buf[220:380]); err != nil {
 			return err
 		}
-		pos = 380
 	}
 
 	// Execution Payload offset if past bellatrix.
 	var offsetExecution uint32
 	if version >= clparams.BellatrixVersion {
-		offsetExecution = ssz_utils.DecodeOffset(buf[pos:])
-		pos += 4
+		offsetExecution = ssz_utils.DecodeOffset(buf[380:])
 	}
 	// Decode Proposer slashings
 	proposerSlashingLength := 416
@@ -329,13 +326,13 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	}
 	leaves = append(leaves, attestationLeaf)
 	// Deposits leaf
-	depositLeaf, err := merkle_tree.ListObjectSSZRoot(b.Deposits, MaxAttestations)
+	depositLeaf, err := merkle_tree.ListObjectSSZRoot(b.Deposits, MaxDeposits)
 	if err != nil {
 		return [32]byte{}, err
 	}
 	leaves = append(leaves, depositLeaf)
 	// Voluntary exits leaf
-	exitLeaf, err := merkle_tree.ListObjectSSZRoot(b.VoluntaryExits, MaxAttestations)
+	exitLeaf, err := merkle_tree.ListObjectSSZRoot(b.VoluntaryExits, MaxVoluntaryExits)
 	if err != nil {
 		return [32]byte{}, err
 	}
