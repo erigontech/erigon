@@ -3,11 +3,13 @@ package commands
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -16,11 +18,11 @@ const (
 	sendValue        uint64 = 10000
 )
 
-func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
+func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) {
 	fmt.Printf("Sending %d ETH to %q from %q...\n", value, toAddr, fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(fromAddr))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr))
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
@@ -42,7 +44,7 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
 
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
-	hashes := map[common.Hash]bool{*hash: true}
+	hashes := map[libcommon.Hash]bool{*hash: true}
 	if _, err = services.SearchReservesForTransactionHash(hashes); err != nil {
 		return nil, fmt.Errorf("failed to call contract tx: %v", err)
 	}
@@ -50,12 +52,12 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
 	return hash, nil
 }
 
-func callContractTx() (*common.Hash, error) {
+func callContractTx() (*libcommon.Hash, error) {
 	// hashset to hold hashes for search after mining
-	hashes := make(map[common.Hash]bool)
+	hashes := make(map[libcommon.Hash]bool)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(models.DevAddress))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(models.DevAddress))
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err

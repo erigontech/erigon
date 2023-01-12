@@ -20,8 +20,8 @@ import (
 	"errors"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -61,8 +61,8 @@ var (
 // TxPoolConfig are the configuration parameters of the transaction pool.
 type TxPoolConfig struct {
 	Disable  bool
-	Locals   []common.Address // Addresses that should be treated by default as local
-	NoLocals bool             // Whether local transaction handling should be disabled
+	Locals   []libcommon.Address // Addresses that should be treated by default as local
+	NoLocals bool                // Whether local transaction handling should be disabled
 
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)

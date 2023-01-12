@@ -23,11 +23,11 @@ import (
 	"fmt"
 	"os"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -45,12 +45,12 @@ var stateTestCommand = cli.Command{
 // StatetestResult contains the execution status after running a state test, any
 // error that might have occurred and a dump of the final state if requested.
 type StatetestResult struct {
-	Name  string       `json:"name"`
-	Pass  bool         `json:"pass"`
-	Root  *common.Hash `json:"stateRoot,omitempty"`
-	Fork  string       `json:"fork"`
-	Error string       `json:"error,omitempty"`
-	State *state.Dump  `json:"state,omitempty"`
+	Name  string          `json:"name"`
+	Pass  bool            `json:"pass"`
+	Root  *libcommon.Hash `json:"stateRoot,omitempty"`
+	Fork  string          `json:"fork"`
+	Error string          `json:"error,omitempty"`
+	State *state.Dump     `json:"state,omitempty"`
 }
 
 func stateTestCmd(ctx *cli.Context) error {
@@ -129,7 +129,7 @@ func aggregateResultsFromStateTests(
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
 
-			var root common.Hash
+			var root libcommon.Hash
 			var calcRootErr error
 
 			statedb, err := test.Run(tx, st, cfg)

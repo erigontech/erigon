@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -33,15 +35,15 @@ const SelfdestructABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"ty
 var SelfdestructBin = "0x6080604052348015600f57600080fd5b50640100000000600055600260018190556003905560b0806100326000396000f3fe60806040526004361060295760003560e01c80632b68b9c61460345780632ee79ded14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605d565b30ff5b60008054600190810190915580548101815560028054909101905556fea2646970667358221220caae26a119b18c374d0a657f2582ca8ab59c89f78ec97da1efbc9d426f23a5c764736f6c63430007020033"
 
 // DeploySelfdestruct deploys a new Ethereum contract, binding an instance of Selfdestruct to it.
-func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Selfdestruct, error) {
+func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Selfdestruct, error) {
 	parsed, err := abi.JSON(strings.NewReader(SelfdestructABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SelfdestructBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 	return address, tx, &Selfdestruct{SelfdestructCaller: SelfdestructCaller{contract: contract}, SelfdestructTransactor: SelfdestructTransactor{contract: contract}, SelfdestructFilterer: SelfdestructFilterer{contract: contract}}, nil
 }
@@ -106,7 +108,7 @@ type SelfdestructTransactorRaw struct {
 }
 
 // NewSelfdestruct creates a new instance of Selfdestruct, bound to a specific deployed contract.
-func NewSelfdestruct(address common.Address, backend bind.ContractBackend) (*Selfdestruct, error) {
+func NewSelfdestruct(address libcommon.Address, backend bind.ContractBackend) (*Selfdestruct, error) {
 	contract, err := bindSelfdestruct(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func NewSelfdestruct(address common.Address, backend bind.ContractBackend) (*Sel
 }
 
 // NewSelfdestructCaller creates a new read-only instance of Selfdestruct, bound to a specific deployed contract.
-func NewSelfdestructCaller(address common.Address, caller bind.ContractCaller) (*SelfdestructCaller, error) {
+func NewSelfdestructCaller(address libcommon.Address, caller bind.ContractCaller) (*SelfdestructCaller, error) {
 	contract, err := bindSelfdestruct(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func NewSelfdestructCaller(address common.Address, caller bind.ContractCaller) (
 }
 
 // NewSelfdestructTransactor creates a new write-only instance of Selfdestruct, bound to a specific deployed contract.
-func NewSelfdestructTransactor(address common.Address, transactor bind.ContractTransactor) (*SelfdestructTransactor, error) {
+func NewSelfdestructTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*SelfdestructTransactor, error) {
 	contract, err := bindSelfdestruct(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +135,7 @@ func NewSelfdestructTransactor(address common.Address, transactor bind.ContractT
 }
 
 // NewSelfdestructFilterer creates a new log filterer instance of Selfdestruct, bound to a specific deployed contract.
-func NewSelfdestructFilterer(address common.Address, filterer bind.ContractFilterer) (*SelfdestructFilterer, error) {
+func NewSelfdestructFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*SelfdestructFilterer, error) {
 	contract, err := bindSelfdestruct(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func NewSelfdestructFilterer(address common.Address, filterer bind.ContractFilte
 }
 
 // bindSelfdestruct binds a generic wrapper to an already deployed contract.
-func bindSelfdestruct(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindSelfdestruct(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(SelfdestructABI))
 	if err != nil {
 		return nil, err

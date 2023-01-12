@@ -8,10 +8,11 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func post(client *http.Client, url, request string, response interface{}) error {
@@ -72,7 +73,7 @@ func (req *RequestGenerator) GetAdminNodeInfo() string {
 	return fmt.Sprintf(template, models.AdminNodeInfo, req.reqID)
 }
 
-func (req *RequestGenerator) GetBalance(address common.Address, blockNum models.BlockNumber) string {
+func (req *RequestGenerator) GetBalance(address libcommon.Address, blockNum models.BlockNumber) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetBalance, address, blockNum, req.reqID)
 }
@@ -82,12 +83,12 @@ func (req *RequestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) str
 	return fmt.Sprintf(template, models.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
 }
 
-func (req *RequestGenerator) GetLogs(fromBlock, toBlock uint64, address common.Address) string {
+func (req *RequestGenerator) GetLogs(fromBlock, toBlock uint64, address libcommon.Address) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetLogs, fromBlock, toBlock, address, req.reqID)
 }
 
-func (req *RequestGenerator) GetTransactionCount(address common.Address, blockNum models.BlockNumber) string {
+func (req *RequestGenerator) GetTransactionCount(address libcommon.Address, blockNum models.BlockNumber) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x","%v"],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetTransactionCount, address, blockNum, req.reqID)
 }

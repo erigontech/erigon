@@ -23,7 +23,8 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/visual"
 )
 
@@ -283,7 +284,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 		var newHexes [][]byte
 		for _, hex := range hexes {
 			if bytes.Equal(n.Key, hex) {
-				var hn common.Hash
+				var hn libcommon.Hash
 				h.hash(n, isRoot, hn[:])
 				return true, hashNode{hash: hn[:]}
 			}
@@ -296,7 +297,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 			folded, nn := fold(n.Val, newHexes, h, false)
 			n.Val = nn
 			if folded {
-				var hn common.Hash
+				var hn libcommon.Hash
 				h.hash(n, isRoot, hn[:])
 				return true, hashNode{hash: hn[:]}
 			}
@@ -324,7 +325,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 			n.child2 = nn2
 		}
 		if folded1 && folded2 {
-			var hn common.Hash
+			var hn libcommon.Hash
 			h.hash(n, isRoot, hn[:])
 			return true, hashNode{hash: hn[:]}
 		}
@@ -352,7 +353,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 			}
 		}
 		if !unfolded {
-			var hn common.Hash
+			var hn libcommon.Hash
 			h.hash(n, isRoot, hn[:])
 			return true, hashNode{hash: hn[:]}
 		}
@@ -363,7 +364,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 
 // HexToQuad converts hexary trie to quad trie with the same set of keys
 func HexToQuad(t *Trie) *Trie {
-	newTrie := New(common.Hash{})
+	newTrie := New(libcommon.Hash{})
 	transformSubTrie(t.root, []byte{}, newTrie, keyHexToQuad)
 	return newTrie
 }

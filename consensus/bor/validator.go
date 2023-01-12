@@ -9,19 +9,19 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Validator represets Volatile state for each Validator
 type Validator struct {
-	ID               uint64         `json:"ID"`
-	Address          common.Address `json:"signer"`
-	VotingPower      int64          `json:"power"`
-	ProposerPriority int64          `json:"accum"`
+	ID               uint64            `json:"ID"`
+	Address          libcommon.Address `json:"signer"`
+	VotingPower      int64             `json:"power"`
+	ProposerPriority int64             `json:"accum"`
 }
 
 // NewValidator creates new validator
-func NewValidator(address common.Address, votingPower int64) *Validator {
+func NewValidator(address libcommon.Address, votingPower int64) *Validator {
 	return &Validator{
 		Address:          address,
 		VotingPower:      votingPower,
@@ -121,7 +121,7 @@ func ParseValidators(validatorsBytes []byte) ([]*Validator, error) {
 		copy(address, validatorsBytes[i:i+20])
 		copy(power, validatorsBytes[i+20:i+40])
 
-		result[i/40] = NewValidator(common.BytesToAddress(address), big.NewInt(0).SetBytes(power).Int64())
+		result[i/40] = NewValidator(libcommon.BytesToAddress(address), big.NewInt(0).SetBytes(power).Int64())
 	}
 
 	return result, nil
@@ -132,9 +132,9 @@ func ParseValidators(validatorsBytes []byte) ([]*Validator, error) {
 // MinimalVal is the minimal validator representation
 // Used to send validator information to bor validator contract
 type MinimalVal struct {
-	ID          uint64         `json:"ID"`
-	VotingPower uint64         `json:"power"` // TODO add 10^-18 here so that we dont overflow easily
-	Signer      common.Address `json:"signer"`
+	ID          uint64            `json:"ID"`
+	VotingPower uint64            `json:"power"` // TODO add 10^-18 here so that we dont overflow easily
+	Signer      libcommon.Address `json:"signer"`
 }
 
 // SortMinimalValByAddress sorts validators

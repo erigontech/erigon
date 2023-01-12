@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/node_utils"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer/sentry_candidates"
@@ -15,8 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
 )
 
 type Crawler struct {

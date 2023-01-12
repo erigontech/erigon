@@ -12,10 +12,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/dbutils"
 )
 
 const (
@@ -38,7 +39,7 @@ func emptyValueGenerator(j int) []byte {
 }
 
 func getTestDataAtIndex(i, j int, inc uint64) []byte {
-	address := common.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+	address := libcommon.HexToAddress(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 	key, _ := common.HashData([]byte("key" + strconv.Itoa(j)))
 	return dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), inc, key.Bytes())
 }
@@ -378,18 +379,18 @@ func TestMultipleIncarnationsOfTheSameContract(t *testing.T) {
 	require.NoError(t, err)
 	defer c1.Close()
 
-	contractA := common.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
-	contractB := common.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
-	contractC := common.HexToAddress("0x1cbdd8336800dc3fe27daf5fb5188f0502ac1fc7")
-	contractD := common.HexToAddress("0xd88eba4c93123372a9f67215f80477bc3644e6ab")
+	contractA := libcommon.HexToAddress("0x6f0e0cdac6c716a00bd8db4d0eee4f2bfccf8e6a")
+	contractB := libcommon.HexToAddress("0xc5acb79c258108f288288bc26f7820d06f45f08c")
+	contractC := libcommon.HexToAddress("0x1cbdd8336800dc3fe27daf5fb5188f0502ac1fc7")
+	contractD := libcommon.HexToAddress("0xd88eba4c93123372a9f67215f80477bc3644e6ab")
 
-	key1 := common.HexToHash("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21efbc")
-	key2 := common.HexToHash("0x0bece5a88f7b038f806dbef77c0b462506e4b566c5be7dd44e8e2fc7b1f6a99c")
-	key3 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	key4 := common.HexToHash("0x4fdf6c1878d2469b49684effe69db8689d88a4f1695055538501ff197bc9e30e")
-	key5 := common.HexToHash("0xaa2703c3ae5d0024b2c3ab77e5200bb2a8eb39a140fad01e89a495d73760297c")
-	key6 := common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000df77")
-	key7 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000")
+	key1 := libcommon.HexToHash("0xa4e69cebbf4f8f3a1c6e493a6983d8a5879d22057a7c73b00e105d7c7e21efbc")
+	key2 := libcommon.HexToHash("0x0bece5a88f7b038f806dbef77c0b462506e4b566c5be7dd44e8e2fc7b1f6a99c")
+	key3 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	key4 := libcommon.HexToHash("0x4fdf6c1878d2469b49684effe69db8689d88a4f1695055538501ff197bc9e30e")
+	key5 := libcommon.HexToHash("0xaa2703c3ae5d0024b2c3ab77e5200bb2a8eb39a140fad01e89a495d73760297c")
+	key6 := libcommon.HexToHash("0x000000000000000000000000000000000000000000000000000000000000df77")
+	key7 := libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000")
 
 	val1 := common.FromHex("0x33bf0d0c348a2ef1b3a12b6a535e1e25a56d3624e45603e469626d80fd78c762")
 	val2 := common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000459")

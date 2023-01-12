@@ -6,15 +6,16 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // ExecutionClient interfaces with the Erigon-EL component consensus side.
@@ -64,7 +65,7 @@ func (ec *ExecutionClient) InsertHeaders(headers []*types.Header) error {
 }
 
 // InsertBodies will send block bodies to execution client
-func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []common.Hash, blockNumbers []uint64) error {
+func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []libcommon.Hash, blockNumbers []uint64) error {
 	if len(bodies) != len(blockHashes) || len(bodies) != len(blockNumbers) {
 		return fmt.Errorf("unbalanced inputs")
 	}
@@ -84,7 +85,7 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []c
 func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block) error {
 	headers := make([]*types.Header, 0, len(payloads))
 	bodies := make([]*types.RawBody, 0, len(payloads))
-	blockHashes := make([]common.Hash, 0, len(payloads))
+	blockHashes := make([]libcommon.Hash, 0, len(payloads))
 	blockNumbers := make([]uint64, 0, len(payloads))
 
 	for _, payload := range payloads {
@@ -100,11 +101,11 @@ func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block
 	return ec.InsertBodies(bodies, blockHashes, blockNumbers)
 }
 
-func (ec *ExecutionClient) ForkChoiceUpdate(headHash common.Hash) (*execution.ForkChoiceReceipt, error) {
+func (ec *ExecutionClient) ForkChoiceUpdate(headHash libcommon.Hash) (*execution.ForkChoiceReceipt, error) {
 	return ec.client.UpdateForkChoice(ec.ctx, gointerfaces.ConvertHashToH256(headHash))
 }
 
-func (ec *ExecutionClient) IsCanonical(hash common.Hash) (bool, error) {
+func (ec *ExecutionClient) IsCanonical(hash libcommon.Hash) (bool, error) {
 	resp, err := ec.client.IsCanonicalHash(ec.ctx, gointerfaces.ConvertHashToH256(hash))
 	if err != nil {
 		return false, err

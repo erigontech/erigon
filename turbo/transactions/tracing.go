@@ -9,9 +9,11 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -21,21 +23,20 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash common.Hash) (*types.Block, error)
+	GetBlockByHash(hash libcommon.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
-	GetBlock(hash common.Hash, number uint64) *types.Block
+	GetBlock(hash libcommon.Hash, number uint64) *types.Block
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.AggregatorV3, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.AggregatorV3, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	header := block.HeaderNoCopy()
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3, cfg.ChainName)
 	if err != nil {
@@ -58,7 +59,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	}
 
-	getHeader := func(hash common.Hash, n uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
@@ -91,7 +92,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -128,7 +129,7 @@ func TraceTx(
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
 	config *tracers.TraceConfig,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) error {

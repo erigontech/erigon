@@ -9,17 +9,20 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -27,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
@@ -38,7 +40,7 @@ type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	bodyDownload      *bodydownload.BodyDownload
-	chainConfig       params.ChainConfig
+	chainConfig       chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
@@ -56,7 +58,7 @@ func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
-	chainConfig params.ChainConfig,
+	chainConfig chain.Config,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -238,7 +240,7 @@ func writeForkChoiceHashes(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 ) (bool, error) {
-	if forkChoice.SafeBlockHash != (common.Hash{}) {
+	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
 		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
 		if err != nil {
 			return false, err
@@ -249,7 +251,7 @@ func writeForkChoiceHashes(
 		}
 	}
 
-	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
 		finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
 		if err != nil {
 			return false, err
@@ -261,10 +263,10 @@ func writeForkChoiceHashes(
 	}
 
 	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-	if forkChoice.SafeBlockHash != (common.Hash{}) {
+	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
 		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
 	}
-	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
 		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
 	}
 
@@ -369,7 +371,7 @@ func startHandlingForkChoice(
 			}
 		}
 
-		u.UnwindTo(forkingPoint, common.Hash{})
+		u.UnwindTo(forkingPoint, libcommon.Hash{})
 
 		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 	} else {
@@ -447,7 +449,7 @@ func finishHandlingForkChoice(
 	}
 
 	if !canonical {
-		if cfg.hd.GetPendingPayloadHash() != (common.Hash{}) {
+		if cfg.hd.GetPendingPayloadHash() != (libcommon.Hash{}) {
 			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{
 				CriticalError: &privateapi.InvalidForkchoiceStateErr,
 			}
@@ -559,7 +561,7 @@ func verifyAndSaveNewPoSHeader(
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
 	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+	extendCanonical := (extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
 	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, false, criticalError
@@ -580,9 +582,9 @@ func verifyAndSaveNewPoSHeader(
 
 func schedulePoSDownload(
 	requestId int,
-	hashToDownload common.Hash,
+	hashToDownload libcommon.Hash,
 	heightToDownload uint64,
-	downloaderTip common.Hash,
+	downloaderTip libcommon.Hash,
 	s *StageState,
 	cfg HeadersCfg,
 ) bool {
@@ -616,7 +618,7 @@ func schedulePoSDownload(
 }
 
 func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter, validate bool) {
-	var lastValidHash common.Hash
+	var lastValidHash libcommon.Hash
 	var badChainError error
 	var foundPow bool
 
@@ -751,7 +753,7 @@ func HeadersPOW(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	if hash == (common.Hash{}) {
+	if hash == (libcommon.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader); err != nil {
 			return err
@@ -900,7 +902,7 @@ Loop:
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
+		u.UnwindTo(headerInserter.UnwindPoint(), libcommon.Hash{})
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
@@ -929,14 +931,14 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader) error {
 	if height == 0 {
 		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var ch common.Hash
+	var ch libcommon.Hash
 	var err error
 	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
@@ -976,7 +978,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		defer tx.Rollback()
 	}
 	// Delete canonical hashes that are being unwound
-	badBlock := u.BadBlock != (common.Hash{})
+	badBlock := u.BadBlock != (libcommon.Hash{})
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Mark all descendants of bad block as bad too
@@ -986,7 +988,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 		defer headerCursor.Close()
 		var k, v []byte
-		for k, v, err = headerCursor.Seek(libcommon.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+		for k, v, err = headerCursor.Seek(hexutility.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
@@ -1004,7 +1006,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 	}
 	if badBlock {
 		var maxTd big.Int
-		var maxHash common.Hash
+		var maxHash libcommon.Hash
 		var maxNum uint64 = 0
 
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
@@ -1023,7 +1025,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 				if len(k) != 40 {
 					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 				}
-				var hash common.Hash
+				var hash libcommon.Hash
 				copy(hash[:], k[8:])
 				if cfg.hd.IsBadHeader(hash) {
 					continue
@@ -1090,18 +1092,18 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 }
 
 type ChainReaderImpl struct {
-	config      *params.ChainConfig
+	config      *chain.Config
 	tx          kv.Getter
 	blockReader services.FullBlockReader
 }
 
-func NewChainReaderImpl(config *params.ChainConfig, tx kv.Getter, blockReader services.FullBlockReader) *ChainReaderImpl {
+func NewChainReaderImpl(config *chain.Config, tx kv.Getter, blockReader services.FullBlockReader) *ChainReaderImpl {
 	return &ChainReaderImpl{config, tx, blockReader}
 }
 
-func (cr ChainReaderImpl) Config() *params.ChainConfig  { return cr.config }
+func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
 func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
-func (cr ChainReaderImpl) GetHeader(hash common.Hash, number uint64) *types.Header {
+func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 		return h
@@ -1116,7 +1118,7 @@ func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 
 }
-func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
 		number := rawdb.ReadHeaderNumber(cr.tx, hash)
 		if number == nil {
@@ -1127,7 +1129,7 @@ func (cr ChainReaderImpl) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr ChainReaderImpl) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		log.Error("ReadTd failed", "err", err)
@@ -1140,19 +1142,19 @@ type EpochReaderImpl struct {
 	tx kv.RwTx
 }
 
-func (cr EpochReaderImpl) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
-func (cr EpochReaderImpl) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
 }
-func (cr EpochReaderImpl) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetPendingEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
 }
-func (cr EpochReaderImpl) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
 }
-func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 

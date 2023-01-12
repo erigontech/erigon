@@ -5,7 +5,8 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/crypto"
 )
@@ -18,22 +19,22 @@ func BorReceiptKey(number uint64) []byte {
 }
 
 // ComputeBorTxHash get derived tx hash from block number and hash
-func ComputeBorTxHash(blockNumber uint64, blockHash common.Hash) common.Hash {
+func ComputeBorTxHash(blockNumber uint64, blockHash libcommon.Hash) libcommon.Hash {
 	txKeyPlain := make([]byte, 0, len(BorTxKeyPrefix)+8+32)
 	txKeyPlain = append(txKeyPlain, BorTxKeyPrefix...)
 	txKeyPlain = append(txKeyPlain, BorReceiptKey(blockNumber)...)
 	txKeyPlain = append(txKeyPlain, blockHash.Bytes()...)
-	return common.BytesToHash(crypto.Keccak256(txKeyPlain))
+	return libcommon.BytesToHash(crypto.Keccak256(txKeyPlain))
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
 func NewBorTransaction() *LegacyTx {
-	return NewTransaction(0, common.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
+	return NewTransaction(0, libcommon.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
 }
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash common.Hash, blockNumber uint64, receipts Receipts) error {
+func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts Receipts) error {
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 
@@ -63,7 +64,7 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash common.Hash, blockNum
 
 // DeriveFieldsForBorLogs fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorLogs(logs []*Log, blockHash common.Hash, blockNumber uint64, txIndex uint, logIndex uint) {
+func DeriveFieldsForBorLogs(logs []*Log, blockHash libcommon.Hash, blockNumber uint64, txIndex uint, logIndex uint) {
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 
 	// the derived log fields can simply be set from the block and transaction

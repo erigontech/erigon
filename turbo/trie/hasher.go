@@ -21,10 +21,10 @@ import (
 	"hash"
 	"sync"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
@@ -36,7 +36,7 @@ type hasher struct {
 	buffers              [1024 * 1024]byte
 	prefixBuf            [8]byte
 	bw                   *ByteArrayWriter
-	callback             func(common.Hash, node)
+	callback             func(libcommon.Hash, node)
 }
 
 const rlpPrefixLength = 4
@@ -115,7 +115,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	}
 
 	if h.callback != nil && len(n.reference()) == length.Hash {
-		var hash common.Hash
+		var hash libcommon.Hash
 		copy(hash[:], storeTo)
 		h.callback(hash, n)
 	}

@@ -27,13 +27,15 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/bitutil"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -435,7 +437,7 @@ func hashimoto(hash []byte, nonce uint64, size uint64, lookup func(index uint32)
 	}
 	mix = mix[:len(mix)/4]
 
-	digest := make([]byte, common.HashLength)
+	digest := make([]byte, length.Hash)
 	for i, val := range mix {
 		binary.LittleEndian.PutUint32(digest[i*4:], val)
 	}

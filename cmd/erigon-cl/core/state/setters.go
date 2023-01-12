@@ -1,8 +1,9 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -13,7 +14,7 @@ func (b *BeaconState) SetGenesisTime(genesisTime uint64) {
 	b.genesisTime = genesisTime
 }
 
-func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot common.Hash) {
+func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Hash) {
 	b.touchedLeaves[GenesisValidatorsRootLeafIndex] = true
 	b.genesisValidatorsRoot = genesisValidatorRoot
 }

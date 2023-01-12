@@ -17,14 +17,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
+
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 const CodeSizeTable = "CodeSize"
@@ -33,7 +33,7 @@ type StateV3 struct {
 	lock         sync.RWMutex
 	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
-	senderTxNums map[common.Address]uint64
+	senderTxNums map[common2.Address]uint64
 	triggerLock  sync.RWMutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
@@ -46,7 +46,7 @@ type StateV3 struct {
 func NewStateV3() *StateV3 {
 	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
-		senderTxNums: map[common.Address]uint64{},
+		senderTxNums: map[common2.Address]uint64{},
 		changes:      map[string]*btree2.Map[string, []byte]{},
 		txsDone:      atomic2.NewUint64(0),
 	}
@@ -172,7 +172,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
+func (rs *StateV3) CommitTxNum(sender *common2.Address, txNum uint64) uint64 {
 	rs.txsDone.Add(1)
 
 	rs.triggerLock.Lock()
@@ -445,7 +445,7 @@ func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address common.Address
+	var address common2.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
@@ -467,7 +467,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 				currentInc = acc.Incarnation
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address common.Address
+				var address common2.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -494,7 +494,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 					return err
 				}
 			} else {
-				var address common.Address
+				var address common2.Address
 				copy(address[:], k)
 				original, err := NewPlainStateReader(tx).ReadAccountData(address)
 				if err != nil {
@@ -516,8 +516,8 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 			return nil
 		}
 		if accumulator != nil {
-			var address common.Address
-			var location common.Hash
+			var address common2.Address
+			var location common2.Hash
 			copy(address[:], k[:length.Addr])
 			copy(location[:], k[length.Addr:])
 			accumulator.ChangeStorage(address, currentInc, location, common2.Copy(v))
@@ -622,7 +622,7 @@ func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.A
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *StateWriter22) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *StateWriter22) UpdateAccountData(address common2.Address, original, account *accounts.Account) error {
 	addressBytes := address.Bytes()
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
@@ -637,7 +637,7 @@ func (w *StateWriter22) UpdateAccountData(address common.Address, original, acco
 	return nil
 }
 
-func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateWriter22) UpdateAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash, code []byte) error {
 	addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHashBytes)
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
@@ -650,7 +650,7 @@ func (w *StateWriter22) UpdateAccountCode(address common.Address, incarnation ui
 	return nil
 }
 
-func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *StateWriter22) DeleteAccount(address common2.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, addressBytes)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
@@ -666,7 +666,7 @@ func (w *StateWriter22) DeleteAccount(address common.Address, original *accounts
 	return nil
 }
 
-func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateWriter22) WriteAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -678,7 +678,7 @@ func (w *StateWriter22) WriteAccountStorage(address common.Address, incarnation 
 	return nil
 }
 
-func (w *StateWriter22) CreateContract(address common.Address) error {
+func (w *StateWriter22) CreateContract(address common2.Address) error {
 	return nil
 }
 
@@ -718,7 +718,7 @@ func (r *StateReader22) SetTrace(trace bool) {
 	r.trace = trace
 }
 
-func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *StateReader22) ReadAccountData(address common2.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
 	enc := r.rs.Get(kv.PlainState, addr)
 	if enc == nil {
@@ -744,7 +744,7 @@ func (r *StateReader22) ReadAccountData(address common.Address) (*accounts.Accou
 	return &a, nil
 }
 
-func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *StateReader22) ReadAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc := r.rs.Get(kv.PlainState, composite)
 	if enc == nil {
@@ -769,7 +769,7 @@ func (r *StateReader22) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *StateReader22) ReadAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash) ([]byte, error) {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
@@ -787,7 +787,7 @@ func (r *StateReader22) ReadAccountCode(address common.Address, incarnation uint
 	return enc, nil
 }
 
-func (r *StateReader22) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *StateReader22) ReadAccountCodeSize(address common2.Address, incarnation uint64, codeHash common2.Hash) (int, error) {
 	codeHashBytes := codeHash.Bytes()
 	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
@@ -808,7 +808,7 @@ func (r *StateReader22) ReadAccountCodeSize(address common.Address, incarnation 
 	return size, nil
 }
 
-func (r *StateReader22) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *StateReader22) ReadAccountIncarnation(address common2.Address) (uint64, error) {
 	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
 	if enc == nil {
 		var err error

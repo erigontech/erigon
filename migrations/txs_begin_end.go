@@ -11,13 +11,15 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const ASSERT = false
@@ -100,14 +102,14 @@ var txsBeginEnd = Migration{
 			}
 
 			// del first tx in block
-			if err = tx.Delete(kv.EthTx, common2.EncodeTs(b.BaseTxId)); err != nil {
+			if err = tx.Delete(kv.EthTx, hexutility.EncodeTs(b.BaseTxId)); err != nil {
 				return err
 			}
 			if err := writeTransactionsNewDeprecated(tx, txs, b.BaseTxId+1); err != nil {
 				return fmt.Errorf("failed to write body txs: %w", err)
 			}
 			// del last tx in block
-			if err = tx.Delete(kv.EthTx, common2.EncodeTs(b.BaseTxId+uint64(b.TxAmount)-1)); err != nil {
+			if err = tx.Delete(kv.EthTx, hexutility.EncodeTs(b.BaseTxId+uint64(b.TxAmount)-1)); err != nil {
 				return err
 			}
 
@@ -225,7 +227,7 @@ var txsBeginEnd = Migration{
 	},
 }
 
-func writeRawBodyDeprecated(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) error {
+func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *types.RawBody) error {
 	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions)))
 	if err != nil {
 		return err
@@ -263,7 +265,7 @@ func writeTransactionsNewDeprecated(db kv.RwTx, txs []types.Transaction, baseTxI
 	return nil
 }
 
-func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common.Hash, number uint64) *types.Body {
+func readCanonicalBodyWithTransactionsDeprecated(db kv.Getter, hash common2.Hash, number uint64) *types.Body {
 	data := rawdb.ReadStorageBodyRLP(db, hash, number)
 	if len(data) == 0 {
 		return nil
@@ -290,7 +292,7 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 		if err != nil {
 			return err
 		}
-		if h == (common.Hash{}) {
+		if h == (common2.Hash{}) {
 			break
 		}
 		data := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
@@ -309,8 +311,8 @@ func makeBodiesNonCanonicalDeprecated(tx kv.RwTx, from uint64, ctx context.Conte
 			return err
 		}
 		id := newBaseId
-		if err := tx.ForAmount(kv.EthTx, common2.EncodeTs(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
-			if err := tx.Put(kv.NonCanonicalTxs, common2.EncodeTs(id), v); err != nil {
+		if err := tx.ForAmount(kv.EthTx, hexutility.EncodeTs(bodyForStorage.BaseTxId), bodyForStorage.TxAmount, func(k, v []byte) error {
+			if err := tx.Put(kv.NonCanonicalTxs, hexutility.EncodeTs(id), v); err != nil {
 				return err
 			}
 			id++

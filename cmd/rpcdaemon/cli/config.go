@@ -13,15 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -49,7 +51,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/node"
@@ -310,7 +311,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		db = rwKv
 
-		var cc *params.ChainConfig
+		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 			if err != nil {
@@ -668,7 +669,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
+	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutility.Encode(jwtSecret)), 0600); err != nil {
 		return nil, err
 	}
 	log.Info("Generated JWT secret", "path", cfg.JWTSecretPath)

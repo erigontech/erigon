@@ -1,14 +1,17 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	ssz "github.com/prysmaticlabs/fastssz"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type Checkpoint struct {
 	Epoch uint64
-	Root  common.Hash
+	Root  libcommon.Hash
 }
 
 func (c *Checkpoint) MarshalSSZTo(buf []byte) (dst []byte, err error) {
@@ -40,7 +43,7 @@ func (c *Checkpoint) UnmarshalSSZ(buf []byte) error {
 }
 
 func (c *Checkpoint) SizeSSZ() int {
-	return common.BlockNumberLength + common.HashLength
+	return common.BlockNumberLength + length.Hash
 }
 
 func (c *Checkpoint) HashTreeRoot() ([32]byte, error) {
@@ -52,7 +55,7 @@ func (c *Checkpoint) HashTreeRoot() ([32]byte, error) {
 }
 
 func (c *Checkpoint) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	var root common.Hash
+	var root libcommon.Hash
 	root, err = c.HashTreeRoot()
 	if err != nil {
 		return

@@ -26,7 +26,10 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -50,29 +53,29 @@ type callContext struct {
 	Difficulty *math.HexOrDecimal256 `json:"difficulty"`
 	Time       math.HexOrDecimal64   `json:"timestamp"`
 	GasLimit   math.HexOrDecimal64   `json:"gasLimit"`
-	Miner      common.Address        `json:"miner"`
+	Miner      libcommon.Address     `json:"miner"`
 }
 
 // callLog is the result of LOG opCode
 type callLog struct {
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Address libcommon.Address `json:"address"`
+	Topics  []libcommon.Hash  `json:"topics"`
+	Data    hexutil.Bytes     `json:"data"`
 }
 
 // callTrace is the result of a callTracer run.
 type callTrace struct {
-	From     common.Address  `json:"from"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	GasUsed  *hexutil.Uint64 `json:"gasUsed"`
-	To       common.Address  `json:"to,omitempty"`
-	Input    hexutil.Bytes   `json:"input"`
-	Output   hexutil.Bytes   `json:"output,omitempty"`
-	Error    string          `json:"error,omitempty"`
-	Revertal string          `json:"revertReason,omitempty"`
-	Calls    []callTrace     `json:"calls,omitempty"`
-	Logs     []callLog       `json:"logs,omitempty"`
-	Value    *hexutil.Big    `json:"value,omitempty"`
+	From     libcommon.Address `json:"from"`
+	Gas      *hexutil.Uint64   `json:"gas"`
+	GasUsed  *hexutil.Uint64   `json:"gasUsed"`
+	To       libcommon.Address `json:"to,omitempty"`
+	Input    hexutil.Bytes     `json:"input"`
+	Output   hexutil.Bytes     `json:"output,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	Revertal string            `json:"revertReason,omitempty"`
+	Calls    []callTrace       `json:"calls,omitempty"`
+	Logs     []callLog         `json:"logs,omitempty"`
+	Value    *hexutil.Big      `json:"value,omitempty"`
 	// Gencodec adds overridden fields at the end
 	Type string `json:"type"`
 }
@@ -231,7 +234,7 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
 	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number))
-	rules := &params.Rules{}
+	rules := &chain.Rules{}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
 		b.Fatalf("failed to prepare transaction for tracing: %v", err)
@@ -277,7 +280,7 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 // Tx to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	var to = libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -301,7 +304,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    libcommon.Address{},
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),

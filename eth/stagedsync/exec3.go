@@ -16,6 +16,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -25,9 +26,12 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/torquem-ch/mdbx-go/mdbx"
+	atomic2 "go.uber.org/atomic"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -38,11 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/torquem-ch/mdbx-go/mdbx"
-	atomic2 "go.uber.org/atomic"
 )
 
 var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
@@ -453,7 +453,7 @@ func ExecV3(ctx context.Context,
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 	}
 
-	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		var err error
 		if parallel {
 			if err = chainDb.View(ctx, func(tx kv.Tx) error {
@@ -501,7 +501,7 @@ Loop:
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
+		getHashFn := func(n uint64) common.Hash {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -785,7 +785,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
-	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
 	var err error
@@ -965,7 +965,7 @@ func reconstituteStep(last bool,
 	var inputTxNum uint64 = startTxNum
 	var b *types.Block
 	var txKey [8]byte
-	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		if err = chainDb.View(ctx, func(tx kv.Tx) error {
 			h, err = blockReader.Header(ctx, tx, hash, number)
 			if err != nil {
@@ -995,7 +995,7 @@ func reconstituteStep(last bool,
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
+		getHashFn := func(n uint64) common.Hash {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -1235,7 +1235,7 @@ func reconstituteStep(last bool,
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
-	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	chainConfig *chain.Config, genesis *core.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()

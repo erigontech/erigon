@@ -22,17 +22,17 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/params"
 	checker "gopkg.in/check.v1"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
-var toAddr = common.BytesToAddress
+var toAddr = libcommon.BytesToAddress
 
 type StateSuite struct {
 	kv    kv.RwDB
@@ -59,10 +59,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	err = s.w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	err = s.state.FinalizeTx(&params.Rules{}, s.w)
+	err = s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(&params.Rules{}, s.w)
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -119,34 +119,34 @@ func (s *StateSuite) TearDownTest(c *checker.C) {
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
-	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
+	address := libcommon.HexToAddress("0x823140710bf13990e4500136726d8b55")
 	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
-	s.state.SetState(address, &common.Hash{}, value)
+	s.state.SetState(address, &libcommon.Hash{}, value)
 
-	err := s.state.FinalizeTx(&params.Rules{}, s.w)
+	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	err = s.state.CommitBlock(&params.Rules{}, s.w)
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	c.Check(err, checker.IsNil)
 
-	s.state.GetCommittedState(address, &common.Hash{}, &value)
+	s.state.GetCommittedState(address, &libcommon.Hash{}, &value)
 	if !value.IsZero() {
 		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
 func (s *StateSuite) TestTouchDelete(c *checker.C) {
-	s.state.GetOrNewStateObject(common.Address{})
+	s.state.GetOrNewStateObject(libcommon.Address{})
 
-	err := s.state.FinalizeTx(&params.Rules{}, s.w)
+	err := s.state.FinalizeTx(&chain.Rules{}, s.w)
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
 
-	err = s.state.CommitBlock(&params.Rules{}, s.w)
+	err = s.state.CommitBlock(&chain.Rules{}, s.w)
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
@@ -154,7 +154,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 	s.state.Reset()
 
 	snapshot := s.state.Snapshot()
-	s.state.AddBalance(common.Address{}, new(uint256.Int))
+	s.state.AddBalance(libcommon.Address{}, new(uint256.Int))
 
 	if len(s.state.journal.dirties) != 1 {
 		c.Fatal("expected one dirty state object")
@@ -167,7 +167,7 @@ func (s *StateSuite) TestTouchDelete(c *checker.C) {
 
 func (s *StateSuite) TestSnapshot(c *checker.C) {
 	stateobjaddr := toAddr([]byte("aa"))
-	var storageaddr common.Hash
+	var storageaddr libcommon.Hash
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
@@ -186,14 +186,14 @@ func (s *StateSuite) TestSnapshot(c *checker.C) {
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
 	c.Assert(value, checker.DeepEquals, data1)
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 
 	// revert up to the genesis state and ensure correct content
 	s.state.RevertToSnapshot(genesis)
 	s.state.GetState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 	s.state.GetCommittedState(stateobjaddr, &storageaddr, &value)
-	c.Assert(value, checker.DeepEquals, common.Hash{})
+	c.Assert(value, checker.DeepEquals, libcommon.Hash{})
 }
 
 func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
@@ -209,7 +209,7 @@ func TestSnapshot2(t *testing.T) {
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
-	var storageaddr common.Hash
+	var storageaddr libcommon.Hash
 
 	data0 := uint256.NewInt(17)
 	data1 := uint256.NewInt(18)
@@ -226,13 +226,13 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(stateobjaddr0, so0)
 
-	err := state.FinalizeTx(&params.Rules{}, w)
+	err := state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while finalizing transaction", err)
 	}
 	w = NewPlainState(tx, 2, nil)
 
-	err = state.CommitBlock(&params.Rules{}, w)
+	err = state.CommitBlock(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -341,13 +341,13 @@ func TestDump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = state.FinalizeTx(&params.Rules{}, w)
+	err = state.FinalizeTx(&chain.Rules{}, w)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
-	err = state.CommitBlock(&params.Rules{}, blockWriter)
+	err = state.CommitBlock(&chain.Rules{}, blockWriter)
 	if err != nil {
 		t.Fatal(err)
 	}

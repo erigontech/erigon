@@ -1,10 +1,11 @@
 package ethutils
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // IsLocalBlock checks whether the specified block is mined
@@ -12,7 +13,7 @@ import (
 //
 // We regard two types of accounts as local miner account: etherbase
 // and accounts specified via `txpool.locals` flag.
-func IsLocalBlock(engine consensus.Engine, etherbase common.Address, txPoolLocals []common.Address, header *types.Header) bool {
+func IsLocalBlock(engine consensus.Engine, etherbase libcommon.Address, txPoolLocals []libcommon.Address, header *types.Header) bool {
 	author, err := engine.Author(header)
 	if err != nil {
 		log.Warn("Failed to retrieve block author", "number", header.Number, "header_hash", header.Hash(), "err", err)

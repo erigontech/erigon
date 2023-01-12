@@ -30,8 +30,11 @@ import (
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
@@ -45,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -139,31 +141,31 @@ var (
 )
 
 // SignerFn hashes and signs the data to be signed by a backing account.
-type SignerFn func(signer common.Address, mimeType string, message []byte) ([]byte, error)
+type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 
 	// hitrate while straight-forward sync is from 0.5 to 0.65
 	if address, known := sigcache.Peek(hash); known {
-		return address.(common.Address), nil
+		return address.(libcommon.Address), nil
 	}
 
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < ExtraSeal {
-		return common.Address{}, errMissingSignature
+		return libcommon.Address{}, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-ExtraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(SealHash(header).Bytes(), signature)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 
-	var signer common.Address
+	var signer libcommon.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	sigcache.Add(hash, signer)
@@ -173,19 +175,19 @@ func ecrecover(header *types.Header, sigcache *lru.ARCCache) (common.Address, er
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Clique struct {
-	chainConfig    *params.ChainConfig
-	config         *params.CliqueConfig            // Consensus engine configuration parameters
+	chainConfig    *chain.Config
+	config         *chain.CliqueConfig             // Consensus engine configuration parameters
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	db             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
 	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
 	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
 
-	proposals map[common.Address]bool // Current list of proposals we are pushing
+	proposals map[libcommon.Address]bool // Current list of proposals we are pushing
 
-	signer common.Address // Ethereum address of the signing key
-	signFn SignerFn       // Signer function to authorize hashes with
-	lock   sync.RWMutex   // Protects the signer and proposals fields
+	signer libcommon.Address // Ethereum address of the signing key
+	signFn SignerFn          // Signer function to authorize hashes with
+	lock   sync.RWMutex      // Protects the signer and proposals fields
 
 	// The fields below are for testing only
 	FakeDiff bool // Skip difficulty verifications
@@ -195,7 +197,7 @@ type Clique struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB) *Clique {
+func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliqueDB kv.RwDB) *Clique {
 	config := cfg.Clique
 
 	// Set any missing consensus parameters to their defaults
@@ -216,7 +218,7 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig
 		db:             cliqueDB,
 		recents:        recents,
 		signatures:     signatures,
-		proposals:      make(map[common.Address]bool),
+		proposals:      make(map[libcommon.Address]bool),
 		exitCh:         exitCh,
 	}
 
@@ -241,15 +243,15 @@ func New(cfg *params.ChainConfig, snapshotConfig *params.ConsensusSnapshotConfig
 }
 
 // Type returns underlying consensus engine
-func (c *Clique) Type() params.ConsensusType {
-	return params.CliqueConsensus
+func (c *Clique) Type() chain.ConsensusName {
+	return chain.CliqueConsensus
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
 // from the signature in the header's extra-data section.
 // This is thread-safe (only access the header, as well as signatures, which
 // are lru.ARCCache, which is thread-safe)
-func (c *Clique) Author(header *types.Header) (common.Address, error) {
+func (c *Clique) Author(header *types.Header) (libcommon.Address, error) {
 	return ecrecover(header, c.signatures)
 }
 
@@ -263,7 +265,7 @@ type VerifyHeaderResponse struct {
 	Cancel  func()
 }
 
-func (c *Clique) recentsAdd(num uint64, hash common.Hash, s *Snapshot) {
+func (c *Clique) recentsAdd(num uint64, hash libcommon.Hash, s *Snapshot) {
 	c.recents.Add(hash, s.copy())
 }
 
@@ -292,7 +294,7 @@ func (c *Clique) VerifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
 
 	// If the block isn't a checkpoint, cast a random vote (good enough for now)
-	header.Coinbase = common.Address{}
+	header.Coinbase = libcommon.Address{}
 	header.Nonce = types.BlockNonce{}
 
 	number := header.Number.Uint64()
@@ -304,7 +306,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	c.lock.RLock()
 	if number%c.config.Epoch != 0 {
 		// Gather all the proposals that make sense voting on
-		addresses := make([]common.Address, 0, len(c.proposals))
+		addresses := make([]libcommon.Address, 0, len(c.proposals))
 		for address, authorize := range c.proposals {
 			if snap.validVote(address, authorize) {
 				addresses = append(addresses, address)
@@ -342,7 +344,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	header.Extra = append(header.Extra, make([]byte, ExtraSeal)...)
 
 	// Mix digest is reserved for now, set to empty
-	header.MixDigest = common.Hash{}
+	header.MixDigest = libcommon.Hash{}
 
 	// Ensure the timestamp has the correct delay
 	parent := chain.GetHeader(header.ParentHash, number-1)
@@ -359,13 +361,13 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-func (c *Clique) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
 // rewards given.
-func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
@@ -376,7 +378,7 @@ func (c *Clique) Finalize(config *params.ChainConfig, header *types.Header, stat
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
@@ -389,7 +391,7 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *ty
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Clique) Authorize(signer common.Address, signFn SignerFn) {
+func (c *Clique) Authorize(signer libcommon.Address, signFn SignerFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -479,7 +481,7 @@ func (c *Clique) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent 
 // that a new block should have:
 // * DIFF_NOTURN(2) if BLOCK_NUMBER % SIGNER_COUNT != SIGNER_INDEX
 // * DIFF_INTURN(1) if BLOCK_NUMBER % SIGNER_COUNT == SIGNER_INDEX
-func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) *big.Int {
+func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, _ *big.Int, parentNumber uint64, parentHash, _ libcommon.Hash, _ uint64) *big.Int {
 
 	snap, err := c.Snapshot(chain, parentNumber, parentHash, nil)
 	if err != nil {
@@ -491,7 +493,7 @@ func (c *Clique) CalcDifficulty(chain consensus.ChainHeaderReader, _, _ uint64, 
 	return calcDifficulty(snap, signer)
 }
 
-func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
+func calcDifficulty(snap *Snapshot, signer libcommon.Address) *big.Int {
 	if snap.inturn(snap.Number+1, signer) {
 		return new(big.Int).Set(DiffInTurn)
 	}
@@ -499,11 +501,11 @@ func calcDifficulty(snap *Snapshot, signer common.Address) *big.Int {
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func (c *Clique) SealHash(header *types.Header) common.Hash {
+func (c *Clique) SealHash(header *types.Header) libcommon.Hash {
 	return SealHash(header)
 }
 
-func (c *Clique) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (c *Clique) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	return false
 }
 
@@ -527,7 +529,7 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header) (hash common.Hash) {
+func SealHash(header *types.Header) (hash libcommon.Hash) {
 	hasher := cryptopool.NewLegacyKeccak256()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 

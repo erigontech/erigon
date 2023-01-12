@@ -3,9 +3,10 @@ package transition
 import (
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const propInd = 49
@@ -23,7 +24,7 @@ func getSuccessfulSlashing() *cltypes.ProposerSlashing {
 			Header: &cltypes.BeaconBlockHeader{
 				Slot:          42,
 				ProposerIndex: propInd,
-				Root:          common.BytesToHash([]byte("root1")),
+				Root:          libcommon.BytesToHash([]byte("root1")),
 			},
 			Signature: testSignature1Slashing,
 		},
@@ -31,7 +32,7 @@ func getSuccessfulSlashing() *cltypes.ProposerSlashing {
 			Header: &cltypes.BeaconBlockHeader{
 				Slot:          42,
 				ProposerIndex: propInd,
-				Root:          common.BytesToHash([]byte("root2")),
+				Root:          libcommon.BytesToHash([]byte("root2")),
 			},
 			Signature: testSignature2Slashing,
 		},

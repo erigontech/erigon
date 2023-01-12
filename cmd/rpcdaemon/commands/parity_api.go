@@ -5,21 +5,22 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-var latestTag = common.BytesToHash([]byte("latest"))
+var latestTag = libcommon.BytesToHash([]byte("latest"))
 
 var ErrWrongTag = fmt.Errorf("listStorageKeys wrong block tag or number: must be '%s' ('latest')", latestTag)
 
 // ParityAPI the interface for the parity_ RPC commands
 type ParityAPI interface {
-	ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
+	ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumber rpc.BlockNumberOrHash) ([]hexutil.Bytes, error)
 }
 
 // ParityAPIImpl data structure to store things needed for parity_ commands
@@ -35,7 +36,7 @@ func NewParityAPIImpl(db kv.RoDB) *ParityAPIImpl {
 }
 
 // ListStorageKeys implements parity_listStorageKeys. Returns all storage keys of the given address
-func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
+func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account libcommon.Address, quantity int, offset *hexutil.Bytes, blockNumberOrTag rpc.BlockNumberOrHash) ([]hexutil.Bytes, error) {
 	if err := api.checkBlockNumber(blockNumberOrTag); err != nil {
 		return nil, err
 	}
