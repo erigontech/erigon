@@ -106,21 +106,21 @@ func (agg *SyncAggregate) Sum() int {
 	return ret
 }
 
-func (agg *SyncAggregate) MarshalSSZ() ([]byte, error) {
-	return append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...), nil
+func (agg *SyncAggregate) EncodeSSZ(buf []byte) []byte {
+	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...)
 }
 
-func (agg *SyncAggregate) UnmarshalSSZ(buf []byte) error {
+func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {
 	copy(agg.SyncCommiteeBits[:], buf)
 	copy(agg.SyncCommiteeSignature[:], buf[64:])
 	return nil
 }
 
-func (agg *SyncAggregate) SizeSSZ() int {
+func (agg *SyncAggregate) EncodingSizeSSZ() int {
 	return 160
 }
 
-func (agg *SyncAggregate) HashTreeRoot() ([32]byte, error) {
+func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
 	var (
 		leaves = make([][32]byte, 2)
 		err    error

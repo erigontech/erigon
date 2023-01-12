@@ -85,7 +85,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
-		dataRoot, err := b.eth1Data.HashTreeRoot()
+		dataRoot, err := b.eth1Data.HashSSZ()
 		if err != nil {
 			return err
 		}

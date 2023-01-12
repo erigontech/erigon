@@ -429,7 +429,7 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 42,
 		BlockHash:    [32]byte{4, 5, 6},
 	}
-	eth1dataAHash, err := Eth1DataA.HashTreeRoot()
+	eth1dataAHash, err := Eth1DataA.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 43,
 		BlockHash:    [32]byte{6, 5, 4},
 	}
-	eth1dataBHash, err := Eth1DataB.HashTreeRoot()
+	eth1dataBHash, err := Eth1DataB.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestProcessEth1Data(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			gotEth1Data := tc.state.Eth1Data()
-			gotHash, err := gotEth1Data.HashTreeRoot()
+			gotHash, err := gotEth1Data.HashSSZ()
 			if err != nil {
 				t.Fatalf("unable to hash output eth1data: %v", err)
 			}

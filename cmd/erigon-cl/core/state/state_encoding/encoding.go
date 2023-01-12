@@ -29,7 +29,7 @@ func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	vectorizedVotesRoot := make([][32]byte, len(votes))
 	// Vectorize ETH1 Data first of all
 	for i, vote := range votes {
-		vectorizedVotesRoot[i], err = vote.HashTreeRoot()
+		vectorizedVotesRoot[i], err = vote.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}

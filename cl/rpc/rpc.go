@@ -147,9 +147,9 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 	return responsePacket[0].(*cltypes.LightClientUpdate), nil
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
 	// Prepare output slice.
-	responsePacket := []ssz_utils.ObjectSSZ{}
+	responsePacket := []*cltypes.SignedBeaconBlock{}
 
 	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
 		Data:  reqData,
@@ -225,24 +225,20 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 				return nil, err
 			}
 		}
-		var responseChunk ssz_utils.ObjectSSZ
+		responseChunk := &cltypes.SignedBeaconBlock{}
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockPhase0{}
+			err = responseChunk.UnmarshalSSZ(raw, clparams.Phase0Version)
 		case utils.Bytes4ToUint32(altairForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockAltair{}
+			err = responseChunk.UnmarshalSSZ(raw, clparams.AltairVersion)
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockBellatrix{}
+			err = responseChunk.UnmarshalSSZ(raw, clparams.BellatrixVersion)
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}
 
-		if err := responseChunk.UnmarshalSSZ(raw); err != nil {
-			return nil, fmt.Errorf("unmarshalling: %w", err)
-		}
-
-		responsePacket = append(responsePacket, cltypes.NewSignedBeaconBlock(responseChunk))
+		responsePacket = append(responsePacket, responseChunk)
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
@@ -251,7 +247,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -267,7 +263,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]ssz_ut
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]*cltypes.SignedBeaconBlock, error) {
 	var req cltypes.BeaconBlocksByRootRequest = roots
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {

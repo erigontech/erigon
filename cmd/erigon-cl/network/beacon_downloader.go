@@ -120,9 +120,7 @@ func (f *ForwardBeaconDownloader) RequestMore() {
 		return
 	}
 	for _, response := range responses {
-		if segment, ok := response.(*cltypes.SignedBeaconBlock); ok {
-			f.addSegment(segment)
-		}
+		f.addSegment(response)
 	}
 
 }
