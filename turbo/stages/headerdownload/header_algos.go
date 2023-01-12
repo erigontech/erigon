@@ -100,6 +100,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
+		log.Warn("[Downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
 	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
@@ -1040,7 +1041,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 	default:
 	}
 
-	return hd.requestChaining && requestMore
+	return !hd.initialCycle && requestMore
 }
 
 func (hd *HeaderDownload) ExtractStats() Stats {
@@ -1070,10 +1071,10 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.consensusHeaderReader = headerReader
 }
 
-func (hd *HeaderDownload) EnableRequestChaining() {
+func (hd *HeaderDownload) AfterInitialCycle() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.requestChaining = true
+	hd.initialCycle = false
 }
 
 func (hd *HeaderDownload) SetFetchingNew(fetching bool) {
@@ -1118,10 +1119,10 @@ func (hd *HeaderDownload) PosStatus() SyncStatus {
 	return hd.posStatus
 }
 
-func (hd *HeaderDownload) RequestChaining() bool {
+func (hd *HeaderDownload) InitialCycle() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.requestChaining
+	return hd.initialCycle
 }
 
 func (hd *HeaderDownload) FetchingNew() bool {

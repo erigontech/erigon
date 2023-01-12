@@ -327,7 +327,7 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
+	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
@@ -393,7 +393,7 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	if len(pkt) == 0 {
-		if !cs.Hd.RequestChaining() {
+		if cs.Hd.InitialCycle() {
 			outreq := proto_sentry.PeerUselessRequest{
 				PeerId: peerID,
 			}
@@ -556,7 +556,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
 	if len(txs) == 0 && len(uncles) == 0 {
-		if !cs.Hd.RequestChaining() {
+		if cs.Hd.InitialCycle() {
 			outreq := proto_sentry.PeerUselessRequest{
 				PeerId: inreq.PeerId,
 			}
