@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/protolambda/ztyp/view"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -529,6 +530,42 @@ func TestTransactionCoding(t *testing.T) {
 		if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestBlobTransactionMinimalCodec(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatalf("could not generate key: %v", err)
+	}
+	var (
+		signer   = LatestSignerForChainID(common.Big1)
+		addr     = common.HexToAddress("0x0000000000000000000000000000000000000001")
+		accesses = AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+	)
+
+	txdata := &SignedBlobTx{
+		Message: BlobTxMessage{
+			ChainID:             view.Uint256View(*uint256.NewInt(1)),
+			Nonce:               view.Uint64View(1),
+			Gas:                 view.Uint64View(123457),
+			GasTipCap:           view.Uint256View(*uint256.NewInt(42)),
+			GasFeeCap:           view.Uint256View(*uint256.NewInt(10)),
+			AccessList:          AccessListView(accesses),
+			BlobVersionedHashes: VersionedHashesView{common.HexToHash("0x01624652859a6e98ffc1608e2af0147ca4e86e1ce27672d8d3f3c9d4ffd6ef7e")},
+			MaxFeePerDataGas:    view.Uint256View(*uint256.NewInt(10000000)),
+		},
+	}
+	tx, err := SignNewTx(key, *signer, txdata)
+	if err != nil {
+		t.Fatalf("could not sign transaction: %v", err)
+	}
+	parsedTx, err := encodeDecodeJSON(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := assertEqual(parsedTx, tx); err != nil {
+		t.Fatal(err)
 	}
 }
 

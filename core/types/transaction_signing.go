@@ -121,6 +121,7 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 // Use this in transaction-handling code where the current block number and fork
 // configuration are unknown. If you have a ChainConfig, use LatestSigner instead.
 // If you have a ChainConfig and know the current block number, use MakeSigner instead.
+// TODO: make it EIP-4844 ready
 func LatestSignerForChainID(chainID *big.Int) *Signer {
 	var signer Signer
 	signer.unprotected = true
@@ -387,3 +388,15 @@ func DeriveChainId(v *uint256.Int) *uint256.Int {
 	r := new(uint256.Int).Sub(v, u256.Num35)
 	return r.Div(r, u256.Num2)
 }
+
+// type dankSigner struct{ londonSigner }
+
+// // NewDankSigner returns a signer that accepts
+// // - (Mini) DankSharding transactions
+// // - EIP-1559 dynamic fee transactions
+// // - EIP-2930 access list transactions,
+// // - EIP-155 replay protected transactions, and
+// // - legacy Homestead transactions.
+// func NewDankSigner(chainId *big.Int) Signer {
+// 	return dankSigner{londonSigner{eip2930Signer{NewEIP155Signer(chainId)}}}
+// }
