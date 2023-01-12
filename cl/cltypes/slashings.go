@@ -31,7 +31,7 @@ func (p *ProposerSlashing) EncodingSizeSSZ() int {
 	return p.Header1.EncodingSizeSSZ() * 2
 }
 
-func (p *ProposerSlashing) HashSSZ() ([32]byte, error) {
+func (p *ProposerSlashing) HashTreeRoot() ([32]byte, error) {
 	root1, err := p.Header1.HashTreeRoot()
 	if err != nil {
 		return [32]byte{}, err
@@ -72,7 +72,7 @@ func (a *AttesterSlashing) EncodingSizeSSZ() int {
 	return a.Attestation_1.EncodingSizeSSZ() + a.Attestation_2.EncodingSizeSSZ()
 }
 
-func (a *AttesterSlashing) HashSSZ() ([32]byte, error) {
+func (a *AttesterSlashing) HashTreeRoot() ([32]byte, error) {
 	root1, err := a.Attestation_1.HashTreeRoot()
 	if err != nil {
 		return [32]byte{}, err

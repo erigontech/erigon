@@ -255,25 +255,9 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	}
 	// Decode Proposer slashings
 	proposerSlashingLength := 416
-	if offSetProposerSlashings > offsetAttesterSlashings || len(buf) < int(offsetAttesterSlashings) {
-		return ssz_utils.ErrBadOffset
-	}
-	proposerSlashingBuffer := buf[offSetProposerSlashings:offsetAttesterSlashings]
-	numProposerSlashings := len(proposerSlashingBuffer) / proposerSlashingLength
-	if numProposerSlashings > MaxProposerSlashings {
-		return fmt.Errorf("decode(SSZ): too big proposer slashings")
-	}
-	if len(proposerSlashingBuffer)%proposerSlashingLength != 0 {
-		return ssz_utils.ErrBadOffset
-	}
-	b.ProposerSlashings = make([]*ProposerSlashing, numProposerSlashings)
-	inPos := 0
-	for i := range b.ProposerSlashings {
-		b.ProposerSlashings[i] = new(ProposerSlashing)
-		if err := b.ProposerSlashings[i].UnmarshalSSZ(proposerSlashingBuffer[inPos:]); err != nil {
-			return err
-		}
-		inPos += b.ProposerSlashings[i].EncodingSizeSSZ()
+	b.ProposerSlashings, err = ssz_utils.DecodeStaticList[*ProposerSlashing](buf, offSetProposerSlashings, offsetAttesterSlashings, uint32(proposerSlashingLength), MaxProposerSlashings)
+	if err != nil {
+		return err
 	}
 	// Decode attester slashings
 	b.AttesterSlashings, err = ssz_utils.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, uint32(MaxAttesterSlashings))
@@ -287,25 +271,9 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	}
 	// Decode deposits
 	depositsLength := 1240
-	if offsetDeposits > offsetExits || len(buf) < int(offsetExits) {
-		return ssz_utils.ErrBadOffset
-	}
-	depositsBuffer := buf[offsetDeposits:offsetExits]
-	numDeposits := len(depositsBuffer) / depositsLength
-	if numDeposits > MaxDeposits {
-		return fmt.Errorf("decode(SSZ): too big deposits")
-	}
-	if len(depositsBuffer)%depositsLength != 0 {
-		return ssz_utils.ErrBadOffset
-	}
-	b.Deposits = make([]*Deposit, numDeposits)
-	inPos = 0
-	for i := range b.Deposits {
-		b.Deposits[i] = new(Deposit)
-		if err := b.Deposits[i].DecodeSSZ(depositsBuffer[inPos:]); err != nil {
-			return err
-		}
-		inPos += b.Deposits[i].EncodingSizeSSZ()
+	b.Deposits, err = ssz_utils.DecodeStaticList[*Deposit](buf, offsetDeposits, offsetExits, uint32(depositsLength), MaxDeposits)
+	if err != nil {
+		return err
 	}
 	// Decode exits
 	exitLength := 112
@@ -313,25 +281,9 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	if b.version >= clparams.BellatrixVersion {
 		endExitBuffer = int(offsetExecution)
 	}
-	if int(offsetExits) > endExitBuffer || len(buf) < int(endExitBuffer) {
-		return ssz_utils.ErrBadOffset
-	}
-	exitsBuffer := buf[offsetExits:endExitBuffer]
-	numExits := len(exitsBuffer) / exitLength
-	if numExits > MaxVoluntaryExits {
-		return fmt.Errorf("decode(SSZ): too big voluntary exits")
-	}
-	if len(exitsBuffer)%exitLength != 0 {
-		return ssz_utils.ErrBadOffset
-	}
-	b.VoluntaryExits = make([]*SignedVoluntaryExit, numExits)
-	inPos = 0
-	for i := range b.VoluntaryExits {
-		b.VoluntaryExits[i] = new(SignedVoluntaryExit)
-		if err := b.VoluntaryExits[i].UnmarshalSSZ(depositsBuffer[inPos:]); err != nil {
-			return err
-		}
-		inPos += b.VoluntaryExits[i].EncodingSizeSSZ()
+	b.VoluntaryExits, err = ssz_utils.DecodeStaticList[*SignedVoluntaryExit](buf, offsetExits, uint32(endExitBuffer), uint32(exitLength), MaxVoluntaryExits)
+	if err != nil {
+		return err
 	}
 	if b.version >= clparams.BellatrixVersion {
 		b.ExecutionPayload = new(Eth1Block)
@@ -359,75 +311,35 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	// Graffiti leaf
 	leaves = append(leaves, common.BytesToHash(b.Graffiti))
 	// Proposer slashings leaf
-	proposerSlashingSubLeaves := make([][32]byte, len(b.ProposerSlashings))
-	for i, slashing := range b.ProposerSlashings {
-		proposerSlashingSubLeaves[i], err = slashing.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	proposerLeaf, err := merkle_tree.MerkleizeVector(proposerSlashingSubLeaves, MaxProposerSlashings)
+	proposerLeaf, err := merkle_tree.ListObjectSSZRoot(b.ProposerSlashings, MaxProposerSlashings)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	mixIn := merkle_tree.Uint64Root(uint64(len(b.ProposerSlashings)))
-	proposerLeaf = utils.Keccak256(proposerLeaf[:], mixIn[:])
+	leaves = append(leaves, proposerLeaf)
 	// Attester slashings leaf
-	attesterSlashingSubLeaves := make([][32]byte, len(b.AttesterSlashings))
-	for i, slashing := range b.AttesterSlashings {
-		attesterSlashingSubLeaves[i], err = slashing.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	attesterLeaf, err := merkle_tree.MerkleizeVector(attesterSlashingSubLeaves, MaxAttesterSlashings)
+	attesterLeaf, err := merkle_tree.ListObjectSSZRoot(b.AttesterSlashings, MaxAttesterSlashings)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	mixIn = merkle_tree.Uint64Root(uint64(len(b.AttesterSlashings)))
-	leaves = append(leaves, utils.Keccak256(attesterLeaf[:], mixIn[:]))
+	leaves = append(leaves, attesterLeaf)
 	// Attestations leaf
-	attestationsSubLeaves := make([][32]byte, len(b.Attestations))
-	for i, att := range b.Attestations {
-		attestationsSubLeaves[i], err = att.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	attestationLeaf, err := merkle_tree.MerkleizeVector(attestationsSubLeaves, MaxAttestations)
+	attestationLeaf, err := merkle_tree.ListObjectSSZRoot(b.Attestations, MaxAttestations)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	mixIn = merkle_tree.Uint64Root(uint64(len(b.Attestations)))
-	leaves = append(leaves, utils.Keccak256(attestationLeaf[:], mixIn[:]))
+	leaves = append(leaves, attestationLeaf)
 	// Deposits leaf
-	depositsSubLeaves := make([][32]byte, len(b.Deposits))
-	for i, d := range b.Deposits {
-		depositsSubLeaves[i], err = d.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	depositLeaf, err := merkle_tree.MerkleizeVector(depositsSubLeaves, MaxDeposits)
+	depositLeaf, err := merkle_tree.ListObjectSSZRoot(b.Deposits, MaxAttestations)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	mixIn = merkle_tree.Uint64Root(uint64(len(b.Deposits)))
-	leaves = append(leaves, utils.Keccak256(depositLeaf[:], mixIn[:]))
+	leaves = append(leaves, depositLeaf)
 	// Voluntary exits leaf
-	exitsSubleaves := make([][32]byte, len(b.VoluntaryExits))
-	for i, v := range b.VoluntaryExits {
-		exitsSubleaves[i], err = v.HashSSZ()
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
-	exitLeaf, err := merkle_tree.MerkleizeVector(exitsSubleaves, MaxVoluntaryExits)
+	exitLeaf, err := merkle_tree.ListObjectSSZRoot(b.VoluntaryExits, MaxAttestations)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	mixIn = merkle_tree.Uint64Root(uint64(len(b.VoluntaryExits)))
-	leaves = append(leaves, utils.Keccak256(exitLeaf[:], mixIn[:]))
+	leaves = append(leaves, exitLeaf)
 	// Sync aggreate leaf
 	if b.version >= clparams.AltairVersion {
 		aggLeaf, err := b.SyncAggregate.HashSSZ()
@@ -458,7 +370,6 @@ func (b *BeaconBlock) MarshalSSZ(buf []byte) (dst []byte, err error) {
 	dst = append(dst, b.StateRoot[:]...)
 	// Encode body
 	dst = append(dst, ssz_utils.OffsetSSZ(84)...)
-	b.Body = new(BeaconBody)
 	if dst, err = b.Body.EncodeSSZ(dst); err != nil {
 		return
 	}

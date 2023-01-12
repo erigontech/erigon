@@ -72,7 +72,7 @@ func (d *Deposit) EncodeSSZ(dst []byte) []byte {
 	return buf
 }
 
-func (d *Deposit) DecodeSSZ(buf []byte) error {
+func (d *Deposit) UnmarshalSSZ(buf []byte) error {
 	d.Proof = make([][]byte, DepositProofLength)
 	for i := range d.Proof {
 		d.Proof[i] = common.CopyBytes(buf[i*32 : i*32+32])
@@ -84,11 +84,15 @@ func (d *Deposit) DecodeSSZ(buf []byte) error {
 	return d.Data.UnmarshalSSZ(buf[33*32:])
 }
 
+func (d *Deposit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return d.UnmarshalSSZ(buf)
+}
+
 func (d *Deposit) EncodingSizeSSZ() int {
 	return 1240
 }
 
-func (d *Deposit) HashSSZ() ([32]byte, error) {
+func (d *Deposit) HashTreeRoot() ([32]byte, error) {
 	proofLeaves := make([][32]byte, DepositProofLength)
 	for i, segProof := range d.Proof {
 		proofLeaves[i] = common.BytesToHash(segProof)
@@ -158,7 +162,7 @@ func (e *SignedVoluntaryExit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
 	return e.UnmarshalSSZ(buf)
 }
 
-func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
+func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
 	sigRoot, err := merkle_tree.SignatureRoot(e.Signature)
 	if err != nil {
 		return [32]byte{}, err

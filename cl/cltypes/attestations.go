@@ -326,7 +326,7 @@ func (a *Attestation) EncodingSizeSSZ() int {
 }
 
 // HashTreeRoot ssz hashes the Attestation object
-func (a *Attestation) HashSSZ() ([32]byte, error) {
+func (a *Attestation) HashTreeRoot() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
 	if a.Data == nil {

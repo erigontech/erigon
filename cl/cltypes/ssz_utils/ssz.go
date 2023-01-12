@@ -101,3 +101,24 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end, max uint32) ([]T
 	}
 	return objs, nil
 }
+
+func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement, max uint32) ([]T, error) {
+	if start > end || len(bytes) < int(end) {
+		return nil, ErrBadOffset
+	}
+	buf := bytes[start:end]
+	elementsNum := uint32(len(buf)) / bytesPerElement
+	// Check for errors
+	if uint32(len(buf))%bytesPerElement != 0 {
+		return nil, ErrBufferNotRounded
+	}
+	if elementsNum > max {
+		return nil, ErrTooBigList
+	}
+	objs := make([]T, elementsNum)
+	for i := range objs {
+		objs[i] = objs[i].Clone().(T)
+		objs[i].UnmarshalSSZ(buf[i*int(elementsNum):])
+	}
+	return objs, nil
+}

@@ -46,6 +46,10 @@ func (*Ping) Clone() clonable.Clonable {
 	return &Ping{}
 }
 
+func (*Deposit) Clone() clonable.Clonable {
+	return &Deposit{}
+}
+
 func (*LightClientBootstrap) Clone() clonable.Clonable {
 	return &LightClientBootstrap{}
 }
