@@ -332,10 +332,10 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 }
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
+	logs := []*types.Log{}
+
 	txNumbers := bitmapdb.NewBitmap64()
 	defer bitmapdb.ReturnToPool64(txNumbers)
-
-	logs := []*types.Log{}
 	if err := applyFiltersV3(txNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
@@ -386,6 +386,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
+			blockHash = header.Hash()
 			lastBlockNum = blockNum
 			if header == nil {
 				log.Warn("header is nil", "blockNum", blockNum)
