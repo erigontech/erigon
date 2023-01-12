@@ -677,7 +677,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				continue
 			}
 		}
-		if txNum+1 == maxTxNum {
+
+		if txNum == maxTxNum {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -776,6 +777,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if err != nil {
 				return err
 			}
+		}
+		if txNum == startTxNum { //is system tx
+			continue
 		}
 		txIndex := txNum - startTxNum - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)

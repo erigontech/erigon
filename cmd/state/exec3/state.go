@@ -318,7 +318,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func()) {
 	var wg sync.WaitGroup
-	queueSize := workerCount * 4
+	queueSize := workerCount * 2
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)
 	for i := 0; i < workerCount; i++ {

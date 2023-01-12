@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
@@ -30,7 +31,7 @@ var cmdResetState = &cobra.Command{
 		defer sn.Close()
 		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			return err
 		}
 
@@ -42,8 +43,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		sn, _ = allSnapshots(ctx, db)
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
 			return err
 		}
 
@@ -58,7 +58,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
+func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -91,7 +91,9 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV))
+
+	_, lastBlockInHistSnap, _ := rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {

@@ -658,25 +658,26 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 	return WriteRawBody(db, hash, number, body)
 }
 
-func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error) {
-	baseTxId, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
+func WriteRawBody(db kv.RwTx, hash common.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnID uint64, err error) {
+	baseTxnID, err := db.IncrementSequence(kv.EthTx, uint64(len(body.Transactions))+2)
 	if err != nil {
 		return false, 0, err
 	}
 	data := types.BodyForStorage{
-		BaseTxId:    baseTxId,
-		TxAmount:    uint32(len(body.Transactions)) + 2,
+		BaseTxId:    baseTxnID,
+		TxAmount:    uint32(len(body.Transactions)) + 2, /*system txs*/
 		Uncles:      body.Uncles,
 		Withdrawals: body.Withdrawals,
 	}
 	if err = WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return false, 0, fmt.Errorf("WriteBodyForStorage: %w", err)
 	}
-	lastTxnNum = baseTxId + uint64(len(body.Transactions)) + 2
-	if err = WriteRawTransactions(db, body.Transactions, baseTxId+1); err != nil {
+	lastTxnID = baseTxnID + uint64(data.TxAmount) - 1
+	firstNonSystemTxnID := baseTxnID + 1
+	if err = WriteRawTransactions(db, body.Transactions, firstNonSystemTxnID); err != nil {
 		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
-	return true, lastTxnNum, nil
+	return true, lastTxnID, nil
 }
 
 func WriteBody(db kv.RwTx, hash common.Hash, number uint64, body *types.Body) error {
@@ -1777,7 +1778,7 @@ func (txNums) Max(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	return binary.BigEndian.Uint64(v), nil
 }
 
-// Min - returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
+// Min = `max(blockNum-1)+1` returns minTxNum in given block. If block not found - return last available value (`latest`/`pending` state)
 func (txNums) Min(tx kv.Tx, blockNum uint64) (maxTxNum uint64, err error) {
 	if blockNum == 0 {
 		return 0, nil
