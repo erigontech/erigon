@@ -13,7 +13,10 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -23,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
@@ -346,29 +348,18 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		addrMap[v] = struct{}{}
 	}
 
-	var lastBlockNum uint64
-	var blockHash common.Hash
-	var header *types.Header
-	var signer *types.Signer
-	var rules *params.Rules
-	var skipAnalysis bool
-
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
-	engine := api.engine()
+	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
-	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{})
-	vmConfig := vm.Config{SkipAnalysis: skipAnalysis}
-	var blockCtx evmtypes.BlockContext
-
+	var lastBlockNum uint64
+	var blockHash common.Hash
+	var header *types.Header
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
 	var ok bool
-	stateReader := state.NewHistoryReaderV3()
-	stateReader.SetTx(tx)
-	ibs := state.New(stateReader)
 
 	iter := txNumbers.Iterator()
 	for iter.HasNext() {
@@ -396,19 +387,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			lastBlockNum = blockNum
-			blockHash = header.Hash()
-			signer = types.MakeSigner(chainConfig, blockNum)
-			if chainConfig == nil {
-				log.Warn("chainConfig is nil")
-				continue
-			}
 			if header == nil {
 				log.Warn("header is nil", "blockNum", blockNum)
 				continue
 			}
-			rules = chainConfig.Rules(blockNum, header.Time)
-			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
-
+			exec.changeBlock(header)
 			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
 			if err != nil {
 				return nil, err
@@ -417,7 +400,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			if err != nil {
 				return nil, err
 			}
-			blockCtx = transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, tx, api._blockReader)
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
@@ -429,37 +411,22 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		stateReader.SetTxNum(txNum)
-		txHash := txn.Hash()
-		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+		rawLogs, err := exec.execTx(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
 
-		ibs.Reset()
-		ibs.Prepare(txHash, blockHash, txIndex)
-
-		evm.ResetBetweenBlocks(blockCtx, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
-
-		gp := new(core.GasPool).AddGas(msg.Gas())
-		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		if err != nil {
-			return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, blockNum, txNum, ibs.Error())
-		}
-
-		rawLogs := ibs.GetLogs(txHash)
-
 		//TODO: logIndex within the block! no way to calc it now
-		logIndex := uint(0)
-		for _, log := range rawLogs {
-			log.Index = logIndex
-			logIndex++
-		}
+		//logIndex := uint(0)
+		//for _, log := range rawLogs {
+		//	log.Index = logIndex
+		//	logIndex++
+		//}
 		filtered := types.Logs(rawLogs).Filter(addrMap, crit.Topics)
 		for _, log := range filtered {
 			log.BlockNumber = blockNum
 			log.BlockHash = blockHash
-			log.TxHash = txHash
+			log.TxHash = txn.Hash()
 		}
 		logs = append(logs, filtered...)
 	}
@@ -467,6 +434,67 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	//stats := api._agg.GetAndResetStats()
 	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
+}
+
+type intraBlockExec struct {
+	ibs         *state.IntraBlockState
+	stateReader *state.HistoryReaderV3
+	engine      consensus.EngineReader
+	tx          kv.TemporalTx
+	br          services.FullBlockReader
+	chainConfig *params.ChainConfig
+	evm         *vm.EVM
+
+	// calculated by .changeBlock()
+	blockHash common.Hash
+	blockNum  uint64
+	header    *types.Header
+	blockCtx  *evmtypes.BlockContext
+	rules     *params.Rules
+	signer    *types.Signer
+	vmConfig  *vm.Config
+}
+
+func newIntraBlockExec(tx kv.TemporalTx, chainConfig *params.ChainConfig, engine consensus.EngineReader) *intraBlockExec {
+	stateReader := state.NewHistoryReaderV3()
+	stateReader.SetTx(tx)
+	return &intraBlockExec{
+		engine:      engine,
+		chainConfig: chainConfig,
+		stateReader: stateReader,
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		vmConfig:    &vm.Config{},
+		ibs:         state.New(stateReader),
+	}
+}
+
+func (e *intraBlockExec) changeBlock(header *types.Header) {
+	e.blockNum = header.Number.Uint64()
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br)
+	e.blockCtx = &blockCtx
+	e.blockHash = header.Hash()
+	e.header = header
+	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum)
+	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
+}
+
+func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, error) {
+	e.stateReader.SetTxNum(txNum)
+	txHash := txn.Hash()
+	e.ibs.Reset()
+	e.ibs.Prepare(txHash, e.blockHash, txIndex)
+	gp := new(core.GasPool).AddGas(txn.GetGas())
+	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
+	if err != nil {
+		return nil, err
+	}
+	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
+	_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	if err != nil {
+		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+	}
+	return e.ibs.GetLogs(txHash), nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -509,6 +537,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 	}
 	return result, nil
 }
+
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
