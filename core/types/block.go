@@ -1624,11 +1624,23 @@ func (b *Block) SendersToTxs(senders []common.Address) {
 	}
 }
 
-// RawBody creates a RawBody based on the block. It is not very efficient, so
-// will probably be removed in favour of RawBlock. Also it panics
+// RawBody creates a RawBody based on the block.
 func (b *Block) RawBody() *RawBody {
 	br := &RawBody{Transactions: make([][]byte, len(b.transactions)), Uncles: b.uncles, Withdrawals: b.withdrawals}
 	for i, tx := range b.transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
+}
+
+// RawBody creates a RawBody based on the body.
+func (b *Body) RawBody() *RawBody {
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	for i, tx := range b.Transactions {
 		var err error
 		br.Transactions[i], err = rlp.EncodeToBytes(tx)
 		if err != nil {

@@ -14,7 +14,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -27,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -282,28 +280,16 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	}
 	// If we do not have the body we can recover it from the batch.
 	if body == nil {
-		var bodyWithTxs *types.Body
-		bodyWithTxs, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
+		var bodyFromDb *types.Body
+		bodyFromDb, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
 		if criticalError != nil {
 			return
 		}
-		if bodyWithTxs == nil {
+		if bodyFromDb == nil {
 			criticalError = fmt.Errorf("ForkValidator failed to recover block body: %d, %x", header.Number.Uint64(), header.Hash())
 			return
 		}
-		var encodedTxs [][]byte
-		buf := bytes.NewBuffer(nil)
-		for _, tx := range bodyWithTxs.Transactions {
-			buf.Reset()
-			if criticalError = rlp.Encode(buf, tx); criticalError != nil {
-				return
-			}
-			encodedTxs = append(encodedTxs, common.CopyBytes(buf.Bytes()))
-		}
-		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: &types.RawBody{
-			Transactions: encodedTxs,
-			// TODO(yperbasis): withdrawals
-		}}
+		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: bodyFromDb.RawBody()}
 	} else {
 		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: body}
 	}
