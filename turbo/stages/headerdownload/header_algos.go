@@ -100,6 +100,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 
 	headerHash := types.RawRlpHash(headerRaw)
 	if _, bad := hd.badHeaders[headerHash]; bad {
+		log.Warn("[Downloader] Rejected header marked as bad", "hash", headerHash, "height", header.Number.Uint64())
 		return nil, BadBlockPenalty, nil
 	}
 	if penalizePoSBlocks && header.Difficulty.Sign() == 0 {
@@ -488,15 +489,15 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime time.T
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	if hd.topSeenHeightPoW < hd.highestInDb+192 {
-		// trying to prevent empty responses
-		return nil
-	}
 	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	var length uint64 = 192
-	strideHeight := hd.highestInDb + 1
-	return &HeaderRequest{Number: strideHeight, Length: length, Skip: stride - 1, Reverse: false}
+	// Include one header that we have already, to make sure the responses are not empty and do not get penalised when we are at the tip of the chain
+	from := hd.highestInDb
+	if from == 0 {
+		from = 1
+	}
+	return &HeaderRequest{Number: from, Length: length, Skip: stride - 1, Reverse: false}
 }
 
 func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
@@ -521,6 +522,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			hd.moveLinkToQueue(link, NoQueue)
 			delete(hd.links, link.hash)
 			hd.removeUpwards(link)
+			log.Warn("[Downloader] Rejected header marked as bad", "hash", link.hash, "height", link.blockHeight)
 			return true, false, 0, nil
 		}
 		if !link.verified {
@@ -1039,7 +1041,7 @@ func (hd *HeaderDownload) ProcessHeaders(csHeaders []ChainSegmentHeader, newBloc
 	default:
 	}
 
-	return hd.requestChaining && requestMore
+	return !hd.initialCycle && requestMore
 }
 
 func (hd *HeaderDownload) ExtractStats() Stats {
@@ -1069,10 +1071,10 @@ func (hd *HeaderDownload) SetHeaderReader(headerReader consensus.ChainHeaderRead
 	hd.consensusHeaderReader = headerReader
 }
 
-func (hd *HeaderDownload) EnableRequestChaining() {
+func (hd *HeaderDownload) AfterInitialCycle() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.requestChaining = true
+	hd.initialCycle = false
 }
 
 func (hd *HeaderDownload) SetFetchingNew(fetching bool) {
@@ -1117,10 +1119,10 @@ func (hd *HeaderDownload) PosStatus() SyncStatus {
 	return hd.posStatus
 }
 
-func (hd *HeaderDownload) RequestChaining() bool {
+func (hd *HeaderDownload) InitialCycle() bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	return hd.requestChaining
+	return hd.initialCycle
 }
 
 func (hd *HeaderDownload) FetchingNew() bool {

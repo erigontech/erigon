@@ -327,7 +327,7 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
+	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
@@ -393,13 +393,15 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	if len(pkt) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
-			PeerId: peerID,
+		if cs.Hd.InitialCycle() {
+			outreq := proto_sentry.PeerUselessRequest{
+				PeerId: peerID,
+			}
+			if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
 		// No point processing empty response
 		return nil
 	}
@@ -554,13 +556,15 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
 	if len(txs) == 0 && len(uncles) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
-			PeerId: inreq.PeerId,
+		if cs.Hd.InitialCycle() {
+			outreq := proto_sentry.PeerUselessRequest{
+				PeerId: inreq.PeerId,
+			}
+			if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		// No point processing empty response
 		return nil
 	}

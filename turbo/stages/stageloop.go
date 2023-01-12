@@ -110,7 +110,7 @@ func StageLoop(
 		}
 
 		initialCycle = false
-		hd.EnableRequestChaining()
+		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)

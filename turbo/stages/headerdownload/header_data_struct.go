@@ -291,7 +291,7 @@ type HeaderDownload struct {
 	persistedLinkLimit     int    // Maximum allowed number of persisted links
 	anchorLimit            int    // Maximum allowed number of anchors
 	highestInDb            uint64 // Height of the highest block header in the database
-	requestChaining        bool   // Whether the downloader is allowed to issue more requests when previous responses created or moved an anchor
+	initialCycle           bool   // Whether downloader is used in the initial cycle, and is allowed to issue more requests when previous responses created or moved an anchor
 	fetchingNew            bool   // Set when the stage that is actively fetching the headers is in progress
 	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
@@ -334,6 +334,7 @@ func NewHeaderDownload(
 ) *HeaderDownload {
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
+		initialCycle:       true,
 		badHeaders:         make(map[common.Hash]struct{}),
 		anchors:            make(map[common.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
