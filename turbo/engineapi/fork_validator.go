@@ -14,7 +14,6 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -27,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -41,7 +39,7 @@ type ForkValidator struct {
 	// Hash => side fork block, any block saved into this map is considered valid.
 	// blocks saved are required to have at most distance maxForkDepth from the head.
 	// if we miss a segment, we only accept the block and give up on full validation.
-	sideForksBlock map[common.Hash]types.HeaderAndBody
+	sideForksBlock map[common.Hash]types.RawBlock
 	// current memory batch containing chain head that extend canonical fork.
 	extendingFork *memdb.MemoryMutation
 	// notifications accumulated for the extending fork
@@ -59,14 +57,14 @@ type ForkValidator struct {
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock: make(map[common.Hash]types.HeaderAndBody),
+		sideForksBlock: make(map[common.Hash]types.RawBlock),
 		currentHeight:  currentHeight,
 	}
 }
 
 func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock:  make(map[common.Hash]types.HeaderAndBody),
+		sideForksBlock:  make(map[common.Hash]types.RawBlock),
 		validatePayload: validatePayload,
 		currentHeight:   currentHeight,
 		tmpDir:          tmpDir,
@@ -189,7 +187,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body 
 	var headersChain []*types.Header
 	unwindPoint := header.Number.Uint64() - 1
 	for !foundCanonical {
-		var sb types.HeaderAndBody
+		var sb types.RawBlock
 		var ok bool
 		if sb, ok = fv.sideForksBlock[currentHash]; !ok {
 			// We miss some components so we did not check validity.
@@ -245,7 +243,7 @@ func (fv *ForkValidator) TryAddingPoWBlock(block *types.Block) {
 	defer fv.clean()
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
-	fv.sideForksBlock[block.Hash()] = types.HeaderAndBody{Header: block.Header(), Body: block.RawBody()}
+	fv.sideForksBlock[block.Hash()] = types.RawBlock{Header: block.Header(), Body: block.RawBody()}
 }
 
 // Clear wipes out current extending fork data and notify txpool.
@@ -282,30 +280,18 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 	}
 	// If we do not have the body we can recover it from the batch.
 	if body == nil {
-		var bodyWithTxs *types.Body
-		bodyWithTxs, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
+		var bodyFromDb *types.Body
+		bodyFromDb, criticalError = rawdb.ReadBodyWithTransactions(tx, header.Hash(), header.Number.Uint64())
 		if criticalError != nil {
 			return
 		}
-		if bodyWithTxs == nil {
+		if bodyFromDb == nil {
 			criticalError = fmt.Errorf("ForkValidator failed to recover block body: %d, %x", header.Number.Uint64(), header.Hash())
 			return
 		}
-		var encodedTxs [][]byte
-		buf := bytes.NewBuffer(nil)
-		for _, tx := range bodyWithTxs.Transactions {
-			buf.Reset()
-			if criticalError = rlp.Encode(buf, tx); criticalError != nil {
-				return
-			}
-			encodedTxs = append(encodedTxs, common.CopyBytes(buf.Bytes()))
-		}
-		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: &types.RawBody{
-			Transactions: encodedTxs,
-			// TODO(yperbasis): withdrawals
-		}}
+		fv.sideForksBlock[header.Hash()] = types.RawBlock{Header: header, Body: bodyFromDb.RawBody()}
 	} else {
-		fv.sideForksBlock[header.Hash()] = types.HeaderAndBody{Header: header, Body: body}
+		fv.sideForksBlock[header.Hash()] = types.RawBlock{Header: header, Body: body}
 	}
 	status = remote.EngineStatus_VALID
 	return
