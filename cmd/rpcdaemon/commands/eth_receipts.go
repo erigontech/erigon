@@ -306,7 +306,6 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	}
 	toTxNum++
 
-	out.Clear()
 	out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
@@ -396,9 +395,11 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 			signer = types.MakeSigner(chainConfig, blockNum)
 			if chainConfig == nil {
 				log.Warn("chainConfig is nil")
+				continue
 			}
 			if header == nil {
-				log.Warn("header is nil")
+				log.Warn("header is nil", "blockNum", blockNum)
+				continue
 			}
 			rules = chainConfig.Rules(blockNum, header.Time)
 			vmConfig.SkipAnalysis = core.SkipAnalysis(chainConfig, blockNum)
@@ -415,7 +416,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		txIndex := int(txNum) - int(minTxNumInBlock) - 1
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, err
@@ -477,7 +478,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing roaring64.Bitmap
+		bitmapForORing := bitmapdb.NewBitmap64()
+		defer bitmapdb.ReturnToPool64(bitmapForORing)
+
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
 			if err != nil {
@@ -494,10 +497,10 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			continue
 		}
 		if result == nil {
-			result = &bitmapForORing
+			result = bitmapForORing.Clone()
 			continue
 		}
-		result = roaring64.And(&bitmapForORing, result)
+		result = roaring64.And(bitmapForORing, result)
 	}
 	return result, nil
 }

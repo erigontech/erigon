@@ -284,7 +284,7 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 			}
 			bm = bitmapdb.CastBitmapTo64(bm32)
 		case TracesFromIdx:
-			bm, err = bitmapdb.Get64(tx, kv.TracesFromIdx, key, fromTs, toTs)
+			bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
 			if err != nil {
 				return nil, err
 			}
