@@ -326,7 +326,6 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
 		opts := mdbx.NewMDBX(logger).
-			WriteMergeThreshold(4 * 8192).
 			Path(dbPath).Label(label).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {

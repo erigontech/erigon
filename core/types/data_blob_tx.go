@@ -401,7 +401,7 @@ type SignedBlobTx struct {
 	Signature ECDSASignature
 }
 
-var _ Transaction = &SignedBlobTx{}
+// var _ Transaction = &SignedBlobTx{}
 
 const (
 	MAX_CALLDATA_SIZE              = 1 << 24
@@ -664,14 +664,14 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) common.Hash {
 		&stx.Message)
 }
 
-func (stx *SignedBlobTx) Size() common.StorageSize {
-	if size := stx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := stx.EncodingSize()
-	stx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
-}
+// func (stx *SignedBlobTx) Size() common.StorageSize {
+// 	if size := stx.size.Load(); size != nil {
+// 		return size.(common.StorageSize)
+// 	}
+// 	c := stx.EncodingSize()
+// 	stx.size.Store(common.StorageSize(c))
+// 	return common.StorageSize(c)
+// }
 
 func (tx SignedBlobTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()

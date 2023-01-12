@@ -71,6 +71,10 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, err
 	}
 
+	if len(result.ReturnData) > api.ReturnDataLimit {
+		return nil, fmt.Errorf("call retuned result on length %d exceeding limit %d", len(result.ReturnData), api.ReturnDataLimit)
+	}
+
 	// If the result contains a revert reason, try to unpack and return it.
 	if len(result.Revert()) > 0 {
 		return nil, ethapi2.NewRevertError(result)

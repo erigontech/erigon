@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -31,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -109,7 +111,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	var accData []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		accData, err = historyv2read.GetAsOfV3(ttx, false /* storage */, addr[:], s.txNr, s.histV3)
+		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, s.txNr)
 		if err != nil {
 			return err
 		}
@@ -191,15 +193,30 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.txNr, s.histV3)
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, ts)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
-		if err != nil {
+		if len(enc) == 0 {
+			if s.trace {
+				fmt.Printf("ReadAccountData [%x] => []\n", address)
+			}
+			return nil, nil
+		}
+		var a accounts.Account
+		if err = a.DecodeForStorage(enc); err != nil {
 			return nil, err
 		}
+		return &a, nil
+	}
+
+	enc, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	if err != nil {
+		return nil, err
 	}
 	if len(enc) == 0 {
 		if s.trace {
@@ -233,15 +250,19 @@ func (s *PlainState) ReadAccountData(address common.Address) (*accounts.Account,
 }
 
 func (s *PlainState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, true /* storage */, compositeKey, s.txNr, s.histV3)
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		enc, _, err = ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), common2.EncodeTs(incarnation)...), key.Bytes(), ts)
 		if err != nil {
 			return nil, err
 		}
 	} else {
+		compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 		enc, err = historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
 		if err != nil {
 			return nil, err
@@ -260,14 +281,30 @@ func (s *PlainState) ReadAccountCode(address common.Address, incarnation uint64,
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	code, err := s.tx.GetOne(kv.Code, codeHash[:])
-	if s.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+	var code []byte
+	var err error
+	if ttx, ok := s.tx.(kv.TemporalTx); ok {
+		ts := s.blockNr
+		if s.histV3 {
+			ts = s.txNr
+		}
+		code, _, err = ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), ts)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		code, err = s.tx.GetOne(kv.Code, codeHash[:])
+		if s.trace {
+			fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(code) == 0 {
 		return nil, nil
 	}
-	return code, err
+	return code, nil
 }
 
 func (s *PlainState) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
@@ -279,7 +316,11 @@ func (s *PlainState) ReadAccountIncarnation(address common.Address) (uint64, err
 	var enc []byte
 	var err error
 	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		enc, err = historyv2read.GetAsOfV3(ttx, false /* storage */, address[:], s.txNr+1, s.histV3)
+		ts := s.blockNr + 1
+		if s.histV3 {
+			ts = s.txNr + 1
+		}
+		enc, _, err = ttx.DomainGet(temporal.AccountsDomain, address[:], nil, ts)
 		if err != nil {
 			return 0, err
 		}

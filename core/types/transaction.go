@@ -72,7 +72,6 @@ type Transaction interface {
 	FakeSign(address common.Address) (Transaction, error)
 	Hash() common.Hash // TODO make it EIP-4844
 	SigningHash(chainID *big.Int) common.Hash
-	Size() common.StorageSize
 	GetData() []byte
 	GetAccessList() AccessList
 	Protected() bool
@@ -128,7 +127,6 @@ type TransactionMisc struct {
 
 	// caches
 	hash atomic.Value //nolint:structcheck
-	size atomic.Value //nolint:structcheck
 	from atomic.Value
 }
 

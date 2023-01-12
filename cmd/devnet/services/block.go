@@ -97,28 +97,38 @@ func initializeTransactOps(nonce uint64) (*bind.TransactOpts, error) {
 }
 
 // txHashInBlock checks if the block with block number has the transaction hash in its list of transactions
-func txHashInBlock(client *rpc.Client, hash common.Hash, blockNumber string) (uint64, bool, error) {
+func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber string, txToBlockMap map[common.Hash]string) (uint64, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // releases the resources held by the context
 
-	var currBlock models.Block
+	var (
+		currBlock models.Block
+		numFound  int
+	)
 	err := client.CallContext(ctx, &currBlock, string(models.ETHGetBlockByNumber), blockNumber, false)
 	if err != nil {
-		return uint64(0), false, fmt.Errorf("failed to get block by number: %v", err)
+		return uint64(0), 0, fmt.Errorf("failed to get block by number: %v", err)
 	}
 
 	for _, txnHash := range currBlock.Transactions {
-		if txnHash == hash {
-			fmt.Printf("SUCCESS => Tx with hash %q is in mined block with number %q\n", hash, blockNumber)
-			return devnetutils.HexToInt(blockNumber), true, nil
+		// check if tx is in the hash set and remove it from the set if it is present
+		if _, ok := hashmap[txnHash]; ok {
+			numFound++
+			fmt.Printf("SUCCESS => Tx with hash %q is in mined block with number %q\n", txnHash, blockNumber)
+			// add the block number as an entry to the map
+			txToBlockMap[txnHash] = blockNumber
+			delete(hashmap, txnHash)
+			if len(hashmap) == 0 {
+				return devnetutils.HexToInt(blockNumber), numFound, nil
+			}
 		}
 	}
 
-	return uint64(0), false, nil
+	return uint64(0), 0, nil
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) error {
+func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) (*common.Hash, error) {
 	fmt.Println("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction
@@ -126,28 +136,21 @@ func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bin
 
 	tx, err := subContract.Fallback(opts, []byte{})
 	if err != nil {
-		return fmt.Errorf("failed to emit event from fallback: %v", err)
+		return nil, fmt.Errorf("failed to emit event from fallback: %v", err)
 	}
 
 	signedTx, err := types.SignTx(tx, *signer, models.DevSignedPrivateKey)
 	if err != nil {
-		return fmt.Errorf("failed to sign fallback transaction: %v", err)
+		return nil, fmt.Errorf("failed to sign fallback transaction: %v", err)
 	}
 
 	hash, err := requests.SendTransaction(models.ReqId, &signedTx)
 	if err != nil {
-		return fmt.Errorf("failed to send fallback transaction: %v", err)
+		return nil, fmt.Errorf("failed to send fallback transaction: %v", err)
 	}
 	fmt.Printf("Tx submitted, adding tx with hash %q to txpool\n", hash)
 
-	blockN, err := SearchBlockForTransactionHash(*hash)
-	if err != nil {
-		return fmt.Errorf("failed to find tx in block: %v", err)
-	}
+	// TODO: Get all the logs across the blocks that mined the transactions and check that they are logged
 
-	if err = requests.GetLogs(reqId, blockN, blockN, address, false); err != nil {
-		return fmt.Errorf("failed to get logs: %v", err)
-	}
-
-	return nil
+	return hash, nil
 }

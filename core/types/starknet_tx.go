@@ -206,10 +206,6 @@ func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
 		})
 }
 
-func (tx StarknetTransaction) Size() common.StorageSize {
-	panic("implement me")
-}
-
 func (tx StarknetTransaction) GetAccessList() AccessList {
 	panic("implement me")
 }

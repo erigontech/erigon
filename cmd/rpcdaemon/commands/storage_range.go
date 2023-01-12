@@ -9,12 +9,12 @@ import (
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
 type StorageRangeResult struct {
-	Storage StorageMap   `json:"storage"`
+	Storage storageMap   `json:"storage"`
 	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
 }
 
-// StorageMap a map from storage locations to StorageEntry items
-type StorageMap map[common.Hash]StorageEntry
+// storageMap a map from storage locations to StorageEntry items
+type storageMap map[common.Hash]StorageEntry
 
 // StorageEntry an entry in storage of the account
 type StorageEntry struct {
@@ -26,8 +26,8 @@ type walker interface {
 	ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error
 }
 
-func StorageRangeAt(stateReader walker, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
-	result := StorageRangeResult{Storage: StorageMap{}}
+func storageRangeAt(stateReader walker, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+	result := StorageRangeResult{Storage: storageMap{}}
 	resultCount := 0
 
 	if err := stateReader.ForEachStorage(contractAddress, common.BytesToHash(start), func(key, seckey common.Hash, value uint256.Int) bool {

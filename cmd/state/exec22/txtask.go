@@ -22,6 +22,7 @@ type TxTask struct {
 	Txs             types.Transactions
 	Uncles          []*types.Header
 	Coinbase        common.Address
+	Withdrawals     types.Withdrawals
 	BlockHash       common.Hash
 	Sender          *common.Address
 	SkipAnalysis    bool
@@ -45,8 +46,7 @@ type TxTask struct {
 	TraceFroms         map[common.Address]struct{}
 	TraceTos           map[common.Address]struct{}
 
-	UsedGas     uint64
-	Withdrawals types.Withdrawals
+	UsedGas uint64
 }
 
 type TxTaskQueue []*TxTask

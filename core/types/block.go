@@ -31,6 +31,9 @@ import (
 	"github.com/gballet/go-verkle"
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -102,6 +105,10 @@ type Header struct {
 
 	// ExcessDataGas was added by EIP-4844 and is ignored in legacy headers.
 	ExcessDataGas *big.Int `json:"excessDataGas" rlp:"optional"`
+	// ETH2 fields
+	// This is the block hash given by the CL,we cannot validate in the context of the state.
+	BlockHashCL common.Hash
+	TxHashSSZ   common.Hash // They decided to hash txs differently than EL :(
 }
 
 func bitsToBytes(bitLen int) (byteLen int) {
@@ -552,6 +559,181 @@ func (h *Header) SanityCheck() error {
 	return nil
 }
 
+func (h *Header) EncodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]byte, error) {
+	buf := dst
+	buf = append(buf, h.ParentHash[:]...)
+	buf = append(buf, h.Coinbase[:]...)
+	buf = append(buf, h.Root[:]...)
+	buf = append(buf, h.ReceiptHash[:]...)
+	buf = append(buf, h.Bloom[:]...)
+	buf = append(buf, h.MixDigest[:]...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.Number.Uint64())...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.GasLimit)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.GasUsed)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(h.Time)...)
+	buf = append(buf, ssz_utils.OffsetSSZ(uint32(extraDataOffset))...)
+
+	// Add Base Fee
+	var baseFeeBytes32 [32]byte // Base fee is padded.
+	baseFeeBytes := h.BaseFee.Bytes()
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	copy(baseFeeBytes32[:], baseFeeBytes)
+	buf = append(buf, baseFeeBytes32[:]...)
+	buf = append(buf, h.BlockHashCL[:]...)
+	return buf, nil
+}
+
+func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
+	buf = dst
+	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
+
+	if h.WithdrawalsHash != nil {
+		offset += 32
+	}
+
+	h.EncodeHeaderMetadataForSSZ(buf, offset)
+	buf = append(buf, h.TxHashSSZ[:]...)
+
+	if h.WithdrawalsHash != nil {
+		buf = append(buf, h.WithdrawalsHash[:]...)
+	}
+
+	buf = append(buf, h.Extra...)
+	return
+}
+
+// NOTE: it is skipping extra data
+func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
+	h.UncleHash = EmptyUncleHash
+	h.Difficulty = common.Big0
+
+	copy(h.ParentHash[:], buf)
+	pos = len(h.ParentHash)
+
+	copy(h.Coinbase[:], buf[pos:])
+	pos += len(h.Coinbase)
+
+	copy(h.Root[:], buf[pos:])
+	pos += len(h.Root)
+
+	copy(h.ReceiptHash[:], buf[pos:])
+	pos += len(h.ReceiptHash)
+
+	h.Bloom.SetBytes(buf[pos : pos+BloomByteLength])
+	pos += BloomByteLength
+
+	copy(h.MixDigest[:], buf[pos:])
+	pos += len(h.MixDigest)
+
+	h.Number = new(big.Int).SetUint64(ssz_utils.UnmarshalUint64SSZ(buf[pos:]))
+	h.GasLimit = ssz_utils.UnmarshalUint64SSZ(buf[pos+8:])
+	h.GasUsed = ssz_utils.UnmarshalUint64SSZ(buf[pos+16:])
+	h.Time = ssz_utils.UnmarshalUint64SSZ(buf[pos+24:])
+	pos += 36
+	// Add Base Fee
+	baseFeeBytes := common.CopyBytes(buf[pos : pos+32])
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	h.BaseFee = new(big.Int).SetBytes(baseFeeBytes)
+	pos += 32
+	copy(h.BlockHashCL[:], buf[pos:pos+32])
+	pos += 32
+	return
+}
+
+func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
+	if len(buf) < h.EncodingSizeSSZ(version) {
+		return ssz_utils.ErrLowBufferSize
+	}
+	pos := h.DecodeHeaderMetadataForSSZ(buf)
+	copy(h.TxHashSSZ[:], buf[pos:pos+32])
+	pos += len(h.TxHashSSZ)
+
+	if version >= clparams.CapellaVersion {
+		h.WithdrawalsHash = new(common.Hash)
+		copy((*h.WithdrawalsHash)[:], buf[pos:])
+		pos += len(h.WithdrawalsHash)
+	} else {
+		h.WithdrawalsHash = nil
+	}
+	h.Extra = common.CopyBytes(buf[pos:])
+	return nil
+}
+
+// SizeSSZ returns the ssz encoded size in bytes for the Header object
+func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
+	size := 536
+
+	if h.WithdrawalsHash != nil || version >= clparams.CapellaVersion {
+		size += 32
+	}
+
+	return size + len(h.Extra)
+}
+
+func (h *Header) HashSSZ() ([32]byte, error) {
+	// Compute coinbase leaf
+	var coinbase32 [32]byte
+	copy(coinbase32[:], h.Coinbase[:])
+	// Compute Bloom leaf
+	bloomLeaf, err := merkle_tree.ArraysRoot([][32]byte{
+		common.BytesToHash(h.Bloom[:32]),
+		common.BytesToHash(h.Bloom[32:64]),
+		common.BytesToHash(h.Bloom[64:96]),
+		common.BytesToHash(h.Bloom[96:128]),
+		common.BytesToHash(h.Bloom[128:160]),
+		common.BytesToHash(h.Bloom[160:192]),
+		common.BytesToHash(h.Bloom[192:224]),
+		common.BytesToHash(h.Bloom[224:]),
+	}, 8)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	// Compute baseFee leaf
+	baseFeeBytes := h.BaseFee.Bytes()
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
+	}
+	var baseFeeLeaf common.Hash
+	copy(baseFeeLeaf[:], baseFeeBytes)
+	// Compute extra data leaf
+	var extraLeaf common.Hash
+
+	var baseExtraLeaf [32]byte
+	copy(baseExtraLeaf[:], h.Extra)
+
+	extraLeaf, err = merkle_tree.ArraysRoot([][32]byte{
+		baseExtraLeaf,
+		merkle_tree.Uint64Root(uint64(len(h.Extra)))}, 2)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	leaves := [][32]byte{
+		h.ParentHash,
+		coinbase32,
+		h.Root,
+		h.ReceiptHash,
+		bloomLeaf,
+		h.MixDigest,
+		merkle_tree.Uint64Root(h.Number.Uint64()),
+		merkle_tree.Uint64Root(h.GasLimit),
+		merkle_tree.Uint64Root(h.GasUsed),
+		merkle_tree.Uint64Root(h.Time),
+		extraLeaf,
+		baseFeeLeaf,
+		h.BlockHashCL,
+		h.TxHashSSZ,
+	}
+	if h.WithdrawalsHash != nil {
+		leaves = append(leaves, *h.WithdrawalsHash)
+	}
+	return merkle_tree.ArraysRoot(leaves, 16)
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
@@ -574,6 +756,12 @@ type BodyForStorage struct {
 	TxAmount    uint32
 	Uncles      []*Header
 	Withdrawals []*Withdrawal
+}
+
+// Alternative representation of the Block.
+type RawBlock struct {
+	Header *Header
+	Body   *RawBody
 }
 
 // Block represents an entire block in the Ethereum blockchain.
@@ -610,23 +798,15 @@ func (b *Body) SendersFromTxs() []common.Address {
 }
 
 func (rb RawBody) EncodingSize() int {
-	payloadSize, _, _, _, _ := rb.payloadSize()
+	payloadSize, _, _, _ := rb.payloadSize()
 	return payloadSize
 }
 
-func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int, transactionsSizes []int) {
-	transactionsSizes = make([]int, len(rb.Transactions))
-
+func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	payloadSize++
-	for idx, tx := range rb.Transactions {
-		txsLen++
-		var txLen = len(tx)
-		transactionsSizes[idx] = txLen
-		if txLen >= 56 {
-			txsLen += bitsToBytes(bits.Len(uint(txLen)))
-		}
-		txsLen += txLen
+	for _, tx := range rb.Transactions {
+		txsLen += len(tx)
 	}
 	if txsLen >= 56 {
 		payloadSize += bitsToBytes(bits.Len(uint(txsLen)))
@@ -665,11 +845,11 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen 
 		payloadSize += withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen, transactionsSizes
+	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
 func (rb RawBody) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen, txSizes := rb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen := rb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -679,10 +859,7 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
-	for idx, tx := range rb.Transactions {
-		if err := EncodeStructSizePrefix(txSizes[idx], w, b[:]); err != nil {
-			return err
-		}
+	for _, tx := range rb.Transactions {
 		if _, err := w.Write(tx); err != nil {
 			return nil
 		}
@@ -722,11 +899,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	}
 	var tx []byte
 	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		_, txContent, _, err := rlp.Split(tx)
-		if err != nil {
-			return err
+		if tx == nil {
+			return errors.New("RawBody.DecodeRLP tx nil\n")
 		}
-		rb.Transactions = append(rb.Transactions, txContent)
+		rb.Transactions = append(rb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
@@ -1504,8 +1680,21 @@ func (b *Block) RawBody() *RawBody {
 	return br
 }
 
+// RawBody creates a RawBody based on the body.
+func (b *Body) RawBody() *RawBody {
+	br := &RawBody{Transactions: make([][]byte, len(b.Transactions)), Uncles: b.Uncles, Withdrawals: b.Withdrawals}
+	for i, tx := range b.Transactions {
+		var err error
+		br.Transactions[i], err = rlp.EncodeToBytes(tx)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return br
+}
+
 // Size returns the true RLP encoded storage size of the block, either by encoding
-// and returning it, or returning a previsouly cached value.
+// and returning it, or returning a previously cached value.
 func (b *Block) Size() common.StorageSize {
 	if size := b.size.Load(); size != nil {
 		return size.(common.StorageSize)
@@ -1556,20 +1745,28 @@ func CalcUncleHash(uncles []*Header) common.Hash {
 	return rlpHash(uncles)
 }
 
+func CopyTxs(in Transactions) Transactions {
+	transactionsData, err := MarshalTransactionsBinary(in)
+	if err != nil {
+		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
+	}
+	out, err := DecodeTransactions(transactionsData)
+	if err != nil {
+		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
+	}
+	for i := 0; i < len(in); i++ {
+		if s, ok := in[i].GetSender(); ok {
+			out[i].SetSender(s)
+		}
+	}
+	return out
+}
+
 // Copy creates a deep copy of the Block.
 func (b *Block) Copy() *Block {
 	uncles := make([]*Header, 0, len(b.uncles))
 	for _, uncle := range b.uncles {
 		uncles = append(uncles, CopyHeader(uncle))
-	}
-
-	transactionsData, err := MarshalTransactionsBinary(b.transactions)
-	if err != nil {
-		panic(fmt.Errorf("MarshalTransactionsBinary failed: %w", err))
-	}
-	transactions, err := DecodeTransactions(transactionsData)
-	if err != nil {
-		panic(fmt.Errorf("DecodeTransactions failed: %w", err))
 	}
 
 	var withdrawals []*Withdrawal
@@ -1596,7 +1793,7 @@ func (b *Block) Copy() *Block {
 	return &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
-		transactions: transactions,
+		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		hash:         hashValue,
 		size:         sizeValue,

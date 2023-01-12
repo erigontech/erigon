@@ -5,11 +5,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type GossipReceiver interface {
-	ReceiveGossip(cltypes.ObjectSSZ)
+	ReceiveGossip(ssz_utils.Unmarshaler)
 }
 
 type GossipManager struct {
@@ -51,11 +53,11 @@ func (g *GossipManager) Loop() {
 		//If the deserialization fails, an error is logged and the loop continues to the next iteration.
 		//If the deserialization is successful, the object is set to the deserialized value and the loop continues to the next iteration.
 		receivers := g.receivers[data.Type]
-		var object cltypes.ObjectSSZ
+		var object ssz_utils.Unmarshaler
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlockBellatrix{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			if err := object.UnmarshalSSZ(common.CopyBytes(data.Data)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding block", "err", err)
 				continue
 			}
@@ -83,7 +85,6 @@ func (g *GossipManager) Loop() {
 				log.Warn("[Beacon Gossip] Failure in decoding proof", "err", err)
 				continue
 			}
-
 		}
 		// If we received a valid object give it to our receiver
 		if object != nil {

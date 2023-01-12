@@ -3,6 +3,7 @@ package state
 import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // Below are setters. Note that they also dirty the state.
@@ -60,6 +61,10 @@ func (b *BeaconState) SetStateRootAt(index int, root [32]byte) {
 func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	b.historicalRoots[index] = root
+}
+
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+	b.validators[index] = validator
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -137,7 +142,7 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 	b.nextSyncCommittee = nextSyncCommittee
 }
 
-func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.ExecutionHeader) {
+func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
 }

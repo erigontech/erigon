@@ -21,11 +21,10 @@ import (
 	"io"
 
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	ssz "github.com/prysmaticlabs/fastssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 )
 
-func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
+func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
@@ -39,8 +38,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	sw := snappy.NewBufferedWriter(wr)
 	defer sw.Flush()
 	// Marshall and snap it
-	xs := make([]byte, 0, val.SizeSSZ())
-	enc, err := val.MarshalSSZTo(xs)
+	enc, err := val.MarshalSSZ()
 	if err != nil {
 		return err
 	}
@@ -48,7 +46,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
+func DecodeAndRead(r io.Reader, val ssz_utils.ObjectSSZ) error {
 	forkDigest := make([]byte, 4)
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -58,7 +56,7 @@ func DecodeAndRead(r io.Reader, val cltypes.ObjectSSZ) error {
 	return DecodeAndReadNoForkDigest(r, val)
 }
 
-func DecodeAndReadNoForkDigest(r io.Reader, val cltypes.ObjectSSZ) error {
+func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
@@ -101,7 +99,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []cltypes.ObjectSSZ) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.ObjectSSZ) error {
 	objSize := list[0].SizeSSZ()
 
 	r := bytes.NewReader(data)

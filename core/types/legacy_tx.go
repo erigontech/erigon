@@ -187,15 +187,6 @@ func (tx LegacyTx) copy() *LegacyTx {
 	return cpy
 }
 
-func (tx *LegacyTx) Size() common.StorageSize {
-	if size := tx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := tx.EncodingSize()
-	tx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
-}
-
 func (tx LegacyTx) EncodingSize() int {
 	payloadSize, _, _ := tx.payloadSize()
 	return payloadSize

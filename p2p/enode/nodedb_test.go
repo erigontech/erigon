@@ -318,6 +318,7 @@ func TestDBPersistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
+	defer db.Close()
 	if err := db.storeInt64(testKey, testInt); err != nil {
 		t.Fatalf("failed to store value: %v.", err)
 	}
@@ -328,6 +329,7 @@ func TestDBPersistency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
+	defer db.Close()
 	if val := db.fetchInt64(testKey); val != testInt {
 		t.Fatalf("value mismatch: have %v, want %v, %T", val, testInt, db)
 	}

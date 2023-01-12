@@ -30,24 +30,12 @@ func (*LightClientOptimisticUpdate) Clone() communication.Packet {
 	return &LightClientOptimisticUpdate{}
 }
 
-func (*MetadataV1) Clone() communication.Packet {
-	return &MetadataV1{}
-}
-
-func (*MetadataV2) Clone() communication.Packet {
-	return &MetadataV2{}
+func (*Metadata) Clone() communication.Packet {
+	return &Metadata{}
 }
 
 func (*Ping) Clone() communication.Packet {
 	return &Ping{}
-}
-
-func (*Status) Clone() communication.Packet {
-	return &Status{}
-}
-
-func (*SingleRoot) Clone() communication.Packet {
-	return &SingleRoot{}
 }
 
 func (*LightClientBootstrap) Clone() communication.Packet {

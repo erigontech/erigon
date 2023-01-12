@@ -348,6 +348,16 @@ var (
 		Name:  "rpc.streaming.disable",
 		Usage: "Erigon has enalbed json streaming for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
 	}
+	RpcBatchLimit = cli.IntFlag{
+		Name:  "rpc.batch.limit",
+		Usage: "Maximum number of requests in a batch",
+		Value: 100,
+	}
+	RpcReturnDataLimit = cli.IntFlag{
+		Name:  "rpc.returndata.limit",
+		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
+		Value: 100_000,
+	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
 		Usage: "Trace HTTP requests with INFO level",
@@ -1158,7 +1168,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	}
 	sz := cfg.MdbxPageSize.Bytes()
 	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		panic(fmt.Errorf("invalid --db.pagesize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
 	}
 }
 

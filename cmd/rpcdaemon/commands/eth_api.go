@@ -111,13 +111,13 @@ type BaseAPI struct {
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
-	_agg         *libstate.Aggregator22
+	_agg         *libstate.AggregatorV3
 	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.Aggregator22, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
 	blocksLRUSize := 128 // ~32Mb
 	if !singleNodeMode {
 		blocksLRUSize = 512
@@ -269,28 +269,30 @@ func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend rpchelper.ApiBackend
-	txPool     txpool.TxpoolClient
-	mining     txpool.MiningClient
-	gasCache   *GasPriceCache
-	db         kv.RoDB
-	GasCap     uint64
+	ethBackend      rpchelper.ApiBackend
+	txPool          txpool.TxpoolClient
+	mining          txpool.MiningClient
+	gasCache        *GasPriceCache
+	db              kv.RoDB
+	GasCap          uint64
+	ReturnDataLimit int
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
-		BaseAPI:    base,
-		db:         db,
-		ethBackend: eth,
-		txPool:     txPool,
-		mining:     mining,
-		gasCache:   NewGasPriceCache(),
-		GasCap:     gascap,
+		BaseAPI:         base,
+		db:              db,
+		ethBackend:      eth,
+		txPool:          txPool,
+		mining:          mining,
+		gasCache:        NewGasPriceCache(),
+		GasCap:          gascap,
+		ReturnDataLimit: returnDataLimit,
 	}
 }
 

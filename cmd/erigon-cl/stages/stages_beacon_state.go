@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -24,10 +25,11 @@ type StageBeaconStateCfg struct {
 	state            *state.BeaconState
 	clearEth1Data    bool // Whether we want to discard eth1 data.
 	triggerExecution triggerExecutionFunc
+	executionClient  *execution_client.ExecutionClient
 }
 
 func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
-	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool) StageBeaconStateCfg {
+	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool, executionClient *execution_client.ExecutionClient) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:               db,
 		genesisCfg:       genesisCfg,
@@ -35,6 +37,7 @@ func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
 		state:            state,
 		clearEth1Data:    clearEth1Data,
 		triggerExecution: triggerExecution,
+		executionClient:  executionClient,
 	}
 }
 
@@ -67,12 +70,18 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		}
 		// TODO: Pass this to state transition with the state
 		_ = block
-		// If successful call the insertion function
-		if cfg.triggerExecution != nil {
-			if err := cfg.triggerExecution(block); err != nil {
-				return err
-			}
+	}
+	// If successful update fork choice
+	if cfg.executionClient != nil {
+		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, endSlot)
+		if err != nil {
+			return err
 		}
+		receipt, err := cfg.executionClient.ForkChoiceUpdate(eth1Hash)
+		if err != nil {
+			return err
+		}
+		log.Info("Forkchoice Status", "outcome", receipt.Success)
 	}
 
 	// Clear all ETH1 data from CL db
