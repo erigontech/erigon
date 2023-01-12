@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -160,17 +159,6 @@ func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, c
 		cfg.dirs.Tmp,
 		ctx,
 	)
-	if err != nil {
-		return err
-	}
-
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		err = parallelWarmup(ctx, cfg.db, kv.PlainContractCode, 2)
-		wg.Done()
-	}()
-	wg.Wait()
 	if err != nil {
 		return err
 	}
