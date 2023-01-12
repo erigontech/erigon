@@ -550,15 +550,18 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 			}
 		case vm.STATICCALL, vm.DELEGATECALL:
 			if st.Len() > 5 {
-				ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64(), st.Back(5).Uint64())
+				ot.memOffStack = append(ot.memOffStack, st.Back(4).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(5).Uint64())
 			}
 		case vm.CALL, vm.CALLCODE:
 			if st.Len() > 6 {
-				ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64(), st.Back(6).Uint64())
+				ot.memOffStack = append(ot.memOffStack, st.Back(5).Uint64())
+				ot.memLenStack = append(ot.memLenStack, st.Back(6).Uint64())
 			}
 		case vm.CREATE, vm.CREATE2, vm.SELFDESTRUCT:
 			// Effectively disable memory output
-			ot.memOffStack = append(ot.memOffStack, 0, 0)
+			ot.memOffStack = append(ot.memOffStack, 0)
+			ot.memLenStack = append(ot.memLenStack, 0)
 		case vm.SSTORE:
 			if st.Len() > 1 {
 				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: st.Back(0).String(), Val: st.Back(1).String()}
