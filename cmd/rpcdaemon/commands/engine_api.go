@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -16,8 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // ExecutionPayloadV1 represents an execution payload (aka block) without withdrawals
@@ -57,6 +60,12 @@ type ExecutionPayloadV2 struct {
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
 }
 
+// GetPayloadV2Response represents the response of the getPayloadV2 method
+type GetPayloadV2Response struct {
+	ExecutionPayload ExecutionPayloadV2 `json:"executionPayload" gencodec:"required"`
+	BlockValue       *hexutil.Big       `json:"blockValue" gencodec:"required"`
+}
+
 // PayloadAttributes represent the attributes required to start assembling a payload
 type ForkChoiceState struct {
 	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
@@ -93,7 +102,7 @@ type EngineAPI interface {
 	ForkchoiceUpdatedV1(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV1) (map[string]interface{}, error)
 	ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributesV2) (map[string]interface{}, error)
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV1, error)
-	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV2, error)
+	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 }
 
@@ -375,7 +384,30 @@ func (e *EngineImpl) GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) 
 	}, nil
 }
 
-func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayloadV2, error) {
+func getTxValueForBlockValue(transaction []byte, baseFee *big.Int) (*big.Int, error) {
+	// calculate blockValue by summing tips - see: https://github.com/ethereum/execution-apis/pull/314
+	s := rlp.NewStream(bytes.NewReader(transaction), uint64(len(transaction)))
+	t, err := types.DecodeTransaction(s)
+	if err != nil {
+		log.Error("Failed to decode transaction", "err", err)
+		return nil, err
+	}
+
+	// convert baseFee to uint256
+	baseFeeUint256, overflow := uint256.FromBig(baseFee)
+	if overflow {
+		log.Warn("baseFee overflow")
+		return nil, fmt.Errorf("baseFee overflow")
+	}
+
+	effectiveTip := t.GetEffectiveGasTip(baseFeeUint256)
+	amount := new(uint256.Int).SetUint64(t.GetGas())
+	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
+
+	return amount.ToBig(), nil
+}
+
+func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
@@ -397,12 +429,18 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) 
 		baseFee = gointerfaces.ConvertH256ToUint256Int(payload.BaseFeePerGas).ToBig()
 	}
 
-	// Convert slice of hexutil.Bytes to a slice of slice of bytes
+	blockValue := big.NewInt(0)
 	transactions := make([]hexutil.Bytes, len(payload.Transactions))
 	for i, transaction := range payload.Transactions {
 		transactions[i] = transaction
+		txVal, err := getTxValueForBlockValue(transaction, baseFee)
+		if err != nil {
+			return nil, err
+		}
+		blockValue.Add(blockValue, txVal)
 	}
-	return &ExecutionPayloadV2{
+
+	epl := ExecutionPayloadV2{
 		ParentHash:    gointerfaces.ConvertH256ToHash(payload.ParentHash),
 		FeeRecipient:  gointerfaces.ConvertH160toAddress(payload.Coinbase),
 		StateRoot:     gointerfaces.ConvertH256ToHash(payload.StateRoot),
@@ -418,6 +456,10 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) 
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
 		Withdrawals:   privateapi.ConvertWithdrawalsFromRpc(ep.Withdrawals),
+	}
+	return &GetPayloadV2Response{
+		epl,
+		(*hexutil.Big)(blockValue),
 	}, nil
 }
 

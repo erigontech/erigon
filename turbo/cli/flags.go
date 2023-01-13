@@ -380,6 +380,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		Gascap:               ctx.Uint64(utils.RpcGasCapFlag.Name),
 		MaxTraces:            ctx.Uint64(utils.TraceMaxtracesFlag.Name),
 		TraceCompatibility:   ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
 
 		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 

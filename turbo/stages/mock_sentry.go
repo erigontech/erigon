@@ -102,10 +102,18 @@ func (ms *MockSentry) Close() {
 	if ms.txPoolDB != nil {
 		ms.txPoolDB.Close()
 	}
-	if ms.HistoryV3 {
+	if ms.Engine != nil {
+		ms.Engine.Close()
+	}
+	if ms.BlockSnapshots != nil {
+		ms.BlockSnapshots.Close()
+	}
+	if ms.agg != nil {
 		ms.agg.Close()
 	}
-	ms.DB.Close()
+	if ms.DB != nil {
+		ms.DB.Close()
+	}
 }
 
 // Stream returns stream, waiting if necessary
@@ -218,7 +226,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	cfg.DeprecatedTxPool.Disable = !withTxPool
 	cfg.DeprecatedTxPool.StartOnInit = true
 
-	db := memdb.New()
+	var db kv.RwDB
+	if t != nil {
+		db = memdb.NewTestDB(t)
+	} else {
+		db = memdb.New()
+	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
@@ -277,7 +290,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
-	blockPropagator := func(Ctx context.Context, block *types.Block, td *big.Int) {}
+	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig
@@ -540,7 +553,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 	// Send all the bodies
 	packet := make(eth.BlockBodiesPacket, n)
 	for i, block := range chain.Blocks[0:n] {
-		packet[i] = (*eth.BlockBody)(block.Body())
+		packet[i] = block.Body()
 	}
 	b, err = rlp.EncodeToBytes(&eth.BlockBodiesPacket66{
 		RequestId:         1,

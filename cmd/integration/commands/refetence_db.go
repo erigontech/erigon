@@ -435,11 +435,6 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		return err1
 	}
 	defer srcTx.Rollback()
-	dstTx, err1 := dst.BeginRw(ctx)
-	if err1 != nil {
-		return err1
-	}
-	defer dstTx.Rollback()
 
 	commitEvery := time.NewTicker(5 * time.Minute)
 	defer commitEvery.Stop()
@@ -451,19 +446,24 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		if b.IsDeprecated {
 			continue
 		}
-
 		go rawdbreset.WarmupTable(ctx, src, name, log.LvlTrace)
-		_ = dstTx.ClearBucket(name)
-		c, err := dstTx.RwCursor(name)
-		if err != nil {
-			return err
-		}
 		srcC, err := srcTx.Cursor(name)
 		if err != nil {
 			return err
 		}
 		total, _ = srcC.Count()
 
+		dstTx, err1 := dst.BeginRw(ctx)
+		if err1 != nil {
+			return err1
+		}
+		defer dstTx.Rollback()
+		_ = dstTx.ClearBucket(name)
+
+		c, err := dstTx.RwCursor(name)
+		if err != nil {
+			return err
+		}
 		casted, isDupsort := c.(kv.RwCursorDupSort)
 		i := uint64(0)
 
@@ -488,20 +488,6 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 				return ctx.Err()
 			case <-logEvery.C:
 				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k))
-			case <-commitEvery.C:
-				if err2 := dstTx.Commit(); err2 != nil {
-					return err2
-				}
-				dstTx, err = dst.BeginRw(ctx)
-				if err != nil {
-					return err
-				}
-				defer dstTx.Rollback()
-				c, err = dstTx.RwCursor(name)
-				if err != nil {
-					return err
-				}
-				casted, isDupsort = c.(kv.RwCursorDupSort)
 			default:
 			}
 		}
@@ -515,10 +501,9 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 		//if err != nil {
 		//	return err
 		//}
-	}
-	err := dstTx.Commit()
-	if err != nil {
-		return err
+		if err2 := dstTx.Commit(); err2 != nil {
+			return err2
+		}
 	}
 	srcTx.Rollback()
 	log.Info("done")

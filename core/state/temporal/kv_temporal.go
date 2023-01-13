@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -129,7 +130,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsDomain:
 		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)
@@ -142,14 +143,24 @@ func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 		v, err = tx.GetOne(kv.PlainState, key)
 		return v, v != nil, err
 	case StorageDomain:
-		v, ok, err = tx.HistoryGet(StorageHistory, key, ts)
-		if err != nil {
-			return nil, false, err
+		if tx.hitoryV3 {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key[:20], key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
+		} else {
+			v, ok, err = tx.HistoryGet(StorageHistory, append(key, key2...), ts)
+			if err != nil {
+				return nil, false, err
+			}
+			if ok {
+				return v, true, nil
+			}
 		}
-		if ok {
-			return v, true, nil
-		}
-		v, err = tx.GetOne(kv.PlainState, key)
+		v, err = tx.GetOne(kv.PlainState, append(key, key2...))
 		return v, v != nil, err
 	case CodeDomain:
 		if tx.hitoryV3 {
@@ -160,10 +171,10 @@ func (tx *Tx) DomainGet(name kv.Domain, key []byte, ts uint64) (v []byte, ok boo
 			if ok {
 				return v, true, nil
 			}
-			v, err = tx.GetOne(kv.Code, key)
+			v, err = tx.GetOne(kv.Code, key2)
 			return v, v != nil, err
 		}
-		v, err = tx.GetOne(kv.Code, key)
+		v, err = tx.GetOne(kv.Code, key2)
 		return v, v != nil, err
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
@@ -178,8 +189,8 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if err != nil {
 				return nil, false, err
 			}
-			if !ok {
-				return nil, ok, nil
+			if !ok || len(v) == 0 {
+				return v, ok, nil
 			}
 			v, err = tx.db.convertV3toV2(v)
 			if err != nil {
@@ -204,8 +215,8 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if err != nil {
 				return nil, false, err
 			}
-			if !ok {
-				return nil, ok, nil
+			if !ok || len(v) == 0 {
+				return v, ok, nil
 			}
 			v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
 			if err != nil {
@@ -235,7 +246,7 @@ type Cursor struct {
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.UnaryStream[uint64], err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (timestamps kv.U64Stream, err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case LogTopicIdx:
@@ -258,23 +269,33 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
 	} else {
-		var table string
+		var bm *roaring64.Bitmap
 		switch name {
 		case LogTopicIdx:
-			table = kv.LogTopicIndex
+			bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
+			if err != nil {
+				return nil, err
+			}
+			bm = bitmapdb.CastBitmapTo64(bm32)
 		case LogAddrIdx:
-			table = kv.LogAddressIdx
+			bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
+			if err != nil {
+				return nil, err
+			}
+			bm = bitmapdb.CastBitmapTo64(bm32)
 		case TracesFromIdx:
-			table = kv.TracesFromIdx
+			bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
+			if err != nil {
+				return nil, err
+			}
 		case TracesToIdx:
-			table = kv.TracesToIdx
+			bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
-		bm, err := bitmapdb.Get64(tx, table, key, fromTs, toTs)
-		if err != nil {
-			return nil, err
-		}
-		return kv.StreamArray(bm.ToArray()), nil
+		return bitmapdb.NewBitmapStream(bm), nil
 	}
 }

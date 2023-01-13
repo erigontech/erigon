@@ -18,6 +18,7 @@ package rpc
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync/atomic"
 
@@ -52,6 +53,7 @@ type Server struct {
 	batchConcurrency uint
 	disableStreaming bool
 	traceRequests    bool // Whether to print requests at INFO level
+	batchLimit       int  // Maximum number of requests in a batch
 }
 
 // NewServer creates a new server instance with no registered handlers.
@@ -67,6 +69,11 @@ func NewServer(batchConcurrency uint, traceRequests, disableStreaming bool) *Ser
 // SetAllowList sets the allow list for methods that are handled by this server
 func (s *Server) SetAllowList(allowList AllowList) {
 	s.methodAllowList = allowList
+}
+
+// SetBatchLimit sets limit of number of requests in a batch
+func (s *Server) SetBatchLimit(limit int) {
+	s.batchLimit = limit
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -120,7 +127,11 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 		return
 	}
 	if batch {
-		h.handleBatch(reqs)
+		if s.batchLimit > 0 && len(reqs) > s.batchLimit {
+			codec.writeJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded: %d requests given", s.batchLimit, len(reqs))))
+		} else {
+			h.handleBatch(reqs)
+		}
 	} else {
 		h.handleMsg(reqs[0], stream)
 	}

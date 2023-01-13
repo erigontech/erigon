@@ -81,17 +81,17 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []c
 }
 
 // InsertExecutionPayloads insert a segment of execution payloads
-func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.ExecutionPayload) error {
+func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block) error {
 	headers := make([]*types.Header, 0, len(payloads))
 	bodies := make([]*types.RawBody, 0, len(payloads))
 	blockHashes := make([]common.Hash, 0, len(payloads))
 	blockNumbers := make([]uint64, 0, len(payloads))
 
 	for _, payload := range payloads {
-		headers = append(headers, payload.Header())
-		bodies = append(bodies, payload.BlockBody())
-		blockHashes = append(blockHashes, payload.BlockHash)
-		blockNumbers = append(blockNumbers, payload.BlockNumber)
+		headers = append(headers, payload.Header)
+		bodies = append(bodies, payload.Body)
+		blockHashes = append(blockHashes, payload.Header.BlockHashCL)
+		blockNumbers = append(blockNumbers, payload.NumberU64())
 	}
 
 	if err := ec.InsertHeaders(headers); err != nil {

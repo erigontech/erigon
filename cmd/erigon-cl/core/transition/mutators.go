@@ -1,15 +1,21 @@
 package transition
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 const (
 	FAR_FUTURE_EPOCH                    = (1<<64 - 1)
-	MAX_SEED_LOOKAHEAD                  = 4
-	MIN_PER_EPOCH_CHURN_LIMIT           = 4
+	MAX_SEED_LOOKAHEAD                  = (1 << 2)
+	MIN_PER_EPOCH_CHURN_LIMIT           = (1 << 2)
 	CHURN_LIMIT_QUOTIENT                = (1 << 16)
 	MIN_VALIDATOR_WITHDRAWABILITY_DELAY = (1 << 8)
+	EPOCHS_PER_SLASHINGS_VECTOR         = (1 << 13)
+	MIN_SLASHING_PENALTY_QUOTIENT       = (1 << 7)
+	WHISTLEBLOWER_REWARD_QUOTIENT       = (1 << 9)
+	PROPOSER_REWARD_QUOTIENT            = (1 << 3)
 )
 
 func IncreaseBalance(state *state.BeaconState, index, delta uint64) {
@@ -68,4 +74,31 @@ func InitiateValidatorExit(state *state.BeaconState, index uint64) {
 
 	validator.ExitEpoch = exitQueueEpoch
 	validator.WithdrawableEpoch = exitQueueEpoch + MIN_VALIDATOR_WITHDRAWABILITY_DELAY
+}
+
+func SlashValidator(state *state.BeaconState, slashedInd, whistleblowerInd uint64) error {
+	epoch := GetEpochAtSlot(state.Slot())
+	InitiateValidatorExit(state, slashedInd)
+	newValidator := *state.ValidatorAt(int(slashedInd))
+	newValidator.Slashed = true
+	withdrawEpoch := epoch + EPOCHS_PER_SLASHINGS_VECTOR
+	if newValidator.WithdrawableEpoch < withdrawEpoch {
+		newValidator.WithdrawableEpoch = withdrawEpoch
+	}
+	state.SetValidatorAt(int(slashedInd), &newValidator)
+	state.Slashings()[epoch%EPOCHS_PER_SLASHINGS_VECTOR] += newValidator.EffectiveBalance
+	DecreaseBalance(state, slashedInd, newValidator.EffectiveBalance/MIN_SLASHING_PENALTY_QUOTIENT)
+
+	proposerInd, err := GetBeaconProposerIndex(state)
+	if err != nil {
+		return fmt.Errorf("unable to get beacon proposer index: %v", err)
+	}
+	if whistleblowerInd == 0 {
+		whistleblowerInd = proposerInd
+	}
+	whistleBlowerReward := newValidator.EffectiveBalance / WHISTLEBLOWER_REWARD_QUOTIENT
+	proposerReward := whistleBlowerReward / PROPOSER_REWARD_QUOTIENT
+	IncreaseBalance(state, proposerInd, proposerReward)
+	IncreaseBalance(state, whistleblowerInd, whistleBlowerReward)
+	return nil
 }

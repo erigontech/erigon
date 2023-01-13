@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
@@ -42,7 +43,7 @@ type BeaconBody struct {
 	// A summary of the current state of the beacon chain
 	SyncAggregate *SyncAggregate
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
-	ExecutionPayload *ExecutionPayload
+	ExecutionPayload *Eth1Block
 	// The version of the beacon chain
 	version clparams.StateVersion
 }
@@ -66,7 +67,7 @@ func (b *BeaconBody) Version() clparams.StateVersion {
 
 // SSZ methods
 
-func (b *BeaconBody) GetUnderlyingSSZ() ObjectSSZ {
+func (b *BeaconBody) GetUnderlyingSSZ() ssz_utils.ObjectSSZ {
 	switch b.version {
 	case clparams.Phase0Version:
 		return &BeaconBodyPhase0{
@@ -130,7 +131,7 @@ func (b *BeaconBody) HashTreeRoot() ([32]byte, error) {
 	return b.GetUnderlyingSSZ().HashTreeRoot()
 }
 
-func (b *BeaconBlock) GetUnderlyingSSZ() ObjectSSZ {
+func (b *BeaconBlock) GetUnderlyingSSZ() ssz_utils.ObjectSSZ {
 	switch b.Version() {
 	case clparams.Phase0Version:
 		return &BeaconBlockPhase0{
@@ -182,7 +183,7 @@ func (b *BeaconBlock) HashTreeRoot() ([32]byte, error) {
 	return b.GetUnderlyingSSZ().HashTreeRoot()
 }
 
-func (b *SignedBeaconBlock) GetUnderlyingSSZ() ObjectSSZ {
+func (b *SignedBeaconBlock) GetUnderlyingSSZ() ssz_utils.ObjectSSZ {
 	switch b.Version() {
 	case clparams.Phase0Version:
 		return &SignedBeaconBlockPhase0{
@@ -251,9 +252,11 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		Version:           uint8(b.Version()),
 		Eth2BlockRoot:     blockRoot,
 	}
+
 	if b.Version() >= clparams.BellatrixVersion {
-		storageObject.Eth1Number = b.Block.Body.ExecutionPayload.BlockNumber
-		storageObject.Eth1BlockHash = b.Block.Body.ExecutionPayload.BlockHash
+		eth1Block := b.Block.Body.ExecutionPayload
+		storageObject.Eth1Number = eth1Block.NumberU64()
+		storageObject.Eth1BlockHash = eth1Block.Header.BlockHashCL
 	}
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {
@@ -299,7 +302,7 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 	}, storageObject.Eth1Number, storageObject.Eth1BlockHash, storageObject.Eth2BlockRoot, nil
 }
 
-func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
+func NewSignedBeaconBlock(obj interface{}) *SignedBeaconBlock {
 	switch block := obj.(type) {
 	case *SignedBeaconBlockPhase0:
 		return &SignedBeaconBlock{
@@ -321,7 +324,7 @@ func NewSignedBeaconBlock(obj ObjectSSZ) *SignedBeaconBlock {
 	}
 }
 
-func NewBeaconBlock(obj ObjectSSZ) *BeaconBlock {
+func NewBeaconBlock(obj ssz_utils.ObjectSSZ) *BeaconBlock {
 	switch block := obj.(type) {
 	case *BeaconBlockPhase0:
 		return &BeaconBlock{
@@ -353,7 +356,7 @@ func NewBeaconBlock(obj ObjectSSZ) *BeaconBlock {
 	}
 }
 
-func NewBeaconBody(obj ObjectSSZ) *BeaconBody {
+func NewBeaconBody(obj ssz_utils.ObjectSSZ) *BeaconBody {
 	switch body := obj.(type) {
 	case *BeaconBodyPhase0:
 		return &BeaconBody{

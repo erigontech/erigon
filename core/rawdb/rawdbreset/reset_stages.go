@@ -305,7 +305,7 @@ func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) erro
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
 			if err := clearTables(ctx, db, tx, Tables[st]...); err != nil {
-				return nil
+				return err
 			}
 			if err := clearStageProgress(tx, stagesList...); err != nil {
 				return err
