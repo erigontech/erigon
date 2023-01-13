@@ -19,6 +19,8 @@ package abi
 import (
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -195,11 +197,11 @@ var packUnpackTests = []packUnpackTest{
 	{
 		def:      `[{"type": "address"}]`,
 		packed:   "0000000000000000000000000100000000000000000000000000000000000000",
-		unpacked: common.Address{1},
+		unpacked: libcommon.Address{1},
 	},
 	{
 		def:      `[{"type": "address[]"}]`,
-		unpacked: []common.Address{{1}, {2}},
+		unpacked: []libcommon.Address{{1}, {2}},
 		packed: "0000000000000000000000000000000000000000000000000000000000000020" +
 			"0000000000000000000000000000000000000000000000000000000000000002" +
 			"0000000000000000000000000100000000000000000000000000000000000000" +
@@ -867,8 +869,8 @@ var packUnpackTests = []packUnpackTest{
 			C []byte
 			D []string
 			E []*big.Int
-			F []common.Address
-		}{"foobar", 1, []byte{1}, []string{"foo", "bar"}, []*big.Int{big.NewInt(1), big.NewInt(-1)}, []common.Address{{1}, {2}}},
+			F []libcommon.Address
+		}{"foobar", 1, []byte{1}, []string{"foo", "bar"}, []*big.Int{big.NewInt(1), big.NewInt(-1)}, []libcommon.Address{{1}, {2}}},
 		packed: "0000000000000000000000000000000000000000000000000000000000000020" + // struct a
 			"00000000000000000000000000000000000000000000000000000000000000c0" + // struct[a] offset
 			"0000000000000000000000000000000000000000000000000000000000000001" + // struct[b]
@@ -891,8 +893,8 @@ var packUnpackTests = []packUnpackTest{
 			"0000000000000000000000000000000000000000000000000000000000000001" + // 1
 			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" + // -1
 			"0000000000000000000000000000000000000000000000000000000000000002" + // struct[f] length
-			"0000000000000000000000000100000000000000000000000000000000000000" + // common.Address{1}
-			"0000000000000000000000000200000000000000000000000000000000000000", // common.Address{2}
+			"0000000000000000000000000100000000000000000000000000000000000000" + // libcommon.Address{1}
+			"0000000000000000000000000200000000000000000000000000000000000000", // libcommon.Address{2}
 	},
 	{
 		def: `[{"components": [{ "type": "tuple","components": [{"name": "a","type": "uint256"},	

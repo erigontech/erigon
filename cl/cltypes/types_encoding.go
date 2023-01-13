@@ -378,6 +378,7 @@ func (s *SyncAggregate) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 
 	return
 }
+
 // MarshalSSZ ssz marshals the BeaconBodyBellatrix object
 func (b *BeaconBodyBellatrix) MarshalSSZ() ([]byte, error) {
 	return ssz.MarshalSSZ(b)

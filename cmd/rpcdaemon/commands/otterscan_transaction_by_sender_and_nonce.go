@@ -6,14 +6,15 @@ import (
 	"sort"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
+func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr libcommon.Address, nonce uint64) (*libcommon.Hash, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -137,14 +138,14 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	return &txHash, nil
 }
 
-func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr common.Address, nonce uint64, blockNum uint64) (bool, common.Hash, error) {
+func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr libcommon.Address, nonce uint64, blockNum uint64) (bool, libcommon.Hash, error) {
 	hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
-		return false, common.Hash{}, err
+		return false, libcommon.Hash{}, err
 	}
 	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
-		return false, common.Hash{}, err
+		return false, libcommon.Hash{}, err
 	}
 
 	txs := block.Transactions()
@@ -159,5 +160,5 @@ func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr commo
 		}
 	}
 
-	return false, common.Hash{}, nil
+	return false, libcommon.Hash{}, nil
 }

@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -33,15 +35,15 @@ const SubscriptionABI = "[{\"anonymous\":false,\"inputs\":[],\"name\":\"Subscrip
 var SubscriptionBin = "0x6080604052348015600f57600080fd5b50607180601d6000396000f3fe6080604052348015600f57600080fd5b506040517f67abc7edb0ab50964ef0e90541d39366b9c69f6f714520f2ff4570059ee8ad8090600090a100fea264697066735822122045a70478ef4f6a283c0e153ad72ec6731dc9ee2e1c191c7334b74dea21a92eaf64736f6c634300080c0033"
 
 // DeploySubscription deploys a new Ethereum contract, binding an instance of Subscription to it.
-func DeploySubscription(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Subscription, error) {
+func DeploySubscription(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Subscription, error) {
 	parsed, err := abi.JSON(strings.NewReader(SubscriptionABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(SubscriptionBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 	return address, tx, &Subscription{SubscriptionCaller: SubscriptionCaller{contract: contract}, SubscriptionTransactor: SubscriptionTransactor{contract: contract}, SubscriptionFilterer: SubscriptionFilterer{contract: contract}}, nil
 }
@@ -106,7 +108,7 @@ type SubscriptionTransactorRaw struct {
 }
 
 // NewSubscription creates a new instance of Subscription, bound to a specific deployed contract.
-func NewSubscription(address common.Address, backend bind.ContractBackend) (*Subscription, error) {
+func NewSubscription(address libcommon.Address, backend bind.ContractBackend) (*Subscription, error) {
 	contract, err := bindSubscription(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func NewSubscription(address common.Address, backend bind.ContractBackend) (*Sub
 }
 
 // NewSubscriptionCaller creates a new read-only instance of Subscription, bound to a specific deployed contract.
-func NewSubscriptionCaller(address common.Address, caller bind.ContractCaller) (*SubscriptionCaller, error) {
+func NewSubscriptionCaller(address libcommon.Address, caller bind.ContractCaller) (*SubscriptionCaller, error) {
 	contract, err := bindSubscription(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func NewSubscriptionCaller(address common.Address, caller bind.ContractCaller) (
 }
 
 // NewSubscriptionTransactor creates a new write-only instance of Subscription, bound to a specific deployed contract.
-func NewSubscriptionTransactor(address common.Address, transactor bind.ContractTransactor) (*SubscriptionTransactor, error) {
+func NewSubscriptionTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*SubscriptionTransactor, error) {
 	contract, err := bindSubscription(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +135,7 @@ func NewSubscriptionTransactor(address common.Address, transactor bind.ContractT
 }
 
 // NewSubscriptionFilterer creates a new log filterer instance of Subscription, bound to a specific deployed contract.
-func NewSubscriptionFilterer(address common.Address, filterer bind.ContractFilterer) (*SubscriptionFilterer, error) {
+func NewSubscriptionFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*SubscriptionFilterer, error) {
 	contract, err := bindSubscription(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func NewSubscriptionFilterer(address common.Address, filterer bind.ContractFilte
 }
 
 // bindSubscription binds a generic wrapper to an already deployed contract.
-func bindSubscription(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindSubscription(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(SubscriptionABI))
 	if err != nil {
 		return nil, err

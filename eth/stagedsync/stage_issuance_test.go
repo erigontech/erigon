@@ -5,13 +5,14 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestIssuanceStage(t *testing.T) {
@@ -46,8 +47,8 @@ func TestIssuanceStage(t *testing.T) {
 	rawdb.WriteCanonicalHash(tx, header2.Hash(), header2.Number.Uint64())
 	rawdb.WriteCanonicalHash(tx, header3.Hash(), header3.Number.Uint64())
 	// Execute stage issuance
-	err := SpawnStageIssuance(StageIssuanceCfg(db, &params.ChainConfig{
-		Consensus: params.EtHashConsensus,
+	err := SpawnStageIssuance(StageIssuanceCfg(db, &chain.Config{
+		Consensus: chain.EtHashConsensus,
 	}, snapshotsync.NewBlockReader(), true), &StageState{
 		ID: stages.Issuance,
 	}, tx, ctx)

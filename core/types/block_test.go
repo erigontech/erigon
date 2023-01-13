@@ -25,11 +25,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -53,15 +54,15 @@ func TestBlockEncoding(t *testing.T) {
 	check("Difficulty", block.Difficulty(), big.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(21000))
-	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
-	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
-	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
-	check("Hash", block.Hash(), common.HexToHash("0a5843ac1cb04865017cb35a57b50b07084e5fcee39b5acadade33149f4fff9e"))
+	check("Coinbase", block.Coinbase(), libcommon.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
+	check("MixDigest", block.MixDigest(), libcommon.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
+	check("Root", block.Root(), libcommon.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
+	check("Hash", block.Hash(), libcommon.HexToHash("0a5843ac1cb04865017cb35a57b50b07084e5fcee39b5acadade33149f4fff9e"))
 	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 
-	var tx1 Transaction = NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
+	var tx1 Transaction = NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), uint256.NewInt(10), 50000, uint256.NewInt(10), nil)
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 	check("len(Transactions)", len(block.Transactions()), 1)
 	check("Transactions[0].Hash", block.Transactions()[0].Hash(), tx1.Hash())
@@ -90,26 +91,26 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	check("Difficulty", block.Difficulty(), big.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(21000))
-	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
-	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
-	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
-	check("Hash", block.Hash(), common.HexToHash("c7252048cd273fe0dac09650027d07f0e3da4ee0675ebbb26627cea92729c372"))
+	check("Coinbase", block.Coinbase(), libcommon.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
+	check("MixDigest", block.MixDigest(), libcommon.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
+	check("Root", block.Root(), libcommon.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
+	check("Hash", block.Hash(), libcommon.HexToHash("c7252048cd273fe0dac09650027d07f0e3da4ee0675ebbb26627cea92729c372"))
 	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 	check("BaseFee", block.BaseFee(), new(big.Int).SetUint64(params.InitialBaseFee))
 
-	var tx1 Transaction = NewTransaction(0, common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), new(uint256.Int).SetUint64(10), 50000, new(uint256.Int).SetUint64(10), nil)
+	var tx1 Transaction = NewTransaction(0, libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"), new(uint256.Int).SetUint64(10), 50000, new(uint256.Int).SetUint64(10), nil)
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 	accesses := AccessList{AccessTuple{
 		Address: addr,
-		StorageKeys: []common.Hash{
+		StorageKeys: []libcommon.Hash{
 			{0},
 		},
 	}}
-	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
+	to := libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	feeCap, _ := uint256.FromBig(block.BaseFee())
 	var tx2 Transaction = &DynamicFeeTransaction{
 		CommonTx: CommonTx{
@@ -156,15 +157,15 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 	check("Difficulty", block.Difficulty(), big.NewInt(131072))
 	check("GasLimit", block.GasLimit(), uint64(3141592))
 	check("GasUsed", block.GasUsed(), uint64(42000))
-	check("Coinbase", block.Coinbase(), common.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
-	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
-	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
+	check("Coinbase", block.Coinbase(), libcommon.HexToAddress("8888f1f195afa192cfee860698584c030f4c9db1"))
+	check("MixDigest", block.MixDigest(), libcommon.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
+	check("Root", block.Root(), libcommon.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Nonce", block.NonceU64(), uint64(0xa13a5a8c8f2bb1c4))
 	check("Time", block.Time(), uint64(1426516743))
 	check("Size", block.Size(), common.StorageSize(len(blockEnc)))
 
 	// Create legacy tx.
-	to := common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
+	to := libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 	ten := new(uint256.Int).SetUint64(10)
 	var tx1 Transaction = &LegacyTx{
 		CommonTx: CommonTx{
@@ -180,7 +181,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 
 	chainID, _ := uint256.FromBig(big.NewInt(1))
 	// Create ACL tx.
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 	var tx2 Transaction = &AccessListTx{
 		ChainID: chainID,
 		LegacyTx: LegacyTx{
@@ -191,7 +192,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 			},
 			GasPrice: ten,
 		},
-		AccessList: AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}},
+		AccessList: AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
 	}
 	sig2 := common.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
 	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
@@ -213,7 +214,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 func TestUncleHash(t *testing.T) {
 	uncles := make([]*Header, 0)
 	h := CalcUncleHash(uncles)
-	exp := common.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+	exp := libcommon.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 	if h != exp {
 		t.Fatalf("empty uncle hash is wrong, got %x != %x", h, exp)
 	}
@@ -253,7 +254,7 @@ func makeBenchBlock() *Block {
 		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
 		price := uint256.NewInt(300000)
 		data := make([]byte, 100)
-		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
+		tx := NewTransaction(uint64(i), libcommon.Address{}, amount, 123457, price, data)
 		signedTx, err := SignTx(tx, *signer, key)
 		if err != nil {
 			panic(err)
@@ -278,12 +279,12 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	body := &RawBody{
 		Uncles: []*Header{
 			{
-				ParentHash:  common.Hash{},
-				UncleHash:   common.Hash{},
-				Coinbase:    common.Address{},
-				Root:        common.Hash{},
-				TxHash:      common.Hash{},
-				ReceiptHash: common.Hash{},
+				ParentHash:  libcommon.Hash{},
+				UncleHash:   libcommon.Hash{},
+				Coinbase:    libcommon.Address{},
+				Root:        libcommon.Hash{},
+				TxHash:      libcommon.Hash{},
+				ReceiptHash: libcommon.Hash{},
 				Bloom:       Bloom{},
 				Difficulty:  big.NewInt(100),
 				Number:      big.NewInt(1000),
@@ -319,7 +320,7 @@ func TestCanEncodeAndDecodeRawBody(t *testing.T) {
 	}
 	rlpBytes := common.CopyBytes(writer.Bytes())
 	writer.Reset()
-	writer.WriteString(hexutil.Encode(rlpBytes))
+	writer.WriteString(hexutility.Encode(rlpBytes))
 
 	var rawBody RawBody
 	fromHex := common.CopyBytes(common.FromHex(writer.String()))
@@ -361,12 +362,12 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	require.True(t, ok)
 
 	header := Header{
-		ParentHash:  common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
-		UncleHash:   common.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
-		Coinbase:    common.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
-		Root:        common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
-		TxHash:      common.HexToHash("0x6a35133fbff7ea2cb5ee7635c9fb623f96d31d689d806a2bfe40a2b1d90ee99c"),
-		ReceiptHash: common.HexToHash("0x324f54860e214ea896ea7a05bda30f85541be3157de77a9059a04fdb1e86badd"),
+		ParentHash:  libcommon.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
+		UncleHash:   libcommon.HexToHash("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+		Coinbase:    libcommon.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
+		Root:        libcommon.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
+		TxHash:      libcommon.HexToHash("0x6a35133fbff7ea2cb5ee7635c9fb623f96d31d689d806a2bfe40a2b1d90ee99c"),
+		ReceiptHash: libcommon.HexToHash("0x324f54860e214ea896ea7a05bda30f85541be3157de77a9059a04fdb1e86badd"),
 		Difficulty:  difficulty,
 		Number:      big.NewInt(24679923),
 		GasLimit:    30_000_000,
@@ -389,16 +390,16 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 
 func TestWithdrawalsEncoding(t *testing.T) {
 	header := Header{
-		ParentHash: common.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
-		Coinbase:   common.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
-		Root:       common.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
+		ParentHash: libcommon.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
+		Coinbase:   libcommon.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
+		Root:       libcommon.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
 		Difficulty: common.Big0,
 		Number:     big.NewInt(20_000_000),
 		GasLimit:   30_000_000,
 		GasUsed:    3_074_345,
 		Time:       1666343339,
 		Extra:      make([]byte, 0),
-		MixDigest:  common.HexToHash("0x7f04e338b206ef863a1fad30e082bbb61571c74e135df8d1677e3f8b8171a09b"),
+		MixDigest:  libcommon.HexToHash("0x7f04e338b206ef863a1fad30e082bbb61571c74e135df8d1677e3f8b8171a09b"),
 		BaseFee:    big.NewInt(7_000_000_000),
 	}
 
@@ -406,13 +407,13 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	withdrawals[0] = &Withdrawal{
 		Index:     44555666,
 		Validator: 89,
-		Address:   common.HexToAddress("0x690b9a9e9aa1c9db991c7721a92d351db4fac990"),
+		Address:   libcommon.HexToAddress("0x690b9a9e9aa1c9db991c7721a92d351db4fac990"),
 		Amount:    *uint256.NewInt(2 * params.Ether),
 	}
 	withdrawals[1] = &Withdrawal{
 		Index:     44555667,
 		Validator: 37,
-		Address:   common.HexToAddress("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5"),
+		Address:   libcommon.HexToAddress("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5"),
 		Amount:    *uint256.NewInt(5 * params.Ether),
 	}
 

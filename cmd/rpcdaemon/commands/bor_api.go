@@ -1,8 +1,9 @@
 package commands
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -11,11 +12,11 @@ import (
 type BorAPI interface {
 	// Bor snapshot related (see ./bor_snapshot.go)
 	GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error)
-	GetAuthor(number *rpc.BlockNumber) (*common.Address, error)
-	GetSnapshotAtHash(hash common.Hash) (*Snapshot, error)
-	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
-	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
-	GetCurrentProposer() (common.Address, error)
+	GetAuthor(number *rpc.BlockNumber) (*libcommon.Address, error)
+	GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error)
+	GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error)
+	GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, error)
+	GetCurrentProposer() (libcommon.Address, error)
 	GetCurrentValidators() ([]*bor.Validator, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }

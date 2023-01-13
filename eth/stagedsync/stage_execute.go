@@ -10,17 +10,19 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	commonold "github.com/ledgerwatch/erigon/common"
-	ecom "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -39,11 +41,9 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -64,7 +64,7 @@ type WithSnapshots interface {
 }
 
 type headerDownloader interface {
-	ReportBadHeaderPoS(badHeader, lastValidAncestor ecom.Hash)
+	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
 type ExecuteBlockCfg struct {
@@ -72,7 +72,7 @@ type ExecuteBlockCfg struct {
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook ChangeSetHook
-	chainConfig   *params.ChainConfig
+	chainConfig   *chain.Config
 	engine        consensus.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
@@ -93,7 +93,7 @@ func StageExecuteBlocksCfg(
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	accumulator *shards.Accumulator,
@@ -148,12 +148,12 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash commonold.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
+	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
 		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
@@ -618,7 +618,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address commonold.Address
+				var address common.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -646,7 +646,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				}
 			} else {
 				if accumulator != nil {
-					var address commonold.Address
+					var address common.Address
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
@@ -657,9 +657,9 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 			return nil
 		}
 		if accumulator != nil {
-			var address commonold.Address
+			var address common.Address
 			var incarnation uint64
-			var location commonold.Hash
+			var location common.Hash
 			copy(address[:], k[:length.Addr])
 			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
 			copy(location[:], k[length.Addr+length.Incarnation:])
@@ -696,7 +696,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	// Truncate CallTraceSet
-	keyStart := common.EncodeTs(u.UnwindPoint + 1)
+	keyStart := hexutility.EncodeTs(u.UnwindPoint + 1)
 	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
@@ -716,7 +716,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address commonold.Address
+	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {

@@ -11,18 +11,19 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 var ErrTraceLimitReached = errors.New("the number of logs reached the specified limit")
 
 // Storage represents a contract's storage.
-type Storage map[common.Hash]common.Hash
+type Storage map[libcommon.Hash]libcommon.Hash
 
 // Copy duplicates the current storage.
 func (s Storage) Copy() Storage {
@@ -42,7 +43,7 @@ type LogConfig struct {
 	Debug             bool // print output during capture end
 	Limit             int  // maximum length of output, but zero means unlimited
 	// Chain overrides, can be used to execute a trace using future fork rules
-	Overrides *params.ChainConfig `json:"overrides,omitempty"`
+	Overrides *chain.Config `json:"overrides,omitempty"`
 }
 
 //go:generate gencodec -type StructLog -field-override structLogMarshaling -out gen_structlog.go
@@ -50,18 +51,18 @@ type LogConfig struct {
 // StructLog is emitted to the EVM each cycle and lists information about the current internal state
 // prior to the execution of the statement.
 type StructLog struct {
-	Pc            uint64                      `json:"pc"`
-	Op            vm.OpCode                   `json:"op"`
-	Gas           uint64                      `json:"gas"`
-	GasCost       uint64                      `json:"gasCost"`
-	Memory        []byte                      `json:"memory"`
-	MemorySize    int                         `json:"memSize"`
-	Stack         []*big.Int                  `json:"stack"`
-	ReturnData    []byte                      `json:"returnData"`
-	Storage       map[common.Hash]common.Hash `json:"-"`
-	Depth         int                         `json:"depth"`
-	RefundCounter uint64                      `json:"refund"`
-	Err           error                       `json:"-"`
+	Pc            uint64                            `json:"pc"`
+	Op            vm.OpCode                         `json:"op"`
+	Gas           uint64                            `json:"gas"`
+	GasCost       uint64                            `json:"gasCost"`
+	Memory        []byte                            `json:"memory"`
+	MemorySize    int                               `json:"memSize"`
+	Stack         []*big.Int                        `json:"stack"`
+	ReturnData    []byte                            `json:"returnData"`
+	Storage       map[libcommon.Hash]libcommon.Hash `json:"-"`
+	Depth         int                               `json:"depth"`
+	RefundCounter uint64                            `json:"refund"`
+	Err           error                             `json:"-"`
 }
 
 // overrides for gencodec
@@ -110,7 +111,7 @@ type StructLogRes struct {
 type StructLogger struct {
 	cfg LogConfig
 
-	storage map[common.Address]Storage
+	storage map[libcommon.Address]Storage
 	logs    []StructLog
 	output  []byte
 	err     error
@@ -120,7 +121,7 @@ type StructLogger struct {
 // NewStructLogger returns a new logger
 func NewStructLogger(cfg *LogConfig) *StructLogger {
 	logger := &StructLogger{
-		storage: make(map[common.Address]Storage),
+		storage: make(map[libcommon.Address]Storage),
 	}
 	if cfg != nil {
 		logger.cfg = *cfg
@@ -133,12 +134,12 @@ func (l *StructLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *StructLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *StructLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
 // CaptureEnter implements the Tracer interface to initialize the tracing operation for an internal call.
-func (l *StructLogger) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -179,7 +180,7 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && stack.Len() >= 1 {
 			var (
-				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
 				value   uint256.Int
 			)
 			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
@@ -188,8 +189,8 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && stack.Len() >= 2 {
 			var (
-				value   = common.Hash(stack.Data[stack.Len()-2].Bytes32())
-				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   = libcommon.Hash(stack.Data[stack.Len()-2].Bytes32())
+				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
 			)
 			l.storage[contract.Address()][address] = value
 		}
@@ -354,7 +355,7 @@ func (t *mdLogger) CaptureTxStart(gasLimit uint64) {}
 
 func (t *mdLogger) CaptureTxEnd(restGas uint64) {}
 
-func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
+func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
 	if !create {
 		fmt.Fprintf(t.out, "From: `%v`\nTo: `%v`\nData: `0x%x`\nGas: `%d`\nValue `%v` wei\n",
 			from.String(), to.String(),
@@ -371,12 +372,12 @@ func (t *mdLogger) captureStartOrEnter(from, to common.Address, create bool, inp
 `)
 }
 
-func (t *mdLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	t.env = env
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
-func (t *mdLogger) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 

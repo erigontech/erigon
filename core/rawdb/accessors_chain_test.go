@@ -25,15 +25,16 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.
@@ -58,7 +59,7 @@ func TestHeaderStorage(t *testing.T) {
 		hasher := sha3.NewLegacyKeccak256()
 		hasher.Write(entry)
 
-		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
+		if hash := libcommon.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
 			t.Fatalf("Retrieved RLP header mismatch: have %v, want %v", entry, header)
 		}
 	}
@@ -96,7 +97,7 @@ func TestBodyStorage(t *testing.T) {
 	// Create a test body to move around the database and make sure it's really new
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
-	hash := common.BytesToHash(hasher.Sum(nil))
+	hash := libcommon.BytesToHash(hasher.Sum(nil))
 
 	if entry := ReadCanonicalBodyWithTransactions(tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
@@ -113,7 +114,7 @@ func TestBodyStorage(t *testing.T) {
 		hasher := sha3.NewLegacyKeccak256()
 		hasher.Write(entry)
 
-		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
+		if calc := libcommon.BytesToHash(hasher.Sum(nil)); calc != hash {
 			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
 		}
 	}
@@ -239,7 +240,7 @@ func TestTdStorage(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	// Create a test TD to move around the database and make sure it's really new
-	hash, td := common.Hash{}, big.NewInt(314)
+	hash, td := libcommon.Hash{}, big.NewInt(314)
 	entry, err := ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
@@ -280,12 +281,12 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	// Create a test canonical number and assinged hash to move around
-	hash, number := common.Hash{0: 0xff}, uint64(314)
+	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
 	entry, err := ReadCanonicalHash(tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry != (common.Hash{}) {
+	if entry != (libcommon.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
@@ -297,7 +298,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry == (common.Hash{}) {
+	if entry == (libcommon.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
 	} else if entry != hash {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
@@ -311,7 +312,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if entry != (common.Hash{}) {
+	if entry != (libcommon.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
 	}
 }
@@ -324,10 +325,10 @@ func TestHeadStorage(t *testing.T) {
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
 
 	// Check that no head entries are in a pristine database
-	if entry := ReadHeadHeaderHash(db); entry != (common.Hash{}) {
+	if entry := ReadHeadHeaderHash(db); entry != (libcommon.Hash{}) {
 		t.Fatalf("Non head header entry returned: %v", entry)
 	}
-	if entry := ReadHeadBlockHash(db); entry != (common.Hash{}) {
+	if entry := ReadHeadBlockHash(db); entry != (libcommon.Hash{}) {
 		t.Fatalf("Non head block entry returned: %v", entry)
 	}
 	// Assign separate entries for the head header and block
@@ -349,8 +350,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require := require.New(t)
 
 	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
-	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
+	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
+	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
 
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 
@@ -359,24 +360,24 @@ func TestBlockReceiptStorage(t *testing.T) {
 		Status:            types.ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
 		Logs: []*types.Log{
-			{Address: common.BytesToAddress([]byte{0x11})},
-			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
+			{Address: libcommon.BytesToAddress([]byte{0x11})},
+			{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
 		},
 		TxHash:          tx1.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
 	}
 	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
-		PostState:         common.Hash{2}.Bytes(),
+		PostState:         libcommon.Hash{2}.Bytes(),
 		CumulativeGasUsed: 2,
 		Logs: []*types.Log{
-			{Address: common.BytesToAddress([]byte{0x22})},
-			{Address: common.BytesToAddress([]byte{0x02, 0x22})},
+			{Address: libcommon.BytesToAddress([]byte{0x22})},
+			{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
 		},
 		TxHash:          tx2.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:         222222,
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
@@ -384,7 +385,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	header := &types.Header{Number: big.NewInt(0)}
 
 	// Check that no receipt entries are in a pristine database
-	hash := header.Hash() //common.BytesToHash([]byte{0x03, 0x14})
+	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
 	b, senders, err := ReadBlockWithSenders(tx, hash, 0)
 	require.NoError(err)
 	//require.NotNil(t, b)
@@ -444,14 +445,14 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	w := types.Withdrawal{
 		Index:     uint64(15),
 		Validator: uint64(5500),
-		Address:   common.Address{0: 0xff},
+		Address:   libcommon.Address{0: 0xff},
 		Amount:    *uint256.NewInt(1000),
 	}
 
 	w2 := types.Withdrawal{
 		Index:     uint64(16),
 		Validator: uint64(5501),
-		Address:   common.Address{0: 0xff},
+		Address:   libcommon.Address{0: 0xff},
 		Amount:    *uint256.NewInt(1001),
 	}
 
@@ -521,13 +522,13 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.NotNil(rw)
 	require.Equal(uint64(15), rw.Index)
 	require.Equal(uint64(5500), rw.Validator)
-	require.Equal(common.Address{0: 0xff}, rw.Address)
+	require.Equal(libcommon.Address{0: 0xff}, rw.Address)
 	require.Equal(*uint256.NewInt(1000), rw.Amount)
 
 	require.NotNil(rw2)
 	require.Equal(uint64(16), rw2.Index)
 	require.Equal(uint64(5501), rw2.Validator)
-	require.Equal(common.Address{0: 0xff}, rw2.Address)
+	require.Equal(libcommon.Address{0: 0xff}, rw2.Address)
 	require.Equal(*uint256.NewInt(1001), rw2.Amount)
 
 	// Delete the block and verify the execution

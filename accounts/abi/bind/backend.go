@@ -21,8 +21,9 @@ import (
 	"errors"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -46,7 +47,7 @@ var (
 type ContractCaller interface {
 	// CodeAt returns the code of the given account. This is needed to differentiate
 	// between contract internal errors and the local chain being out of sync.
-	CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error)
+	CodeAt(ctx context.Context, contract libcommon.Address, blockNumber *big.Int) ([]byte, error)
 	// ContractCall executes an Ethereum contract call with the specified data as the
 	// input.
 	CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
@@ -57,7 +58,7 @@ type ContractCaller interface {
 // If the backend does not support the pending state, Call returns ErrNoPendingState.
 type PendingContractCaller interface {
 	// PendingCodeAt returns the code of the given account in the pending state.
-	PendingCodeAt(ctx context.Context, contract common.Address) ([]byte, error)
+	PendingCodeAt(ctx context.Context, contract libcommon.Address) ([]byte, error)
 	// PendingCallContract executes an Ethereum contract call against the pending state.
 	PendingCallContract(ctx context.Context, call ethereum.CallMsg) ([]byte, error)
 }
@@ -68,9 +69,9 @@ type PendingContractCaller interface {
 // to the transactor to decide.
 type ContractTransactor interface {
 	// PendingCodeAt returns the code of the given account in the pending state.
-	PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error)
+	PendingCodeAt(ctx context.Context, account libcommon.Address) ([]byte, error)
 	// PendingNonceAt retrieves the current pending nonce associated with an account.
-	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
+	PendingNonceAt(ctx context.Context, account libcommon.Address) (uint64, error)
 	// SuggestGasPrice retrieves the currently suggested gas price to allow a timely
 	// execution of a transaction.
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
@@ -100,8 +101,8 @@ type ContractFilterer interface {
 
 // DeployBackend wraps the operations needed by WaitMined and WaitDeployed.
 type DeployBackend interface {
-	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
-	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
+	TransactionReceipt(ctx context.Context, txHash libcommon.Hash) (*types.Receipt, error)
+	CodeAt(ctx context.Context, account libcommon.Address, blockNumber *big.Int) ([]byte, error)
 }
 
 // ContractBackend defines the methods needed to work with contracts on a read-write basis.

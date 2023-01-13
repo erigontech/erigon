@@ -3,15 +3,17 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var testCheckpoint = &cltypes.Checkpoint{
 	Epoch: 69,
-	Root:  common.HexToHash("0x3"),
+	Root:  libcommon.HexToHash("0x3"),
 }
 
 var expectedTestCheckpointMarshalled = common.Hex2Bytes("45000000000000000000000000000000000000000000000000000000000000000000000000000003")

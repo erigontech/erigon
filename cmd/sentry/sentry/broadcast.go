@@ -9,17 +9,18 @@ import (
 	"strings"
 	"syscall"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 )
 
 // Methods of sentry called by Core
@@ -126,7 +127,7 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 	}
 }
 
-func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []libcommon.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -140,7 +141,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 	for len(txs) > 0 {
 
 		pendingLen := maxTxPacketSize / length.Hash
-		pending := make([]common.Hash, 0, pendingLen)
+		pending := make([]libcommon.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {
 			pending = append(pending, txs[i])
@@ -189,7 +190,7 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []common
 	}
 }
 
-func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []common.Hash) {
+func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []libcommon.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -199,7 +200,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 	for len(txs) > 0 {
 
 		pendingLen := maxTxPacketSize / length.Hash
-		pending := make([]common.Hash, 0, pendingLen)
+		pending := make([]libcommon.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {
 			pending = append(pending, txs[i])
@@ -245,7 +246,7 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []commo
 	}
 }
 
-func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []common.Hash) {
+func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []libcommon.Hash) {
 	if len(txs) == 0 {
 		return
 	}
@@ -255,7 +256,7 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 	for len(txs) > 0 {
 
 		pendingLen := maxTxPacketSize / length.Hash
-		pending := make([]common.Hash, 0, pendingLen)
+		pending := make([]libcommon.Hash, 0, pendingLen)
 
 		for i := 0; i < pendingLen && i < len(txs); i++ {
 			pending = append(pending, txs[i])

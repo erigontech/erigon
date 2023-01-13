@@ -3,16 +3,18 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var testAttData = &cltypes.AttestationData{
 	Slot:            69,
 	Index:           402,
-	BeaconBlockHash: common.HexToHash("123"),
+	BeaconBlockHash: libcommon.HexToHash("123"),
 	Source:          testCheckpoint,
 	Target:          testCheckpoint,
 }

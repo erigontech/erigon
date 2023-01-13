@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
@@ -150,7 +151,7 @@ func TestAllocConstructor(t *testing.T) {
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
-	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
 	genSpec := &Genesis{
 		Config: params.AllProtocolChanges,
 		Alloc: GenesisAlloc{
@@ -172,11 +173,11 @@ func TestAllocConstructor(t *testing.T) {
 	code := state.GetCode(address)
 	assert.Equal(common.FromHex("5f355f55"), code)
 
-	key0 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
+	key0 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000000")
 	storage0 := &uint256.Int{}
 	state.GetState(address, &key0, storage0)
 	assert.Equal(uint256.NewInt(0x2a), storage0)
-	key1 := common.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
+	key1 := libcommon.HexToHash("0000000000000000000000000000000000000000000000000000000000000001")
 	storage1 := &uint256.Int{}
 	state.GetState(address, &key1, storage1)
 	assert.Equal(uint256.NewInt(0x01c9), storage1)

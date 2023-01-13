@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -18,7 +18,7 @@ func (w Withdrawal) MarshalJSON() ([]byte, error) {
 	type Withdrawal struct {
 		Index     hexutil.Uint64 `json:"index"`
 		Validator hexutil.Uint64 `json:"validatorIndex"`
-		Address   common.Address `json:"address"`
+		Address   libcommon.Address `json:"address"`
 		Amount    uint256.Int    `json:"amount"`
 	}
 	var enc Withdrawal
@@ -34,7 +34,7 @@ func (w *Withdrawal) UnmarshalJSON(input []byte) error {
 	type Withdrawal struct {
 		Index     *hexutil.Uint64 `json:"index"`
 		Validator *hexutil.Uint64 `json:"validatorIndex"`
-		Address   *common.Address `json:"address"`
+		Address   *libcommon.Address `json:"address"`
 		Amount    *uint256.Int    `json:"amount"`
 	}
 	var dec Withdrawal

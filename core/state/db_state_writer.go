@@ -7,9 +7,11 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -60,7 +62,7 @@ func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
 	return originalData
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	if err := dsw.csw.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
@@ -76,7 +78,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (dsw *DbStateWriter) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := dsw.csw.DeleteAccount(address, original); err != nil {
 		return err
 	}
@@ -97,7 +99,7 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (dsw *DbStateWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := dsw.csw.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
@@ -116,7 +118,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(address common.Address, incarnation 
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (dsw *DbStateWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	// We delegate here first to let the changeSetWrite make its own decision on whether to proceed in case *original == *value
 	if err := dsw.csw.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
@@ -141,7 +143,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	return dsw.db.Put(kv.HashedStorage, compositeKey, v)
 }
 
-func (dsw *DbStateWriter) CreateContract(address common.Address) error {
+func (dsw *DbStateWriter) CreateContract(address libcommon.Address) error {
 	if err := dsw.csw.CreateContract(address); err != nil {
 		return err
 	}

@@ -3,15 +3,17 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var testEth1Data = &cltypes.Eth1Data{
-	Root:         common.HexToHash("0x2"),
-	BlockHash:    common.HexToHash("0x3"),
+	Root:         libcommon.HexToHash("0x2"),
+	BlockHash:    libcommon.HexToHash("0x3"),
 	DepositCount: 69,
 }
 

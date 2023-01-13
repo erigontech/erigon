@@ -1,7 +1,7 @@
 package trie
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 var emptyHash [32]byte
@@ -11,8 +11,8 @@ var emptyHash [32]byte
 // If the loading is done for verification and testing purposes, then usually only
 // sub-tree root hash would be queried
 type SubTries struct {
-	Hashes []common.Hash // Root hashes of the sub-tries
-	roots  []node        // Sub-tries
+	Hashes []libcommon.Hash // Root hashes of the sub-tries
+	roots  []node           // Sub-tries
 }
 
 type LoadFunc func(*SubTrieLoader, *RetainList, [][]byte, []int) (SubTries, error)

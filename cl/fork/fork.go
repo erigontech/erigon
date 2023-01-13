@@ -20,10 +20,11 @@ import (
 	"sort"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func ComputeForkDigest(
@@ -33,7 +34,7 @@ func ComputeForkDigest(
 	if genesisConfig.GenesisTime == 0 {
 		return [4]byte{}, errors.New("genesis time is not set")
 	}
-	if genesisConfig.GenesisValidatorRoot == (common.Hash{}) {
+	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
 		return [4]byte{}, errors.New("genesis validators root is not set")
 	}
 
@@ -67,7 +68,7 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 }
 
 func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
-	var currentVersion32 common.Hash
+	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
 	dataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	// copy first four bytes to output
@@ -131,7 +132,7 @@ func ComputeDomain(
 	currentVersion [4]byte,
 	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
-	var currentVersion32 common.Hash
+	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
 	forkDataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
