@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -59,17 +60,18 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 	}
 	headerArr := [32]byte{}
 	copy(headerArr[:], header)
-	return cltypes.NewBeaconBlock(&cltypes.BeaconBlockBellatrix{
+	return &cltypes.BeaconBlock{
 		Slot:          19,
 		ProposerIndex: 1947,
 		ParentRoot:    headerArr,
-		Body: &cltypes.BeaconBodyBellatrix{
+		Body: &cltypes.BeaconBody{
 			Graffiti:         make([]byte, 32),
 			Eth1Data:         &cltypes.Eth1Data{},
 			SyncAggregate:    &cltypes.SyncAggregate{},
 			ExecutionPayload: emptyBlock,
+			Version:          clparams.BellatrixVersion,
 		},
-	})
+	}
 }
 
 func TestComputeShuffledIndex(t *testing.T) {

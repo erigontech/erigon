@@ -39,7 +39,7 @@ var attestations = []*cltypes.Attestation{
 var expectedAttestationMarshalled = "e4000000450000000000000092010000000000000000000000000000000000000000000000000000000000000000000000000123450000000000000000000000000000000000000000000000000000000000000000000000000000034500000000000000000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002"
 
 func TestAttestationHashTest(t *testing.T) {
-	hash, err := attestations[0].HashSSZ()
+	hash, err := attestations[0].HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, common.Bytes2Hex(hash[:]), "c9cf21a5c4273a2b85a84b5eff0e500dbafc8b20ecd21c59a87c610791112ba7")
 }
@@ -57,6 +57,6 @@ func TestAttestationMarshalUnmarmashal(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.Bytes2Hex(marshalled[:]), expectedAttestationMarshalled)
 	testData2 := &cltypes.Attestation{}
-	require.NoError(t, testData2.DecodeSSZ(marshalled))
+	require.NoError(t, testData2.UnmarshalSSZ(marshalled))
 	require.Equal(t, testData2, attestations[0])
 }

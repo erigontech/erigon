@@ -118,7 +118,7 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement, 
 	objs := make([]T, elementsNum)
 	for i := range objs {
 		objs[i] = objs[i].Clone().(T)
-		objs[i].UnmarshalSSZ(buf[i*int(elementsNum):])
+		objs[i].UnmarshalSSZ(buf[i*int(bytesPerElement):])
 	}
 	return objs, nil
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
@@ -29,7 +28,16 @@ var emptyBlock = &cltypes.Eth1Block{
 
 func TestBeaconBlock(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	signedBeaconBlock := cltypes.NewSignedBeaconBlock(clparams.BellatrixVersion)
+	signedBeaconBlock := &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
+			Body: &cltypes.BeaconBody{
+				Eth1Data:         &cltypes.Eth1Data{},
+				Graffiti:         make([]byte, 32),
+				SyncAggregate:    &cltypes.SyncAggregate{},
+				ExecutionPayload: emptyBlock,
+			},
+		},
+	}
 
 	require.NoError(t, rawdb.WriteBeaconBlock(tx, signedBeaconBlock))
 	newBlock, err := rawdb.ReadBeaconBlock(tx, signedBeaconBlock.Block.Slot)

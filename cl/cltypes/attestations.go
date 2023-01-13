@@ -70,7 +70,8 @@ func EncodeAttestationsForStorage(attestations []*Attestation) []byte {
 }
 
 func DecodeAttestationsForStorage(buf []byte) ([]*Attestation, error) {
-	if len(buf) == 0 {
+	fmt.Println(buf)
+	if len(buf) <= 1 {
 		return nil, nil
 	}
 

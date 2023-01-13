@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -42,6 +43,10 @@ func (m *Metadata) SizeSSZ() (ret int) {
 	return
 }
 
+func (m *Metadata) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return m.UnmarshalSSZ(buf)
+}
+
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.
 type Ping struct {
 	Id uint64
@@ -62,6 +67,10 @@ func (p *Ping) SizeSSZ() int {
 	return common.BlockNumberLength
 }
 
+func (p *Ping) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return p.UnmarshalSSZ(buf)
+}
+
 // P2P Message for bootstrap
 type SingleRoot struct {
 	Root [32]byte
@@ -80,6 +89,14 @@ func (s *SingleRoot) SizeSSZ() int {
 	return common.HashLength
 }
 
+func (s *SingleRoot) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return s.UnmarshalSSZ(buf)
+}
+
+func (*SingleRoot) Clone() clonable.Clonable {
+	return &SingleRoot{}
+}
+
 /*
  * LightClientUpdatesByRangeRequest that helps syncing to chain tip from a past point.
  * It takes the Period of the starting update and the amount of updates we want (MAX: 128).
@@ -87,6 +104,14 @@ func (s *SingleRoot) SizeSSZ() int {
 type LightClientUpdatesByRangeRequest struct {
 	Period uint64
 	Count  uint64
+}
+
+func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
+	return &LightClientUpdatesByRangeRequest{}
+}
+
+func (l *LightClientUpdatesByRangeRequest) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return l.UnmarshalSSZ(buf)
 }
 
 func (l *LightClientUpdatesByRangeRequest) MarshalSSZ() ([]byte, error) {
@@ -130,8 +155,16 @@ func (b *BeaconBlocksByRangeRequest) UnmarshalSSZ(buf []byte) error {
 	return nil
 }
 
+func (b *BeaconBlocksByRangeRequest) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return b.UnmarshalSSZ(buf)
+}
+
 func (b *BeaconBlocksByRangeRequest) SizeSSZ() int {
 	return 3 * common.BlockNumberLength
+}
+
+func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
+	return &BeaconBlocksByRangeRequest{}
 }
 
 /*
