@@ -366,14 +366,13 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
 
 	// Process data field.
-	i.Data = new(AttestationData)
 	dst = i.Data.EncodeSSZ(dst)
 	// Write signature
 	dst = append(dst, i.Signature[:]...)
 
 	// Field (0) 'AttestingIndices'
 	if len(i.AttestingIndices) > 2048 {
-		return nil, errors.New("Too bing attesting indices")
+		return nil, errors.New("too bing attesting indices")
 	}
 	for _, index := range i.AttestingIndices {
 		dst = append(dst, ssz_utils.Uint64SSZ(index)...)
