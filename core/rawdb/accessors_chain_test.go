@@ -24,16 +24,16 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.
@@ -445,14 +445,14 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		Index:     uint64(15),
 		Validator: uint64(5500),
 		Address:   common.Address{0: 0xff},
-		Amount:    *uint256.NewInt(1000),
+		Amount:    1000,
 	}
 
 	w2 := types.Withdrawal{
 		Index:     uint64(16),
 		Validator: uint64(5501),
 		Address:   common.Address{0: 0xff},
-		Amount:    *uint256.NewInt(1001),
+		Amount:    1001,
 	}
 
 	withdrawals := make([]*types.Withdrawal, 0)
@@ -522,13 +522,13 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Equal(uint64(15), rw.Index)
 	require.Equal(uint64(5500), rw.Validator)
 	require.Equal(common.Address{0: 0xff}, rw.Address)
-	require.Equal(*uint256.NewInt(1000), rw.Amount)
+	require.Equal(uint64(1000), rw.Amount)
 
 	require.NotNil(rw2)
 	require.Equal(uint64(16), rw2.Index)
 	require.Equal(uint64(5501), rw2.Validator)
 	require.Equal(common.Address{0: 0xff}, rw2.Address)
-	require.Equal(*uint256.NewInt(1001), rw2.Amount)
+	require.Equal(uint64(1001), rw2.Amount)
 
 	// Delete the block and verify the execution
 	if err := TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -133,7 +135,8 @@ func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, st
 		}
 	}
 	for _, w := range withdrawals {
-		state.AddBalance(w.Address, &w.Amount)
+		amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+		state.AddBalance(w.Address, amountInWei)
 	}
 	return txs, r, nil
 }

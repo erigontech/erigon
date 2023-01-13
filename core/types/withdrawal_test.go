@@ -3,12 +3,10 @@ package types
 import (
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/u256"
 )
 
 func TestWithdrawalsHash(t *testing.T) {
@@ -16,7 +14,7 @@ func TestWithdrawalsHash(t *testing.T) {
 		Index:     0,
 		Validator: 0,
 		Address:   common.HexToAddress("0x6295ee1b4f6dd65047762f924ecd367c17eabf8f"),
-		Amount:    *u256.Num1,
+		Amount:    1,
 	}
 	withdrawals := Withdrawals([]*Withdrawal{w})
 	hash := DeriveSha(withdrawals)
@@ -32,7 +30,7 @@ var testWithdrawal = &Withdrawal{
 	Index:     9170781944418253065,
 	Validator: 16033042974434771745,
 	Address:   common.HexToAddress("0xdbbcbcbeee17b2395d5d3f839fc1ba3559d1a73e"),
-	Amount:    *uint256.NewInt(15157676145812061173),
+	Amount:    15157676145812061173,
 }
 
 func TestWithdrawalSSZ(t *testing.T) {

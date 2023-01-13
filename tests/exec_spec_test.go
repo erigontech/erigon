@@ -15,6 +15,9 @@ func TestExecutionSpec(t *testing.T) {
 
 	dir := filepath.Join(".", "execution-spec-tests")
 
+	// TODO(yperbasis): re-fill and re-enable after Wei -> Gwei in geth
+	bt.skipLoad(`^withdrawals/withdrawals`)
+
 	// Failing because the fixture was filled by geth w/o EIP-3860
 	bt.skipLoad(`^withdrawals/withdrawals/withdrawals_newly_created_contract.json`)
 
