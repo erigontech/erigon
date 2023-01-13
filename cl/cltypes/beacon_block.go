@@ -306,7 +306,9 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	}
 	leaves = append(leaves, dataLeaf)
 	// Graffiti leaf
-	leaves = append(leaves, common.BytesToHash(b.Graffiti))
+	var graffitiLeaf [32]byte
+	copy(graffitiLeaf[:], b.Graffiti)
+	leaves = append(leaves, graffitiLeaf)
 	// Proposer slashings leaf
 	proposerLeaf, err := merkle_tree.ListObjectSSZRoot(b.ProposerSlashings, MaxProposerSlashings)
 	if err != nil {

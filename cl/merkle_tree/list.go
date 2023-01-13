@@ -161,7 +161,7 @@ func TransactionsListRoot(transactions [][]byte) (common.Hash, error) {
 }
 
 func ListObjectSSZRoot[T ssz_utils.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
-	subLeaves := make([][32]byte, len(list))
+	subLeaves := make([][32]byte, 0, len(list))
 	for _, element := range list {
 		subLeaf, err := element.HashTreeRoot()
 		if err != nil {
@@ -174,5 +174,5 @@ func ListObjectSSZRoot[T ssz_utils.HashableSSZ](list []T, limit uint64) ([32]byt
 		return [32]byte{}, err
 	}
 	lenLeaf := Uint64Root(uint64(len(list)))
-	return ArraysRoot([][32]byte{vectorLeaf, lenLeaf}, 2)
+	return utils.Keccak256(vectorLeaf[:], lenLeaf[:]), nil
 }

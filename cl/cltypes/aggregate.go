@@ -128,7 +128,7 @@ func (agg *SyncAggregate) HashSSZ() ([32]byte, error) {
 		leaves = make([][32]byte, 2)
 		err    error
 	)
-	leaves[0] = utils.Keccak256(agg.SyncCommiteeBits[:])
+	leaves[0] = utils.Keccak256(agg.SyncCommiteeBits[:32], agg.SyncCommiteeBits[32:])
 	leaves[1], err = merkle_tree.SignatureRoot(agg.SyncCommiteeSignature)
 	if err != nil {
 		return [32]byte{}, err
