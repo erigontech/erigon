@@ -52,6 +52,7 @@ func BodiesForward(
 	cfg BodiesCfg,
 	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
 	firstCycle bool,
+	quiet bool,
 ) error {
 	var doUpdate bool
 	if cfg.snapshots != nil && s.BlockNumber < cfg.snapshots.BlocksAvailable() {
@@ -292,7 +293,7 @@ func BodiesForward(
 			cfg.bd.ResetAddedBodies()
 		}
 
-		if toProcess > 0 {
+		if !quiet && toProcess > 0 {
 			logWritingBodies(logPrefix, bodyProgress, headerProgress)
 		}
 
