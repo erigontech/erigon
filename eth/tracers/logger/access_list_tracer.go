@@ -18,34 +18,35 @@ package logger
 
 import (
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 // accessList is an accumulator for the set of accounts and storage slots an EVM
 // contract execution touches.
-type accessList map[common.Address]accessListSlots
+type accessList map[libcommon.Address]accessListSlots
 
 // accessListSlots is an accumulator for the set of storage slots within a single
 // contract that an EVM contract execution touches.
-type accessListSlots map[common.Hash]struct{}
+type accessListSlots map[libcommon.Hash]struct{}
 
 // newAccessList creates a new accessList.
 func newAccessList() accessList {
-	return make(map[common.Address]accessListSlots)
+	return make(map[libcommon.Address]accessListSlots)
 }
 
 // addAddress adds an address to the accesslist.
-func (al accessList) addAddress(address common.Address) {
+func (al accessList) addAddress(address libcommon.Address) {
 	// Set address if not previously present
 	if _, present := al[address]; !present {
-		al[address] = make(map[common.Hash]struct{})
+		al[address] = make(map[libcommon.Hash]struct{})
 	}
 }
 
 // addSlot adds a storage slot to the accesslist.
-func (al accessList) addSlot(address common.Address, slot common.Hash) {
+func (al accessList) addSlot(address libcommon.Address, slot libcommon.Hash) {
 	// Set address if not previously present
 	al.addAddress(address)
 
@@ -95,7 +96,7 @@ func (al accessList) equal(other accessList) bool {
 func (al accessList) accessList() types.AccessList {
 	acl := make(types.AccessList, 0, len(al))
 	for addr, slots := range al {
-		tuple := types.AccessTuple{Address: addr, StorageKeys: []common.Hash{}}
+		tuple := types.AccessTuple{Address: addr, StorageKeys: []libcommon.Hash{}}
 		for slot := range slots {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
@@ -107,15 +108,15 @@ func (al accessList) accessList() types.AccessList {
 // AccessListTracer is a tracer that accumulates touched accounts and storage
 // slots into an internal set.
 type AccessListTracer struct {
-	excl map[common.Address]struct{} // Set of account to exclude from the list
-	list accessList                  // Set of accounts and storage slots touched
+	excl map[libcommon.Address]struct{} // Set of account to exclude from the list
+	list accessList                     // Set of accounts and storage slots touched
 }
 
 // NewAccessListTracer creates a new tracer that can generate AccessLists.
 // An optional AccessList can be specified to occupy slots and addresses in
 // the resulting accesslist.
-func NewAccessListTracer(acl types.AccessList, from, to common.Address, precompiles []common.Address) *AccessListTracer {
-	excl := map[common.Address]struct{}{
+func NewAccessListTracer(acl types.AccessList, from, to libcommon.Address, precompiles []libcommon.Address) *AccessListTracer {
+	excl := map[libcommon.Address]struct{}{
 		from: {}, to: {},
 	}
 	for _, addr := range precompiles {
@@ -140,10 +141,10 @@ func (a *AccessListTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (a *AccessListTracer) CaptureTxEnd(restGas uint64) {}
 
-func (a *AccessListTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-func (a *AccessListTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (a *AccessListTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState captures all opcodes that touch storage or addresses and adds them to the accesslist.
@@ -154,17 +155,17 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 	stackData := stack.Data
 	stackLen := len(stackData)
 	if (op == vm.SLOAD || op == vm.SSTORE) && stackLen >= 1 {
-		slot := common.Hash(stackData[stackLen-1].Bytes32())
+		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
 		a.list.addSlot(contract.Address(), slot)
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 		}
 	}
 	if (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE) && stackLen >= 5 {
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 		}

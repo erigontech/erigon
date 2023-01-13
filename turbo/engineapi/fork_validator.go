@@ -18,16 +18,17 @@ import (
 	"fmt"
 	"sync"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // the maximum point from the current head, past which side forks are not validated anymore.
@@ -39,13 +40,13 @@ type ForkValidator struct {
 	// Hash => side fork block, any block saved into this map is considered valid.
 	// blocks saved are required to have at most distance maxForkDepth from the head.
 	// if we miss a segment, we only accept the block and give up on full validation.
-	sideForksBlock map[common.Hash]types.RawBlock
+	sideForksBlock map[libcommon.Hash]types.RawBlock
 	// current memory batch containing chain head that extend canonical fork.
 	extendingFork *memdb.MemoryMutation
 	// notifications accumulated for the extending fork
 	extendingForkNotifications *shards.Notifications
 	// hash of chain head that extend canonical fork.
-	extendingForkHeadHash common.Hash
+	extendingForkHeadHash libcommon.Hash
 	// this is the function we use to perform payload validation.
 	validatePayload validatePayloadFunc
 	// this is the current point where we processed the chain so far.
@@ -57,14 +58,14 @@ type ForkValidator struct {
 
 func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock: make(map[common.Hash]types.RawBlock),
+		sideForksBlock: make(map[libcommon.Hash]types.RawBlock),
 		currentHeight:  currentHeight,
 	}
 }
 
 func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string) *ForkValidator {
 	return &ForkValidator{
-		sideForksBlock:  make(map[common.Hash]types.RawBlock),
+		sideForksBlock:  make(map[libcommon.Hash]types.RawBlock),
 		validatePayload: validatePayload,
 		currentHeight:   currentHeight,
 		tmpDir:          tmpDir,
@@ -72,7 +73,7 @@ func NewForkValidator(currentHeight uint64, validatePayload validatePayloadFunc,
 }
 
 // ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
-func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
+func (fv *ForkValidator) ExtendingForkHeadHash() libcommon.Hash {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	return fv.extendingForkHeadHash
@@ -114,7 +115,7 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	}
 	fv.extendingFork = nil
 	fv.extendingForkNotifications = nil
-	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkHeadHash = libcommon.Hash{}
 }
 
 // FlushExtendingFork flush the current extending fork if fcu chooses its head hash as the its forkchoice.
@@ -128,7 +129,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(accumulator)
 	// Clean extending fork data
 	fv.extendingFork.Rollback()
-	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingFork = nil
 	fv.extendingForkNotifications = nil
 	return nil
@@ -138,7 +139,7 @@ func (fv *ForkValidator) FlushExtendingFork(tx kv.RwTx, accumulator *shards.Accu
 // if the payload extend the canonical chain, then we stack it in extendingFork without any unwind.
 // if the payload is a fork then we unwind to the point where the fork meet the canonical chain and we check if it is valid or not from there.
 // if for any reasons none of the action above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+func (fv *ForkValidator) ValidatePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, extendCanonical bool) (status remote.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.validatePayload == nil {
@@ -233,9 +234,9 @@ func (fv *ForkValidator) clear() {
 	if fv.extendingFork != nil {
 		fv.extendingFork.Rollback()
 	}
-	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkHeadHash = libcommon.Hash{}
 	fv.extendingFork = nil
-	//fv.sideForksBlock = map[common.Hash]forkSegment{}
+	//fv.sideForksBlock = map[libcommon.Hash]forkSegment{}
 }
 
 // TryAddingPoWBlock adds a PoW block to the fork validator if possible
@@ -252,7 +253,7 @@ func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumul
 	defer fv.lock.Unlock()
 	sb, ok := fv.sideForksBlock[fv.extendingForkHeadHash]
 	// If we did not flush the fork state, then we need to notify the txpool through unwind.
-	if fv.extendingFork != nil && accumulator != nil && fv.extendingForkHeadHash != (common.Hash{}) && ok {
+	if fv.extendingFork != nil && accumulator != nil && fv.extendingForkHeadHash != (libcommon.Hash{}) && ok {
 		fv.extendingFork.UpdateTxn(tx)
 		// this will call unwind of extending fork to notify txpool of reverting transactions.
 		if err := fv.notifyTxPool(sb.Header.Number.Uint64()-1, accumulator, c); err != nil {
@@ -265,7 +266,7 @@ func (fv *ForkValidator) ClearWithUnwind(tx kv.RwTx, accumulator *shards.Accumul
 
 // validateAndStorePayload validate and store a payload fork chain if such chain results valid.
 func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
-	notifications *shards.Notifications) (status remote.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+	notifications *shards.Notifications) (status remote.EngineStatus, latestValidHash libcommon.Hash, validationError error, criticalError error) {
 	validationError = fv.validatePayload(tx, header, body, unwindPoint, headersChain, bodiesChain, notifications)
 	latestValidHash = header.Hash()
 	if validationError != nil {
@@ -275,7 +276,7 @@ func (fv *ForkValidator) validateAndStorePayload(tx kv.RwTx, header *types.Heade
 			fv.extendingFork.Rollback()
 			fv.extendingFork = nil
 		}
-		fv.extendingForkHeadHash = common.Hash{}
+		fv.extendingForkHeadHash = libcommon.Hash{}
 		return
 	}
 	// If we do not have the body we can recover it from the batch.

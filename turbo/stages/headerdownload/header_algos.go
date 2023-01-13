@@ -14,11 +14,13 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -116,7 +118,7 @@ func (hd *HeaderDownload) SingleHeaderAsSegment(headerRaw []byte, header *types.
 }
 
 // ReportBadHeader -
-func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
+func (hd *HeaderDownload) ReportBadHeader(headerHash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badHeaders[headerHash] = struct{}{}
@@ -126,7 +128,7 @@ func (hd *HeaderDownload) ReportBadHeader(headerHash common.Hash) {
 	}
 }
 
-func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
+func (hd *HeaderDownload) IsBadHeader(headerHash libcommon.Hash) bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	_, ok := hd.badHeaders[headerHash]
@@ -134,22 +136,22 @@ func (hd *HeaderDownload) IsBadHeader(headerHash common.Hash) bool {
 }
 
 // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-func (hd *HeaderDownload) SetPoSDownloaderTip(hash common.Hash) {
+func (hd *HeaderDownload) SetPoSDownloaderTip(hash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.posDownloaderTip = hash
 }
-func (hd *HeaderDownload) PoSDownloaderTip() common.Hash {
+func (hd *HeaderDownload) PoSDownloaderTip() libcommon.Hash {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.posDownloaderTip
 }
-func (hd *HeaderDownload) ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash) {
+func (hd *HeaderDownload) ReportBadHeaderPoS(badHeader, lastValidAncestor libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.badPoSHeaders[badHeader] = lastValidAncestor
 }
-func (hd *HeaderDownload) IsBadHeaderPoS(tipHash common.Hash) (bad bool, lastValidAncestor common.Hash) {
+func (hd *HeaderDownload) IsBadHeaderPoS(tipHash libcommon.Hash) (bad bool, lastValidAncestor libcommon.Hash) {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	lastValidAncestor, bad = hd.badPoSHeaders[tipHash]
@@ -504,7 +506,7 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 	return hd.engine.VerifyHeader(hd.consensusHeaderReader, header, true /* seal */)
 }
 
-type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error)
+type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
 func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, error) {
 	hd.lock.Lock()
@@ -631,7 +633,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 	return hd.highestInDb >= hd.preverifiedHeight && hd.topSeenHeightPoW > 0 && hd.highestInDb >= hd.topSeenHeightPoW, nil
 }
 
-func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash common.Hash, height uint64) {
+func (hd *HeaderDownload) SetHeaderToDownloadPoS(hash libcommon.Hash, height uint64) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 
@@ -736,7 +738,7 @@ func (hd *HeaderDownload) Progress() uint64 {
 	}
 }
 
-func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
+func (hd *HeaderDownload) HasLink(linkHash libcommon.Hash) bool {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	if _, ok := hd.getLink(linkHash); ok {
@@ -747,13 +749,13 @@ func (hd *HeaderDownload) HasLink(linkHash common.Hash) bool {
 
 // SaveExternalAnnounce - does mark hash as seen in external announcement
 // only such hashes will broadcast further after
-func (hd *HeaderDownload) SaveExternalAnnounce(hash common.Hash) {
+func (hd *HeaderDownload) SaveExternalAnnounce(hash libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.seenAnnounces.Add(hash)
 }
 
-func (hd *HeaderDownload) getLink(linkHash common.Hash) (*Link, bool) {
+func (hd *HeaderDownload) getLink(linkHash libcommon.Hash) (*Link, bool) {
 	if link, ok := hd.links[linkHash]; ok {
 		return link, true
 	}
@@ -785,7 +787,7 @@ func (hd *HeaderDownload) addHeaderAsLink(h ChainSegmentHeader, persisted bool) 
 }
 
 func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader services.HeaderReader) FeedHeaderFunc {
-	return func(header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (*big.Int, error) {
+	return func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (*big.Int, error) {
 		return hi.FeedHeaderPoW(db, headerReader, header, headerRaw, hash, blockHeight)
 	}
 }
@@ -794,9 +796,9 @@ func (hi *HeaderInserter) NewFeedHeaderFunc(db kv.StatelessRwTx, headerReader se
 // Most common case - forking point is the height of the parent header
 func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *types.Header) (forkingPoint uint64, err error) {
 	blockHeight := header.Number.Uint64()
-	var ch common.Hash
+	var ch libcommon.Hash
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
-		ch = fromCache.(common.Hash)
+		ch = fromCache.(libcommon.Hash)
 	} else {
 		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
@@ -810,7 +812,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		ancestorHeight := blockHeight - 2
 		// Look in the cache first
 		for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
-			ch = fromCache.(common.Hash)
+			ch = fromCache.(libcommon.Hash)
 			if ch == ancestorHash {
 				break
 			}
@@ -843,7 +845,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	return
 }
 
-func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash common.Hash, blockHeight uint64) (td *big.Int, err error) {
+func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader services.HeaderReader, header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error) {
 	if hash == hi.prevHash {
 		// Skip duplicates
 		return nil, nil
@@ -903,7 +905,7 @@ func (hi *HeaderInserter) FeedHeaderPoW(db kv.StatelessRwTx, headerReader servic
 	return td, nil
 }
 
-func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash common.Hash) error {
+func (hi *HeaderInserter) FeedHeaderPoS(db kv.GetPut, header *types.Header, hash libcommon.Hash) error {
 	blockHeight := header.Number.Uint64()
 	// TODO(yperbasis): do we need to check if the header is already inserted (oldH)?
 
@@ -928,7 +930,7 @@ func (hi *HeaderInserter) GetHighest() uint64 {
 	return hi.highest
 }
 
-func (hi *HeaderInserter) GetHighestHash() common.Hash {
+func (hi *HeaderInserter) GetHighestHash() libcommon.Hash {
 	return hi.highestHash
 }
 
@@ -1131,13 +1133,13 @@ func (hd *HeaderDownload) FetchingNew() bool {
 	return hd.fetchingNew
 }
 
-func (hd *HeaderDownload) GetPendingPayloadHash() common.Hash {
+func (hd *HeaderDownload) GetPendingPayloadHash() libcommon.Hash {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
 	return hd.pendingPayloadHash
 }
 
-func (hd *HeaderDownload) SetPendingPayloadHash(header common.Hash) {
+func (hd *HeaderDownload) SetPendingPayloadHash(header libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
 	hd.pendingPayloadHash = header
@@ -1146,7 +1148,7 @@ func (hd *HeaderDownload) SetPendingPayloadHash(header common.Hash) {
 func (hd *HeaderDownload) ClearPendingPayloadHash() {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	hd.pendingPayloadHash = common.Hash{}
+	hd.pendingPayloadHash = libcommon.Hash{}
 }
 
 func (hd *HeaderDownload) GetPendingPayloadStatus() *engineapi.PayloadStatus {
@@ -1327,8 +1329,8 @@ func (hd *HeaderDownload) StartPoSDownloader(
 	}()
 }
 
-func DecodeTips(encodings []string) (map[common.Hash]HeaderRecord, error) {
-	hardTips := make(map[common.Hash]HeaderRecord, len(encodings))
+func DecodeTips(encodings []string) (map[libcommon.Hash]HeaderRecord, error) {
+	hardTips := make(map[libcommon.Hash]HeaderRecord, len(encodings))
 
 	var buf bytes.Buffer
 

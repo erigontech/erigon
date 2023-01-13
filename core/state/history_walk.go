@@ -6,16 +6,18 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // startKey is the concatenation of address and incarnation (BigEndian 8 byte)
-func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, startLocation common.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+func WalkAsOfStorage(tx kv.Tx, address libcommon.Address, incarnation uint64, startLocation libcommon.Hash, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
 	var startkey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	copy(startkey, address.Bytes())
 	binary.BigEndian.PutUint64(startkey[length.Addr:], incarnation)
@@ -142,7 +144,7 @@ func WalkAsOfStorage(tx kv.Tx, address common.Address, incarnation uint64, start
 	return nil
 }
 
-func WalkAsOfAccounts(tx kv.Tx, startAddress common.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+func WalkAsOfAccounts(tx kv.Tx, startAddress libcommon.Address, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	mainCursor, err := tx.Cursor(kv.PlainState)
 	if err != nil {
 		return err

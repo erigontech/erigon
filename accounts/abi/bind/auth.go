@@ -21,7 +21,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 )
@@ -42,7 +43,7 @@ func NewKeyedTransactorWithChainID(key *ecdsa.PrivateKey, chainID *big.Int) (*Tr
 	signer := types.LatestSignerForChainID(chainID)
 	return &TransactOpts{
 		From: keyAddr,
-		Signer: func(address common.Address, tx types.Transaction) (types.Transaction, error) {
+		Signer: func(address libcommon.Address, tx types.Transaction) (types.Transaction, error) {
 			if address != keyAddr {
 				return nil, ErrNotAuthorized
 			}

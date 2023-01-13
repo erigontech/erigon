@@ -7,13 +7,15 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
-	"golang.org/x/crypto/sha3"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
@@ -589,15 +591,15 @@ func (hb *HashBuilder) emptyRoot() {
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
 
-func (hb *HashBuilder) RootHash() (common.Hash, error) {
+func (hb *HashBuilder) RootHash() (libcommon.Hash, error) {
 	if !hb.hasRoot() {
-		return common.Hash{}, fmt.Errorf("no root in the tree")
+		return libcommon.Hash{}, fmt.Errorf("no root in the tree")
 	}
 	return hb.rootHash(), nil
 }
 
-func (hb *HashBuilder) rootHash() common.Hash {
-	var hash common.Hash
+func (hb *HashBuilder) rootHash() libcommon.Hash {
+	var hash libcommon.Hash
 	top := hb.topHash()
 	if len(top) == 33 {
 		copy(hash[:], top[1:])

@@ -8,8 +8,9 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -34,9 +35,9 @@ const (
 type Link struct {
 	header      *types.Header
 	headerRaw   []byte
-	fChild      *Link       // Pointer to the first child, further children can be found by following `next` pointers to the siblings
-	next        *Link       // Pointer to the next sibling, or nil if there are no siblings
-	hash        common.Hash // Hash of the header
+	fChild      *Link          // Pointer to the first child, further children can be found by following `next` pointers to the siblings
+	next        *Link          // Pointer to the next sibling, or nil if there are no siblings
+	hash        libcommon.Hash // Hash of the header
 	blockHeight uint64
 	persisted   bool    // Whether this link comes from the database record
 	verified    bool    // Ancestor of pre-verified header or verified by consensus engine
@@ -103,8 +104,8 @@ func (lq *LinkQueue) Pop() interface{} {
 // more than one pointer.
 type Anchor struct {
 	peerID        [64]byte
-	fLink         *Link       // Links attached immediately to this anchor (pointer to the first one, the rest can be found by following `next` fields)
-	parentHash    common.Hash // Hash of the header this anchor can be connected to (to disappear)
+	fLink         *Link          // Links attached immediately to this anchor (pointer to the first one, the rest can be found by following `next` fields)
+	parentHash    libcommon.Hash // Hash of the header this anchor can be connected to (to disappear)
 	blockHeight   uint64
 	nextRetryTime time.Time // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
 	timeouts      int       // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
@@ -162,7 +163,7 @@ func (aq *AnchorQueue) Pop() interface{} {
 type ChainSegmentHeader struct {
 	HeaderRaw rlp.RawValue
 	Header    *types.Header
-	Hash      common.Hash
+	Hash      libcommon.Hash
 	Number    uint64
 }
 
@@ -196,7 +197,7 @@ type PeerPenalty struct {
 
 // Request for chain segment starting with hash and going to its parent, etc, with length headers in total
 type HeaderRequest struct {
-	Hash    common.Hash
+	Hash    libcommon.Hash
 	Number  uint64
 	Length  uint64
 	Skip    uint64
@@ -209,12 +210,12 @@ type PenaltyItem struct {
 	Penalty Penalty
 }
 type Announce struct {
-	Hash   common.Hash
+	Hash   libcommon.Hash
 	Number uint64
 }
 
 type VerifySealFunc func(header *types.Header) error
-type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash common.Hash) *big.Int
+type CalcDifficultyFunc func(childTimestamp uint64, parentTime uint64, parentDifficulty, parentNumber *big.Int, parentHash, parentUncleHash libcommon.Hash) *big.Int
 
 // InsertQueue keeps the links before they are inserted in the database
 // It priorities them by block height (the lowest block height on the top),
@@ -274,9 +275,9 @@ type Stats struct {
 }
 
 type HeaderDownload struct {
-	badHeaders             map[common.Hash]struct{}
-	anchors                map[common.Hash]*Anchor // Mapping from parentHash to collection of anchors
-	links                  map[common.Hash]*Link   // Links by header hash
+	badHeaders             map[libcommon.Hash]struct{}
+	anchors                map[libcommon.Hash]*Anchor // Mapping from parentHash to collection of anchors
+	links                  map[libcommon.Hash]*Link   // Links by header hash
 	engine                 consensus.Engine
 	insertQueue            InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
 	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
@@ -307,17 +308,17 @@ type HeaderDownload struct {
 	requestId            int
 	posAnchor            *Anchor
 	posStatus            SyncStatus
-	posSync              bool                         // Whether the chain is syncing in the PoS mode
-	headersCollector     *etl.Collector               // ETL collector for headers
-	BeaconRequestList    *engineapi.RequestList       // Requests from ethbackend to staged sync
-	PayloadStatusCh      chan engineapi.PayloadStatus // Responses (validation/execution status)
-	ShutdownCh           chan struct{}                // Channel to signal shutdown
-	pendingPayloadHash   common.Hash                  // Header whose status we still should send to PayloadStatusCh
-	pendingPayloadStatus *engineapi.PayloadStatus     // Alternatively, there can be an already prepared response to send to PayloadStatusCh
-	unsettledForkChoice  *engineapi.ForkChoiceMessage // Forkchoice to process after unwind
-	unsettledHeadHeight  uint64                       // Height of unsettledForkChoice.headBlockHash
-	posDownloaderTip     common.Hash                  // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-	badPoSHeaders        map[common.Hash]common.Hash  // Invalid Tip -> Last Valid Ancestor
+	posSync              bool                              // Whether the chain is syncing in the PoS mode
+	headersCollector     *etl.Collector                    // ETL collector for headers
+	BeaconRequestList    *engineapi.RequestList            // Requests from ethbackend to staged sync
+	PayloadStatusCh      chan engineapi.PayloadStatus      // Responses (validation/execution status)
+	ShutdownCh           chan struct{}                     // Channel to signal shutdown
+	pendingPayloadHash   libcommon.Hash                    // Header whose status we still should send to PayloadStatusCh
+	pendingPayloadStatus *engineapi.PayloadStatus          // Alternatively, there can be an already prepared response to send to PayloadStatusCh
+	unsettledForkChoice  *engineapi.ForkChoiceMessage      // Forkchoice to process after unwind
+	unsettledHeadHeight  uint64                            // Height of unsettledForkChoice.headBlockHash
+	posDownloaderTip     libcommon.Hash                    // See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
+	badPoSHeaders        map[libcommon.Hash]libcommon.Hash // Invalid Tip -> Last Valid Ancestor
 }
 
 // HeaderRecord encapsulates two forms of the same header - raw RLP encoding (to avoid duplicated decodings and encodings), and parsed value types.Header
@@ -335,13 +336,13 @@ func NewHeaderDownload(
 	persistentLinkLimit := linkLimit / 16
 	hd := &HeaderDownload{
 		initialCycle:       true,
-		badHeaders:         make(map[common.Hash]struct{}),
-		anchors:            make(map[common.Hash]*Anchor),
+		badHeaders:         make(map[libcommon.Hash]struct{}),
+		anchors:            make(map[libcommon.Hash]*Anchor),
 		persistedLinkLimit: persistentLinkLimit,
 		linkLimit:          linkLimit - persistentLinkLimit,
 		anchorLimit:        anchorLimit,
 		engine:             engine,
-		links:              make(map[common.Hash]*Link),
+		links:              make(map[libcommon.Hash]*Link),
 		anchorQueue:        &AnchorQueue{},
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
@@ -350,7 +351,7 @@ func NewHeaderDownload(
 		PayloadStatusCh:    make(chan engineapi.PayloadStatus, 1),
 		ShutdownCh:         make(chan struct{}),
 		headerReader:       headerReader,
-		badPoSHeaders:      make(map[common.Hash]common.Hash),
+		badPoSHeaders:      make(map[libcommon.Hash]libcommon.Hash),
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
@@ -420,8 +421,8 @@ func (hd *HeaderDownload) moveLinkToQueue(link *Link, queueId QueueID) {
 type HeaderInserter struct {
 	localTd          *big.Int
 	logPrefix        string
-	prevHash         common.Hash // Hash of previously seen header - to filter out potential duplicates
-	highestHash      common.Hash
+	prevHash         libcommon.Hash // Hash of previously seen header - to filter out potential duplicates
+	highestHash      libcommon.Hash
 	newCanonical     bool
 	unwind           bool
 	unwindPoint      uint64
@@ -455,7 +456,7 @@ func NewSeenAnnounces() *SeenAnnounces {
 	return &SeenAnnounces{hashes: cache}
 }
 
-func (s *SeenAnnounces) Pop(hash common.Hash) bool {
+func (s *SeenAnnounces) Pop(hash libcommon.Hash) bool {
 	_, ok := s.hashes.Get(hash)
 	if ok {
 		s.hashes.Remove(hash)
@@ -463,11 +464,11 @@ func (s *SeenAnnounces) Pop(hash common.Hash) bool {
 	return ok
 }
 
-func (s SeenAnnounces) Seen(hash common.Hash) bool {
+func (s SeenAnnounces) Seen(hash libcommon.Hash) bool {
 	_, ok := s.hashes.Get(hash)
 	return ok
 }
 
-func (s *SeenAnnounces) Add(b common.Hash) {
+func (s *SeenAnnounces) Add(b libcommon.Hash) {
 	s.hashes.ContainsOrAdd(b, struct{}{})
 }

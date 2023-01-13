@@ -7,8 +7,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
@@ -21,8 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetLogs(t *testing.T) {
@@ -40,14 +42,14 @@ func TestGetLogs(t *testing.T) {
 
 		//filer by wrong address
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
-			Addresses: common.Addresses{common.Address{}},
+			Addresses: common.Addresses{libcommon.Address{}},
 		})
 		assert.NoError(err)
 		assert.Equal(0, len(logs))
 
 		//filer by wrong address
 		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
-			Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+			Topics: [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
 		assert.NoError(err)
 		assert.Equal(1, len(logs))
@@ -136,13 +138,13 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 
 	var lastBlock uint64
 	var blockCount uint64
-	containsTopics := make([][]common.Hash, 0)
+	containsTopics := make([][]libcommon.Hash, 0)
 
 	for i := range expectedLogs {
 		if expectedLogs[i].BlockNumber != lastBlock {
 			blockCount++
 		}
-		containsTopics = append(containsTopics, []common.Hash{
+		containsTopics = append(containsTopics, []libcommon.Hash{
 			expectedLogs[i].Topics[0],
 		})
 	}

@@ -136,15 +136,6 @@ var (
 	}
 )
 
-func TestEncode(t *testing.T) {
-	for _, test := range encodeBytesTests {
-		enc := Encode(test.input.([]byte))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
-	}
-}
-
 func TestDecode(t *testing.T) {
 	for _, test := range decodeBytesTests {
 		dec, err := Decode(test.input)

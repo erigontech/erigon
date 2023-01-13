@@ -8,8 +8,12 @@ import (
 	"io"
 
 	"github.com/golang/snappy"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/zap/buffer"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
@@ -18,8 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/zap/buffer"
 )
 
 // BeaconRpcP2P represents a beacon chain RPC client.
@@ -91,7 +93,7 @@ func (b *BeaconRpcP2P) SendLightClientOptimisticUpdateReqV1() (*cltypes.LightCli
 
 // SendLightClientBootstrapReqV1 sends a request for a LightClientBootstrap message to a beacon chain node.
 // It returns a LightClientBootstrap struct or an error if one occurred.
-func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root common.Hash) (*cltypes.LightClientBootstrap, error) {
+func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root libcommon.Hash) (*cltypes.LightClientBootstrap, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &cltypes.SingleRoot{Root: root}); err != nil {
 		return nil, err
@@ -286,7 +288,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	return amount.Amount, nil
 }
 
-func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint64, headRoot common.Hash, headSlot uint64) error {
+func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
 	forkDigest, err := fork.ComputeForkDigest(b.beaconConfig, b.genesisConfig)
 	if err != nil {
 		return err

@@ -30,10 +30,11 @@ import (
 	"os"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -71,7 +72,7 @@ func NewKeccakState() KeccakState {
 }
 
 // HashData hashes the provided data using the KeccakState and returns a 32 byte hash
-func HashData(kh KeccakState, data []byte) (h common.Hash) {
+func HashData(kh KeccakState, data []byte) (h libcommon.Hash) {
 	kh.Reset()
 	//nolint:errcheck
 	kh.Write(data)
@@ -94,7 +95,7 @@ func Keccak256(data ...[]byte) []byte {
 
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
-func Keccak256Hash(data ...[]byte) (h common.Hash) {
+func Keccak256Hash(data ...[]byte) (h libcommon.Hash) {
 	d := NewKeccakState()
 	for _, b := range data {
 		d.Write(b)
@@ -115,16 +116,16 @@ func Keccak512(data ...[]byte) []byte {
 
 // CreateAddress creates an ethereum address given the bytes and the nonce
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress(b common.Address, nonce uint64) common.Address {
+func CreateAddress(b libcommon.Address, nonce uint64) libcommon.Address {
 	data, _ := rlp.EncodeToBytes([]interface{}{b, nonce})
-	return common.BytesToAddress(Keccak256(data)[12:])
+	return libcommon.BytesToAddress(Keccak256(data)[12:])
 }
 
 // CreateAddress2 creates an ethereum address given the address bytes, initial
 // contract code hash and a salt.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func CreateAddress2(b common.Address, salt [32]byte, inithash []byte) common.Address {
-	return common.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
+func CreateAddress2(b libcommon.Address, salt [32]byte, inithash []byte) libcommon.Address {
+	return libcommon.BytesToAddress(Keccak256([]byte{0xff}, b.Bytes(), salt[:], inithash)[12:])
 }
 
 // ToECDSA creates a private key with the given D value.
@@ -313,9 +314,9 @@ func ValidateSignatureValues(v byte, r, s *uint256.Int, homestead bool) bool {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func PubkeyToAddress(p ecdsa.PublicKey) common.Address {
+func PubkeyToAddress(p ecdsa.PublicKey) libcommon.Address {
 	pubBytes := MarshalPubkey(&p)
-	return common.BytesToAddress(Keccak256(pubBytes)[12:])
+	return libcommon.BytesToAddress(Keccak256(pubBytes)[12:])
 }
 
 func zeroBytes(bytes []byte) {

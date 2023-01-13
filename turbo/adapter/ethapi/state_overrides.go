@@ -5,11 +5,12 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
-type StateOverrides map[common.Address]Account
+type StateOverrides map[libcommon.Address]Account
 
 func (overrides *StateOverrides) Override(state *state.IntraBlockState) error {
 

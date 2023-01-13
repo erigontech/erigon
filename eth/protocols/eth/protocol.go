@@ -24,8 +24,9 @@ import (
 	"math/big"
 	"math/bits"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -148,15 +149,15 @@ type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
-	Head            common.Hash
-	Genesis         common.Hash
+	Head            libcommon.Hash
+	Genesis         libcommon.Hash
 	ForkID          forkid.ID
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
 type NewBlockHashesPacket []struct {
-	Hash   common.Hash // Hash of one particular block being announced
-	Number uint64      // Number of one particular block being announced
+	Hash   libcommon.Hash // Hash of one particular block being announced
+	Number uint64         // Number of one particular block being announced
 }
 
 // TransactionsPacket is the network packet for broadcasting new transactions.
@@ -242,14 +243,14 @@ type GetBlockHeadersPacket66 struct {
 
 // HashOrNumber is a combined field for specifying an origin block.
 type HashOrNumber struct {
-	Hash   common.Hash // Block hash from which to retrieve headers (excludes Number)
-	Number uint64      // Block hash from which to retrieve headers (excludes Hash)
+	Hash   libcommon.Hash // Block hash from which to retrieve headers (excludes Number)
+	Number uint64         // Block hash from which to retrieve headers (excludes Hash)
 }
 
 // EncodeRLP is a specialized encoder for HashOrNumber to encode only one of the
 // two contained union fields.
 func (hn *HashOrNumber) EncodeRLP(w io.Writer) error {
-	if hn.Hash == (common.Hash{}) {
+	if hn.Hash == (libcommon.Hash{}) {
 		return rlp.Encode(w, hn.Number)
 	}
 	if hn.Number != 0 {
@@ -375,7 +376,7 @@ func (request *NewBlockPacket) SanityCheck() error {
 }
 
 // GetBlockBodiesPacket represents a block body query.
-type GetBlockBodiesPacket []common.Hash
+type GetBlockBodiesPacket []libcommon.Hash
 
 // GetBlockBodiesPacket represents a block body query over eth/66.
 type GetBlockBodiesPacket66 struct {
@@ -427,7 +428,7 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.
 }
 
 // GetNodeDataPacket represents a trie node data query.
-type GetNodeDataPacket []common.Hash
+type GetNodeDataPacket []libcommon.Hash
 
 // GetNodeDataPacket represents a trie node data query over eth/66.
 type GetNodeDataPacket66 struct {
@@ -445,7 +446,7 @@ type NodeDataPacket66 struct {
 }
 
 // GetReceiptsPacket represents a block receipts query.
-type GetReceiptsPacket []common.Hash
+type GetReceiptsPacket []libcommon.Hash
 
 // GetReceiptsPacket represents a block receipts query over eth/66.
 type GetReceiptsPacket66 struct {
@@ -472,10 +473,10 @@ type ReceiptsRLPPacket66 struct {
 }
 
 // NewPooledTransactionHashesPacket represents a transaction announcement packet.
-type NewPooledTransactionHashesPacket []common.Hash
+type NewPooledTransactionHashesPacket []libcommon.Hash
 
 // GetPooledTransactionsPacket represents a transaction query.
-type GetPooledTransactionsPacket []common.Hash
+type GetPooledTransactionsPacket []libcommon.Hash
 
 type GetPooledTransactionsPacket66 struct {
 	RequestId uint64

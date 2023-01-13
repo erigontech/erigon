@@ -20,7 +20,8 @@ import (
 	"encoding/json"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -59,7 +60,7 @@ func newMuxTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, er
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *muxTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
 		t.CaptureStart(env, from, to, precompile, create, input, gas, value, code)
 	}
@@ -87,7 +88,7 @@ func (t *muxTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scop
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *muxTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *muxTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	for _, t := range t.tracers {
 		t.CaptureEnter(typ, from, to, precompile, create, input, gas, value, code)
 	}

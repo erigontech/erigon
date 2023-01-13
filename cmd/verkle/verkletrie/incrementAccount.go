@@ -6,13 +6,14 @@ import (
 	"sync"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter, from, to uint64) error {
@@ -61,7 +62,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 	marker := NewVerkleMarker()
 	defer marker.Rollback()
 
-	for k, v, err := accountCursor.Seek(common2.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {
+	for k, v, err := accountCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accountCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -73,7 +74,7 @@ func IncrementAccount(vTx kv.RwTx, tx kv.Tx, workers uint64, verkleWriter *Verkl
 		if blockNumber > to {
 			break
 		}
-		address := common.BytesToAddress(addressBytes)
+		address := libcommon.BytesToAddress(addressBytes)
 
 		marked, err := marker.IsMarked(addressBytes)
 		if err != nil {

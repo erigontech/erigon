@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -26,24 +26,24 @@ var (
 )
 
 // CreateTransaction creates a transaction depending on the type of transaction being passed
-func CreateTransaction(txType models.TransactionType, addr string, value, nonce uint64) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
+func CreateTransaction(txType models.TransactionType, addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	switch txType {
 	case models.NonContractTx:
 		tx, address, err := createNonContractTx(addr, value, nonce)
 		if err != nil {
-			return nil, common.Address{}, nil, nil, fmt.Errorf("failed to create non-contract transaction: %v", err)
+			return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create non-contract transaction: %v", err)
 		}
 		return tx, address, nil, nil, nil
 	case models.ContractTx:
 		return createContractTx(nonce)
 	default:
-		return nil, common.Address{}, nil, nil, models.ErrInvalidTransactionType
+		return nil, libcommon.Address{}, nil, nil, models.ErrInvalidTransactionType
 	}
 }
 
 // createNonContractTx returns a signed transaction and the recipient address
-func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, common.Address, error) {
-	toAddress := common.HexToAddress(addr)
+func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, error) {
+	toAddress := libcommon.HexToAddress(addr)
 
 	// create a new transaction using the parameters to send
 	transaction := types.NewTransaction(nonce, toAddress, uint256.NewInt(value), params.TxGas, uint256.NewInt(gasPrice), nil)
@@ -51,30 +51,30 @@ func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, 
 	// sign the transaction using the developer 0signed private key
 	signedTx, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
 	if err != nil {
-		return nil, common.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
+		return nil, libcommon.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
 	}
 
 	return &signedTx, toAddress, nil
 }
 
 // createContractTx creates and signs a transaction using the developer address, returns the contract and the signed transaction
-func createContractTx(nonce uint64) (*types.Transaction, common.Address, *contracts.Subscription, *bind.TransactOpts, error) {
+func createContractTx(nonce uint64) (*types.Transaction, libcommon.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	// initialize transactOpts
 	transactOpts, err := initializeTransactOps(nonce)
 	if err != nil {
-		return nil, common.Address{}, nil, nil, fmt.Errorf("failed to initialize transactOpts: %v", err)
+		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to initialize transactOpts: %v", err)
 	}
 
 	// deploy the contract and get the contract handler
 	address, txToSign, subscriptionContract, err := contracts.DeploySubscription(transactOpts, models.ContractBackend)
 	if err != nil {
-		return nil, common.Address{}, nil, nil, fmt.Errorf("failed to deploy subscription: %v", err)
+		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to deploy subscription: %v", err)
 	}
 
 	// sign the transaction with the private key
 	signedTx, err := types.SignTx(txToSign, *signer, models.DevSignedPrivateKey)
 	if err != nil {
-		return nil, common.Address{}, nil, nil, fmt.Errorf("failed to sign tx: %v", err)
+		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to sign tx: %v", err)
 	}
 
 	return &signedTx, address, subscriptionContract, transactOpts, nil
@@ -97,7 +97,7 @@ func initializeTransactOps(nonce uint64) (*bind.TransactOpts, error) {
 }
 
 // txHashInBlock checks if the block with block number has the transaction hash in its list of transactions
-func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber string, txToBlockMap map[common.Hash]string) (uint64, int, error) {
+func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNumber string, txToBlockMap map[libcommon.Hash]string) (uint64, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel() // releases the resources held by the context
 
@@ -128,7 +128,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[common.Hash]bool, blockNumber
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address common.Address) (*common.Hash, error) {
+func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address libcommon.Address) (*libcommon.Hash, error) {
 	fmt.Println("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction

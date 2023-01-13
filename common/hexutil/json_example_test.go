@@ -20,13 +20,15 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 type MyType [5]byte
 
 func (v *MyType) UnmarshalText(input []byte) error {
-	return hexutil.UnmarshalFixedText("MyType", input, v[:])
+	return hexutility.UnmarshalFixedText("MyType", input, v[:])
 }
 
 func (v MyType) String() string {

@@ -24,9 +24,10 @@ import (
 
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
@@ -99,7 +100,7 @@ type jsTracer struct {
 	toBuf             toBufFn               // Converts a []byte into a JS buffer
 	fromBuf           fromBufFn             // Converts an array, hex string or Uint8Array to a []byte
 	ctx               map[string]goja.Value // KV-bag passed to JS in `result`
-	activePrecompiles []common.Address      // List of active precompiles at current block
+	activePrecompiles []libcommon.Address   // List of active precompiles at current block
 	traceStep         bool                  // True if tracer object exposes a `step()` method
 	traceFrame        bool                  // True if tracer object exposes the `enter()` and `exit()` methods
 	gasLimit          uint64                // Amount of gas bought for the whole tx
@@ -145,9 +146,9 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (tracer
 	if ctx == nil {
 		ctx = new(tracers.Context)
 	}
-	if ctx.BlockHash != (common.Hash{}) {
+	if ctx.BlockHash != (libcommon.Hash{}) {
 		t.ctx["blockHash"] = vm.ToValue(ctx.BlockHash.Bytes())
-		if ctx.TxHash != (common.Hash{}) {
+		if ctx.TxHash != (libcommon.Hash{}) {
 			t.ctx["txIndex"] = vm.ToValue(ctx.TxIndex)
 			t.ctx["txHash"] = vm.ToValue(ctx.TxHash.Bytes())
 		}
@@ -223,7 +224,7 @@ func (t *jsTracer) CaptureTxEnd(restGas uint64) {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *jsTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
 	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
@@ -295,7 +296,7 @@ func (t *jsTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *jsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *jsTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if !t.traceFrame {
 		return
 	}
@@ -378,7 +379,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return ""
 		}
-		return hexutil.Encode(b)
+		return hexutility.Encode(b)
 	})
 	vm.Set("toWord", func(v goja.Value) goja.Value {
 		// TODO: add test with []byte len < 32 or > 32
@@ -387,7 +388,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		b = common.BytesToHash(b).Bytes()
+		b = libcommon.BytesToHash(b).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -401,7 +402,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		a = common.BytesToAddress(a).Bytes()
+		a = libcommon.BytesToAddress(a).Bytes()
 		res, err := t.toBuf(vm, a)
 		if err != nil {
 			vm.Interrupt(err)
@@ -415,7 +416,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		addr := common.BytesToAddress(a)
+		addr := libcommon.BytesToAddress(a)
 		b := crypto.CreateAddress(addr, uint64(nonce)).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
@@ -430,7 +431,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		addr := common.BytesToAddress(a)
+		addr := libcommon.BytesToAddress(a)
 		code, err := t.fromBuf(vm, initcode, true)
 		if err != nil {
 			vm.Interrupt(err)
@@ -438,7 +439,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 		}
 		code = common.CopyBytes(code)
 		codeHash := crypto.Keccak256(code)
-		b := crypto.CreateAddress2(addr, common.HexToHash(salt), codeHash).Bytes()
+		b := crypto.CreateAddress2(addr, libcommon.HexToHash(salt), codeHash).Bytes()
 		res, err := t.toBuf(vm, b)
 		if err != nil {
 			vm.Interrupt(err)
@@ -452,7 +453,7 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return false
 		}
-		addr := common.BytesToAddress(a)
+		addr := libcommon.BytesToAddress(a)
 		for _, p := range t.activePrecompiles {
 			if p == addr {
 				return true
@@ -665,7 +666,7 @@ func (do *dbObj) GetBalance(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := libcommon.BytesToAddress(a)
 	value := do.ibs.GetBalance(addr).ToBig()
 	res, err := do.toBig(do.vm, value.String())
 	if err != nil {
@@ -681,7 +682,7 @@ func (do *dbObj) GetNonce(addrSlice goja.Value) uint64 {
 		do.vm.Interrupt(err)
 		return 0
 	}
-	addr := common.BytesToAddress(a)
+	addr := libcommon.BytesToAddress(a)
 	return do.ibs.GetNonce(addr)
 }
 
@@ -691,7 +692,7 @@ func (do *dbObj) GetCode(addrSlice goja.Value) goja.Value {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := libcommon.BytesToAddress(a)
 	code := do.ibs.GetCode(addr)
 	res, err := do.toBuf(do.vm, code)
 	if err != nil {
@@ -707,13 +708,13 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		do.vm.Interrupt(err)
 		return nil
 	}
-	addr := common.BytesToAddress(a)
+	addr := libcommon.BytesToAddress(a)
 	h, err := do.fromBuf(do.vm, hashSlice, false)
 	if err != nil {
 		do.vm.Interrupt(err)
 		return nil
 	}
-	hash := common.BytesToHash(h)
+	hash := libcommon.BytesToHash(h)
 	var outValue uint256.Int
 	do.ibs.GetState(addr, &hash, &outValue)
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
@@ -730,7 +731,7 @@ func (do *dbObj) Exists(addrSlice goja.Value) bool {
 		do.vm.Interrupt(err)
 		return false
 	}
-	addr := common.BytesToAddress(a)
+	addr := libcommon.BytesToAddress(a)
 	return do.ibs.Exist(addr)
 }
 
@@ -806,8 +807,8 @@ type callframe struct {
 	toBuf toBufFn
 
 	typ   string
-	from  common.Address
-	to    common.Address
+	from  libcommon.Address
+	to    libcommon.Address
 	input []byte
 	gas   uint
 	value *big.Int

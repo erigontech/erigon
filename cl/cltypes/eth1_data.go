@@ -1,14 +1,17 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	ssz "github.com/prysmaticlabs/fastssz"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type Eth1Data struct {
-	Root         common.Hash
-	BlockHash    common.Hash
+	Root         libcommon.Hash
+	BlockHash    libcommon.Hash
 	DepositCount uint64
 }
 
@@ -23,7 +26,7 @@ func (e *Eth1Data) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 
 // MarshalSSZ ssz marshals the Eth1Data object
 func (e *Eth1Data) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, 0, common.BlockNumberLength+common.HashLength*2)
+	buf := make([]byte, 0, common.BlockNumberLength+length.Hash*2)
 	return e.MarshalSSZTo(buf)
 }
 
@@ -44,7 +47,7 @@ func (e *Eth1Data) UnmarshalSSZ(buf []byte) error {
 
 // SizeSSZ returns the ssz encoded size in bytes for the Eth1Data object
 func (e *Eth1Data) SizeSSZ() int {
-	return common.BlockNumberLength + common.HashLength*2
+	return common.BlockNumberLength + length.Hash*2
 }
 
 // HashTreeRoot ssz hashes the Eth1Data object
@@ -59,7 +62,7 @@ func (e *Eth1Data) HashTreeRoot() ([32]byte, error) {
 
 // HashTreeRootWith ssz hashes the Eth1Data object with a hasher
 func (e *Eth1Data) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	var root common.Hash
+	var root libcommon.Hash
 	root, err = e.HashTreeRoot()
 	if err != nil {
 		return

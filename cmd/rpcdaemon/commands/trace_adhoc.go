@@ -11,6 +11,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	math2 "github.com/ledgerwatch/erigon/common/math"
@@ -24,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -42,34 +43,34 @@ const (
 
 // TraceCallParam (see SendTxArgs -- this allows optional prams plus don't use MixedcaseAddress
 type TraceCallParam struct {
-	From                 *common.Address   `json:"from"`
-	To                   *common.Address   `json:"to"`
-	Gas                  *hexutil.Uint64   `json:"gas"`
-	GasPrice             *hexutil.Big      `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
-	Value                *hexutil.Big      `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
-	AccessList           *types.AccessList `json:"accessList"`
-	txHash               *common.Hash
+	From                 *libcommon.Address `json:"from"`
+	To                   *libcommon.Address `json:"to"`
+	Gas                  *hexutil.Uint64    `json:"gas"`
+	GasPrice             *hexutil.Big       `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
+	Value                *hexutil.Big       `json:"value"`
+	Data                 hexutil.Bytes      `json:"data"`
+	AccessList           *types.AccessList  `json:"accessList"`
+	txHash               *libcommon.Hash
 	traceTypes           []string
 }
 
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
-	Output          hexutil.Bytes                        `json:"output"`
-	StateDiff       map[common.Address]*StateDiffAccount `json:"stateDiff"`
-	Trace           []*ParityTrace                       `json:"trace"`
-	VmTrace         *VmTrace                             `json:"vmTrace"`
-	TransactionHash *common.Hash                         `json:"transactionHash,omitempty"`
+	Output          hexutil.Bytes                           `json:"output"`
+	StateDiff       map[libcommon.Address]*StateDiffAccount `json:"stateDiff"`
+	Trace           []*ParityTrace                          `json:"trace"`
+	VmTrace         *VmTrace                                `json:"vmTrace"`
+	TransactionHash *libcommon.Hash                         `json:"transactionHash,omitempty"`
 }
 
 // StateDiffAccount is the part of `trace_call` response that is under "stateDiff" tag
 type StateDiffAccount struct {
-	Balance interface{}                            `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
-	Code    interface{}                            `json:"code"`
-	Nonce   interface{}                            `json:"nonce"`
-	Storage map[common.Hash]map[string]interface{} `json:"storage"`
+	Balance interface{}                               `json:"balance"` // Can be either string "=" or mapping "*" => {"from": "hex", "to": "hex"}
+	Code    interface{}                               `json:"code"`
+	Nonce   interface{}                               `json:"nonce"`
+	Storage map[libcommon.Hash]map[string]interface{} `json:"storage"`
 }
 
 type StateDiffBalance struct {
@@ -88,8 +89,8 @@ type StateDiffNonce struct {
 }
 
 type StateDiffStorage struct {
-	From common.Hash `json:"from"`
-	To   common.Hash `json:"to"`
+	From libcommon.Hash `json:"from"`
+	To   libcommon.Hash `json:"to"`
 }
 
 // VmTrace is the part of `trace_call` response that is under "vmTrace" tag
@@ -128,7 +129,7 @@ type VmTraceStore struct {
 // ToMessage converts CallArgs to the Message type used by the core evm
 func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (types.Message, error) {
 	// Set sender address or use zero address if none specified.
-	var addr common.Address
+	var addr libcommon.Address
 	if args.From != nil {
 		addr = *args.From
 	}
@@ -238,7 +239,7 @@ func (ot *OeTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (ot *OeTracer) CaptureTxEnd(restGas uint64) {}
 
-func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	//fmt.Printf("captureStartOrEnter deep %t, typ %s, from %x, to %x, create %t, input %x, gas %d, value %d, precompile %t\n", deep, typ.String(), from, to, create, input, gas, value, precompile)
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
@@ -280,7 +281,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	if create {
 		trResult := &CreateTraceResult{}
 		trace.Type = CREATE
-		trResult.Address = new(common.Address)
+		trResult.Address = new(libcommon.Address)
 		copy(trResult.Address[:], to.Bytes())
 		trace.Result = trResult
 	} else {
@@ -344,11 +345,11 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from common.Ad
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.captureStartOrEnter(false /* deep */, vm.CALL, from, to, precompile, create, input, gas, value, code)
 }
 
-func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.captureStartOrEnter(true /* deep */, typ, from, to, precompile, create, input, gas, value, code)
 }
 
@@ -578,55 +579,55 @@ func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scop
 
 // Implements core/state/StateWriter to provide state diffs
 type StateDiff struct {
-	sdMap map[common.Address]*StateDiffAccount
+	sdMap map[libcommon.Address]*StateDiffAccount
 }
 
-func (sd *StateDiff) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (sd *StateDiff) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (sd *StateDiff) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (sd *StateDiff) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
-func (sd *StateDiff) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (sd *StateDiff) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
 	accountDiff := sd.sdMap[address]
 	if accountDiff == nil {
-		accountDiff = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		accountDiff = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 		sd.sdMap[address] = accountDiff
 	}
 	m := make(map[string]interface{})
-	m["*"] = &StateDiffStorage{From: common.BytesToHash(original.Bytes()), To: common.BytesToHash(value.Bytes())}
+	m["*"] = &StateDiffStorage{From: libcommon.BytesToHash(original.Bytes()), To: libcommon.BytesToHash(value.Bytes())}
 	accountDiff.Storage[*key] = m
 	return nil
 }
 
-func (sd *StateDiff) CreateContract(address common.Address) error {
+func (sd *StateDiff) CreateContract(address libcommon.Address) error {
 	if _, ok := sd.sdMap[address]; !ok {
-		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[common.Hash]map[string]interface{})}
+		sd.sdMap[address] = &StateDiffAccount{Storage: make(map[libcommon.Hash]map[string]interface{})}
 	}
 	return nil
 }
 
 // CompareStates uses the addresses accumulated in the sdMap and compares balances, nonces, and codes of the accounts, and fills the rest of the sdMap
 func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
-	var toRemove []common.Address
+	var toRemove []libcommon.Address
 	for addr, accountDiff := range sd.sdMap {
 		initialExist := initialIbs.Exist(addr)
 		exist := ibs.Exist(addr)
@@ -714,7 +715,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) {
 	}
 }
 
-func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) (*TraceCallResult, error) {
+func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) (*TraceCallResult, error) {
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -985,14 +986,14 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 
 	gp := new(core.GasPool).AddGas(msg.Gas())
 	var execResult *core.ExecutionResult
-	ibs.Prepare(common.Hash{}, common.Hash{}, 0)
+	ibs.Prepare(libcommon.Hash{}, libcommon.Hash{}, 0)
 	execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */)
 	if err != nil {
 		return nil, err
 	}
 	traceResult.Output = common.CopyBytes(execResult.ReturnData)
 	if traceTypeStateDiff {
-		sdMap := make(map[common.Address]*StateDiffAccount)
+		sdMap := make(map[libcommon.Address]*StateDiffAccount)
 		traceResult.StateDiff = sdMap
 		sd := &StateDiff{sdMap: sdMap}
 		if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
@@ -1210,7 +1211,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		if args.txHash != nil {
 			ibs.Prepare(*args.txHash, header.Hash(), txIndex)
 		} else {
-			ibs.Prepare(common.Hash{}, header.Hash(), txIndex)
+			ibs.Prepare(libcommon.Hash{}, header.Hash(), txIndex)
 		}
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */)
 		if err != nil {
@@ -1219,7 +1220,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		traceResult.Output = common.CopyBytes(execResult.ReturnData)
 		if traceTypeStateDiff {
 			initialIbs := state.New(cloneReader)
-			sdMap := make(map[common.Address]*StateDiffAccount)
+			sdMap := make(map[libcommon.Address]*StateDiffAccount)
 			traceResult.StateDiff = sdMap
 			sd := &StateDiff{sdMap: sdMap}
 			if err = ibs.FinalizeTx(evm.ChainRules(), sd); err != nil {
@@ -1251,7 +1252,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 }
 
 // RawTransaction implements trace_rawTransaction.
-func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error) {
+func (api *TraceAPIImpl) RawTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) ([]interface{}, error) {
 	var stub []interface{}
 	return stub, fmt.Errorf(NotImplemented, "trace_rawTransaction")
 }

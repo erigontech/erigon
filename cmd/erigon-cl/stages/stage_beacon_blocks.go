@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -13,9 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type StageBeaconsBlockCfg struct {
@@ -51,7 +52,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		defer tx.Rollback()
 	}
 	progress := s.BlockNumber
-	var lastRoot common.Hash
+	var lastRoot libcommon.Hash
 	if progress == 0 {
 		progress = cfg.state.LatestBlockHeader().Slot
 		lastRoot, err = cfg.state.BlockRoot()
@@ -69,7 +70,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 
 	log.Info(fmt.Sprintf("[%s] Started", s.LogPrefix()), "start", progress, "target", targetSlot)
 	cfg.downloader.SetHighestProcessedSlot(progress)
-	if cfg.downloader.HighestProcessedRoot() == (common.Hash{}) {
+	if cfg.downloader.HighestProcessedRoot() == (libcommon.Hash{}) {
 		cfg.downloader.SetHighestProcessedRoot(lastRoot)
 	}
 	cfg.downloader.SetTargetSlot(targetSlot)
@@ -77,8 +78,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	// On new blocks we just check slot sequencing for now :)
 	cfg.downloader.SetProcessFunction(func(
 		highestSlotProcessed uint64,
-		highestRootProcessed common.Hash,
-		newBlocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+		highestRootProcessed libcommon.Hash,
+		newBlocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed libcommon.Hash, err error) {
 		// Setup
 		newHighestSlotProcessed = highestSlotProcessed
 		newHighestBlockRootProcessed = highestRootProcessed
@@ -87,7 +88,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			return
 		}
 		// Retrieve last blocks to do reverse soft checks
-		var lastRootInSegment common.Hash
+		var lastRootInSegment libcommon.Hash
 		lastBlockInSegment := newBlocks[len(newBlocks)-1]
 		lastSlotInSegment := lastBlockInSegment.Block.Slot
 		lastRootInSegment, err = lastBlockInSegment.Block.HashTreeRoot()
@@ -98,7 +99,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 
 		for i := len(newBlocks) - 2; i >= 0; i-- {
-			var blockRoot common.Hash
+			var blockRoot libcommon.Hash
 			blockRoot, err = newBlocks[i].Block.HashTreeRoot()
 			if err != nil {
 				return

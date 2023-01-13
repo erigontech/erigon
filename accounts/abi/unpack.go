@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"reflect"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -239,9 +241,9 @@ func toGoType(index int, t Type, output []byte) (interface{}, error) {
 	case BoolTy:
 		return readBool(returnOutput)
 	case AddressTy:
-		return common.BytesToAddress(returnOutput), nil
+		return libcommon.BytesToAddress(returnOutput), nil
 	case HashTy:
-		return common.BytesToHash(returnOutput), nil
+		return libcommon.BytesToHash(returnOutput), nil
 	case BytesTy:
 		return output[begin : begin+length], nil
 	case FixedBytesTy:

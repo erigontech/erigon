@@ -5,8 +5,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
@@ -16,8 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestEmptyStageSync(t *testing.T) {
@@ -28,7 +30,7 @@ func TestHeaderStep(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -66,7 +68,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	require, m := require.New(t), stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
 	{ // Do 1 step to start txPool
@@ -101,7 +103,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 
 	chain, err = core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
 		// In block 1, addr1 sends addr2 some ether.
-		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas, u256.Num1, nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 		require.NoError(err)
 		gen.AddTx(tx)
 	}, false /* intermediateHashes */)
@@ -129,7 +131,7 @@ func TestReorg(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -168,20 +170,20 @@ func TestReorg(t *testing.T) {
 
 	// Now generate three competing branches, one short and two longer ones
 	short, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	long1, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
+		b.SetCoinbase(libcommon.Address{2}) // Need to make headers different from short branch
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
 	}
 	// Second long chain needs to be slightly shorter than the first long chain
 	long2, err := core.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
+		b.SetCoinbase(libcommon.Address{3}) // Need to make headers different from short branch and another long branch
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
@@ -265,7 +267,7 @@ func TestReorg(t *testing.T) {
 	// another short chain
 	// Now generate three competing branches, one short and two longer ones
 	short2, err := core.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate short fork: %v", err)
@@ -304,14 +306,14 @@ func TestAnchorReplace(t *testing.T) {
 	m := stages.Mock(t)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 11, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -319,9 +321,9 @@ func TestAnchorReplace(t *testing.T) {
 
 	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, b *core.BlockGen) {
 		if i < 10 {
-			b.SetCoinbase(common.Address{1})
+			b.SetCoinbase(libcommon.Address{1})
 		} else {
-			b.SetCoinbase(common.Address{2})
+			b.SetCoinbase(libcommon.Address{2})
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -399,14 +401,14 @@ func TestAnchorReplace(t *testing.T) {
 func TestAnchorReplace2(t *testing.T) {
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
 	}
 
 	short, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate blocks: %v", err)
@@ -414,9 +416,9 @@ func TestAnchorReplace2(t *testing.T) {
 
 	long, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 30, func(i int, b *core.BlockGen) {
 		if i < 10 {
-			b.SetCoinbase(common.Address{1})
+			b.SetCoinbase(libcommon.Address{1})
 		} else {
-			b.SetCoinbase(common.Address{2})
+			b.SetCoinbase(libcommon.Address{2})
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -527,7 +529,7 @@ func TestBogusForkchoice(t *testing.T) {
 
 	// Bogus forkChoice: head points to rubbish
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
-		HeadBlockHash:      common.HexToHash("11111111111111111111"),
+		HeadBlockHash:      libcommon.HexToHash("11111111111111111111"),
 		SafeBlockHash:      m.Genesis.Hash(),
 		FinalizedBlockHash: m.Genesis.Hash(),
 	}
@@ -561,7 +563,7 @@ func TestPoSDownloader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2 /* n */, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
@@ -620,7 +622,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	m := stages.MockWithZeroTTD(t, true)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3 /* n */, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
+		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(t, err)
 
