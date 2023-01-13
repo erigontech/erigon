@@ -279,7 +279,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 		hb.accProofResult.CodeHash = a.CodeHash
 		hb.accProofResult.Nonce = hexutil.Uint64(a.Nonce)
 		if a.storage != nil {
-			hb.accProofResult.StorageHash = common.BytesToHash(a.storage.reference())
+			hb.accProofResult.StorageHash = libcommon.BytesToHash(a.storage.reference())
 		} else {
 			hb.accProofResult.StorageHash = EmptyRoot
 		}
