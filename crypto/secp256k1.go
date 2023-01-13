@@ -19,11 +19,11 @@ package crypto
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var (
-	secp256k1N     = new(uint256.Int).SetBytes(common.MustDecodeHex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
+	secp256k1N     = new(uint256.Int).SetBytes(hexutility.MustDecodeHex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141"))
 	secp256k1halfN = new(uint256.Int).Rsh(secp256k1N, 1)
 )
 

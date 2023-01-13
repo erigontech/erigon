@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"sort"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -39,7 +39,7 @@ func NewAccountChangeSet() *ChangeSet {
 
 func EncodeAccounts(blockN uint64, s *ChangeSet, f func(k, v []byte) error) error {
 	sort.Sort(s)
-	newK := common2.EncodeTs(blockN)
+	newK := hexutility.EncodeTs(blockN)
 	for _, cs := range s.Changes {
 		newV := make([]byte, len(cs.Key)+len(cs.Value))
 		copy(newV, cs.Key)
@@ -62,7 +62,7 @@ func DecodeAccounts(dbKey, dbValue []byte) (uint64, []byte, []byte, error) {
 }
 
 func FindAccount(c kv.CursorDupSort, blockNumber uint64, key []byte) ([]byte, error) {
-	k := common2.EncodeTs(blockNumber)
+	k := hexutility.EncodeTs(blockNumber)
 	v, err := c.SeekBothRange(k, key)
 	if err != nil {
 		return nil, err

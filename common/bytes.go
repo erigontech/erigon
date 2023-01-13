@@ -16,7 +16,9 @@
 
 package common
 
-import "fmt"
+import (
+	"fmt"
+)
 
 func ByteCount(b uint64) string {
 	const unit = 1024

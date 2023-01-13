@@ -23,7 +23,7 @@ import (
 	math2 "math"
 	"reflect"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -175,7 +175,7 @@ func ForPrefix(db kv.Tx, bucket string, startkey []byte, walker func(blockN uint
 }
 
 func Truncate(tx kv.RwTx, from uint64) error {
-	keyStart := common.EncodeTs(from)
+	keyStart := hexutility.EncodeTs(from)
 
 	{
 		c, err := tx.RwCursorDupSort(kv.AccountChangeSet)

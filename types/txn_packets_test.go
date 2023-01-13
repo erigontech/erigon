@@ -24,7 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var hashParseTests = []struct {
@@ -40,11 +40,11 @@ func TestParseHash(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var hashBuf [32]byte
-			payload := common.MustDecodeHex(tt.payloadStr)
+			payload := hexutility.MustDecodeHex(tt.payloadStr)
 			_, parseEnd, err := ParseHash(payload, 0, hashBuf[:0])
 			require.Equal(tt.expectedErr, err != nil)
 			require.Equal(len(payload), parseEnd)
-			require.Equal(common.MustDecodeHex(tt.hashStr), hashBuf[:])
+			require.Equal(hexutility.MustDecodeHex(tt.hashStr), hashBuf[:])
 		})
 	}
 }
@@ -66,8 +66,8 @@ func TestEncodeHash(t *testing.T) {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
-			encodeBuf = EncodeHashes(common.MustDecodeHex(tt.hashesStr), encodeBuf)
-			require.Equal(common.MustDecodeHex(tt.payloadStr), encodeBuf)
+			encodeBuf = EncodeHashes(hexutility.MustDecodeHex(tt.hashesStr), encodeBuf)
+			require.Equal(hexutility.MustDecodeHex(tt.payloadStr), encodeBuf)
 		})
 	}
 }
@@ -90,16 +90,16 @@ func TestEncodeGPT66(t *testing.T) {
 			require := require.New(t)
 			var encodeBuf []byte
 			var err error
-			encodeBuf, err = EncodeGetPooledTransactions66(common.MustDecodeHex(tt.hashesStr), tt.requestID, encodeBuf)
+			encodeBuf, err = EncodeGetPooledTransactions66(hexutility.MustDecodeHex(tt.hashesStr), tt.requestID, encodeBuf)
 			require.Equal(tt.expectedErr, err != nil)
-			require.Equal(common.MustDecodeHex(tt.payloadStr), encodeBuf)
+			require.Equal(hexutility.MustDecodeHex(tt.payloadStr), encodeBuf)
 			if err != nil {
 				return
 			}
 			requestID, hashes, _, err := ParseGetPooledTransactions66(encodeBuf, 0, nil)
 			require.Equal(tt.expectedErr, err != nil)
 			require.Equal(tt.requestID, requestID)
-			require.Equal(common.MustDecodeHex(tt.hashesStr), hashes)
+			require.Equal(hexutility.MustDecodeHex(tt.hashesStr), hashes)
 		})
 	}
 }
@@ -113,25 +113,25 @@ var ptp66EncodeTests = []struct {
 }{
 	{
 		txs: [][]byte{
-			common.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
+			hexutility.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
 		},
 		encoded: "f88088a4e61e8ad32f4845f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", requestID: 11882218248461043781, expectedErr: false, chainID: 5,
 	},
 	{
 		txs: [][]byte{
-			common.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
-			common.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
+			hexutility.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
+			hexutility.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
 		encoded: "f8d7820457f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", requestID: 1111, expectedErr: false, chainID: 1,
 	},
 }
 
 func TestPooledTransactionsPacket(t *testing.T) {
-	b := common.MustDecodeHex("e317e1a084a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680")
+	b := hexutility.MustDecodeHex("e317e1a084a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680")
 	requestID, out, pos, err := ParseGetPooledTransactions66(b, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, uint64(23), requestID)
-	require.Equal(t, common.MustDecodeHex("84a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680"), out)
+	require.Equal(t, hexutility.MustDecodeHex("84a64018534279c4d3f05ea8cc7c9bfaa6f72d09c1d0a5f3be337e8b9226a680"), out)
 	require.Equal(t, 36, pos)
 }
 
@@ -182,14 +182,14 @@ var tpEncodeTests = []struct {
 }{
 	{
 		txs: [][]byte{
-			common.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
+			hexutility.MustDecodeHex("02f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab"),
 		},
 		encoded: "f875b87302f870051b8477359400847735940a82520894c388750a661cc0b99784bab2c55e1f38ff91643b861319718a500080c080a028bf802cf4be66f51ab0570fa9fc06365c1b816b8a7ffe40bc05f9a0d2d12867a012c2ce1fc908e7a903b750388c8c2ae82383a476bc345b7c2826738fc321fcab", expectedErr: false, chainID: 5,
 	},
 	{
 		txs: [][]byte{
-			common.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
-			common.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
+			hexutility.MustDecodeHex("f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10"),
+			hexutility.MustDecodeHex("f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb"),
 		},
 		encoded: "f8d2f867088504a817c8088302e2489435353535353535353535353535353535353535358202008025a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12a064b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10f867098504a817c809830334509435353535353535353535353535353535353535358202d98025a052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afba052f8f61201b2b11a78d6e866abc9c3db2ae8631fa656bfe5cb53668255367afb", expectedErr: false, chainID: 1,
 	},

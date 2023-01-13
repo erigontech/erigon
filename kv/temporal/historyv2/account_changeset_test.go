@@ -23,9 +23,10 @@ import (
 	"reflect"
 	"testing"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 func TestEncodingAccount(t *testing.T) {
@@ -40,13 +41,13 @@ func TestEncodingAccount(t *testing.T) {
 	assert.NoError(t, err)
 
 	vals := [][]byte{
-		common2.MustDecodeHex("f7f6db1eb17c6d582078e0ffdd0c"),
-		common2.MustDecodeHex("b1e9b5c16355eede662031dd621d08faf4ea"),
-		common2.MustDecodeHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
+		hexutility.MustDecodeHex("f7f6db1eb17c6d582078e0ffdd0c"),
+		hexutility.MustDecodeHex("b1e9b5c16355eede662031dd621d08faf4ea"),
+		hexutility.MustDecodeHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"),
 	}
 	numOfElements := 3
 	for i := 0; i < numOfElements; i++ {
-		address := common2.MustDecodeHex(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
+		address := hexutility.MustDecodeHex(fmt.Sprintf("0xBe828AD8B538D1D691891F6c725dEdc5989abBc%d", i))
 		err2 := ch.Add(address, vals[i])
 		if err2 != nil {
 			t.Fatal(err)
