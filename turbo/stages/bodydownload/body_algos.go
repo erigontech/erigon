@@ -350,6 +350,7 @@ Loop:
 			delete(bd.requestedMap, tripleHash) // Delivered, cleaning up
 
 			err := bd.addBodyToBucket(tx, blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
+			log.Debug("added body to bucket", "blockNum", blockNum, "err", err)
 			if err != nil {
 				return 0, 0, err
 			}
