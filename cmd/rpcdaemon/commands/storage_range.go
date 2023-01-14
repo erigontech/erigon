@@ -5,6 +5,9 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 )
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -40,6 +43,40 @@ func storageRangeAt(stateReader walker, contractAddress libcommon.Address, start
 		return resultCount <= maxResult
 	}, maxResult+1); err != nil {
 		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %w", err)
+	}
+	return result, nil
+}
+
+func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
+	result := StorageRangeResult{Storage: storageMap{}}
+	resultCount := 0
+
+	r, err := ttx.(*temporal.Tx).DomainRange(temporal.StorageDomain, contractAddress.Bytes(), start, txNum, maxResult)
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+	for r.HasNext() {
+		k, v, err := r.Next()
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		if len(v) == 0 {
+			continue // Skip deleted entries
+		}
+		key := libcommon.BytesToHash(k[20:])
+		seckey, err := common.HashData(k[20:])
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		var value uint256.Int
+		value.SetBytes(v)
+		if resultCount < maxResult {
+			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
+		} else {
+			result.NextKey = &key
+			break
+		}
+		resultCount++
 	}
 	return result, nil
 }
