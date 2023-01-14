@@ -498,7 +498,7 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, 0)
+		signer := *types.MakeSigner(chainConfig, blockNum, b.Time())
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -997,7 +997,7 @@ func reconstituteStep(last bool,
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, bn)
-		signer := *types.MakeSigner(chainConfig, bn, 0)
+		signer := *types.MakeSigner(chainConfig, bn, b.Time())
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}

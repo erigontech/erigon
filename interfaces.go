@@ -121,10 +121,11 @@ type CallMsg struct {
 	Value    *uint256.Int    // amount of wei sent along with the call
 	Data     []byte          // input data, usually an ABI-encoded contract method invocation
 
-	FeeCap     *uint256.Int     // EIP-1559 fee cap per gas.
-	Tip        *uint256.Int     // EIP-1559 tip per gas.
-	AccessList types.AccessList // EIP-2930 access list.
-	DataHashes []common.Hash    // EIP-4844 versioned data hashes.
+	FeeCap           *uint256.Int     // EIP-1559 fee cap per gas.
+	Tip              *uint256.Int     // EIP-1559 tip per gas.
+	AccessList       types.AccessList // EIP-2930 access list.
+	DataHashes       []common.Hash    // EIP-4844 versioned data hashes.
+	MaxFeePerDataGas *uint256.Int     // EIP-4844 max_fee_per_data_gas
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

@@ -45,6 +45,7 @@ func MakeSigner(config *params.ChainConfig, blockNumber uint64, time uint64) *Si
 	signer.unprotected = true
 	switch {
 	case config.IsSharding(time):
+		// TODO: make sure this part is correct
 		signer.protected = true
 		signer.accesslist = true
 		signer.dynamicfee = true
@@ -99,7 +100,8 @@ func LatestSigner(config *params.ChainConfig) *Signer {
 	signer.chainIDMul.Mul(chainId, u256.Num2)
 	if config.ChainID != nil {
 		if config.ShardingForkTime != nil {
-			// TODO make a research on this
+			// TODO: make sure this part is correct
+			signer.dynamicfee = true
 		}
 		if config.LondonBlock != nil {
 			signer.dynamicfee = true

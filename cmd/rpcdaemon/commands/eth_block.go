@@ -111,7 +111,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Coinbase:   coinbase,
 	}
 
-	signer := types.MakeSigner(chainConfig, blockNumber, 0)
+	signer := types.MakeSigner(chainConfig, blockNumber, timestamp) // TODO: see if timestamp is correct arg here?
 	rules := chainConfig.Rules(blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {

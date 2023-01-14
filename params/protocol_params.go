@@ -178,7 +178,6 @@ const (
 	DataGasPriceUpdateFraction = 2225652
 	MaxBlobsPerBlock           = MaxDataGasPerBlock / DataGasPerBlob
 
-	BlobVerificationGas      uint64 = 1800000
 	BlobCommitmentVersionKZG uint8  = 0x01
 	PointEvaluationGas       uint64 = 50000
 )

@@ -268,6 +268,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	if overflow {
 		return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 	}
+
+	// compute data fee for eip-4844 data blobs if any
 	dgval := new(big.Int)
 	var dataGasUsed uint64
 	if st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {

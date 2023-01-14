@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -28,7 +29,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/protolambda/ztyp/codec"
+	"golang.org/x/crypto/sha3"
 )
+
+// hasherPool holds LegacyKeccak256 hashers for rlpHash.
+var hasherPool = sync.Pool{
+	New: func() interface{} { return sha3.NewLegacyKeccak256() },
+}
 
 type DerivableList interface {
 	Len() int
@@ -191,11 +198,11 @@ func prefixedRlpHash(prefix byte, x interface{}) (h common.Hash) {
 	return h
 }
 
-// prefixedSSZHash writes the prefix into the hasher before SSZ hash-tree-root-ing x.
-// It's used for typed transactions.
+// prefixedSSZHash writes the prefix into the hasher before SSZ encoding x.  It's used for
+// computing the tx id & signing hashes of signed blob transactions.
 func prefixedSSZHash(prefix byte, obj codec.Serializable) (h common.Hash) {
-	sha := cryptopool.NewLegacyKeccak256().(crypto.KeccakState)
-	defer cryptopool.ReturnToPoolKeccak256(sha)
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
 	sha.Reset()
 	sha.Write([]byte{prefix})
 	EncodeSSZ(sha, obj)

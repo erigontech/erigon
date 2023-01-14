@@ -483,14 +483,13 @@ func newIntraBlockExec(tx kv.TemporalTx, chainConfig *params.ChainConfig, engine
 }
 
 func (e *intraBlockExec) changeBlock(header *types.Header, excessDataGas *big.Int) {
-
 	e.blockNum = header.Number.Uint64()
 	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br, excessDataGas)
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
 	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
-	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time) // make sure `header.Time` is right arg
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time) // TODO: make sure `header.Time` is right arg
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 

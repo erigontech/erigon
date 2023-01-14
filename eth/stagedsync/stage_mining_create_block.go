@@ -152,7 +152,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		uncles    mapset.Set // uncle set
 	}
 	env := &envT{
-		signer:    types.MakeSigner(&cfg.chainConfig, blockNum, 0),
+		signer:    types.MakeSigner(&cfg.chainConfig, blockNum, 0), // TODO: pass correct time here
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),

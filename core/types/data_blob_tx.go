@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"math/bits"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
@@ -326,16 +325,6 @@ func (alv *AccessListView) FixedLength() uint64 {
 	return 0
 }
 
-// func (alv AccessListView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-// 	length := uint64(len(alv))
-// 	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-// 		if i < length {
-// 			return (*AccessTupleView)(&alv[i])
-// 		}
-// 		return nil
-// 	}, length, MAX_ACCESS_LIST_SIZE)
-// }
-
 type BlobTxMessage struct {
 	ChainID          Uint256View
 	Nonce            Uint64View
@@ -557,14 +546,6 @@ func (tx *SignedBlobTx) GetAccessList() AccessList {
 	return AccessList(tx.Message.AccessList)
 }
 
-// func (stx SignedBlobTx) BlobVersionedHashes() []common.Hash {
-// 	blobTx, ok := stx.inner.(*SignedBlobTx)
-// 	if !ok {
-// 		return nil
-// 	}
-// 	return blobTx.Message.BlobVersionedHashes
-// }
-
 func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
 		nonce:            stx.GetNonce(),
@@ -599,18 +580,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 
 // Hash computes the hash (but not for signatures!)
 func (stx *SignedBlobTx) Hash() common.Hash {
-	hash := prefixedRlpHash(BlobTxType, []interface{}{
-		stx.GetChainID(),
-		stx.GetNonce(),
-		stx.GetTip(),
-		stx.GetFeeCap(),
-		stx.GetGas(),
-		stx.GetTo(),
-		stx.GetAmount(),
-		stx.Message.Data,
-		stx.GetAccessList(),
-		stx.Signature.V, stx.Signature.R, stx.Signature.S,
-	})
+	hash := prefixedSSZHash(stx.Type(), stx)
 	// stx.hash.Store(&hash)
 	return hash
 }
@@ -664,25 +634,16 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) common.Hash {
 		&stx.Message)
 }
 
-// func (stx *SignedBlobTx) Size() common.StorageSize {
-// 	if size := stx.size.Load(); size != nil {
-// 		return size.(common.StorageSize)
+// func (tx SignedBlobTx) EncodingSize() int {
+// 	payloadSize, _, _, _ := tx.payloadSize()
+// 	envelopeSize := payloadSize
+// 	// Add envelope size and type size
+// 	if payloadSize >= 56 {
+// 		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
 // 	}
-// 	c := stx.EncodingSize()
-// 	stx.size.Store(common.StorageSize(c))
-// 	return common.StorageSize(c)
+// 	envelopeSize += 2
+// 	return envelopeSize
 // }
-
-func (tx SignedBlobTx) EncodingSize() int {
-	payloadSize, _, _, _ := tx.payloadSize()
-	envelopeSize := payloadSize
-	// Add envelope size and type size
-	if payloadSize >= 56 {
-		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-	}
-	envelopeSize += 2
-	return envelopeSize
-}
 
 func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
 	err := dr.Container(&stx.Message, &stx.Signature)
@@ -706,8 +667,6 @@ func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 }
 
 func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.GetDataHashes() }
-
-// func (stx *SignedBlobTx) WrapData() TxWrapData      { return nil }
 
 func (stx *SignedBlobTx) DataGas() *big.Int {
 	r := new(big.Int)

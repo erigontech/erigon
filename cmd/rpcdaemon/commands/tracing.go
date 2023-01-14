@@ -92,7 +92,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		excessDataGas = ph.ExcessDataGas
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64(), 0)
+	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 	for idx, txn := range block.Transactions() {
@@ -400,7 +400,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
-	signer := types.MakeSigner(chainConfig, blockNum, 0)
+	signer := types.MakeSigner(chainConfig, blockNum, block.Time()) // or blockCtx.Time?
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
 	// Setup the gas pool (also for unmetered requests)

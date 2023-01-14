@@ -699,7 +699,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	}
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), block.Time())
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time()) // or block.Time()?
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)
@@ -803,7 +803,7 @@ func (m callMsg) Data() []byte                   { return m.CallMsg.Data }
 func (m callMsg) AccessList() types.AccessList   { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                   { return false }
 func (m callMsg) DataHashes() []common.Hash      { return m.CallMsg.DataHashes }
-func (m callMsg) MaxFeePerDataGas() *uint256.Int { return nil }
+func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob * uint64(len(m.CallMsg.DataHashes)) }
 
 // filterBackend implements filters.Backend to support filtering for logs without
