@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -33,7 +34,7 @@ func InitSubscriptions(methods []models.SubMethod) {
 	}()
 }
 
-func SearchReservesForTransactionHash(hashes map[common.Hash]bool) (*map[common.Hash]string, error) {
+func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
 	fmt.Printf("Searching for txes in reserved blocks...\n")
 	m, err := searchBlockForHashes(hashes)
 	if err != nil {
@@ -148,8 +149,8 @@ func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, err
 //	return blockN, err
 //}
 
-func searchBlockForHashes(hashesmap map[common.Hash]bool) (*map[common.Hash]string, error) {
-	txToBlock := make(map[common.Hash]string, len(hashesmap))
+func searchBlockForHashes(hashesmap map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
+	txToBlock := make(map[libcommon.Hash]string, len(hashesmap))
 
 	toFind := len(hashesmap)
 	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]

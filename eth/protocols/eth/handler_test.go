@@ -21,9 +21,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -32,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/stretchr/testify/require"
 )
 
 var (
@@ -84,7 +85,7 @@ func TestGetBlockReceipts(t *testing.T) {
 
 	// Collect the hashes to request, and the response to expect
 	var (
-		hashes   []common.Hash
+		hashes   []libcommon.Hash
 		receipts []rlp.RawValue
 	)
 

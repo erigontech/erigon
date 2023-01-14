@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -18,12 +19,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[common.Address]uint64, map[common.Hash]uint64) {
-	addrs := []common.Address{{1}, {2}, {3}}
-	topics := []common.Hash{{1}, {2}, {3}}
+func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[libcommon.Address]uint64, map[libcommon.Hash]uint64) {
+	addrs := []libcommon.Address{{1}, {2}, {3}}
+	topics := []libcommon.Hash{{1}, {2}, {3}}
 
-	expectAddrs := map[common.Address]uint64{}
-	expectTopics := map[common.Hash]uint64{}
+	expectAddrs := map[libcommon.Address]uint64{}
+	expectTopics := map[libcommon.Hash]uint64{}
 	for i := range addrs {
 		expectAddrs[addrs[i]] = 0
 	}
@@ -40,15 +41,15 @@ func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[common.Address]ui
 				Logs: []*types.Log{
 					{
 						Address: a,
-						Topics:  []common.Hash{t1, t2},
+						Topics:  []libcommon.Hash{t1, t2},
 					},
 					{
 						Address: a,
-						Topics:  []common.Hash{t2},
+						Topics:  []libcommon.Hash{t2},
 					},
 					{
 						Address: a,
-						Topics:  []common.Hash{},
+						Topics:  []libcommon.Hash{},
 					},
 				},
 			}}
@@ -62,18 +63,18 @@ func genReceipts(t *testing.T, tx kv.RwTx, blocks uint64) (map[common.Address]ui
 				Logs: []*types.Log{
 					{
 						Address: a1,
-						Topics:  []common.Hash{t1, t2, t1, t2},
+						Topics:  []libcommon.Hash{t1, t2, t1, t2},
 					},
 				},
 			}, {
 				Logs: []*types.Log{
 					{
 						Address: a2,
-						Topics:  []common.Hash{t1, t2, t1, t2},
+						Topics:  []libcommon.Hash{t1, t2, t1, t2},
 					},
 					{
 						Address: a1,
-						Topics:  []common.Hash{t1},
+						Topics:  []libcommon.Hash{t1},
 					},
 				},
 			}}

@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -45,26 +47,26 @@ type precompiledFailureTest struct {
 
 // allPrecompiles does not map to the actual set of precompiles, as it also contains
 // repriced versions of precompiles at certain slots
-var allPrecompiles = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}):    &ecrecover{},
-	common.BytesToAddress([]byte{2}):    &sha256hash{},
-	common.BytesToAddress([]byte{3}):    &ripemd160hash{},
-	common.BytesToAddress([]byte{4}):    &dataCopy{},
-	common.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false},
-	common.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}):    &blake2F{},
-	common.BytesToAddress([]byte{10}):   &bls12381G1Add{},
-	common.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
-	common.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
-	common.BytesToAddress([]byte{13}):   &bls12381G2Add{},
-	common.BytesToAddress([]byte{14}):   &bls12381G2Mul{},
-	common.BytesToAddress([]byte{15}):   &bls12381G2MultiExp{},
-	common.BytesToAddress([]byte{16}):   &bls12381Pairing{},
-	common.BytesToAddress([]byte{17}):   &bls12381MapG1{},
-	common.BytesToAddress([]byte{18}):   &bls12381MapG2{},
+var allPrecompiles = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{1}):    &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}):    &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}):    &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}):    &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false},
+	libcommon.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}):    &blake2F{},
+	libcommon.BytesToAddress([]byte{10}):   &bls12381G1Add{},
+	libcommon.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
+	libcommon.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{13}):   &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{14}):   &bls12381G2Mul{},
+	libcommon.BytesToAddress([]byte{15}):   &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{16}):   &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{17}):   &bls12381MapG1{},
+	libcommon.BytesToAddress([]byte{18}):   &bls12381MapG2{},
 }
 
 // EIP-152 test vectors
@@ -92,7 +94,7 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 }
 
 func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
-	p := allPrecompiles[common.HexToAddress(addr)]
+	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
@@ -113,7 +115,7 @@ func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 }
 
 func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
-	p := allPrecompiles[common.HexToAddress(addr)]
+	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in) - 1
 
@@ -131,7 +133,7 @@ func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 }
 
 func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing.T) {
-	p := allPrecompiles[common.HexToAddress(addr)]
+	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
@@ -151,7 +153,7 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 	if test.NoBenchmark {
 		return
 	}
-	p := allPrecompiles[common.HexToAddress(addr)]
+	p := allPrecompiles[libcommon.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	reqGas := p.RequiredGas(in)
 

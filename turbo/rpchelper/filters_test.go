@@ -4,12 +4,12 @@ import (
 	"context"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/filters"
 )
 
@@ -28,9 +28,9 @@ func createLog() *remote.SubscribeLogsReply {
 }
 
 var (
-	address1     = common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	address1     = libcommon.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
 	address1H160 = gointerfaces.ConvertAddressToH160(address1)
-	topic1       = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	topic1       = libcommon.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	topic1H256   = gointerfaces.ConvertHashToH256(topic1)
 )
 
@@ -57,11 +57,11 @@ func TestFilters_GenerateSubscriptionID(t *testing.T) {
 func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	f := New(context.TODO(), nil, nil, nil, func() {})
 
-	subbedTopic := common.BytesToHash([]byte{10, 20})
+	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
 	criteria := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{{subbedTopic}},
+		Topics:    [][]libcommon.Hash{{subbedTopic}},
 	}
 
 	outChan, _ := f.SubscribeLogs(10, criteria)
@@ -88,12 +88,12 @@ func TestFilters_SingleSubscription_OnlyTopicsSubscribedAreBroadcast(t *testing.
 func TestFilters_SingleSubscription_EmptyTopicsInCriteria_OnlyTopicsSubscribedAreBroadcast(t *testing.T) {
 	f := New(context.TODO(), nil, nil, nil, func() {})
 
-	var nilTopic common.Hash
-	subbedTopic := common.BytesToHash([]byte{10, 20})
+	var nilTopic libcommon.Hash
+	subbedTopic := libcommon.BytesToHash([]byte{10, 20})
 
 	criteria := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{{nilTopic, subbedTopic, nilTopic}},
+		Topics:    [][]libcommon.Hash{{nilTopic, subbedTopic, nilTopic}},
 	}
 
 	outChan, _ := f.SubscribeLogs(10, criteria)
@@ -122,11 +122,11 @@ func TestFilters_TwoSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{},
+		Topics:    [][]libcommon.Hash{},
 	}
 	criteria2 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{{topic1}},
+		Topics:    [][]libcommon.Hash{{topic1}},
 	}
 
 	chan1, _ := f.SubscribeLogs(256, criteria1)
@@ -161,15 +161,15 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 
 	criteria1 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{},
+		Topics:    [][]libcommon.Hash{},
 	}
 	criteria2 := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{{topic1}},
+		Topics:    [][]libcommon.Hash{{topic1}},
 	}
 	criteria3 := filters.FilterCriteria{
-		Addresses: []common.Address{common.HexToAddress(address1.String())},
-		Topics:    [][]common.Hash{},
+		Addresses: []libcommon.Address{libcommon.HexToAddress(address1.String())},
+		Topics:    [][]libcommon.Hash{},
 	}
 
 	chan1, _ := f.SubscribeLogs(256, criteria1)
@@ -192,7 +192,7 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	}
 
 	// now a log that the subscription cares about
-	var a common.Address
+	var a libcommon.Address
 	a.SetBytes(address1.Bytes())
 	log.Address = gointerfaces.ConvertAddressToH160(a)
 
@@ -236,8 +236,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// first request has no filters
 	criteria1 := filters.FilterCriteria{
-		Addresses: []common.Address{},
-		Topics:    [][]common.Hash{},
+		Addresses: []libcommon.Address{},
+		Topics:    [][]libcommon.Hash{},
 	}
 	_, id1 := f.SubscribeLogs(1, criteria1)
 
@@ -251,8 +251,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// second request filters on an address
 	criteria2 := filters.FilterCriteria{
-		Addresses: []common.Address{address1},
-		Topics:    [][]common.Hash{},
+		Addresses: []libcommon.Address{address1},
+		Topics:    [][]libcommon.Hash{},
 	}
 	_, id2 := f.SubscribeLogs(1, criteria2)
 
@@ -269,8 +269,8 @@ func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {
 
 	// third request filters on topic
 	criteria3 := filters.FilterCriteria{
-		Addresses: []common.Address{},
-		Topics:    [][]common.Hash{{topic1}},
+		Addresses: []libcommon.Address{},
+		Topics:    [][]libcommon.Hash{{topic1}},
 	}
 	_, id3 := f.SubscribeLogs(1, criteria3)
 

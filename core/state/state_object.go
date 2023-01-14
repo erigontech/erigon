@@ -23,7 +23,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -31,7 +32,7 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
-var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
+var emptyCodeHashH = libcommon.BytesToHash(emptyCodeHash)
 
 type Code []byte
 
@@ -39,7 +40,7 @@ func (c Code) String() string {
 	return string(c) //strings.Join(Disassemble(c), " ")
 }
 
-type Storage map[common.Hash]uint256.Int
+type Storage map[libcommon.Hash]uint256.Int
 
 func (s Storage) String() (str string) {
 	for key, value := range s {
@@ -64,7 +65,7 @@ func (s Storage) Copy() Storage {
 // First you need to obtain a state object.
 // Account values can be accessed and modified through the object.
 type stateObject struct {
-	address  common.Address
+	address  libcommon.Address
 	data     accounts.Account
 	original accounts.Account
 	db       *IntraBlockState
@@ -96,7 +97,7 @@ func (so *stateObject) empty() bool {
 }
 
 // newObject creates a state object.
-func newObject(db *IntraBlockState, address common.Address, data, original *accounts.Account) *stateObject {
+func newObject(db *IntraBlockState, address libcommon.Address, data, original *accounts.Account) *stateObject {
 	var so = stateObject{
 		db:                 db,
 		address:            address,
@@ -109,10 +110,10 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		so.data.Balance.SetUint64(0)
 		so.data.Initialised = true
 	}
-	if so.data.CodeHash == (common.Hash{}) {
+	if so.data.CodeHash == (libcommon.Hash{}) {
 		so.data.CodeHash = emptyCodeHashH
 	}
-	if so.data.Root == (common.Hash{}) {
+	if so.data.Root == (libcommon.Hash{}) {
 		so.data.Root = trie.EmptyRoot
 	}
 	so.original.Copy(original)
@@ -148,7 +149,7 @@ func (so *stateObject) touch() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
+func (so *stateObject) GetState(key *libcommon.Hash, out *uint256.Int) {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[*key]
@@ -164,7 +165,7 @@ func (so *stateObject) GetState(key *common.Hash, out *uint256.Int) {
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
-func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
+func (so *stateObject) GetCommittedState(key *libcommon.Hash, out *uint256.Int) {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
 	if so.fakeStorage != nil {
 		*out = so.fakeStorage[*key]
@@ -199,7 +200,7 @@ func (so *stateObject) GetCommittedState(key *common.Hash, out *uint256.Int) {
 }
 
 // SetState updates a value in account storage.
-func (so *stateObject) SetState(key *common.Hash, value uint256.Int) {
+func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.append(fakeStorageChange{
@@ -243,7 +244,7 @@ func (so *stateObject) SetStorage(storage Storage) {
 	// debugging and the `fake` storage won't be committed to database.
 }
 
-func (so *stateObject) setState(key *common.Hash, value uint256.Int) {
+func (so *stateObject) setState(key *libcommon.Hash, value uint256.Int) {
 	so.dirtyStorage[*key] = value
 }
 
@@ -315,7 +316,7 @@ func (so *stateObject) setIncarnation(incarnation uint64) {
 //
 
 // Returns the address of the contract/account
-func (so *stateObject) Address() common.Address {
+func (so *stateObject) Address() libcommon.Address {
 	return so.address
 }
 
@@ -327,7 +328,7 @@ func (so *stateObject) Code() []byte {
 	if bytes.Equal(so.CodeHash(), emptyCodeHash) {
 		return nil
 	}
-	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, common.BytesToHash(so.CodeHash()))
+	code, err := so.db.stateReader.ReadAccountCode(so.Address(), so.data.Incarnation, libcommon.BytesToHash(so.CodeHash()))
 	if err != nil {
 		so.setError(fmt.Errorf("can't load code hash %x: %w", so.CodeHash(), err))
 	}
@@ -335,7 +336,7 @@ func (so *stateObject) Code() []byte {
 	return code
 }
 
-func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
+func (so *stateObject) SetCode(codeHash libcommon.Hash, code []byte) {
 	prevcode := so.Code()
 	so.db.journal.append(codeChange{
 		account:  &so.address,
@@ -345,7 +346,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
 	so.setCode(codeHash, code)
 }
 
-func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
+func (so *stateObject) setCode(codeHash libcommon.Hash, code []byte) {
 	so.code = code
 	so.data.CodeHash = codeHash
 	so.dirtyCode = true

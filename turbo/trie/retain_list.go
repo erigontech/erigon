@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type RetainDecider interface {
 	Retain([]byte) bool
-	IsCodeTouched(common.Hash) bool
+	IsCodeTouched(libcommon.Hash) bool
 }
 
 type RetainDeciderWithMarker interface {
@@ -45,12 +45,12 @@ type RetainList struct {
 	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 	hexes       [][]byte
 	markers     []bool
-	codeTouches map[common.Hash]struct{}
+	codeTouches map[libcommon.Hash]struct{}
 }
 
 // NewRetainList creates new RetainList
 func NewRetainList(minLength int) *RetainList {
-	return &RetainList{minLength: minLength, codeTouches: make(map[common.Hash]struct{})}
+	return &RetainList{minLength: minLength, codeTouches: make(map[libcommon.Hash]struct{})}
 }
 
 func (rl *RetainList) Len() int {
@@ -85,11 +85,11 @@ func (rl *RetainList) AddHex(hex []byte) {
 }
 
 // AddCodeTouch adds a new code touch into the resolve set
-func (rl *RetainList) AddCodeTouch(codeHash common.Hash) {
+func (rl *RetainList) AddCodeTouch(codeHash libcommon.Hash) {
 	rl.codeTouches[codeHash] = struct{}{}
 }
 
-func (rl *RetainList) IsCodeTouched(codeHash common.Hash) bool {
+func (rl *RetainList) IsCodeTouched(codeHash libcommon.Hash) bool {
 	_, ok := rl.codeTouches[codeHash]
 	return ok
 }

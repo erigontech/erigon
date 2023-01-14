@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
@@ -8,8 +10,8 @@ import (
 )
 
 type Eth1Data struct {
-	Root         common.Hash
-	BlockHash    common.Hash
+	Root         libcommon.Hash
+	BlockHash    libcommon.Hash
 	DepositCount uint64
 }
 
@@ -39,7 +41,7 @@ func (e *Eth1Data) DecodeSSZ(buf []byte) error {
 
 // SizeSSZ returns the ssz encoded size in bytes for the Eth1Data object
 func (e *Eth1Data) EncodingSizeSSZ() int {
-	return common.BlockNumberLength + common.HashLength*2
+	return common.BlockNumberLength + length.Hash*2
 }
 
 // HashTreeRoot ssz hashes the Eth1Data object

@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -14,7 +16,7 @@ import (
 func init() {
 	// Initialise systemContractCodeLookup
 	for _, chainName := range []string{networkname.BSCChainName, networkname.ChapelChainName, networkname.RialtoChainName} {
-		byChain := map[common.Address][]state.CodeRecord{}
+		byChain := map[libcommon.Address][]state.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
 		genesisBlock := DefaultGenesisBlockByChainName(chainName)
@@ -76,7 +78,7 @@ func init() {
 	}
 }
 
-func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain map[common.Address][]state.CodeRecord) {
+func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain map[libcommon.Address][]state.CodeRecord) {
 	for _, config := range upgrade.Configs {
 		list := byChain[config.ContractAddr]
 		code, err := hex.DecodeString(config.Code)

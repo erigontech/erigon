@@ -20,8 +20,7 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -31,22 +30,22 @@ type journalEntry interface {
 	revert(*IntraBlockState)
 
 	// dirtied returns the Ethereum address modified by this journal entry.
-	dirtied() *common.Address
+	dirtied() *libcommon.Address
 }
 
 // journal contains the list of state modifications applied since the last state
 // commit. These are tracked to be able to be reverted in case of an execution
 // exception or revertal request.
 type journal struct {
-	entries []journalEntry         // Current changes tracked by the journal
-	dirties map[common.Address]int // Dirty accounts and the number of changes
+	entries []journalEntry            // Current changes tracked by the journal
+	dirties map[libcommon.Address]int // Dirty accounts and the number of changes
 	mu      sync.RWMutex
 }
 
 // newJournal create a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[common.Address]int),
+		dirties: make(map[libcommon.Address]int),
 	}
 }
 
@@ -82,7 +81,7 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
 // precompile consensus exception.
-func (j *journal) dirty(addr common.Address) {
+func (j *journal) dirty(addr libcommon.Address) {
 	j.mu.Lock()
 	j.dirties[addr]++
 	j.mu.Unlock()
@@ -99,48 +98,48 @@ func (j *journal) length() int {
 type (
 	// Changes to the account trie.
 	createObjectChange struct {
-		account *common.Address
+		account *libcommon.Address
 	}
 	resetObjectChange struct {
-		account *common.Address
+		account *libcommon.Address
 		prev    *stateObject
 	}
 	selfdestructChange struct {
-		account     *common.Address
+		account     *libcommon.Address
 		prev        bool // whether account had already selfdestructed
 		prevbalance uint256.Int
 	}
 
 	// Changes to individual accounts.
 	balanceChange struct {
-		account *common.Address
+		account *libcommon.Address
 		prev    uint256.Int
 	}
 	balanceIncrease struct {
-		account  *common.Address
+		account  *libcommon.Address
 		increase uint256.Int
 	}
 	balanceIncreaseTransfer struct {
 		bi *BalanceIncrease
 	}
 	nonceChange struct {
-		account *common.Address
+		account *libcommon.Address
 		prev    uint64
 	}
 	storageChange struct {
-		account  *common.Address
-		key      common.Hash
+		account  *libcommon.Address
+		key      libcommon.Hash
 		prevalue uint256.Int
 	}
 	fakeStorageChange struct {
-		account  *common.Address
-		key      common.Hash
+		account  *libcommon.Address
+		key      libcommon.Hash
 		prevalue uint256.Int
 	}
 	codeChange struct {
-		account  *common.Address
+		account  *libcommon.Address
 		prevcode []byte
-		prevhash common.Hash
+		prevhash libcommon.Hash
 	}
 
 	// Changes to other state values.
@@ -148,18 +147,18 @@ type (
 		prev uint64
 	}
 	addLogChange struct {
-		txhash common.Hash
+		txhash libcommon.Hash
 	}
 	touchChange struct {
-		account *common.Address
+		account *libcommon.Address
 	}
 	// Changes to the access list
 	accessListAddAccountChange struct {
-		address *common.Address
+		address *libcommon.Address
 	}
 	accessListAddSlotChange struct {
-		address *common.Address
-		slot    *common.Hash
+		address *libcommon.Address
+		slot    *libcommon.Hash
 	}
 )
 
@@ -168,7 +167,7 @@ func (ch createObjectChange) revert(s *IntraBlockState) {
 	delete(s.stateObjectsDirty, *ch.account)
 }
 
-func (ch createObjectChange) dirtied() *common.Address {
+func (ch createObjectChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -176,7 +175,7 @@ func (ch resetObjectChange) revert(s *IntraBlockState) {
 	s.setStateObject(*ch.account, ch.prev)
 }
 
-func (ch resetObjectChange) dirtied() *common.Address {
+func (ch resetObjectChange) dirtied() *libcommon.Address {
 	return nil
 }
 
@@ -188,16 +187,16 @@ func (ch selfdestructChange) revert(s *IntraBlockState) {
 	}
 }
 
-func (ch selfdestructChange) dirtied() *common.Address {
+func (ch selfdestructChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
-var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
+var ripemd = libcommon.HexToAddress("0000000000000000000000000000000000000003")
 
 func (ch touchChange) revert(s *IntraBlockState) {
 }
 
-func (ch touchChange) dirtied() *common.Address {
+func (ch touchChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -205,7 +204,7 @@ func (ch balanceChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setBalance(&ch.prev)
 }
 
-func (ch balanceChange) dirtied() *common.Address {
+func (ch balanceChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -219,11 +218,11 @@ func (ch balanceIncrease) revert(s *IntraBlockState) {
 	}
 }
 
-func (ch balanceIncrease) dirtied() *common.Address {
+func (ch balanceIncrease) dirtied() *libcommon.Address {
 	return ch.account
 }
 
-func (ch balanceIncreaseTransfer) dirtied() *common.Address {
+func (ch balanceIncreaseTransfer) dirtied() *libcommon.Address {
 	return nil
 }
 
@@ -234,7 +233,7 @@ func (ch nonceChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setNonce(ch.prev)
 }
 
-func (ch nonceChange) dirtied() *common.Address {
+func (ch nonceChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -242,7 +241,7 @@ func (ch codeChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setCode(ch.prevhash, ch.prevcode)
 }
 
-func (ch codeChange) dirtied() *common.Address {
+func (ch codeChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -250,7 +249,7 @@ func (ch storageChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setState(&ch.key, ch.prevalue)
 }
 
-func (ch storageChange) dirtied() *common.Address {
+func (ch storageChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -258,7 +257,7 @@ func (ch fakeStorageChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).fakeStorage[ch.key] = ch.prevalue
 }
 
-func (ch fakeStorageChange) dirtied() *common.Address {
+func (ch fakeStorageChange) dirtied() *libcommon.Address {
 	return ch.account
 }
 
@@ -266,7 +265,7 @@ func (ch refundChange) revert(s *IntraBlockState) {
 	s.refund = ch.prev
 }
 
-func (ch refundChange) dirtied() *common.Address {
+func (ch refundChange) dirtied() *libcommon.Address {
 	return nil
 }
 
@@ -280,7 +279,7 @@ func (ch addLogChange) revert(s *IntraBlockState) {
 	s.logSize--
 }
 
-func (ch addLogChange) dirtied() *common.Address {
+func (ch addLogChange) dirtied() *libcommon.Address {
 	return nil
 }
 
@@ -297,7 +296,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) {
 	s.accessList.DeleteAddress(*ch.address)
 }
 
-func (ch accessListAddAccountChange) dirtied() *common.Address {
+func (ch accessListAddAccountChange) dirtied() *libcommon.Address {
 	return nil
 }
 
@@ -305,6 +304,6 @@ func (ch accessListAddSlotChange) revert(s *IntraBlockState) {
 	s.accessList.DeleteSlot(*ch.address, *ch.slot)
 }
 
-func (ch accessListAddSlotChange) dirtied() *common.Address {
+func (ch accessListAddSlotChange) dirtied() *libcommon.Address {
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -1039,7 +1040,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_ = printStages(tx, sn)
+		_ = printStages(tx, sn, agg)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
@@ -1107,7 +1108,7 @@ func printAllStages(db kv.RoDB, ctx context.Context) error {
 	sn, agg := allSnapshots(ctx, db)
 	defer sn.Close()
 	defer agg.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) })
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
@@ -1201,7 +1202,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
 	//log.Info("Initialised chain configuration", "config", chainConfig)
@@ -1307,7 +1308,7 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(cc *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB) (engine consensus.Engine) {
 	l := log.New()
 	snapshots, _ := allSnapshots(context.Background(), db)
 	config := ethconfig.Defaults

@@ -22,17 +22,18 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 )
 
 // Draws an validator nonce modulo number of validators.
-func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call consensus.Call) (common.Address, error) {
+func GetFromValidatorSet(set ValidatorSet, parent libcommon.Hash, nonce uint, call consensus.Call) (libcommon.Address, error) {
 	//d, err := set.defaultCaller(parent)
 	//if err != nil {
-	//	return common.Address{}, err
+	//	return libcommon.Address{}, err
 	//}
 	return set.getWithCaller(parent, nonce, call)
 }
@@ -40,11 +41,11 @@ func GetFromValidatorSet(set ValidatorSet, parent common.Hash, nonce uint, call 
 // Different ways of specifying validators.
 type ValidatorSetJson struct {
 	// A simple list of authorities.
-	List []common.Address `json:"list"`
+	List []libcommon.Address `json:"list"`
 	// Address of a contract that indicates the list of authorities.
-	SafeContract *common.Address `json:"safeContract"`
+	SafeContract *libcommon.Address `json:"safeContract"`
 	// Address of a contract that indicates the list of authorities and enables reporting of their misbehaviour using transactions.
-	Contract *common.Address `json:"contract"`
+	Contract *libcommon.Address `json:"contract"`
 	// A map of starting blocks for each validator set.
 	Multi map[uint64]*ValidatorSetJson `json:"multi"`
 }
@@ -93,7 +94,7 @@ type JsonSpec struct {
 	/// Block reward contract address which overrides the `block_reward` setting. This option allows
 	/// one to add a single block reward contract address and is compatible with the multiple
 	/// address option `block_reward_contract_transitions` below.
-	BlockRewardContractAddress *common.Address `json:"blockRewardContractAddress"`
+	BlockRewardContractAddress *libcommon.Address `json:"blockRewardContractAddress"`
 	// Block reward contract addresses with their associated starting block numbers.
 	//
 	// Setting the block reward contract overrides `block_reward`. If the single block reward
@@ -103,7 +104,7 @@ type JsonSpec struct {
 	// used simultaneously in the same configuration. In such a case the code requires that the
 	// block number of the single transition is strictly less than any of the block numbers in the
 	// map.
-	BlockRewardContractTransitions map[uint]common.Address `json:"blockRewardContractTransitions"`
+	BlockRewardContractTransitions map[uint]libcommon.Address `json:"blockRewardContractTransitions"`
 	// Block at which maximum uncle count should be considered.
 	MaximumUncleCountTransition *uint64 `json:"maximumUncleCountTransition"`
 	// Maximum number of accepted uncles.
@@ -111,28 +112,28 @@ type JsonSpec struct {
 	// Strict validation of empty steps transition block.
 	StrictEmptyStepsTransition *uint `json:"strictEmptyStepsTransition"`
 	// The random number contract's address, or a map of contract transitions.
-	RandomnessContractAddress map[uint64]common.Address `json:"randomnessContractAddress"`
+	RandomnessContractAddress map[uint64]libcommon.Address `json:"randomnessContractAddress"`
 	// The addresses of contracts that determine the block gas limit starting from the block number
 	// associated with each of those contracts.
-	BlockGasLimitContractTransitions map[uint64]common.Address `json:"blockGasLimitContractTransitions"`
+	BlockGasLimitContractTransitions map[uint64]libcommon.Address `json:"blockGasLimitContractTransitions"`
 	// The block number at which the consensus engine switches from AuRa to AuRa with POSDAO
 	// modifications.
 	PosdaoTransition *uint64 `json:"PosdaoTransition"`
 	// Stores human-readable keys associated with addresses, like DNS information.
 	// This contract is primarily required to store the address of the Certifier contract.
-	Registrar *common.Address `json:"registrar"`
+	Registrar *libcommon.Address `json:"registrar"`
 
-	RewriteBytecode map[uint64]map[common.Address]hexutil.Bytes `json:"rewriteBytecode"`
+	RewriteBytecode map[uint64]map[libcommon.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
 type Code struct {
 	Code     []byte
-	CodeHash common.Hash
+	CodeHash libcommon.Hash
 }
 
 type BlockRewardContract struct {
 	blockNum uint64
-	address  common.Address // On-chain address.
+	address  libcommon.Address // On-chain address.
 }
 
 type BlockRewardContractList []BlockRewardContract
@@ -152,7 +153,7 @@ func (r BlockRewardList) Less(i, j int) bool { return r[i].blockNum < r[j].block
 func (r BlockRewardList) Len() int           { return len(r) }
 func (r BlockRewardList) Swap(i, j int)      { r[i], r[j] = r[j], r[i] }
 
-func NewBlockRewardContract(address common.Address) *BlockRewardContract {
+func NewBlockRewardContract(address libcommon.Address) *BlockRewardContract {
 	return &BlockRewardContract{address: address}
 }
 
@@ -185,18 +186,18 @@ type AuthorityRoundParams struct {
 	// Transition block to strict empty steps validation.
 	StrictEmptyStepsTransition uint64
 	// If set, enables random number contract integration. It maps the transition block to the contract address.
-	RandomnessContractAddress map[uint64]common.Address
+	RandomnessContractAddress map[uint64]libcommon.Address
 	// The addresses of contracts that determine the block gas limit with their associated block
 	// numbers.
-	BlockGasLimitContractTransitions map[uint64]common.Address
+	BlockGasLimitContractTransitions map[uint64]libcommon.Address
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
 	// with POSDAO modifications.
 	PosdaoTransition *uint64
 	// Stores human-readable keys associated with addresses, like DNS information.
 	// This contract is primarily required to store the address of the Certifier contract.
-	Registrar *common.Address
+	Registrar *libcommon.Address
 
-	RewriteBytecode map[uint64]map[common.Address][]byte
+	RewriteBytecode map[uint64]map[libcommon.Address][]byte
 }
 
 func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
@@ -254,9 +255,9 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 	}
 	sort.Sort(params.BlockReward)
 
-	params.RewriteBytecode = make(map[uint64]map[common.Address][]byte, len(jsonParams.RewriteBytecode))
+	params.RewriteBytecode = make(map[uint64]map[libcommon.Address][]byte, len(jsonParams.RewriteBytecode))
 	for block, overrides := range jsonParams.RewriteBytecode {
-		params.RewriteBytecode[block] = make(map[common.Address][]byte, len(overrides))
+		params.RewriteBytecode[block] = make(map[libcommon.Address][]byte, len(overrides))
 		for address, code := range overrides {
 			params.RewriteBytecode[block][address] = []byte(code)
 		}

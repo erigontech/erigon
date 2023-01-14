@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 )
 
@@ -42,8 +43,8 @@ type SignedBeaconBlock struct {
 type BeaconBlock struct {
 	Slot          uint64
 	ProposerIndex uint64
-	ParentRoot    common.Hash
-	StateRoot     common.Hash
+	ParentRoot    libcommon.Hash
+	StateRoot     libcommon.Hash
 	Body          *BeaconBody
 }
 
@@ -222,7 +223,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 		return err
 	}
 	// Decode graffiti.
-	b.Graffiti = common.CopyBytes(buf[168:200])
+	b.Graffiti = libcommon.Copy(buf[168:200])
 	// Decode offsets
 	offSetProposerSlashings := ssz_utils.DecodeOffset(buf[200:])
 	offsetAttesterSlashings := ssz_utils.DecodeOffset(buf[204:])
@@ -450,7 +451,7 @@ func (b *SignedBeaconBlock) HashTreeRoot() ([32]byte, error) {
 // EncodeForStorage encodes beacon block in snappy compressed CBOR format.
 func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 	var (
-		blockRoot common.Hash
+		blockRoot libcommon.Hash
 		err       error
 	)
 	if blockRoot, err = b.Block.HashSSZ(); err != nil {
@@ -487,18 +488,18 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 }
 
 // DecodeBeaconBlockForStorage decodes beacon block in snappy compressed CBOR format.
-func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Number uint64, eth1Hash common.Hash, eth2Hash common.Hash, err error) {
+func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Number uint64, eth1Hash libcommon.Hash, eth2Hash libcommon.Hash, err error) {
 	decompressedBuf, err := utils.DecompressSnappy(buf)
 	if err != nil {
-		return nil, 0, common.Hash{}, common.Hash{}, err
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, err
 	}
 	storageObject := &BeaconBlockForStorage{}
 	var buffer bytes.Buffer
 	if _, err := buffer.Write(decompressedBuf); err != nil {
-		return nil, 0, common.Hash{}, common.Hash{}, err
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, err
 	}
 	if err := cbor.Unmarshal(storageObject, &buffer); err != nil {
-		return nil, 0, common.Hash{}, common.Hash{}, err
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, err
 	}
 
 	return &SignedBeaconBlock{

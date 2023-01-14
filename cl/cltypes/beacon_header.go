@@ -1,9 +1,11 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 /*
@@ -13,9 +15,9 @@ import (
 type BeaconBlockHeader struct {
 	Slot          uint64
 	ProposerIndex uint64
-	ParentRoot    common.Hash
-	Root          common.Hash
-	BodyRoot      common.Hash
+	ParentRoot    libcommon.Hash
+	Root          libcommon.Hash
+	BodyRoot      libcommon.Hash
 }
 
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) []byte {
@@ -48,7 +50,7 @@ func (b *BeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
 }
 
 func (b *BeaconBlockHeader) EncodingSizeSSZ() int {
-	return common.HashLength*3 + common.BlockNumberLength*2
+	return length.Hash*3 + length.BlockNum*2
 }
 
 /*

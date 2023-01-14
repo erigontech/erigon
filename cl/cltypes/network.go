@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
@@ -86,7 +87,7 @@ func (s *SingleRoot) UnmarshalSSZ(buf []byte) error {
 }
 
 func (s *SingleRoot) SizeSSZ() int {
-	return common.HashLength
+	return length.Hash
 }
 
 func (s *SingleRoot) UnmarshalSSZWithVersion(buf []byte, _ int) error {

@@ -20,11 +20,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 //go:generate gencodec -type DifficultyTest -field-override difficultyTestMarshaling -out gen_difficultytest.go
@@ -47,7 +48,7 @@ type difficultyTestMarshaling struct {
 	CurrentBlockNumber math.HexOrDecimal64
 }
 
-func (test *DifficultyTest) Run(config *params.ChainConfig) error {
+func (test *DifficultyTest) Run(config *chain.Config) error {
 	parentNumber := big.NewInt(int64(test.CurrentBlockNumber - 1))
 	parent := &types.Header{
 		Difficulty: test.ParentDifficulty,
@@ -58,7 +59,7 @@ func (test *DifficultyTest) Run(config *params.ChainConfig) error {
 	if test.ParentUncles == 0 {
 		parent.UncleHash = types.EmptyUncleHash
 	} else {
-		parent.UncleHash = common.HexToHash("ab") // some dummy != EmptyUncleHash
+		parent.UncleHash = libcommon.HexToHash("ab") // some dummy != EmptyUncleHash
 	}
 
 	actual := ethash.CalcDifficulty(config, test.CurrentTimestamp, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.UncleHash)

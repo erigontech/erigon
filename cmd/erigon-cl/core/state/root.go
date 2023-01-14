@@ -1,9 +1,10 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
@@ -231,7 +232,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	return nil
 }
 
-func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf common.Hash) {
+func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
 	// Update leaf with new value.
 	b.leaves[idx] = leaf
 	// Now leaf is clean :).

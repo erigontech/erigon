@@ -8,15 +8,15 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 type Sync struct {
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
-	badBlock        common.Hash
+	badBlock        libcommon.Hash
 
 	stages       []*Stage
 	unwindOrder  []*Stage
@@ -37,7 +37,7 @@ func (s *Sync) Len() int                 { return len(s.stages) }
 func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
-	return &UnwindState{id, unwindPoint, currentProgress, common.Hash{}, s}
+	return &UnwindState{id, unwindPoint, currentProgress, libcommon.Hash{}, s}
 }
 
 func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx kv.Tx, db kv.RwDB) (*PruneState, error) {
@@ -105,7 +105,7 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *Sync) UnwindTo(unwindPoint uint64, badBlock common.Hash) {
+func (s *Sync) UnwindTo(unwindPoint uint64, badBlock libcommon.Hash) {
 	log.Info("UnwindTo", "block", unwindPoint, "bad_block_hash", badBlock.String())
 	s.unwindPoint = &unwindPoint
 	s.badBlock = badBlock
@@ -203,7 +203,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	}
 	s.prevUnwindPoint = s.unwindPoint
 	s.unwindPoint = nil
-	s.badBlock = common.Hash{}
+	s.badBlock = libcommon.Hash{}
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 		return err
 	}
@@ -226,10 +226,10 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool, quiet bool) error {
 			}
 			s.prevUnwindPoint = s.unwindPoint
 			s.unwindPoint = nil
-			if s.badBlock != (common.Hash{}) {
+			if s.badBlock != (libcommon.Hash{}) {
 				badBlockUnwind = true
 			}
-			s.badBlock = common.Hash{}
+			s.badBlock = libcommon.Hash{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
 				return err
 			}

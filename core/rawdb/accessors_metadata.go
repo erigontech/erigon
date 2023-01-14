@@ -20,14 +20,13 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error) {
+func ReadChainConfig(db kv.Getter, hash libcommon.Hash) (*chain.Config, error) {
 	data, err := db.GetOne(kv.ConfigTable, hash[:])
 	if err != nil {
 		return nil, err
@@ -35,7 +34,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error
 	if len(data) == 0 {
 		return nil, nil
 	}
-	var config params.ChainConfig
+	var config chain.Config
 	if err := json.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
@@ -43,7 +42,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*params.ChainConfig, error
 }
 
 // WriteChainConfig writes the chain config settings to the database.
-func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) error {
+func WriteChainConfig(db kv.Putter, hash libcommon.Hash, cfg *chain.Config) error {
 	if cfg == nil {
 		return nil
 	}
@@ -58,6 +57,6 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *params.ChainConfig) e
 }
 
 // DeleteChainConfig retrieves the consensus settings based on the given genesis hash.
-func DeleteChainConfig(db kv.Deleter, hash common.Hash) error {
+func DeleteChainConfig(db kv.Deleter, hash libcommon.Hash) error {
 	return db.Delete(kv.ConfigTable, hash[:])
 }

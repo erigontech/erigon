@@ -7,7 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -74,8 +75,8 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		}
 
 		n := len(b.Result.Transactions)
-		from := make([]common.Address, n)
-		to := make([]*common.Address, n)
+		from := make([]libcommon.Address, n)
+		to := make([]*libcommon.Address, n)
 		gas := make([]*hexutil.Big, n)
 		gasPrice := make([]*hexutil.Big, n)
 		value := make([]*hexutil.Big, n)

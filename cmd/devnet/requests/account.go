@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"strconv"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 )
 
-func GetBalance(reqId int, address common.Address, blockNum models.BlockNumber) (uint64, error) {
+func GetBalance(reqId int, address libcommon.Address, blockNum models.BlockNumber) (uint64, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthBalance
 

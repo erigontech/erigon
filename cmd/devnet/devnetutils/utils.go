@@ -3,13 +3,15 @@ package devnetutils
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/crypto"
 	"os/exec"
 	"strconv"
 	"strings"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/crypto"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 )
@@ -100,7 +102,7 @@ func NamespaceAndSubMethodFromMethod(method string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func HashSlicesAreEqual(s1, s2 []common.Hash) bool {
+func HashSlicesAreEqual(s1, s2 []libcommon.Hash) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
@@ -114,7 +116,7 @@ func HashSlicesAreEqual(s1, s2 []common.Hash) bool {
 	return true
 }
 
-func BuildLog(hash common.Hash, blockNum string, address common.Address, topics []common.Hash, data hexutil.Bytes, txIndex hexutil.Uint, blockHash common.Hash, index hexutil.Uint, removed bool) rpctest.Log {
+func BuildLog(hash libcommon.Hash, blockNum string, address libcommon.Address, topics []libcommon.Hash, data hexutil.Bytes, txIndex hexutil.Uint, blockHash libcommon.Hash, index hexutil.Uint, removed bool) rpctest.Log {
 	return rpctest.Log{
 		Address:     address,
 		Topics:      topics,
@@ -149,7 +151,7 @@ func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
 	return errs, len(errs) == 0
 }
 
-func GenerateTopic(signature string) []common.Hash {
+func GenerateTopic(signature string) []libcommon.Hash {
 	hashed := crypto.Keccak256([]byte(signature))
-	return []common.Hash{common.BytesToHash(hashed)}
+	return []libcommon.Hash{libcommon.BytesToHash(hashed)}
 }

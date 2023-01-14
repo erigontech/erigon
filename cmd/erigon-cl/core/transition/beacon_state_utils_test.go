@@ -5,12 +5,12 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state "
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -275,7 +275,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	badProposerInd.ProposerIndex = 0
 
 	badParentRoot := getTestBlock(t)
-	badParentRoot.ParentRoot = common.Hash{}
+	badParentRoot.ParentRoot = libcommon.Hash{}
 
 	badBlockBodyHash := getTestBlock(t)
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})

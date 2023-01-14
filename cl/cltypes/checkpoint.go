@@ -1,15 +1,17 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	ssz "github.com/prysmaticlabs/fastssz"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type Checkpoint struct {
 	Epoch uint64
-	Root  common.Hash
+	Root  libcommon.Hash
 }
 
 func (c *Checkpoint) EncodeSSZ(buf []byte) []byte {
@@ -33,7 +35,7 @@ func (c *Checkpoint) DecodeSSZ(buf []byte) error {
 }
 
 func (c *Checkpoint) EncodingSizeSSZ() int {
-	return common.BlockNumberLength + common.HashLength
+	return length.BlockNum + length.Hash
 }
 
 func (c *Checkpoint) HashSSZ() ([32]byte, error) {

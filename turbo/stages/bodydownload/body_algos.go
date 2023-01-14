@@ -7,14 +7,14 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -26,15 +26,15 @@ import (
 const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return 0, 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
-		return 0, 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
@@ -51,12 +51,12 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
-		return 0, 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)
@@ -64,7 +64,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headTd256 = new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
 	if overflow {
-		return 0, 0, common.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
 	}
 	headTime = 0
 	headHeader := rawdb.ReadHeader(db, headHash, headHeight)
@@ -78,7 +78,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
-	hashes := make([]common.Hash, 0, BlockBufferSize)
+	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
 	if blockNum < bd.requestedLow {
 		blockNum = bd.requestedLow
@@ -108,7 +108,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		// if we already have the body we can continue on to populate header info and then skip
 		// the body request altogether
 		var err error
-		key := common2.EncodeTs(blockNum)
+		key := hexutility.EncodeTs(blockNum)
 		var bodyInBucket bool
 		if !bd.UsingExternalTx {
 			bodyInBucket, err = tx.Has("BodiesStage", key)
@@ -124,7 +124,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			continue
 		}
 
-		var hash common.Hash
+		var hash libcommon.Hash
 		var header *types.Header
 		request := true
 		if bd.deliveriesH[blockNum] != nil {
@@ -209,7 +209,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 }
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
-func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
+func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
 	header, body := bd.prefetchedBlocks.Get(hash)
 
 	if body == nil {
@@ -409,21 +409,21 @@ func (bd *BodyDownload) AddToPrefetch(header *types.Header, body *types.RawBody)
 // or if the code is continuing from a previous run and this isn't present, by reading from the DB as the RequestMoreBodies would have.
 // as the requestedLow count is incremented before a call to this function we need the process count so that we can anticipate this,
 // effectively reversing time a little to get the actual position we need in the slice prior to requestedLow being incremented
-func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, common.Hash, error) {
+func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, libcommon.Hash, error) {
 	var header *types.Header
 	if bd.deliveriesH[blockNum] != nil {
 		header = bd.deliveriesH[blockNum]
 	} else {
 		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
 		header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
 		if header == nil {
-			return nil, common.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
+			return nil, libcommon.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 		}
 	}
 	return header, header.Hash(), nil
@@ -439,9 +439,9 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 		}
 		rlpBytes := common.CopyBytes(writer.Bytes())
 		writer.Reset()
-		writer.WriteString(hexutil.Encode(rlpBytes))
+		writer.WriteString(hexutility.Encode(rlpBytes))
 
-		k := common2.EncodeTs(key)
+		k := hexutility.EncodeTs(key)
 		err = tx.Put("BodiesStage", k, writer.Bytes())
 		if err != nil {
 			return err
@@ -457,7 +457,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 
 func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
 	if !bd.UsingExternalTx {
-		key := common2.EncodeTs(blockNum)
+		key := hexutility.EncodeTs(blockNum)
 		body, err := tx.GetOne("BodiesStage", key)
 		if err != nil {
 			return nil, err

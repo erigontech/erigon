@@ -24,9 +24,11 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -34,12 +36,12 @@ type CommonTx struct {
 	TransactionMisc
 
 	ChainID *uint256.Int
-	Nonce   uint64          // nonce of sender account
-	Gas     uint64          // gas limit
-	To      *common.Address `rlp:"nil"` // nil means contract creation
-	Value   *uint256.Int    // wei amount
-	Data    []byte          // contract invocation input data
-	V, R, S uint256.Int     // signature values
+	Nonce   uint64             // nonce of sender account
+	Gas     uint64             // gas limit
+	To      *libcommon.Address `rlp:"nil"` // nil means contract creation
+	Value   *uint256.Int       // wei amount
+	Data    []byte             // contract invocation input data
+	V, R, S uint256.Int        // signature values
 }
 
 func (ct CommonTx) GetChainID() *uint256.Int {
@@ -50,7 +52,7 @@ func (ct CommonTx) GetNonce() uint64 {
 	return ct.Nonce
 }
 
-func (ct CommonTx) GetTo() *common.Address {
+func (ct CommonTx) GetTo() *libcommon.Address {
 	return ct.To
 }
 
@@ -66,14 +68,14 @@ func (ct CommonTx) GetData() []byte {
 	return ct.Data
 }
 
-func (ct CommonTx) GetSender() (common.Address, bool) {
+func (ct CommonTx) GetSender() (libcommon.Address, bool) {
 	if sc := ct.from.Load(); sc != nil {
-		return sc.(common.Address), true
+		return sc.(libcommon.Address), true
 	}
-	return common.Address{}, false
+	return libcommon.Address{}, false
 }
 
-func (ct *CommonTx) SetSender(addr common.Address) {
+func (ct *CommonTx) SetSender(addr libcommon.Address) {
 	ct.from.Store(addr)
 }
 
@@ -132,7 +134,7 @@ func (tx LegacyTx) Protected() bool {
 
 // NewTransaction creates an unsigned legacy transaction.
 // Deprecated: use NewTx instead.
-func NewTransaction(nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
+func NewTransaction(nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, data []byte) *LegacyTx {
 	return &LegacyTx{
 		CommonTx: CommonTx{
 			Nonce: nonce,
@@ -326,7 +328,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
+		tx.To = &libcommon.Address{}
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -355,7 +357,7 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *params.Rules) (Message, error) {
+func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -386,7 +388,7 @@ func (tx *LegacyTx) WithSignature(signer Signer, sig []byte) (Transaction, error
 	return cpy, nil
 }
 
-func (tx *LegacyTx) FakeSign(address common.Address) (Transaction, error) {
+func (tx *LegacyTx) FakeSign(address libcommon.Address) (Transaction, error) {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
@@ -396,9 +398,9 @@ func (tx *LegacyTx) FakeSign(address common.Address) (Transaction, error) {
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx *LegacyTx) Hash() common.Hash {
+func (tx *LegacyTx) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*common.Hash)
+		return *hash.(*libcommon.Hash)
 	}
 	hash := rlpHash([]interface{}{
 		tx.Nonce,
@@ -413,7 +415,7 @@ func (tx *LegacyTx) Hash() common.Hash {
 	return hash
 }
 
-func (tx LegacyTx) SigningHash(chainID *big.Int) common.Hash {
+func (tx LegacyTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	if chainID != nil && chainID.Sign() != 0 {
 		return rlpHash([]interface{}{
 			tx.Nonce,
@@ -445,13 +447,13 @@ func (tx LegacyTx) GetChainID() *uint256.Int {
 	return DeriveChainId(&tx.V)
 }
 
-func (tx *LegacyTx) Sender(signer Signer) (common.Address, error) {
+func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), nil
+		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 	tx.from.Store(addr)
 	return addr, nil

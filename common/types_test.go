@@ -25,13 +25,15 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestBytesConversion(t *testing.T) {
 	byteSlice := []byte{5}
-	hash := BytesToHash(byteSlice)
+	hash := libcommon.BytesToHash(byteSlice)
 
-	var exp Hash
+	var exp libcommon.Hash
 	exp[31] = 5
 
 	if hash != exp {
@@ -56,7 +58,7 @@ func TestIsHexAddress(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if result := IsHexAddress(test.str); result != test.exp {
+		if result := libcommon.IsHexAddress(test.str); result != test.exp {
 			t.Errorf("IsHexAddress(%s) == %v; expected %v",
 				test.str, result, test.exp)
 		}
@@ -78,7 +80,7 @@ func TestHashJsonValidation(t *testing.T) {
 	}
 	for _, test := range tests {
 		input := `"` + test.Prefix + strings.Repeat("0", test.Size) + `"`
-		var v Hash
+		var v libcommon.Hash
 		err := json.Unmarshal([]byte(input), &v)
 		if err == nil {
 			if test.Error != "" {
@@ -107,7 +109,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 		{`"0x0000000000000000000000000000000000000010"`, false, big.NewInt(16)},
 	}
 	for i, test := range tests {
-		var v Address
+		var v libcommon.Address
 		err := json.Unmarshal([]byte(test.Input), &v)
 		if err != nil && !test.ShouldErr {
 			t.Errorf("test #%d: unexpected error: %v", i, err)
@@ -140,7 +142,7 @@ func TestAddressHexChecksum(t *testing.T) {
 		{"0x000000000000000000000000000000000000000a", "0x000000000000000000000000000000000000000A"},
 	}
 	for i, test := range tests {
-		output := HexToAddress(test.Input).Hex()
+		output := libcommon.HexToAddress(test.Input).Hex()
 		if output != test.Output {
 			t.Errorf("test #%d: failed to match when it should (%s != %s)", i, output, test.Output)
 		}
@@ -148,7 +150,7 @@ func TestAddressHexChecksum(t *testing.T) {
 }
 
 func BenchmarkAddressHex(b *testing.B) {
-	testAddr := HexToAddress("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
+	testAddr := libcommon.HexToAddress("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
 	for n := 0; n < b.N; n++ {
 		testAddr.Hex()
 	}
@@ -233,7 +235,7 @@ func TestHash_Scan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := &Hash{}
+			h := &libcommon.Hash{}
 			if err := h.Scan(tt.args.src); (err != nil) != tt.wantErr {
 				t.Errorf("Hash.Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -259,11 +261,11 @@ func TestHash_Value(t *testing.T) {
 		0xa2, 0x18, 0xc6, 0xa9, 0x27, 0x4d, 0x30, 0xab, 0x9a, 0x15,
 		0x10, 0x00,
 	}
-	var usedH Hash
+	var usedH libcommon.Hash
 	usedH.SetBytes(b)
 	tests := []struct {
 		name    string
-		h       Hash
+		h       libcommon.Hash
 		want    driver.Value
 		wantErr bool
 	}{
@@ -321,7 +323,7 @@ func TestAddress_Scan(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			a := &Address{}
+			a := &libcommon.Address{}
 			if err := a.Scan(tt.args.src); (err != nil) != tt.wantErr {
 				t.Errorf("Address.Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -345,11 +347,11 @@ func TestAddress_Value(t *testing.T) {
 		0xb2, 0x6f, 0x2b, 0x34, 0x2a, 0xab, 0x24, 0xbc, 0xf6, 0x3e,
 		0xa2, 0x18, 0xc6, 0xa9, 0x27, 0x4d, 0x30, 0xab, 0x9a, 0x15,
 	}
-	var usedA Address
+	var usedA libcommon.Address
 	usedA.SetBytes(b)
 	tests := []struct {
 		name    string
-		a       Address
+		a       libcommon.Address
 		want    driver.Value
 		wantErr bool
 	}{
@@ -379,7 +381,7 @@ func TestAddress_Format(t *testing.T) {
 		0xb2, 0x6f, 0x2b, 0x34, 0x2a, 0xab, 0x24, 0xbc, 0xf6, 0x3e,
 		0xa2, 0x18, 0xc6, 0xa9, 0x27, 0x4d, 0x30, 0xab, 0x9a, 0x15,
 	}
-	var addr Address
+	var addr libcommon.Address
 	addr.SetBytes(b)
 
 	tests := []struct {
@@ -454,7 +456,7 @@ func TestAddress_Format(t *testing.T) {
 }
 
 func TestHash_Format(t *testing.T) {
-	var hash Hash
+	var hash libcommon.Hash
 	hash.SetBytes([]byte{
 		0xb2, 0x6f, 0x2b, 0x34, 0x2a, 0xab, 0x24, 0xbc, 0xf6, 0x3e,
 		0xa2, 0x18, 0xc6, 0xa9, 0x27, 0x4d, 0x30, 0xab, 0x9a, 0x15,
@@ -593,7 +595,7 @@ func TestAddress32HexChecksum(t *testing.T) {
 }
 
 func BenchmarkAddress32Hex(b *testing.B) {
-	testAddr := HexToAddress("0x02f9e8d79ceb60818adef3372729c60aeb0428d6357eb7d1587c347f0113b338")
+	testAddr := libcommon.HexToAddress("0x02f9e8d79ceb60818adef3372729c60aeb0428d6357eb7d1587c347f0113b338")
 	for n := 0; n < b.N; n++ {
 		println(testAddr.Hex())
 	}

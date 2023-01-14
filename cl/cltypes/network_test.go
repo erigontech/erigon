@@ -3,10 +3,11 @@ package cltypes_test
 import (
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -19,7 +20,7 @@ var testPing = &cltypes.Ping{
 }
 
 var testSingleRoot = &cltypes.SingleRoot{
-	Root: common.HexToHash("96"),
+	Root: libcommon.HexToHash("96"),
 }
 
 var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
@@ -35,8 +36,8 @@ var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
 var testStatus = &cltypes.Status{
 	FinalizedEpoch: 666,
 	HeadSlot:       94,
-	HeadRoot:       common.HexToHash("a"),
-	FinalizedRoot:  common.HexToHash("bbba"),
+	HeadRoot:       libcommon.HexToHash("a"),
+	FinalizedRoot:  libcommon.HexToHash("bbba"),
 }
 
 func TestMarshalNetworkTypes(t *testing.T) {

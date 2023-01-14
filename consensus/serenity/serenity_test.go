@@ -4,15 +4,16 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 type readerMock struct{}
 
-func (r readerMock) Config() *params.ChainConfig {
+func (r readerMock) Config() *chain.Config {
 	return nil
 }
 
@@ -20,7 +21,7 @@ func (r readerMock) CurrentHeader() *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeader(common.Hash, uint64) *types.Header {
+func (r readerMock) GetHeader(libcommon.Hash, uint64) *types.Header {
 	return nil
 }
 
@@ -28,11 +29,11 @@ func (r readerMock) GetHeaderByNumber(uint64) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
+func (r readerMock) GetHeaderByHash(libcommon.Hash) *types.Header {
 	return nil
 }
 
-func (r readerMock) GetTd(common.Hash, uint64) *big.Int {
+func (r readerMock) GetTd(libcommon.Hash, uint64) *big.Int {
 	return nil
 }
 
