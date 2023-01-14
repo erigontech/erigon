@@ -450,13 +450,16 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 		writer.WriteString(hexutility.Encode(rlpBytes))
 
 		k := hexutility.EncodeTs(key)
+		log.Debug("Before tx.Put", "len", len(writer.Bytes()))
 		err = tx.Put("BodiesStage", k, writer.Bytes())
+		log.Debug("After tx.Put", "err", err)
 		if err != nil {
 			return err
 		}
 	} else {
 		// use an in memory cache as we're near the top of the chain
 		bd.bodyCache[key] = body
+		log.Debug("Put into bodyCache")
 	}
 
 	bd.bodiesAdded = true
