@@ -1,6 +1,9 @@
 package cltypes
 
-import "github.com/ledgerwatch/erigon/cl/merkle_tree"
+import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+)
 
 type ProposerSlashing struct {
 	Header1 *SignedBeaconBlockHeader
@@ -50,6 +53,12 @@ type AttesterSlashing struct {
 
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) []byte {
 	buf := dst
+	offset := 8
+	// Write offsets
+	buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
+	offset += a.Attestation_1.EncodingSizeSSZ()
+	buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
+	// Write the attestations
 	buf = a.Attestation_1.Data.EncodeSSZ(buf)
 	buf = a.Attestation_2.Data.EncodeSSZ(buf)
 	return buf
@@ -58,10 +67,11 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) []byte {
 func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
-	if err := a.Attestation_1.DecodeSSZ(buf); err != nil {
+	attestation2Offset := ssz_utils.DecodeOffset(buf[4:])
+	if err := a.Attestation_1.DecodeSSZ(buf[8:attestation2Offset]); err != nil {
 		return err
 	}
-	return a.Attestation_2.DecodeSSZ(buf[a.Attestation_1.EncodingSizeSSZ():])
+	return a.Attestation_2.DecodeSSZ(buf[attestation2Offset:])
 }
 
 func (a *AttesterSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
@@ -69,7 +79,7 @@ func (a *AttesterSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {
-	return a.Attestation_1.EncodingSizeSSZ() + a.Attestation_2.EncodingSizeSSZ()
+	return 8 + a.Attestation_1.EncodingSizeSSZ() + a.Attestation_2.EncodingSizeSSZ()
 }
 
 func (a *AttesterSlashing) HashTreeRoot() ([32]byte, error) {
