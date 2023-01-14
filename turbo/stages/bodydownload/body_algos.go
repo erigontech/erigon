@@ -39,6 +39,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
+	log.Debug("UpdateFromDb", "bd.requestedLow", bd.requestedLow)
 	bd.lowWaitUntil = 0
 	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
 	bd.requestedMap = make(map[TripleHash]uint64)
@@ -76,6 +77,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 
 // RequestMoreBodies - returns nil if nothing to request
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+	log.Debug("RequestMoreBodies", "blockNum", blockNum, "bd.requestedLow", bd.requestedLow)
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
@@ -376,6 +378,7 @@ func (bd *BodyDownload) NextProcessingCount() uint64 {
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	bd.requestedLow += i
+	log.Debug("NextProcessingCount", "bd.requestedLow", bd.requestedLow)
 	return i
 }
 
