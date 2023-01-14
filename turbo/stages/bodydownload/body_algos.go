@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -440,18 +439,13 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawBody) error {
 	if !bd.UsingExternalTx {
 		// use the kv store to hold onto bodies as we're anticipating a lot of memory usage
-		writer := bytes.NewBuffer(nil)
-		err := body.EncodeRLP(writer)
+		b, err := rlp.EncodeToBytes(body)
 		if err != nil {
 			return err
 		}
-		rlpBytes := common.CopyBytes(writer.Bytes())
-		writer.Reset()
-		writer.WriteString(hexutility.Encode(rlpBytes))
-
 		k := hexutility.EncodeTs(key)
-		log.Debug("Before tx.Put", "len", len(writer.Bytes()))
-		err = tx.Put("BodiesStage", k, writer.Bytes())
+		log.Debug("Before tx.Put", "key", key, "len", len(b))
+		err = tx.Put("BodiesStage", k, b)
 		log.Debug("After tx.Put", "err", err)
 		if err != nil {
 			return err
@@ -469,17 +463,13 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
 	if !bd.UsingExternalTx {
 		key := hexutility.EncodeTs(blockNum)
-		body, err := tx.GetOne("BodiesStage", key)
+		b, err := tx.GetOne("BodiesStage", key)
 		if err != nil {
 			return nil, err
 		}
 
 		var rawBody types.RawBody
-		fromHex := common.CopyBytes(common.FromHex(string(body)))
-		bodyReader := bytes.NewReader(fromHex)
-		stream := rlp.NewStream(bodyReader, 0)
-		err = rawBody.DecodeRLP(stream)
-		if err != nil {
+		if err := rlp.DecodeBytes(b, &rawBody); err != nil {
 			log.Error("Unexpected body from bucket", "err", err, "block", blockNum)
 			return nil, fmt.Errorf("%w, nextBlock=%d", err, blockNum)
 		}
