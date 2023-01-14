@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 50
+const requestLoopCutOff int = 4
 
 type BodiesCfg struct {
 	db              kv.RwDB
