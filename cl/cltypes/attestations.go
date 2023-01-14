@@ -355,9 +355,9 @@ func (a *Attestation) HashTreeRoot() ([32]byte, error) {
  * IndexedAttestation are attestantions sets to prove that someone misbehaved.
  */
 type IndexedAttestation struct {
-	AttestingIndices []uint64 `ssz-max:"2048"`
+	AttestingIndices []uint64
 	Data             *AttestationData
-	Signature        [96]byte `ssz-size:"96"`
+	Signature        [96]byte
 }
 
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
@@ -403,12 +403,10 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	if num > 2048 {
 		return ssz_utils.ErrBadDynamicLength
 	}
-	pos := 228
 	i.AttestingIndices = make([]uint64, num)
 
 	for index := 0; index < num; index++ {
-		i.AttestingIndices[index] = ssz.UnmarshallUint64(buf[pos:])
-		pos += 8
+		i.AttestingIndices[index] = ssz.UnmarshallUint64(bitsBuf[index*8:])
 	}
 	return nil
 }
@@ -422,7 +420,7 @@ func (i *IndexedAttestation) EncodingSizeSSZ() int {
 func (i *IndexedAttestation) HashTreeRoot() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
-	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, 2048)
+	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, ssz_utils.CalculateIndiciesLimit(2048, uint64(len(i.AttestingIndices)), 8))
 	if err != nil {
 		return [32]byte{}, err
 	}
