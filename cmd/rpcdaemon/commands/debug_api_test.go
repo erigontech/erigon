@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var dumper = spew.ConfigState{Indent: "    "}
+var dumper = spew.ConfigState{Indent: "   "}
 
 var debugTraceTransactionTests = []struct {
 	txHash      string
@@ -265,10 +265,19 @@ func TestStorageRangeAt(t *testing.T) {
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
+
 		// limited
 		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 2)
 		require.NoError(t, err)
 		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[5]}
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+
+		// start from something, limited
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		require.NoError(t, err)
+		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
 		if !reflect.DeepEqual(result, expect) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
