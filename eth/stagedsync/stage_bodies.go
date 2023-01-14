@@ -196,7 +196,8 @@ func BodiesForward(
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			req, blockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+			var newBlockNum uint64
+			req, newBlockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
@@ -213,6 +214,7 @@ func BodiesForward(
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 				log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
+				blockNum = newBlockNum
 			}
 
 			loopCount++
