@@ -119,7 +119,7 @@ type VoluntaryExit struct {
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(ssz_utils.Uint64SSZ(e.Epoch)[:], ssz_utils.Uint64SSZ(e.ValidatorIndex)[:]...)...)
+	return append(buf, append(ssz_utils.Uint64SSZ(e.Epoch), ssz_utils.Uint64SSZ(e.ValidatorIndex)...)...)
 }
 
 func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {

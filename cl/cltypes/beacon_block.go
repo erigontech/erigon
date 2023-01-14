@@ -93,7 +93,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write "easy" fields
 	buf = append(buf, b.RandaoReveal[:]...)
 	buf = b.Eth1Data.EncodeSSZ(buf)
-	buf = append(buf, b.Graffiti[:]...)
+	buf = append(buf, b.Graffiti...)
 	// Write offsets for proposer slashings
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
 	offset += uint32(len(b.ProposerSlashings) * 416)
