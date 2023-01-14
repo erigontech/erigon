@@ -134,11 +134,7 @@ func BodiesForward(
 	// this will allow us to restart the bodies stage and not request bodies we already have
 	// once the bodies stage is complete this bucket is dropped
 	if !useExternalTx {
-		err = tx.CreateBucket("BodiesStage")
-		if err != nil {
-			return err
-		}
-		err = tx.ClearBucket("BodiesStage")
+		err = tx.ClearBucket(kv.BodiesStage)
 		if err != nil {
 			return err
 		}
@@ -333,7 +329,7 @@ func BodiesForward(
 
 	// remove the temporary bucket for bodies stage
 	if !useExternalTx {
-		tx.ClearBucket("BodiesStage")
+		tx.ClearBucket(kv.BodiesStage)
 		err = tx.Commit()
 		if err != nil {
 			return err

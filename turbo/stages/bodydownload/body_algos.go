@@ -445,7 +445,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 		}
 		k := hexutility.EncodeTs(key)
 		log.Debug("Before tx.Put", "key", key, "len", len(b))
-		err = tx.Put("BodiesStage", k, b)
+		err = tx.Put(kv.BodiesStage, k, b)
 		log.Debug("After tx.Put", "err", err)
 		if err != nil {
 			return err
@@ -463,7 +463,7 @@ func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawB
 func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
 	if !bd.UsingExternalTx {
 		key := hexutility.EncodeTs(blockNum)
-		b, err := tx.GetOne("BodiesStage", key)
+		b, err := tx.GetOne(kv.BodiesStage, key)
 		if err != nil {
 			return nil, err
 		}
@@ -473,7 +473,7 @@ func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.R
 			log.Error("Unexpected body from bucket", "err", err, "block", blockNum)
 			return nil, fmt.Errorf("%w, nextBlock=%d", err, blockNum)
 		}
-		if err := tx.Delete("BodiesStage", key); err != nil {
+		if err := tx.Delete(kv.BodiesStage, key); err != nil {
 			return nil, err
 		}
 
