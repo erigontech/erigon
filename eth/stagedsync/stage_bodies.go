@@ -150,25 +150,12 @@ func BodiesForward(
 
 	var blockNum uint64
 	loopBody := func() (bool, error) {
-		// innerTx is used for the temporary stage bucket to hold on to bodies as they're downloaded
-		// offering restart capability for the stage bodies process
-		var innerTx kv.RwTx
-		if !useExternalTx {
-			innerTx, err = cfg.db.BeginRw(context.Background())
-			if err != nil {
-				return false, err
-			}
-			defer innerTx.Rollback()
-		} else {
-			innerTx = tx
-		}
-
 		// always check if a new request is needed at the start of the loop
 		// this will check for timed out old requests and attempt to send them again
 		start := time.Now()
 		currentTime := uint64(time.Now().Unix())
 		var newBlockNum uint64
-		req, newBlockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+		req, newBlockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 		if err != nil {
 			return false, fmt.Errorf("request more bodies: %w", err)
 		}
@@ -200,7 +187,7 @@ func BodiesForward(
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
 			var newBlockNum uint64
-			req, newBlockNum, err = cfg.bd.RequestMoreBodies(innerTx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+			req, newBlockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
@@ -227,14 +214,14 @@ func BodiesForward(
 		}
 
 		start = time.Now()
-		requestedLow, delivered, err := cfg.bd.GetDeliveries(innerTx)
+		requestedLow, delivered, err := cfg.bd.GetDeliveries(tx)
 		if err != nil {
 			return false, err
 		}
 		totalDelivered += delivered
 		d4 += time.Since(start)
 		start = time.Now()
-		cr := ChainReader{Cfg: cfg.chanConfig, Db: innerTx}
+		cr := ChainReader{Cfg: cfg.chanConfig, Db: tx}
 
 		toProcess := cfg.bd.NextProcessingCount()
 
@@ -243,7 +230,7 @@ func BodiesForward(
 			for i = 0; i < toProcess; i++ {
 				nextBlock := requestedLow + i
 
-				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, innerTx)
+				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
 				if err != nil {
 					return false, err
 				}
@@ -252,7 +239,7 @@ func BodiesForward(
 					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
 				}
 
-				rawBody, err := cfg.bd.GetBlockFromCache(innerTx, nextBlock)
+				rawBody, err := cfg.bd.GetBlockFromCache(tx, nextBlock)
 				if err != nil {
 					log.Error(fmt.Sprintf("[%s] Error getting body from cache", logPrefix), "err", err)
 					return false, err
@@ -270,19 +257,19 @@ func BodiesForward(
 				}
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(innerTx, header.Hash(), blockHeight, rawBody)
+				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 				if err != nil {
 					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 				}
 				if cfg.historyV3 && ok {
-					if err := rawdb.TxNums.Append(innerTx, blockHeight, lastTxnNum); err != nil {
+					if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 						return false, err
 					}
 				}
 
 				if blockHeight > bodyProgress {
 					bodyProgress = blockHeight
-					if err = s.Update(innerTx, blockHeight); err != nil {
+					if err = s.Update(tx, blockHeight); err != nil {
 						return false, fmt.Errorf("saving Bodies progress: %w", err)
 					}
 				}
@@ -291,7 +278,7 @@ func BodiesForward(
 
 		// if some form of work has happened then commit the transaction
 		if !useExternalTx && (cfg.bd.HasAddedBodies() || toProcess > 0) {
-			err = innerTx.Commit()
+			err = tx.Commit()
 			if err != nil {
 				return false, err
 			}
@@ -354,14 +341,8 @@ func BodiesForward(
 
 	// remove the temporary bucket for bodies stage
 	if !useExternalTx {
-		bucketTx, err := cfg.db.BeginRw(context.Background())
-		if err != nil {
-			return err
-		}
-		defer bucketTx.Rollback()
-
-		bucketTx.ClearBucket("BodiesStage")
-		err = bucketTx.Commit()
+		tx.ClearBucket("BodiesStage")
+		err = tx.Commit()
 		if err != nil {
 			return err
 		}
