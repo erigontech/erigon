@@ -62,7 +62,7 @@ func BodiesForward(
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
 	useExternalTx := tx != nil
-	cfg.bd.UsingExternalTx = useExternalTx
+	cfg.bd.UsingExternalTx = true // To turn off temporary bodies table
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
