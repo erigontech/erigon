@@ -3,6 +3,7 @@ package cltypes
 import (
 	"bytes"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -21,33 +22,6 @@ type BeaconBodyBellatrix struct {
 	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
 	SyncAggregate     *SyncAggregate
 	ExecutionPayload  *Eth1Block
-}
-
-/*
- * Block body for Consensus Layer to be stored internally (payload and attestations are stored separatedly).
- */
-type BeaconBlockForStorage struct {
-	// Non-body fields
-	Signature     [96]byte `ssz-size:"96"`
-	Slot          uint64
-	ProposerIndex uint64
-	ParentRoot    [32]byte `ssz-size:"32"`
-	StateRoot     [32]byte `ssz-size:"32"`
-	// Body fields
-	RandaoReveal      [96]byte `ssz-size:"96"`
-	Eth1Data          *Eth1Data
-	Graffiti          []byte                 `ssz-size:"32"`
-	ProposerSlashings []*ProposerSlashing    `ssz-max:"16"`
-	AttesterSlashings []*AttesterSlashing    `ssz-max:"2"`
-	Deposits          []*Deposit             `ssz-max:"16"`
-	VoluntaryExits    []*SignedVoluntaryExit `ssz-max:"16"`
-	SyncAggregate     *SyncAggregate
-	// Metadatas
-	Eth1Number    uint64
-	Eth1BlockHash [32]byte `ssz-size:"32"`
-	Eth2BlockRoot [32]byte `ssz-size:"32"`
-	// Version type
-	Version uint8
 }
 
 /*
@@ -77,7 +51,7 @@ func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 type LightClientBootstrap struct {
 	Header                     *BeaconBlockHeader
 	CurrentSyncCommittee       *SyncCommittee
-	CurrentSyncCommitteeBranch [][]byte `ssz-size:"5,32"`
+	CurrentSyncCommitteeBranch []libcommon.Hash
 }
 
 func (l *LightClientBootstrap) UnmarshalSSZWithVersion(buf []byte, _ int) error {
@@ -88,9 +62,9 @@ func (l *LightClientBootstrap) UnmarshalSSZWithVersion(buf []byte, _ int) error 
 type LightClientUpdate struct {
 	AttestedHeader          *BeaconBlockHeader
 	NextSyncCommitee        *SyncCommittee
-	NextSyncCommitteeBranch [][]byte `ssz-size:"5,32"`
+	NextSyncCommitteeBranch []libcommon.Hash
 	FinalizedHeader         *BeaconBlockHeader
-	FinalityBranch          [][]byte `ssz-size:"6,32"`
+	FinalityBranch          []libcommon.Hash
 	SyncAggregate           *SyncAggregate
 	SignatureSlot           uint64
 }
@@ -116,7 +90,7 @@ func (l *LightClientUpdate) HasSyncFinality() bool {
 type LightClientFinalityUpdate struct {
 	AttestedHeader  *BeaconBlockHeader
 	FinalizedHeader *BeaconBlockHeader
-	FinalityBranch  [][]byte `ssz-size:"6,32"`
+	FinalityBranch  []libcommon.Hash `ssz-size:"6,32"`
 	SyncAggregate   *SyncAggregate
 	SignatureSlot   uint64
 }
@@ -144,7 +118,6 @@ type Fork struct {
 }
 
 // Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
-// NOT USED but necessary for decoding Checkpoint sync.
 type Validator struct {
 	PublicKey                  [48]byte `ssz-size:"48"`
 	WithdrawalCredentials      []byte   `ssz-size:"32"`

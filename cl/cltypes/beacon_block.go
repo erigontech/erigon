@@ -13,6 +13,33 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 )
 
+/*
+ * Block body for Consensus Layer to be stored internally (payload and attestations are stored separatedly).
+ */
+type BeaconBlockForStorage struct {
+	// Non-body fields
+	Signature     [96]byte
+	Slot          uint64
+	ProposerIndex uint64
+	ParentRoot    libcommon.Hash
+	StateRoot     libcommon.Hash
+	// Body fields
+	RandaoReveal      [96]byte
+	Eth1Data          *Eth1Data
+	Graffiti          []byte
+	ProposerSlashings []*ProposerSlashing
+	AttesterSlashings []*AttesterSlashing
+	Deposits          []*Deposit
+	VoluntaryExits    []*SignedVoluntaryExit
+	SyncAggregate     *SyncAggregate
+	// Metadatas
+	Eth1Number    uint64
+	Eth1BlockHash libcommon.Hash
+	Eth2BlockRoot libcommon.Hash
+	// Version type
+	Version uint8
+}
+
 const (
 	MaxAttesterSlashings = 2
 	MaxProposerSlashings = 16

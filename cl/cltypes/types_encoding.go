@@ -5,6 +5,8 @@ package cltypes
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ssz "github.com/prysmaticlabs/fastssz"
 )
 
@@ -128,7 +130,7 @@ func (l *LightClientBootstrap) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 			err = ssz.ErrBytesLengthFn("--.CurrentSyncCommitteeBranch[ii]", size, 32)
 			return
 		}
-		dst = append(dst, l.CurrentSyncCommitteeBranch[ii]...)
+		dst = append(dst, l.CurrentSyncCommitteeBranch[ii][:]...)
 	}
 
 	return
@@ -159,12 +161,9 @@ func (l *LightClientBootstrap) UnmarshalSSZ(buf []byte) error {
 	}
 
 	// Field (2) 'CurrentSyncCommitteeBranch'
-	l.CurrentSyncCommitteeBranch = make([][]byte, 5)
+	l.CurrentSyncCommitteeBranch = make([]libcommon.Hash, 5)
 	for ii := 0; ii < 5; ii++ {
-		if cap(l.CurrentSyncCommitteeBranch[ii]) == 0 {
-			l.CurrentSyncCommitteeBranch[ii] = make([]byte, 0, len(buf[24736:24896][ii*32:(ii+1)*32]))
-		}
-		l.CurrentSyncCommitteeBranch[ii] = append(l.CurrentSyncCommitteeBranch[ii], buf[24736:24896][ii*32:(ii+1)*32]...)
+		copy(l.CurrentSyncCommitteeBranch[ii][:], buf[24736:24896][ii*32:(ii+1)*32])
 	}
 
 	return err
@@ -208,7 +207,7 @@ func (l *LightClientUpdate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 			err = ssz.ErrBytesLengthFn("--.NextSyncCommitteeBranch[ii]", size, 32)
 			return
 		}
-		dst = append(dst, l.NextSyncCommitteeBranch[ii]...)
+		dst = append(dst, l.NextSyncCommitteeBranch[ii][:]...)
 	}
 
 	// Field (3) 'FinalizedHeader'
@@ -227,7 +226,7 @@ func (l *LightClientUpdate) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 			err = ssz.ErrBytesLengthFn("--.FinalityBranch[ii]", size, 32)
 			return
 		}
-		dst = append(dst, l.FinalityBranch[ii]...)
+		dst = append(dst, l.FinalityBranch[ii][:]...)
 	}
 
 	// Field (5) 'SyncAggregate'
@@ -267,12 +266,9 @@ func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
 	}
 
 	// Field (2) 'NextSyncCommitteeBranch'
-	l.NextSyncCommitteeBranch = make([][]byte, 5)
+	l.NextSyncCommitteeBranch = make([]libcommon.Hash, 5)
 	for ii := 0; ii < 5; ii++ {
-		if cap(l.NextSyncCommitteeBranch[ii]) == 0 {
-			l.NextSyncCommitteeBranch[ii] = make([]byte, 0, len(buf[24736:24896][ii*32:(ii+1)*32]))
-		}
-		l.NextSyncCommitteeBranch[ii] = append(l.NextSyncCommitteeBranch[ii], buf[24736:24896][ii*32:(ii+1)*32]...)
+		copy(l.NextSyncCommitteeBranch[ii][:], buf[24736:24896][ii*32:(ii+1)*32])
 	}
 
 	// Field (3) 'FinalizedHeader'
@@ -284,12 +280,9 @@ func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
 	}
 
 	// Field (4) 'FinalityBranch'
-	l.FinalityBranch = make([][]byte, 6)
+	l.FinalityBranch = make([]libcommon.Hash, 6)
 	for ii := 0; ii < 6; ii++ {
-		if cap(l.FinalityBranch[ii]) == 0 {
-			l.FinalityBranch[ii] = make([]byte, 0, len(buf[25008:25200][ii*32:(ii+1)*32]))
-		}
-		l.FinalityBranch[ii] = append(l.FinalityBranch[ii], buf[25008:25200][ii*32:(ii+1)*32]...)
+		copy(l.FinalityBranch[ii][:], buf[25008:25200][ii*32:(ii+1)*32])
 	}
 
 	// Field (5) 'SyncAggregate'
@@ -342,7 +335,7 @@ func (l *LightClientFinalityUpdate) MarshalSSZTo(buf []byte) (dst []byte, err er
 			err = ssz.ErrBytesLengthFn("--.FinalityBranch[ii]", size, 32)
 			return
 		}
-		dst = append(dst, l.FinalityBranch[ii]...)
+		dst = append(dst, l.FinalityBranch[ii][:]...)
 	}
 
 	// Field (3) 'SyncAggregate'
@@ -383,12 +376,9 @@ func (l *LightClientFinalityUpdate) UnmarshalSSZ(buf []byte) error {
 	}
 
 	// Field (2) 'FinalityBranch'
-	l.FinalityBranch = make([][]byte, 6)
+	l.FinalityBranch = make([]libcommon.Hash, 6)
 	for ii := 0; ii < 6; ii++ {
-		if cap(l.FinalityBranch[ii]) == 0 {
-			l.FinalityBranch[ii] = make([]byte, 0, len(buf[224:416][ii*32:(ii+1)*32]))
-		}
-		l.FinalityBranch[ii] = append(l.FinalityBranch[ii], buf[224:416][ii*32:(ii+1)*32]...)
+		copy(l.FinalityBranch[ii][:], buf[224:416][ii*32:(ii+1)*32])
 	}
 
 	// Field (3) 'SyncAggregate'

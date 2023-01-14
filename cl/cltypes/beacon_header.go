@@ -66,6 +66,7 @@ func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) []byte {
 }
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte) error {
+	b.Header = new(BeaconBlockHeader)
 	if err := b.Header.DecodeSSZ(buf); err != nil {
 		return err
 	}
