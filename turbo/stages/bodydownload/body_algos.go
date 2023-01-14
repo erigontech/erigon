@@ -483,10 +483,15 @@ func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.R
 			log.Error("Unexpected body from bucket", "err", err, "block", blockNum)
 			return nil, fmt.Errorf("%w, nextBlock=%d", err, blockNum)
 		}
+		if err := tx.Delete("BodiesStage", key); err != nil {
+			return nil, err
+		}
 
 		return &rawBody, nil
 	} else {
-		return bd.bodyCache[blockNum], nil
+		rawBody := bd.bodyCache[blockNum]
+		delete(bd.bodyCache, blockNum)
+		return rawBody, nil
 	}
 }
 

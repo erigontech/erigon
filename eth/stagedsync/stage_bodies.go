@@ -142,10 +142,6 @@ func BodiesForward(
 		if err != nil {
 			return err
 		}
-		err = tx.Commit()
-		if err != nil {
-			return err
-		}
 	}
 
 	var blockNum uint64
@@ -278,10 +274,6 @@ func BodiesForward(
 
 		// if some form of work has happened then commit the transaction
 		if !useExternalTx && (cfg.bd.HasAddedBodies() || toProcess > 0) {
-			err = tx.Commit()
-			if err != nil {
-				return false, err
-			}
 			cfg.bd.ResetAddedBodies()
 		}
 
