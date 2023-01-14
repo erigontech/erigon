@@ -254,7 +254,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	if cfg.HistoryV3 {
-		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
+		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
