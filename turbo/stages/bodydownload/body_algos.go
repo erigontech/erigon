@@ -304,6 +304,7 @@ Loop:
 		default:
 			break Loop
 		}
+		log.Debug("GetDeliveried", "peer", fmt.Sprintf("%x", delivery.peerID), "len", len(delivery.txs))
 
 		if delivery.txs == nil {
 			log.Warn("nil transactions delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
@@ -335,9 +336,11 @@ Loop:
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
 			blockNum, ok := bd.requestedMap[tripleHash]
 			if !ok {
+				log.Debug("undelivered")
 				undelivered++
 				continue
 			}
+			log.Debug("deliverying", "blockNum", blockNum)
 			req := bd.requests[blockNum]
 			if req != nil {
 				if _, ok := reqMap[req.BlockNums[0]]; !ok {
@@ -356,7 +359,7 @@ Loop:
 		// Clean up the requests
 		for _, req := range reqMap {
 			for _, blockNum := range req.BlockNums {
-				bd.requests[blockNum] = nil
+				delete(bd.requests, blockNum)
 			}
 		}
 		total := delivered + undelivered
