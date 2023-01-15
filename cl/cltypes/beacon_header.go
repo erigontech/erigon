@@ -87,7 +87,7 @@ func (b *SignedBeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
 	return merkle_tree.ArraysRoot([][32]byte{
 		headerRoot,
 		signatureRoot,
-	}, 8)
+	}, 2)
 }
 
 func (b *SignedBeaconBlockHeader) EncodingSizeSSZ() int {
