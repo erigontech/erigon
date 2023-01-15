@@ -321,10 +321,10 @@ func (b *BlobTxWrapData) sizeWrapData() common.StorageSize {
 }
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
-func (b *BlobTxWrapData) validateBlobTransactionWrapper(inner Transaction) error {
-	blobTx, ok := inner.(*SignedBlobTx)
+func (b *BlobTxWrapData) validateBlobTransactionWrapper(tx Transaction) error {
+	blobTx, ok := tx.(*SignedBlobTx)
 	if !ok {
-		return fmt.Errorf("expected signed blob tx, got %T", inner)
+		return fmt.Errorf("expected signed blob tx, got %T", tx)
 	}
 	l1 := len(b.BlobKzgs)
 	l2 := len(blobTx.Message.BlobVersionedHashes)

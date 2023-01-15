@@ -569,7 +569,7 @@ func (ethash *Ethash) Finalize(config *params.ChainConfig, header *types.Header,
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
 	// set header.Root?
-	// misc.HeaderSetExcessDataGas(chain, header, txs)
+	misc.HeaderSetExcessDataGas(chain, header, txs)
 	return txs, r, nil
 }
 

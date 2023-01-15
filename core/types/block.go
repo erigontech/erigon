@@ -516,18 +516,6 @@ func (h *Header) Size() common.StorageSize {
 		s += common.StorageSize(common.HashLength)
 	}
 	return s
-	// var feeBits int
-	// if h.BaseFee != nil {
-	// 	feeBits = h.BaseFee.BitLen()
-	// }
-	// if h.ExcessDataGas != nil {
-	// 	feeBits += h.ExcessDataGas.BitLen()
-	// }
-	// var withdrawalBytes int
-	// if h.WithdrawalsHash != nil {
-	// 	withdrawalBytes = common.HashLength
-	// }
-	// return headerSize + common.StorageSize(len(h.Extra)+(h.Difficulty.BitLen()+h.Number.BitLen()+feeBits)/8+withdrawalBytes)
 }
 
 // SanityCheck checks a few basic things -- these checks are way beyond what
@@ -1654,7 +1642,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
-	bd.SendersFromTxs()
+	bd.SendersFromTxs() // is this required?
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {

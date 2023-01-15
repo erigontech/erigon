@@ -581,7 +581,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 // Hash computes the hash (but not for signatures!)
 func (stx *SignedBlobTx) Hash() common.Hash {
 	hash := prefixedSSZHash(stx.Type(), stx)
-	// stx.hash.Store(&hash)
+	stx.hash.Store(&hash) // TODO: make sure this part is correct!
 	return hash
 }
 

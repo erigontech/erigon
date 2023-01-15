@@ -65,7 +65,6 @@ func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) commo
 	if excessDataGas != nil {
 		edg.Set(excessDataGas)
 	}
-
 	return evmtypes.BlockContext{
 		CanTransfer:   CanTransfer,
 		Transfer:      transferFunc,
