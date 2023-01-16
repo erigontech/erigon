@@ -424,11 +424,3 @@ func (bd *BodyDownload) ClearBodyCache() {
 func (bd *BodyDownload) BodyCacheSize() int {
 	return bd.bodyCacheSize
 }
-
-func (bd *BodyDownload) HasAddedBodies() bool {
-	return bd.bodiesAdded
-}
-
-func (bd *BodyDownload) ResetAddedBodies() {
-	bd.bodiesAdded = false
-}

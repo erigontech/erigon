@@ -48,7 +48,6 @@ type BodyDownload struct {
 	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	deliveredCount   float64
 	wastedCount      float64
-	bodiesAdded      bool
 	bodyCache        *btree.BTreeG[BodyTreeItem]
 	bodyCacheSize    int
 }

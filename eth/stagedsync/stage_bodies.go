@@ -246,11 +246,6 @@ func BodiesForward(
 			}
 		}
 
-		// if some form of work has happened then commit the transaction
-		if !useExternalTx && (cfg.bd.HasAddedBodies() || toProcess > 0) {
-			cfg.bd.ResetAddedBodies()
-		}
-
 		if !quiet && toProcess > 0 {
 			logWritingBodies(logPrefix, bodyProgress, headerProgress)
 		}
