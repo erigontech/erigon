@@ -136,7 +136,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRange(name kv.Domain, k1, fromKey []byte, asOfTs uint64, amount int) (pairs kv.Pairs, err error) {
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs kv.Pairs, err error) {
 	if tx.hitoryV3 {
 		switch name {
 		case AccountsDomain:
@@ -145,7 +145,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, fromKey []byte, asOfTs uint64, amo
 			//it := tx.agg.StorageHistoryRIterateChanged(asOfTs, math.MaxUint64, tx)
 			toKey, _ := kv.NextSubtree(k1)
 			fromKey2 := append(common.Copy(k1), fromKey...)
-			it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, amount, tx)
+			it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
 
 			accData, err := tx.GetOne(kv.PlainState, k1)
 			if err != nil {
@@ -164,7 +164,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, fromKey []byte, asOfTs uint64, amo
 			copy(toPrefix, k1)
 			binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
-			it2, err := tx.Range(kv.PlainState, startkey, toPrefix)
+			it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
 			if err != nil {
 				return nil, err
 			}
@@ -325,34 +325,34 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		default:
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
-	} else {
-		var bm *roaring64.Bitmap
-		switch name {
-		case LogTopicIdx:
-			bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
-			if err != nil {
-				return nil, err
-			}
-			bm = bitmapdb.CastBitmapTo64(bm32)
-		case LogAddrIdx:
-			bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
-			if err != nil {
-				return nil, err
-			}
-			bm = bitmapdb.CastBitmapTo64(bm32)
-		case TracesFromIdx:
-			bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
-			if err != nil {
-				return nil, err
-			}
-		case TracesToIdx:
-			bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unexpected history name: %s", name)
-		}
-		return bitmapdb.NewBitmapStream(bm), nil
 	}
+
+	var bm *roaring64.Bitmap
+	switch name {
+	case LogTopicIdx:
+		bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
+		if err != nil {
+			return nil, err
+		}
+		bm = bitmapdb.CastBitmapTo64(bm32)
+	case LogAddrIdx:
+		bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
+		if err != nil {
+			return nil, err
+		}
+		bm = bitmapdb.CastBitmapTo64(bm32)
+	case TracesFromIdx:
+		bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+	case TracesToIdx:
+		bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
+	}
+	return bitmapdb.NewBitmapStream(bm), nil
 }

@@ -51,7 +51,7 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 	result := StorageRangeResult{Storage: storageMap{}}
 	resultCount := 0
 
-	r, err := ttx.(*temporal.Tx).DomainRange(temporal.StorageDomain, contractAddress.Bytes(), start, txNum, maxResult)
+	r, err := ttx.(*temporal.Tx).DomainRangeAscend(temporal.StorageDomain, contractAddress.Bytes(), start, txNum, maxResult)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
