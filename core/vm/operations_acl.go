@@ -20,7 +20,8 @@ import (
 	"errors"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
@@ -35,7 +36,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		// Gas sentry honoured, do the actual gas calculation based on the stored value
 		var (
 			y, x    = stack.Back(1), stack.Peek()
-			slot    = common.Hash(x.Bytes32())
+			slot    = libcommon.Hash(x.Bytes32())
 			current uint256.Int
 			cost    = uint64(0)
 		)
@@ -61,7 +62,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			return cost + params.WarmStorageReadCostEIP2929, nil // SLOAD_GAS
 		}
 		var original uint256.Int
-		slotCommited := common.Hash(x.Bytes32())
+		slotCommited := libcommon.Hash(x.Bytes32())
 		evm.IntraBlockState().GetCommittedState(contract.Address(), &slotCommited, &original)
 		if original.Eq(&current) {
 			if original.IsZero() { // create slot (2.1.1)
@@ -108,7 +109,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // If the pair is already in accessed_storage_keys, charge 100 gas.
 func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	loc := stack.Peek()
-	slot := common.Hash(loc.Bytes32())
+	slot := libcommon.Hash(loc.Bytes32())
 	// Check slot presence in the access list
 	if _, slotPresent := evm.IntraBlockState().SlotInAccessList(contract.Address(), slot); !slotPresent {
 		// If the caller cannot afford the cost, this change will be rolled back
@@ -130,7 +131,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem
 	if err != nil {
 		return 0, err
 	}
-	addr := common.Address(stack.Peek().Bytes20())
+	addr := libcommon.Address(stack.Peek().Bytes20())
 	// Check slot presence in the access list
 	if !evm.IntraBlockState().AddressInAccessList(addr) {
 		evm.IntraBlockState().AddAddressToAccessList(addr)
@@ -152,7 +153,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem
 // - extcodesize,
 // - (ext) balance
 func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	addr := common.Address(stack.Peek().Bytes20())
+	addr := libcommon.Address(stack.Peek().Bytes20())
 	// Check slot presence in the access list
 	if !evm.IntraBlockState().AddressInAccessList(addr) {
 		// If the caller cannot afford the cost, this change will be rolled back
@@ -165,7 +166,7 @@ func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *stack.Stack, me
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
-		addr := common.Address(stack.Back(1).Bytes20())
+		addr := libcommon.Address(stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
 		// The WarmStorageReadCostEIP2929 (100) is already deducted in the form of a constant cost, so
@@ -230,7 +231,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
-			address = common.Address(stack.Peek().Bytes20())
+			address = libcommon.Address(stack.Peek().Bytes20())
 		)
 		if !evm.IntraBlockState().AddressInAccessList(address) {
 			// If the caller cannot afford the cost, this change will be rolled back

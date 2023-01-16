@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -54,7 +56,7 @@ type EthBackendServer struct {
 	events      *shards.Events
 	db          kv.RoDB
 	blockReader services.BlockAndTxnReader
-	config      *params.ChainConfig
+	config      *chain.Config
 	// Block proposing for proof-of-stake
 	payloadId uint64
 	builders  map[uint64]*builder.BlockBuilder
@@ -67,7 +69,7 @@ type EthBackendServer struct {
 }
 
 type EthBackend interface {
-	Etherbase() (common.Address, error)
+	Etherbase() (libcommon.Address, error)
 	NetVersion() (uint64, error)
 	NetPeerCount() (uint64, error)
 	NodesInfo(limit int) (*remote.NodesInfoReply, error)
@@ -75,7 +77,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.RwDB, events *shards.Events, blockReader services.BlockAndTxnReader,
-	config *params.ChainConfig, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hd *headerdownload.HeaderDownload, proposing bool,
 ) *EthBackendServer {
 	s := &EthBackendServer{ctx: ctx, eth: eth, events: events, db: db, blockReader: blockReader, config: config,
 		builders:    make(map[uint64]*builder.BlockBuilder),
@@ -114,7 +116,7 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*types2.Ver
 }
 
 func (s *EthBackendServer) Etherbase(_ context.Context, _ *remote.EtherbaseRequest) (*remote.EtherbaseReply, error) {
-	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(common.Address{})}
+	out := &remote.EtherbaseReply{Address: gointerfaces.ConvertAddressToH160(libcommon.Address{})}
 
 	base, err := s.eth.Etherbase()
 	if err != nil {
@@ -315,7 +317,7 @@ func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdr
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
-		log.Error("[NewPayload] invalid block hash", "stated", common.Hash(blockHash), "actual", header.Hash())
+		log.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
 		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
@@ -352,7 +354,7 @@ func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdr
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", common.Hash(blockHash))
+	log.Debug("[NewPayload] sending block", "height", header.Number, "hash", libcommon.Hash(blockHash))
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh
@@ -366,7 +368,7 @@ func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdr
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
+func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.Hash, blockNumber uint64, parentHash libcommon.Hash, forkchoiceMessage *engineapi.ForkChoiceMessage, newPayload bool) (*engineapi.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -419,7 +421,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 
 	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
 		log.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
-		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: common.Hash{}}, nil
+		return &engineapi.PayloadStatus{Status: remote.EngineStatus_INVALID, LatestValidHash: libcommon.Hash{}}, nil
 	}
 
 	if !s.hd.POSSync() {
@@ -427,7 +429,7 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash common.Hash
 		return &engineapi.PayloadStatus{Status: remote.EngineStatus_SYNCING}, nil
 	}
 
-	var canonicalHash common.Hash
+	var canonicalHash libcommon.Hash
 	if header != nil {
 		canonicalHash, err = rawdb.ReadCanonicalHash(tx, header.Number.Uint64())
 	}
@@ -586,7 +588,7 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 		FinalizedBlockHash: gointerfaces.ConvertH256ToHash(reqForkchoice.FinalizedBlockHash),
 	}
 
-	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadBlockHash, 0, common.Hash{}, &forkChoice, false)
+	status, err := s.getQuickPayloadStatusIfPossible(forkChoice.HeadBlockHash, 0, libcommon.Hash{}, &forkChoice, false)
 	if err != nil {
 		return nil, err
 	}

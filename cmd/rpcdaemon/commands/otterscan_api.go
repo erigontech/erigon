@@ -8,15 +8,16 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -35,17 +36,17 @@ type TransactionsWithReceipts struct {
 
 type OtterscanAPI interface {
 	GetApiLevel() uint8
-	GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error)
-	SearchTransactionsBefore(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
-	SearchTransactionsAfter(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
+	GetInternalOperations(ctx context.Context, hash libcommon.Hash) ([]*InternalOperation, error)
+	SearchTransactionsBefore(ctx context.Context, addr libcommon.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
+	SearchTransactionsAfter(ctx context.Context, addr libcommon.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error)
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
-	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
+	GetBlockDetailsByHash(ctx context.Context, hash libcommon.Hash) (map[string]interface{}, error)
 	GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
-	HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
-	TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error)
-	GetTransactionError(ctx context.Context, hash common.Hash) (hexutil.Bytes, error)
-	GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error)
-	GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error)
+	HasCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error)
+	TraceTransaction(ctx context.Context, hash libcommon.Hash) ([]*TraceEntry, error)
+	GetTransactionError(ctx context.Context, hash libcommon.Hash) (hexutil.Bytes, error)
+	GetTransactionBySenderAndNonce(ctx context.Context, addr libcommon.Address, nonce uint64) (*libcommon.Hash, error)
+	GetContractCreator(ctx context.Context, addr libcommon.Address) (*ContractCreatorData, error)
 }
 
 type OtterscanAPIImpl struct {
@@ -65,22 +66,22 @@ func (api *OtterscanAPIImpl) GetApiLevel() uint8 {
 }
 
 // TODO: dedup from eth_txs.go#GetTransactionByHash
-func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (types.Transaction, *types.Block, common.Hash, uint64, uint64, error) {
+func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx, hash libcommon.Hash) (types.Transaction, *types.Block, libcommon.Hash, uint64, uint64, error) {
 	// https://infura.io/docs/ethereum/json-rpc/eth-getTransactionByHash
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
-		return nil, nil, common.Hash{}, 0, 0, err
+		return nil, nil, libcommon.Hash{}, 0, 0, err
 	}
 	if !ok {
-		return nil, nil, common.Hash{}, 0, 0, nil
+		return nil, nil, libcommon.Hash{}, 0, 0, nil
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
-		return nil, nil, common.Hash{}, 0, 0, err
+		return nil, nil, libcommon.Hash{}, 0, 0, err
 	}
 	if block == nil {
-		return nil, nil, common.Hash{}, 0, 0, nil
+		return nil, nil, libcommon.Hash{}, 0, 0, nil
 	}
 	blockHash := block.Hash()
 	var txnIndex uint64
@@ -95,18 +96,18 @@ func (api *OtterscanAPIImpl) getTransactionByHash(ctx context.Context, tx kv.Tx,
 
 	// Add GasPrice for the DynamicFeeTransaction
 	// var baseFee *big.Int
-	// if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
+	// if chainConfig.IsLondon(blockNum) && blockHash != (libcommon.Hash{}) {
 	// 	baseFee = block.BaseFee()
 	// }
 
 	// if no transaction was found then we return nil
 	if txn == nil {
-		return nil, nil, common.Hash{}, 0, 0, nil
+		return nil, nil, libcommon.Hash{}, 0, 0, nil
 	}
 	return txn, block, blockHash, blockNum, txnIndex, nil
 }
 
-func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash common.Hash, tracer vm.EVMLogger) (*core.ExecutionResult, error) {
+func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash libcommon.Hash, tracer vm.EVMLogger) (*core.ExecutionResult, error) {
 	txn, block, _, _, txIndex, err := api.getTransactionByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -142,7 +143,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.Tx, hash commo
 	return result, nil
 }
 
-func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash common.Hash) ([]*InternalOperation, error) {
+func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash libcommon.Hash) ([]*InternalOperation, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -165,7 +166,7 @@ func (api *OtterscanAPIImpl) GetInternalOperations(ctx context.Context, hash com
 // they are just returned. But it may return a little more than pageSize if there are more txs
 // than the necessary to fill pageSize in the last found block, i.e., let's say you want pageSize == 25,
 // you already found 24 txs, the next block contains 4 matches, then this function will return 28 txs.
-func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr libcommon.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -248,7 +249,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 // they are just returned. But it may return a little more than pageSize if there are more txs
 // than the necessary to fill pageSize in the last found block, i.e., let's say you want pageSize == 25,
 // you already found 24 txs, the next block contains 4 matches, then this function will return 28 txs.
-func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr common.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr libcommon.Address, blockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	dbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -325,7 +326,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	return &TransactionsWithReceipts{txs, receipts, !hasMore, isLastPage}, nil
 }
 
-func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *params.ChainConfig, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
+func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr libcommon.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
 	var wg sync.WaitGroup
 
 	// Estimate the common case of user address having at most 1 interaction/block and
@@ -389,7 +390,7 @@ type internalIssuance struct {
 	Issuance    string `json:"issuance,omitempty"`
 }
 
-func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *params.ChainConfig) (internalIssuance, error) {
+func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
 		return internalIssuance{}, nil
@@ -410,7 +411,7 @@ func (api *OtterscanAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chai
 	return ret, nil
 }
 
-func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *params.ChainConfig) (uint64, error) {
+func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []libcommon.Address, chainConfig *chain.Config) (uint64, error) {
 	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
 	if err != nil {
 		return 0, fmt.Errorf("getReceipts error: %v", err)
@@ -433,7 +434,7 @@ func (api *OtterscanAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, bl
 	return fees, nil
 }
 
-func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []common.Address, error) {
+func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Block, []libcommon.Address, error) {
 	if number == rpc.PendingBlockNumber {
 		return api.pendingBlock(), nil, nil
 	}

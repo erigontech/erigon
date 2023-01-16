@@ -1,10 +1,12 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // Just a bunch of simple getters.
@@ -13,7 +15,7 @@ func (b *BeaconState) GenesisTime() uint64 {
 	return b.genesisTime
 }
 
-func (b *BeaconState) GenesisValidatorsRoot() common.Hash {
+func (b *BeaconState) GenesisValidatorsRoot() libcommon.Hash {
 	return b.genesisValidatorsRoot
 }
 
@@ -105,7 +107,7 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
-func (b *BeaconState) LatestExecutionPayloadHeader() *cltypes.ExecutionHeader {
+func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
 	return b.latestExecutionPayloadHeader
 }
 

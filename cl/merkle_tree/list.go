@@ -3,8 +3,10 @@ package merkle_tree
 import (
 	"math/bits"
 
-	"github.com/ledgerwatch/erigon/cl/utils"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/prysmaticlabs/gohashtree"
+
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // MerkleizeVector uses our optimized routine to hash a list of 32-byte
@@ -131,4 +133,29 @@ func parseBitlist(dst, buf []byte) ([]byte, uint64) {
 	}
 	res := dst[:newLen]
 	return res, size
+}
+
+func TransactionsListRoot(transactions [][]byte) (libcommon.Hash, error) {
+	txCount := uint64(len(transactions))
+
+	leaves := [][32]byte{}
+	for _, transaction := range transactions {
+		transactionLength := uint64(len(transaction))
+		packedTransactions := packBits(transaction) // Pack transactions
+		transactionsBaseRoot, err := MerkleizeVector(packedTransactions, 33554432)
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+
+		lengthRoot := Uint64Root(transactionLength)
+		leaves = append(leaves, utils.Keccak256(transactionsBaseRoot[:], lengthRoot[:]))
+	}
+	transactionsBaseRoot, err := MerkleizeVector(leaves, 1048576)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	countRoot := Uint64Root(txCount)
+
+	return utils.Keccak256(transactionsBaseRoot[:], countRoot[:]), nil
 }

@@ -5,7 +5,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -14,7 +15,7 @@ type MiningConfig struct {
 	Enabled    bool
 	EnabledPOS bool
 	Noverify   bool              // Disable remote mining solution verification(only useful in ethash).
-	Etherbase  common.Address    `toml:",omitempty"` // Public address for block mining rewards
+	Etherbase  libcommon.Address `toml:",omitempty"` // Public address for block mining rewards
 	SigKey     *ecdsa.PrivateKey // ECDSA private key for signing blocks
 	Notify     []string          `toml:",omitempty"` // HTTP URL list to be notified of new work packages(only useful in ethash).
 	ExtraData  hexutil.Bytes     `toml:",omitempty"` // Block extra data set by the miner

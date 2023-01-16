@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
@@ -51,7 +52,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 		return
 	}
 	fmt.Printf("Last block: %d\n", blockNumber.Number)
-	accounts := make(map[common.Address]struct{})
+	accounts := make(map[libcommon.Address]struct{})
 	prevBn := blockFrom
 	storageCounter := 0
 	for bn := blockFrom; bn <= blockTo; bn++ {
@@ -97,10 +98,10 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
-					nextKey := &common.Hash{}
-					nextKeyG := &common.Hash{}
-					sm := make(map[common.Hash]storageEntry)
-					smg := make(map[common.Hash]storageEntry)
+					nextKey := &libcommon.Hash{}
+					nextKeyG := &libcommon.Hash{}
+					sm := make(map[libcommon.Hash]storageEntry)
+					smg := make(map[libcommon.Hash]storageEntry)
 					for nextKey != nil {
 						var sr DebugStorageRange
 						reqGen.reqID++
@@ -282,15 +283,15 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			}
 			fmt.Printf("Done blocks %d-%d, modified accounts: %d\n", prevBn, bn, len(mag.Result))
 
-			page := common.Hash{}.Bytes()
-			pageGeth := common.Hash{}.Bytes()
+			page := libcommon.Hash{}.Bytes()
+			pageGeth := libcommon.Hash{}.Bytes()
 
-			var accRangeErigon map[common.Address]state.DumpAccount
-			var accRangeGeth map[common.Address]state.DumpAccount
+			var accRangeErigon map[libcommon.Address]state.DumpAccount
+			var accRangeGeth map[libcommon.Address]state.DumpAccount
 
 			for len(page) > 0 {
-				accRangeErigon = make(map[common.Address]state.DumpAccount)
-				accRangeGeth = make(map[common.Address]state.DumpAccount)
+				accRangeErigon = make(map[libcommon.Address]state.DumpAccount)
+				accRangeGeth = make(map[libcommon.Address]state.DumpAccount)
 				var sr DebugAccountRange
 				reqGen.reqID++
 				res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)

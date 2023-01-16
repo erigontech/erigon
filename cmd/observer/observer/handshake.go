@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -48,8 +50,8 @@ type StatusMessage struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
-	Head            common.Hash
-	Genesis         common.Hash
+	Head            libcommon.Hash
+	Genesis         libcommon.Hash
 	ForkID          *forkid.ID     `rlp:"-"` // parsed from Rest if exists in v64+
 	Rest            []rlp.RawValue `rlp:"tail"`
 }

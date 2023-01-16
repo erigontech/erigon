@@ -20,17 +20,19 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockReader services.HeaderAndCanonicalReader) ([]*types.Header, error) {
-	hashMode := query.Origin.Hash != (common.Hash{})
+	hashMode := query.Origin.Hash != (libcommon.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
 
@@ -85,7 +87,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				unknown = true
 			} else {
 				query.Origin.Hash, query.Origin.Number = rawdb.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical, blockReader)
-				unknown = query.Origin.Hash == common.Hash{}
+				unknown = query.Origin.Hash == libcommon.Hash{}
 			}
 		case hashMode && !query.Reverse:
 			// Hash based traversal towards the leaf block

@@ -5,7 +5,9 @@ import (
 	"encoding/binary"
 
 	"github.com/VictoriaMetrics/fastcache"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -42,7 +44,7 @@ func (dbr *DbStateReader) SetCodeSizeCache(codeSizeCache *fastcache.Cache) {
 	dbr.codeSizeCache = codeSizeCache
 }
 
-func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (dbr *DbStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	var enc []byte
 	var ok bool
 	if dbr.accountCache != nil {
@@ -72,7 +74,7 @@ func (dbr *DbStateReader) ReadAccountData(address common.Address) (*accounts.Acc
 	return acc, nil
 }
 
-func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (dbr *DbStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return nil, err
@@ -97,7 +99,7 @@ func (dbr *DbStateReader) ReadAccountStorage(address common.Address, incarnation
 	return enc, nil
 }
 
-func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (dbr *DbStateReader) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -121,7 +123,7 @@ func (dbr *DbStateReader) ReadAccountCode(address common.Address, incarnation ui
 	return code, err
 }
 
-func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (codeSize int, err error) {
+func (dbr *DbStateReader) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (codeSize int, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
@@ -143,7 +145,7 @@ func (dbr *DbStateReader) ReadAccountCodeSize(address common.Address, incarnatio
 	return len(code), nil
 }
 
-func (dbr *DbStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (dbr *DbStateReader) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	b, err := dbr.db.GetOne(kv.IncarnationMap, address[:])
 	if err != nil {
 		return 0, err

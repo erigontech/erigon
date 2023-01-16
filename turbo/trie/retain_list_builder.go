@@ -1,22 +1,26 @@
 package trie
 
-import "github.com/ledgerwatch/erigon/common"
+import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/common"
+)
 
 // RetainListBuilder is the structure that accumulates the list of keys that were read or changes (touched) during
 // the execution of a block. It also tracks the contract codes that were created and used during the execution
 // of a block
 type RetainListBuilder struct {
-	touches        [][]byte                 // Read/change set of account keys (account hashes)
-	storageTouches [][]byte                 // Read/change set of storage keys (account hashes concatenated with storage key hashes)
-	proofCodes     map[common.Hash]struct{} // Contract codes that have been accessed (codeHash)
-	createdCodes   map[common.Hash]struct{} // Contract codes that were created (deployed) (codeHash)
+	touches        [][]byte                    // Read/change set of account keys (account hashes)
+	storageTouches [][]byte                    // Read/change set of storage keys (account hashes concatenated with storage key hashes)
+	proofCodes     map[libcommon.Hash]struct{} // Contract codes that have been accessed (codeHash)
+	createdCodes   map[libcommon.Hash]struct{} // Contract codes that were created (deployed) (codeHash)
 }
 
 // NewRetainListBuilder creates new ProofGenerator and initialised its maps
 func NewRetainListBuilder() *RetainListBuilder {
 	return &RetainListBuilder{
-		proofCodes:   make(map[common.Hash]struct{}),
-		createdCodes: make(map[common.Hash]struct{}),
+		proofCodes:   make(map[libcommon.Hash]struct{}),
+		createdCodes: make(map[libcommon.Hash]struct{}),
 	}
 }
 
@@ -41,22 +45,22 @@ func (rlb *RetainListBuilder) ExtractTouches() ([][]byte, [][]byte) {
 
 // extractCodeTouches returns the set of all contract codes that were required during the block's execution
 // but were not created during that same block. It also clears the set for the next block's execution
-func (rlb *RetainListBuilder) extractCodeTouches() map[common.Hash]struct{} {
+func (rlb *RetainListBuilder) extractCodeTouches() map[libcommon.Hash]struct{} {
 	proofCodes := rlb.proofCodes
-	rlb.proofCodes = make(map[common.Hash]struct{})
-	rlb.createdCodes = make(map[common.Hash]struct{})
+	rlb.proofCodes = make(map[libcommon.Hash]struct{})
+	rlb.createdCodes = make(map[libcommon.Hash]struct{})
 	return proofCodes
 }
 
 // ReadCode registers that given contract code has been accessed during current block's execution
-func (rlb *RetainListBuilder) ReadCode(codeHash common.Hash) {
+func (rlb *RetainListBuilder) ReadCode(codeHash libcommon.Hash) {
 	if _, ok := rlb.proofCodes[codeHash]; !ok {
 		rlb.proofCodes[codeHash] = struct{}{}
 	}
 }
 
 // CreateCode registers that given contract code has been created (deployed) during current block's execution
-func (rlb *RetainListBuilder) CreateCode(codeHash common.Hash) {
+func (rlb *RetainListBuilder) CreateCode(codeHash libcommon.Hash) {
 	if _, ok := rlb.proofCodes[codeHash]; !ok {
 		rlb.createdCodes[codeHash] = struct{}{}
 	}

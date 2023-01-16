@@ -3,7 +3,7 @@ package trie
 import (
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ugorji/go/codec"
 )
 
@@ -48,7 +48,7 @@ type WitnessOperator interface {
 }
 
 type OperatorHash struct {
-	Hash common.Hash
+	Hash libcommon.Hash
 }
 
 func (o *OperatorHash) WriteTo(output *OperatorMarshaller) error {

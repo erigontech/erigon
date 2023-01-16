@@ -21,11 +21,11 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
 // Forks table defines supported forks and their chain config.
-var Forks = map[string]*params.ChainConfig{
+var Forks = map[string]*chain.Config{
 	"Frontier": {
 		ChainID: big.NewInt(1),
 	},

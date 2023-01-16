@@ -4,8 +4,11 @@ import (
 	"context"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -14,8 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSenders(t *testing.T) {
@@ -34,7 +35,7 @@ func TestSenders(t *testing.T) {
 
 	// prepare tx so it works with our test
 	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(rawdb.WriteBody(tx, common.HexToHash("01"), 1, &types.Body{
+	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("01"), 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -60,10 +61,10 @@ func TestSenders(t *testing.T) {
 			}, *signer1),
 		},
 	}))
-	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("01"), 1))
+	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("01"), 1))
 
 	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64())
-	require.NoError(rawdb.WriteBody(tx, common.HexToHash("02"), 2, &types.Body{
+	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("02"), 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
 				LegacyTx: types.LegacyTx{
@@ -100,12 +101,12 @@ func TestSenders(t *testing.T) {
 			}, *signer2),
 		},
 	}))
-	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("02"), 2))
+	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("02"), 2))
 
-	require.NoError(rawdb.WriteBody(tx, common.HexToHash("03"), 3, &types.Body{
+	require.NoError(rawdb.WriteBody(tx, libcommon.HexToHash("03"), 3, &types.Body{
 		Transactions: []types.Transaction{}, Uncles: []*types.Header{{GasLimit: 3}},
 	}))
-	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("03"), 3))
+	require.NoError(rawdb.WriteCanonicalHash(tx, libcommon.HexToHash("03"), 3))
 
 	require.NoError(stages.SaveStageProgress(tx, stages.Bodies, 3))
 
@@ -114,26 +115,26 @@ func TestSenders(t *testing.T) {
 	assert.NoError(t, err)
 
 	{
-		found := rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("01"), 1)
+		found := rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("01"), 1)
 		assert.NotNil(t, found)
 		assert.Equal(t, 2, len(found.Transactions))
-		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("02"), 2)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("02"), 2)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Transactions))
-		found = rawdb.ReadCanonicalBodyWithTransactions(tx, common.HexToHash("03"), 3)
+		found = rawdb.ReadCanonicalBodyWithTransactions(tx, libcommon.HexToHash("03"), 3)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Transactions))
 		assert.NotNil(t, 2, len(found.Uncles))
 	}
 
 	{
-		senders, err := rawdb.ReadSenders(tx, common.HexToHash("01"), 1)
+		senders, err := rawdb.ReadSenders(tx, libcommon.HexToHash("01"), 1)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(senders))
-		senders, err = rawdb.ReadSenders(tx, common.HexToHash("02"), 2)
+		senders, err = rawdb.ReadSenders(tx, libcommon.HexToHash("02"), 2)
 		assert.NoError(t, err)
 		assert.Equal(t, 3, len(senders))
-		senders, err = rawdb.ReadSenders(tx, common.HexToHash("03"), 3)
+		senders, err = rawdb.ReadSenders(tx, libcommon.HexToHash("03"), 3)
 		assert.NoError(t, err)
 		assert.Equal(t, 0, len(senders))
 	}

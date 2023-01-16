@@ -17,7 +17,8 @@
 package params
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -244,7 +245,7 @@ const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUD
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
 // genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
 // information.
-func KnownDNSNetwork(genesis common.Hash, protocol string) string {
+func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 	var net string
 	switch genesis {
 	case MainnetGenesisHash:

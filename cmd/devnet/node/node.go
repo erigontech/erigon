@@ -139,3 +139,14 @@ func getEnode() (string, error) {
 
 	return enode, nil
 }
+
+// QuitOnSignal stops the node goroutines after all checks have been made on the devnet
+func QuitOnSignal(wg *sync.WaitGroup) {
+	models.QuitNodeChan = make(chan bool)
+	go func() {
+		for <-models.QuitNodeChan {
+			wg.Done()
+			wg.Done()
+		}
+	}()
+}

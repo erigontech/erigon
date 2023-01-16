@@ -3,9 +3,10 @@ package state
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
@@ -53,7 +54,7 @@ func (hr *HistoryReaderV4) SetTrace(trace bool) {
 	hr.trace = trace
 }
 
-func (hr *HistoryReaderV4) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountData(address.Bytes()); err != nil {
 			return nil, err
@@ -80,7 +81,7 @@ func (hr *HistoryReaderV4) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountStorage(address.Bytes(), key.Bytes()); err != nil {
 			return nil, err
@@ -103,7 +104,7 @@ func (hr *HistoryReaderV4) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCode(address.Bytes()); err != nil {
 			return nil, err
@@ -119,7 +120,7 @@ func (hr *HistoryReaderV4) ReadAccountCode(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (hr *HistoryReaderV4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	if hr.ri != nil {
 		if err := hr.ri.ReadAccountCodeSize(address.Bytes()); err != nil {
 			return 0, err
@@ -135,6 +136,6 @@ func (hr *HistoryReaderV4) ReadAccountCodeSize(address common.Address, incarnati
 	return size, nil
 }
 
-func (hr *HistoryReaderV4) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (hr *HistoryReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }

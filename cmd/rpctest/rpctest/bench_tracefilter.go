@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Compares response of Erigon with OpenEthereum
@@ -77,7 +77,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
-			accounts := make([]common.Address, 0, len(accountSet))
+			accounts := make([]libcommon.Address, 0, len(accountSet))
 			for account := range accountSet {
 				accounts = append(accounts, account)
 			}

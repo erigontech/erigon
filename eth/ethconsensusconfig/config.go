@@ -3,9 +3,12 @@ package ethconsensusconfig
 import (
 	"path/filepath"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
@@ -17,10 +20,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
+func CreateConsensusEngine(chainConfig *chain.Config, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -52,7 +54,7 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 			}
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly))
 		}
-	case *params.AuRaConfig:
+	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
 			if consensusCfg.DBPath == "" {
 				consensusCfg.DBPath = filepath.Join(datadir, "aura")
@@ -63,14 +65,14 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 				panic(err)
 			}
 		}
-	case *params.ParliaConfig:
+	case *chain.ParliaConfig:
 		if chainConfig.Parlia != nil {
 			if consensusCfg.DBPath == "" {
 				consensusCfg.DBPath = filepath.Join(datadir, "parlia")
 			}
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
-	case *params.BorConfig:
+	case *chain.BorConfig:
 		if chainConfig.Bor != nil {
 			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
 			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false, readonly), HeimdallURL, WithoutHeimdall)

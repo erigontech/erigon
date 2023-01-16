@@ -10,9 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/consensus/bor"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -231,7 +232,7 @@ func (vals *ValidatorSet) HasAddress(address []byte) bool {
 
 // GetByAddress returns an index of the validator with address and validator
 // itself if found. Otherwise, -1 and nil are returned.
-func (vals *ValidatorSet) GetByAddress(address common.Address) (index int, val *bor.Validator) {
+func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *bor.Validator) {
 	idx := sort.Search(len(vals.Validators), func(i int) bool {
 		return bytes.Compare(address.Bytes(), vals.Validators[i].Address.Bytes()) <= 0
 	})
@@ -344,7 +345,7 @@ func processChanges(origChanges []*bor.Validator) (updates, removals []*bor.Vali
 
 	removals = make([]*bor.Validator, 0, len(changes))
 	updates = make([]*bor.Validator, 0, len(changes))
-	var prevAddr common.Address
+	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
 	for _, valUpdate := range changes {

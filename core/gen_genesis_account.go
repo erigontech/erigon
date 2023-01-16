@@ -7,7 +7,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 )
@@ -60,9 +61,9 @@ func (g *GenesisAccount) UnmarshalJSON(input []byte) error {
 		g.Code = *dec.Code
 	}
 	if dec.Storage != nil {
-		g.Storage = make(map[common.Hash]common.Hash, len(dec.Storage))
+		g.Storage = make(map[libcommon.Hash]libcommon.Hash, len(dec.Storage))
 		for k, v := range dec.Storage {
-			g.Storage[common.Hash(k)] = common.Hash(v)
+			g.Storage[libcommon.Hash(k)] = libcommon.Hash(v)
 		}
 	}
 	if dec.Balance == nil {

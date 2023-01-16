@@ -22,6 +22,9 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -35,8 +38,8 @@ func TestCreation(t *testing.T) {
 		want ID
 	}
 	tests := []struct {
-		config  *params.ChainConfig
-		genesis common.Hash
+		config  *chain.Config
+		genesis libcommon.Hash
 		cases   []testcase
 	}{
 		// Mainnet test cases
@@ -175,8 +178,8 @@ func TestCreationWithTimestamps(t *testing.T) {
 		want ID
 	}
 	tests := []struct {
-		config  *params.ChainConfig
-		genesis common.Hash
+		config  *chain.Config
+		genesis libcommon.Hash
 		cases   []testcase
 	}{
 		// Mainnet test cases
