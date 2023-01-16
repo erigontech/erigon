@@ -297,7 +297,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
+	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit))
 
 	cs := &MultiClient{
 		nodeName:      nodeName,
