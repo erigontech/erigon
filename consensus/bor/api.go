@@ -8,16 +8,16 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/common"
+	lru "github.com/hashicorp/golang-lru"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/xsleonard/go-merkle"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
-
-	lru "github.com/hashicorp/golang-lru"
-	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -53,15 +53,15 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 type BlockSigners struct {
 	Signers []difficultiesKV
 	Diff    int
-	Author  common.Address
+	Author  libcommon.Address
 }
 
 type difficultiesKV struct {
-	Signer     common.Address
+	Signer     libcommon.Address
 	Difficulty uint64
 }
 
-func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
+func rankMapDifficulties(values map[libcommon.Address]uint64) []difficultiesKV {
 	ss := make([]difficultiesKV, 0, len(values))
 	for k, v := range values {
 		ss = append(ss, difficultiesKV{k, v})
@@ -78,7 +78,7 @@ func rankMapDifficulties(values map[common.Address]uint64) []difficultiesKV {
 func (api *API) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigners, error) {
 	snapNumber := *number - 1
 
-	var difficulties = make(map[common.Address]uint64)
+	var difficulties = make(map[libcommon.Address]uint64)
 
 	snap, err := api.GetSnapshot(&snapNumber)
 
@@ -117,19 +117,19 @@ func (api *API) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigne
 }
 
 // GetSnapshotProposer retrieves the in-turn signer at a given block.
-func (api *API) GetSnapshotProposer(number *rpc.BlockNumber) (common.Address, error) {
+func (api *API) GetSnapshotProposer(number *rpc.BlockNumber) (libcommon.Address, error) {
 	*number -= 1
 	snap, err := api.GetSnapshot(number)
 
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 
 	return snap.ValidatorSet.GetProposer().Address, nil
 }
 
 // GetAuthor retrieves the author a block.
-func (api *API) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) {
+func (api *API) GetAuthor(number *rpc.BlockNumber) (*libcommon.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
@@ -148,7 +148,7 @@ func (api *API) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) {
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
+func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
@@ -158,7 +158,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
@@ -181,7 +181,7 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *API) GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
@@ -197,10 +197,10 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 }
 
 // GetCurrentProposer gets the current proposer
-func (api *API) GetCurrentProposer() (common.Address, error) {
+func (api *API) GetCurrentProposer() (libcommon.Address, error) {
 	snap, err := api.GetSnapshot(nil)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 
 	return snap.ValidatorSet.GetProposer().Address, nil

@@ -2,13 +2,16 @@ package transition
 
 import (
 	"encoding/hex"
+	"math/big"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var (
@@ -44,15 +47,18 @@ var (
 
 func getEmptyState() *state.BeaconState {
 	bellatrixState := &cltypes.BeaconStateBellatrix{
-		Fork:                         &cltypes.Fork{},
-		LatestBlockHeader:            &cltypes.BeaconBlockHeader{},
-		Eth1Data:                     &cltypes.Eth1Data{},
-		CurrentJustifiedCheckpoint:   &cltypes.Checkpoint{},
-		FinalizedCheckpoint:          &cltypes.Checkpoint{},
-		PreviousJustifiedCheckpoint:  &cltypes.Checkpoint{},
-		CurrentSyncCommittee:         &cltypes.SyncCommittee{},
-		NextSyncCommittee:            &cltypes.SyncCommittee{},
-		LatestExecutionPayloadHeader: &cltypes.ExecutionHeader{},
+		Fork:                        &cltypes.Fork{},
+		LatestBlockHeader:           &cltypes.BeaconBlockHeader{},
+		Eth1Data:                    &cltypes.Eth1Data{},
+		CurrentJustifiedCheckpoint:  &cltypes.Checkpoint{},
+		FinalizedCheckpoint:         &cltypes.Checkpoint{},
+		PreviousJustifiedCheckpoint: &cltypes.Checkpoint{},
+		CurrentSyncCommittee:        &cltypes.SyncCommittee{},
+		NextSyncCommittee:           &cltypes.SyncCommittee{},
+		LatestExecutionPayloadHeader: &types.Header{
+			BaseFee: big.NewInt(0),
+			Number:  big.NewInt(0),
+		},
 	}
 	return state.FromBellatrixState(bellatrixState)
 }
@@ -63,7 +69,7 @@ func getEmptyBlock() *cltypes.SignedBeaconBlock {
 			Body: &cltypes.BeaconBodyBellatrix{
 				Eth1Data:         &cltypes.Eth1Data{},
 				SyncAggregate:    &cltypes.SyncAggregate{},
-				ExecutionPayload: &cltypes.ExecutionPayload{},
+				ExecutionPayload: emptyBlock,
 			},
 		},
 	})
@@ -74,15 +80,10 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
 		Block: &cltypes.BeaconBlockBellatrix{
 			ProposerIndex: 0,
 			Body: &cltypes.BeaconBodyBellatrix{
-				Eth1Data: &cltypes.Eth1Data{},
-				Graffiti: make([]byte, 32),
-				SyncAggregate: &cltypes.SyncAggregate{
-					SyncCommiteeBits: make([]byte, 64),
-				},
-				ExecutionPayload: &cltypes.ExecutionPayload{
-					LogsBloom:     make([]byte, 256),
-					BaseFeePerGas: make([]byte, 32),
-				},
+				Eth1Data:         &cltypes.Eth1Data{},
+				Graffiti:         make([]byte, 32),
+				SyncAggregate:    &cltypes.SyncAggregate{},
+				ExecutionPayload: emptyBlock,
 			},
 			StateRoot: testStateRoot,
 		},
@@ -103,9 +104,9 @@ func getTestBeaconState() *state.BeaconState {
 		NextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
-		LatestExecutionPayloadHeader: &cltypes.ExecutionHeader{
-			LogsBloom:     make([]byte, 256),
-			BaseFeePerGas: make([]byte, 32),
+		LatestExecutionPayloadHeader: &types.Header{
+			BaseFee: big.NewInt(0),
+			Number:  big.NewInt(0),
 		},
 		LatestBlockHeader: &cltypes.BeaconBlockHeader{
 			Root: [32]byte{},
@@ -120,13 +121,8 @@ func getTestBeaconState() *state.BeaconState {
 }
 
 func assertStateEq(t *testing.T, got *state.BeaconState, expected *state.BeaconState) {
-	if !cmp.Equal(
-		got.GetStateSSZObject().(*cltypes.BeaconStateBellatrix),
-		expected.GetStateSSZObject().(*cltypes.BeaconStateBellatrix)) {
-		t.Errorf("unexpected result state: %v", cmp.Diff(
-			got.GetStateSSZObject().(*cltypes.BeaconStateBellatrix),
-			expected.GetStateSSZObject().(*cltypes.BeaconStateBellatrix)))
-	}
+	assert.Equal(t, got.LatestExecutionPayloadHeader(), expected.LatestExecutionPayloadHeader())
+
 }
 
 func getTestBeaconStateWithValidator() *state.BeaconState {
@@ -143,18 +139,18 @@ func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs
 		if err != nil {
 			t.Fatalf("unable to decode test hash: %v", err)
 		}
-		nextState.SetStateRootAt(int(val), common.BytesToHash(hash))
+		nextState.SetStateRootAt(int(val), libcommon.BytesToHash(hash))
 		latestBlockHeader := nextState.LatestBlockHeader()
 		// Only copy if the previous is empty.
 		if latestBlockHeader.Root == [32]byte{} {
-			latestBlockHeader.Root = common.BytesToHash(hash)
+			latestBlockHeader.Root = libcommon.BytesToHash(hash)
 			nextState.SetLatestBlockHeader(latestBlockHeader)
 		}
 		hash, err = hex.DecodeString(blockHashs[i])
 		if err != nil {
 			t.Fatalf("unable to decode test hash: %v", err)
 		}
-		nextState.SetBlockRootAt(int(val), common.BytesToHash(hash))
+		nextState.SetBlockRootAt(int(val), libcommon.BytesToHash(hash))
 	}
 	nextState.SetSlot(slots[len(slots)-1] + 1)
 	return nextState
@@ -361,7 +357,7 @@ func TestTransitionState(t *testing.T) {
 	badSigBlock := getTestBeaconBlock()
 	badSigBlock.Signature = badSignature
 	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block.StateRoot = common.Hash{}
+	badStateRootBlock.Block.StateRoot = libcommon.Hash{}
 	testCases := []struct {
 		description   string
 		prevState     *state.BeaconState

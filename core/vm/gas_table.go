@@ -20,8 +20,8 @@ import (
 	"errors"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
@@ -98,7 +98,7 @@ var (
 
 func gasSStore(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	value, x := stack.Back(1), stack.Back(0)
-	key := common.Hash(x.Bytes32())
+	key := libcommon.Hash(x.Bytes32())
 	var current uint256.Int
 	evm.IntraBlockState().GetState(contract.Address(), &key, &current)
 	// The legacy gas metering only takes into consideration the current state
@@ -186,7 +186,7 @@ func gasSStoreEIP2200(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value, x := stack.Back(1), stack.Back(0)
-	key := common.Hash(x.Bytes32())
+	key := libcommon.Hash(x.Bytes32())
 	var current uint256.Int
 	evm.IntraBlockState().GetState(contract.Address(), &key, &current)
 
@@ -313,19 +313,15 @@ func gasCreateEip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Mem
 		return 0, err
 	}
 	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
+	if overflow || len > params.MaxInitCodeSize {
 		return 0, ErrGasUintOverflow
 	}
-	if len <= params.MaxInitCodeSize {
-		numWords := ToWordSize(len)
-		wordGas, overflow := math.SafeMul(numWords, params.InitCodeWordGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, wordGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
+	numWords := ToWordSize(len)
+	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := params.InitCodeWordGas * numWords
+	gas, overflow = math.SafeAdd(gas, wordGas)
+	if overflow {
+		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
 }
@@ -336,18 +332,12 @@ func gasCreate2Eip3860(evm *EVM, contract *Contract, stack *stack.Stack, mem *Me
 		return 0, err
 	}
 	len, overflow := stack.Back(2).Uint64WithOverflow()
-	if overflow {
+	if overflow || len > params.MaxInitCodeSize {
 		return 0, ErrGasUintOverflow
-	}
-	wordCost := params.Keccak256WordGas
-	if len <= params.MaxInitCodeSize {
-		wordCost += params.InitCodeWordGas
 	}
 	numWords := ToWordSize(len)
-	wordGas, overflow := math.SafeMul(numWords, wordCost)
-	if overflow {
-		return 0, ErrGasUintOverflow
-	}
+	// Since size <= params.MaxInitCodeSize, this multiplication cannot overflow
+	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
 		return 0, ErrGasUintOverflow
@@ -385,7 +375,7 @@ func gasCall(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memo
 	var (
 		gas            uint64
 		transfersValue = !stack.Back(2).IsZero()
-		address        = common.Address(stack.Back(1).Bytes20())
+		address        = libcommon.Address(stack.Back(1).Bytes20())
 	)
 	if evm.ChainRules().IsSpuriousDragon {
 		if transfersValue && evm.IntraBlockState().Empty(address) {
@@ -478,7 +468,7 @@ func gasSelfdestruct(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas = params.SelfdestructGasEIP150
-		var address = common.Address(stack.Back(0).Bytes20())
+		var address = libcommon.Address(stack.Back(0).Bytes20())
 
 		if evm.ChainRules().IsSpuriousDragon {
 			// if empty and transfers value

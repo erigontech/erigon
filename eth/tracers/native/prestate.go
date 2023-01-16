@@ -23,7 +23,8 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -36,13 +37,13 @@ func init() {
 	register("prestateTracer", newPrestateTracer)
 }
 
-type state = map[common.Address]*account
+type state = map[libcommon.Address]*account
 
 type account struct {
-	Balance *big.Int                    `json:"balance,omitempty"`
-	Code    []byte                      `json:"code,omitempty"`
-	Nonce   uint64                      `json:"nonce,omitempty"`
-	Storage map[common.Hash]common.Hash `json:"storage,omitempty"`
+	Balance *big.Int                          `json:"balance,omitempty"`
+	Code    []byte                            `json:"code,omitempty"`
+	Nonce   uint64                            `json:"nonce,omitempty"`
+	Storage map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
 }
 
 func (a *account) exists() bool {
@@ -60,13 +61,13 @@ type prestateTracer struct {
 	pre       state
 	post      state
 	create    bool
-	to        common.Address
+	to        libcommon.Address
 	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt uint32 // Atomic flag to signal execution interruption
 	reason    error  // Textual reason for the interruption
-	created   map[common.Address]bool
-	deleted   map[common.Address]bool
+	created   map[libcommon.Address]bool
+	deleted   map[libcommon.Address]bool
 }
 
 type prestateTracerConfig struct {
@@ -84,13 +85,13 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Trace
 		pre:     state{},
 		post:    state{},
 		config:  config,
-		created: make(map[common.Address]bool),
-		deleted: make(map[common.Address]bool),
+		created: make(map[libcommon.Address]bool),
+		deleted: make(map[libcommon.Address]bool),
 	}, nil
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *prestateTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precomplile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *prestateTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precomplile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.env = env
 	t.create = create
 	t.to = to
@@ -140,16 +141,16 @@ func (t *prestateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 	caller := scope.Contract.Address()
 	switch {
 	case stackLen >= 1 && (op == vm.SLOAD || op == vm.SSTORE):
-		slot := common.Hash(stackData[stackLen-1].Bytes32())
+		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
 		t.lookupStorage(caller, slot)
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
-		addr := common.Address(stackData[stackLen-1].Bytes20())
+		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
 		t.lookupAccount(addr)
 		if op == vm.SELFDESTRUCT {
 			t.deleted[caller] = true
 		}
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
-		addr := common.Address(stackData[stackLen-2].Bytes20())
+		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
 		t.lookupAccount(addr)
 	case op == vm.CREATE:
 		nonce := t.env.IntraBlockState().GetNonce(caller)
@@ -183,7 +184,7 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 			continue
 		}
 		modified := false
-		postAccount := &account{Storage: make(map[common.Hash]common.Hash)}
+		postAccount := &account{Storage: make(map[libcommon.Hash]libcommon.Hash)}
 		newBalance := t.env.IntraBlockState().GetBalance(addr).ToBig()
 		newNonce := t.env.IntraBlockState().GetNonce(addr)
 		newCode := t.env.IntraBlockState().GetCode(addr)
@@ -203,7 +204,7 @@ func (t *prestateTracer) CaptureTxEnd(restGas uint64) {
 
 		for key, val := range state.Storage {
 			// don't include the empty slot
-			if val == (common.Hash{}) {
+			if val == (libcommon.Hash{}) {
 				delete(t.pre[addr].Storage, key)
 			}
 
@@ -263,7 +264,7 @@ func (t *prestateTracer) Stop(err error) {
 
 // lookupAccount fetches details of an account and adds it to the prestate
 // if it doesn't exist there.
-func (t *prestateTracer) lookupAccount(addr common.Address) {
+func (t *prestateTracer) lookupAccount(addr libcommon.Address) {
 	if _, ok := t.pre[addr]; ok {
 		return
 	}
@@ -272,14 +273,14 @@ func (t *prestateTracer) lookupAccount(addr common.Address) {
 		Balance: t.env.IntraBlockState().GetBalance(addr).ToBig(),
 		Nonce:   t.env.IntraBlockState().GetNonce(addr),
 		Code:    t.env.IntraBlockState().GetCode(addr),
-		Storage: make(map[common.Hash]common.Hash),
+		Storage: make(map[libcommon.Hash]libcommon.Hash),
 	}
 }
 
 // lookupStorage fetches the requested storage slot and adds
 // it to the prestate of the given contract. It assumes `lookupAccount`
 // has been performed on the contract before.
-func (t *prestateTracer) lookupStorage(addr common.Address, key common.Hash) {
+func (t *prestateTracer) lookupStorage(addr libcommon.Address, key libcommon.Hash) {
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}

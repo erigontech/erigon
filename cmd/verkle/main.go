@@ -9,16 +9,18 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/zap/buffer"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/zap/buffer"
 )
 
 type optionsCfg struct {
@@ -172,7 +174,7 @@ func GenerateVerkleTree(cfg optionsCfg) error {
 	// Verkle Tree to be built
 	log.Info("Started Verkle Tree creation")
 
-	var root common.Hash
+	var root libcommon.Hash
 	if root, err = verkleWriter.CommitVerkleTreeFromScratch(); err != nil {
 		return err
 	}
@@ -367,15 +369,15 @@ func dump_storage_preimages(cfg optionsCfg) error {
 	}
 	log.Info("Current Block Number", "num", num)
 	var currentIncarnation uint64
-	var currentAddress common.Address
-	var addressHash common.Hash
+	var currentAddress libcommon.Address
+	var addressHash libcommon.Hash
 	var buf buffer.Buffer
 	for k, v, err := stateCursor.First(); k != nil; k, v, err = stateCursor.Next() {
 		if err != nil {
 			return err
 		}
 		if len(k) == 20 {
-			if currentAddress != (common.Address{}) {
+			if currentAddress != (libcommon.Address{}) {
 				if err := collector.Collect(addressHash[:], buf.Bytes()); err != nil {
 					return err
 				}
@@ -385,11 +387,11 @@ func dump_storage_preimages(cfg optionsCfg) error {
 			if err := acc.DecodeForStorage(v); err != nil {
 				return err
 			}
-			currentAddress = common.BytesToAddress(k)
+			currentAddress = libcommon.BytesToAddress(k)
 			currentIncarnation = acc.Incarnation
 			addressHash = utils.Keccak256(currentAddress[:])
 		} else {
-			address := common.BytesToAddress(k[:20])
+			address := libcommon.BytesToAddress(k[:20])
 			if address != currentAddress {
 				continue
 			}

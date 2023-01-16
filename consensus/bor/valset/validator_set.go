@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -46,7 +46,7 @@ type ValidatorSet struct {
 
 	// cached (unexported)
 	totalVotingPower int64
-	validatorsMap    map[common.Address]int // address -> index
+	validatorsMap    map[libcommon.Address]int // address -> index
 }
 
 // NewValidatorSet initializes a ValidatorSet by copying over the
@@ -234,7 +234,7 @@ func validatorListCopy(valsList []*Validator) []*Validator {
 // Copy each validator into a new ValidatorSet.
 func (vals *ValidatorSet) Copy() *ValidatorSet {
 	valCopy := validatorListCopy(vals.Validators)
-	validatorsMap := make(map[common.Address]int, len(vals.Validators))
+	validatorsMap := make(map[libcommon.Address]int, len(vals.Validators))
 
 	for i, val := range valCopy {
 		validatorsMap[val.Address] = i
@@ -250,7 +250,7 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 
 // HasAddress returns true if address given is in the validator set, false -
 // otherwise.
-func (vals *ValidatorSet) HasAddress(address common.Address) bool {
+func (vals *ValidatorSet) HasAddress(address libcommon.Address) bool {
 	_, ok := vals.validatorsMap[address]
 
 	return ok
@@ -258,7 +258,7 @@ func (vals *ValidatorSet) HasAddress(address common.Address) bool {
 
 // GetByAddress returns an index of the validator with address and validator
 // itself if found. Otherwise, -1 and nil are returned.
-func (vals *ValidatorSet) GetByAddress(address common.Address) (index int, val *Validator) {
+func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *Validator) {
 	idx, ok := vals.validatorsMap[address]
 	if ok {
 		return idx, vals.Validators[idx].Copy()
@@ -384,7 +384,7 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 	removals = make([]*Validator, 0, sliceCap)
 	updates = make([]*Validator, 0, sliceCap)
 
-	var prevAddr common.Address
+	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
 	for _, valUpdate := range changes {
@@ -632,7 +632,7 @@ func (vals *ValidatorSet) updateValidators(updates []*Validator, deletes []*Vali
 }
 
 func (vals *ValidatorSet) UpdateValidatorMap() {
-	vals.validatorsMap = make(map[common.Address]int, len(vals.Validators))
+	vals.validatorsMap = make(map[libcommon.Address]int, len(vals.Validators))
 
 	for i, val := range vals.Validators {
 		vals.validatorsMap[val.Address] = i

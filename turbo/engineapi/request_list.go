@@ -5,9 +5,9 @@ import (
 	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
-
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -16,16 +16,16 @@ import (
 // Status: block's status
 type PayloadStatus struct {
 	Status          remote.EngineStatus
-	LatestValidHash common.Hash
+	LatestValidHash libcommon.Hash
 	ValidationError error
 	CriticalError   error
 }
 
 // The message we are going to send to the stage sync in ForkchoiceUpdated
 type ForkChoiceMessage struct {
-	HeadBlockHash      common.Hash
-	SafeBlockHash      common.Hash
-	FinalizedBlockHash common.Hash
+	HeadBlockHash      libcommon.Hash
+	SafeBlockHash      libcommon.Hash
+	FinalizedBlockHash libcommon.Hash
 }
 
 type RequestStatus int

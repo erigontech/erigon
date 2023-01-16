@@ -9,10 +9,14 @@ import (
 	"path/filepath"
 	"syscall"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -20,10 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -93,7 +94,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		return err4
 	}
 	w := state.NewPlainStateWriter(rwTx, nil, 0)
-	if err = genesisIbs.CommitBlock(&params.Rules{}, w); err != nil {
+	if err = genesisIbs.CommitBlock(&chain2.Rules{}, w); err != nil {
 		return fmt.Errorf("cannot write state: %w", err)
 	}
 	if err = rwTx.Commit(); err != nil {
@@ -131,7 +132,9 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 		w = state.NewPlainStateWriter(rwTx, nil, block)
 		r := state.NewPlainStateReader(tx)
 		intraBlockState := state.New(r)
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(historyTx, hash, number)
+		}
 		if _, err = runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, w, chainConfig, getHeader, b, vmConfig, false); err != nil {
 			return fmt.Errorf("block %d: %w", block, err)
 		}
@@ -145,7 +148,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 			if err = stagedsync.PromoteHashedStateCleanly("hashedstate", rwTx, stagedsync.StageHashStateCfg(nil, dirs, false, nil), ctx); err != nil {
 				return err
 			}
-			var root common.Hash
+			var root libcommon.Hash
 			root, err = trie.CalcRoot("genesis", rwTx)
 			if err != nil {
 				return err

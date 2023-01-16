@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
 // Whether the reverse downloader arrived at expected height or condition.
@@ -17,7 +18,7 @@ type OnNewBlock func(blk *cltypes.SignedBeaconBlock) (finished bool, err error)
 type BackwardBeaconDownloader struct {
 	ctx            context.Context
 	slotToDownload uint64
-	expectedRoot   common.Hash
+	expectedRoot   libcommon.Hash
 	rpc            *rpc.BeaconRpcP2P
 	onNewBlock     OnNewBlock
 	segments       []*cltypes.BeaconBlockBellatrix
@@ -41,7 +42,7 @@ func (b *BackwardBeaconDownloader) SetSlotToDownload(slot uint64) {
 }
 
 // SetExpectedRoot sets the expected root we expect to download.
-func (b *BackwardBeaconDownloader) SetExpectedRoot(root common.Hash) {
+func (b *BackwardBeaconDownloader) SetExpectedRoot(root libcommon.Hash) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.expectedRoot = root

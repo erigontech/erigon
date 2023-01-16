@@ -31,6 +31,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -61,41 +63,41 @@ var ErrGenesisNoConfig = errors.New("genesis has no chain configuration")
 // Genesis specifies the header fields, state of a genesis block. It also defines hard
 // fork switch-over blocks through the chain configuration.
 type Genesis struct {
-	Config     *params.ChainConfig `json:"config"`
-	Nonce      uint64              `json:"nonce"`
-	Timestamp  uint64              `json:"timestamp"`
-	ExtraData  []byte              `json:"extraData"`
-	GasLimit   uint64              `json:"gasLimit"   gencodec:"required"`
-	Difficulty *big.Int            `json:"difficulty" gencodec:"required"`
-	Mixhash    common.Hash         `json:"mixHash"`
-	Coinbase   common.Address      `json:"coinbase"`
-	Alloc      GenesisAlloc        `json:"alloc"      gencodec:"required"`
-	AuRaStep   uint64              `json:"auRaStep"`
-	AuRaSeal   []byte              `json:"auRaSeal"`
+	Config     *chain.Config     `json:"config"`
+	Nonce      uint64            `json:"nonce"`
+	Timestamp  uint64            `json:"timestamp"`
+	ExtraData  []byte            `json:"extraData"`
+	GasLimit   uint64            `json:"gasLimit"   gencodec:"required"`
+	Difficulty *big.Int          `json:"difficulty" gencodec:"required"`
+	Mixhash    libcommon.Hash    `json:"mixHash"`
+	Coinbase   libcommon.Address `json:"coinbase"`
+	Alloc      GenesisAlloc      `json:"alloc"      gencodec:"required"`
+	AuRaStep   uint64            `json:"auRaStep"`
+	AuRaSeal   []byte            `json:"auRaSeal"`
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64      `json:"number"`
-	GasUsed    uint64      `json:"gasUsed"`
-	ParentHash common.Hash `json:"parentHash"`
-	BaseFee    *big.Int    `json:"baseFeePerGas"`
+	Number     uint64         `json:"number"`
+	GasUsed    uint64         `json:"gasUsed"`
+	ParentHash libcommon.Hash `json:"parentHash"`
+	BaseFee    *big.Int       `json:"baseFeePerGas"`
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
-type GenesisAlloc map[common.Address]GenesisAccount
+type GenesisAlloc map[libcommon.Address]GenesisAccount
 
 type AuthorityRoundSeal struct {
 	/// Seal step.
 	Step uint64 `json:"step"`
 	/// Seal signature.
-	Signature common.Hash `json:"signature"`
+	Signature libcommon.Hash `json:"signature"`
 }
 
 var genesisTmpDB kv.RwDB
 var genesisDBLock *sync.Mutex
 
 func init() {
-	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(os.TempDir()).MapSize(2 * datasize.GB).PageSize(2 * 4096).WriteMergeThreshold(2 * 8192).MustOpen()
+	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(os.TempDir()).MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
 	genesisDBLock = &sync.Mutex{}
 }
 
@@ -106,7 +108,7 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	}
 	*ga = make(GenesisAlloc)
 	for addr, a := range m {
-		(*ga)[common.Address(addr)] = a
+		(*ga)[libcommon.Address(addr)] = a
 	}
 	return nil
 }
@@ -114,12 +116,12 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 // GenesisAccount is an account in the state of the genesis block.
 // Either use "constructor" for deployment code or "code" directly for the final code.
 type GenesisAccount struct {
-	Constructor []byte                      `json:"constructor,omitempty"` // deployment code
-	Code        []byte                      `json:"code,omitempty"`        // final contract code
-	Storage     map[common.Hash]common.Hash `json:"storage,omitempty"`
-	Balance     *big.Int                    `json:"balance" gencodec:"required"`
-	Nonce       uint64                      `json:"nonce,omitempty"`
-	PrivateKey  []byte                      `json:"secretKey,omitempty"` // for tests
+	Constructor []byte                            `json:"constructor,omitempty"` // deployment code
+	Code        []byte                            `json:"code,omitempty"`        // final contract code
+	Storage     map[libcommon.Hash]libcommon.Hash `json:"storage,omitempty"`
+	Balance     *big.Int                          `json:"balance" gencodec:"required"`
+	Nonce       uint64                            `json:"nonce,omitempty"`
+	PrivateKey  []byte                            `json:"secretKey,omitempty"` // for tests
 }
 
 // field type overrides for gencodec
@@ -146,7 +148,7 @@ type genesisAccountMarshaling struct {
 
 // storageJSON represents a 256 bit byte array, but allows less than 256 bits when
 // unmarshaling from hex.
-type storageJSON common.Hash
+type storageJSON libcommon.Hash
 
 func (h *storageJSON) UnmarshalText(text []byte) error {
 	text = bytes.TrimPrefix(text, []byte("0x"))
@@ -167,7 +169,7 @@ func (h storageJSON) MarshalText() ([]byte, error) {
 // GenesisMismatchError is raised when trying to overwrite an existing
 // genesis block with an incompatible one.
 type GenesisMismatchError struct {
-	Stored, New common.Hash
+	Stored, New libcommon.Hash
 }
 
 func (e *GenesisMismatchError) Error() string {
@@ -191,11 +193,11 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, nil)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShanghaiTime *big.Int) (*params.ChainConfig, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShanghaiTime *big.Int) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
@@ -212,7 +214,7 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShangh
 	return c, b, nil
 }
 
-func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, *types.Block) {
+func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*chain.Config, *types.Block) {
 	c, b, err := CommitGenesisBlock(db, genesis)
 	if err != nil {
 		panic(err)
@@ -220,7 +222,7 @@ func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*params.ChainConfig, 
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.Int) (*params.ChainConfig, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.Int) (*chain.Config, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -230,13 +232,13 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.I
 		return nil, nil, storedErr
 	}
 
-	applyOverrides := func(config *params.ChainConfig) {
+	applyOverrides := func(config *chain.Config) {
 		if overrideShanghaiTime != nil {
 			config.ShanghaiTime = overrideShanghaiTime
 		}
 	}
 
-	if (storedHash == common.Hash{}) {
+	if (storedHash == libcommon.Hash{}) {
 		custom := true
 		if genesis == nil {
 			log.Info("Writing default main-net genesis block")
@@ -309,7 +311,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.I
 	return newCfg, storedBlock, nil
 }
 
-func (g *Genesis) configOrDefault(genesisHash common.Hash) *params.ChainConfig {
+func (g *Genesis) configOrDefault(genesisHash libcommon.Hash) *chain.Config {
 	if g != nil {
 		return g.Config
 	}
@@ -372,7 +374,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		withdrawals = []*types.Withdrawal{}
 	}
 
-	var root common.Hash
+	var root libcommon.Hash
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
 	wg.Add(1)
@@ -398,12 +400,12 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		}
 		// See https://github.com/NethermindEth/nethermind/blob/master/src/Nethermind/Nethermind.Consensus.AuRa/InitializationSteps/LoadGenesisBlockAuRa.cs
 		if hasConstructorAllocation && g.Config.Aura != nil {
-			statedb.CreateAccount(common.Address{}, false)
+			statedb.CreateAccount(libcommon.Address{}, false)
 		}
 
 		keys := sortedAllocKeys(g.Alloc)
 		for _, key := range keys {
-			addr := common.BytesToAddress([]byte(key))
+			addr := libcommon.BytesToAddress([]byte(key))
 			account := g.Alloc[addr]
 
 			balance, overflow := uint256.FromBig(account.Balance)
@@ -430,7 +432,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
-		if err := statedb.FinalizeTx(&params.Rules{}, w); err != nil {
+		if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
 			panic(err)
 		}
 		root, err = trie.CalcRoot("genesis", tx)
@@ -467,7 +469,7 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 
 	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
 
-	if err := statedb.CommitBlock(&params.Rules{}, blockWriter); err != nil {
+	if err := statedb.CommitBlock(&chain.Rules{}, blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
 	if err := blockWriter.WriteChangeSets(); err != nil {
@@ -526,7 +528,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 		return nil, nil, err
 	}
 	// We support ethash/serenity for issuance (for now)
-	if g.Config.Consensus != params.EtHashConsensus {
+	if g.Config.Consensus != chain.EtHashConsensus {
 		return block, statedb, nil
 	}
 	// Issuance is the sum of allocs
@@ -567,20 +569,20 @@ func (g *Genesis) MustCommit(db kv.RwDB) *types.Block {
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr common.Address, balance *big.Int) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
 	block := g.MustCommit(db)
 	return block
 }
 
 type GenAccount struct {
-	Addr    common.Address
+	Addr    libcommon.Address
 	Balance *big.Int
 }
 
 func GenesisWithAccounts(db kv.RwDB, accs []GenAccount) *types.Block {
 	g := Genesis{Config: params.TestChainConfig}
-	allocs := make(map[common.Address]GenesisAccount)
+	allocs := make(map[libcommon.Address]GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
 	}
@@ -660,8 +662,8 @@ func DefaultBSCGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000002a7cdd959bfe8d9487b2a43b33565295a698f7e26488aa4d1955ee33403f8ccb1d4de5fb97c7ade29ef9f4360c606c7ab4db26b016007d3ad0ab86a0ee01c3b1283aa067c58eab4709f85e99d46de5fe685b1ded8013785d6623cc18d214320b6bb6475978f3adfc719c99674c072166708589033e2d9afec2be4ec20253b8642161bc3f444f53679c1f3d472f7be8361c80a4c1e7e9aaf001d0877f1cfde218ce2fd7544e0b2cc94692d4a704debef7bcb61328b8f7166496996a7da21cf1f1b04d9b3e26a3d0772d4c407bbe49438ed859fe965b140dcf1aab71a96bbad7cf34b5fa511d8e963dbba288b1960e75d64430b3230294d12c6ab2aac5c2cd68e80b16b581ea0a6e3c511bbd10f4519ece37dc24887e11b55d7ae2f5b9e386cd1b50a4550696d957cb4900f03a82012708dafc9e1b880fd083b32182b869be8e0922b81f8e175ffde54d797fe11eb03f9e3bf75f1d68bf0b8b6fb4e317a0f9d6f03eaf8ce6675bc60d8c4d90829ce8f72d0163c1d5cf348a862d55063035e7a025f4da968de7e4d7e4004197917f4070f1d6caa02bbebaebb5d7e581e4b66559e635f805ff0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x2625a00,
 		Difficulty: big.NewInt(0x1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
 		Alloc:      readPrealloc("allocs/bsc.json"),
 		Number:     0x00,
 		GasUsed:    0x00,
@@ -676,8 +678,8 @@ func DefaultChapelGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001284214b9b9c85549ab3d2b972df0deef66ac2c9b71b214cb885500844365e95cd9942c7276e7fd8a2959d3f95eae5dc7d70144ce1b73b403b7eb6e0980a75ecd1309ea12fa2ed87a8744fbfc9b863d535552c16704d214347f29fa77f77da6d75d7c752f474cf03cceff28abc65c9cbae594f725c80e12d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x2625a00,
 		Difficulty: big.NewInt(0x1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
 		Alloc:      readPrealloc("allocs/chapel.json"),
 		Number:     0x00,
 		GasUsed:    0x00,
@@ -692,8 +694,8 @@ func DefaultRialtoGenesisBlock() *Genesis {
 		ExtraData:  hexutil.MustDecode("0x00000000000000000000000000000000000000000000000000000000000000001284214b9b9c85549ab3d2b972df0deef66ac2c9b71b214cb885500844365e95cd9942c7276e7fd8a2959d3f95eae5dc7d70144ce1b73b403b7eb6e0980a75ecd1309ea12fa2ed87a8744fbfc9b863d535552c16704d214347f29fa77f77da6d75d7c752f474cf03cceff28abc65c9cbae594f725c80e12d0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   0x2625a00,
 		Difficulty: big.NewInt(0x1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE"),
 		Alloc:      readPrealloc("allocs/bsc.json"),
 		Number:     0x00,
 		GasUsed:    0x00,
@@ -707,8 +709,8 @@ func DefaultMumbaiGenesisBlock() *Genesis {
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/mumbai.json"),
 	}
 }
@@ -721,8 +723,8 @@ func DefaultBorMainnetGenesisBlock() *Genesis {
 		Timestamp:  1590824836,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/bor_mainnet.json"),
 	}
 }
@@ -734,8 +736,8 @@ func DefaultBorDevnetGenesisBlock() *Genesis {
 		Timestamp:  1558348305,
 		GasLimit:   10000000,
 		Difficulty: big.NewInt(1),
-		Mixhash:    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
-		Coinbase:   common.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/bor_devnet.json"),
 	}
 }
@@ -767,10 +769,10 @@ func DefaultChiadoGenesisBlock() *Genesis {
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
 //	DevnetEtherbase=crypto.PubkeyToAddress(DevnetSignPrivateKey.PublicKey)
 var DevnetSignPrivateKey, _ = crypto.HexToECDSA("26e86e45f6fc45ec6e2ecd128cec80fa1d1505e5507dcd2ae58c3130a7a97b48")
-var DevnetEtherbase = common.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
+var DevnetEtherbase = libcommon.HexToAddress("67b1d87101671b127f5f8714789c7192f7ad340e")
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(period uint64, faucet common.Address) *Genesis {
+func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *Genesis {
 	// Override the default period to the user requested one
 	config := *params.AllCliqueProtocolChanges
 	config.Clique.Period = period

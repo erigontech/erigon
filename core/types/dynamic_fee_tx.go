@@ -24,9 +24,11 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -104,15 +106,6 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 
 func (tx DynamicFeeTransaction) GetAccessList() AccessList {
 	return tx.AccessList
-}
-
-func (tx *DynamicFeeTransaction) Size() common.StorageSize {
-	if size := tx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := tx.EncodingSize()
-	tx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
 }
 
 func (tx DynamicFeeTransaction) EncodingSize() int {
@@ -198,7 +191,7 @@ func (tx *DynamicFeeTransaction) WithSignature(signer Signer, sig []byte) (Trans
 	return cpy, nil
 }
 
-func (tx *DynamicFeeTransaction) FakeSign(address common.Address) (Transaction, error) {
+func (tx *DynamicFeeTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
 	cpy := tx.copy()
 	cpy.R.Set(u256.Num1)
 	cpy.S.Set(u256.Num1)
@@ -349,7 +342,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
+		tx.To = &libcommon.Address{}
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -381,7 +374,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 }
 
 // AsMessage returns the transaction as a core.Message.
-func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
+func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -414,9 +407,9 @@ func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *par
 }
 
 // Hash computes the hash (but not for signatures!)
-func (tx *DynamicFeeTransaction) Hash() common.Hash {
+func (tx *DynamicFeeTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*common.Hash)
+		return *hash.(*libcommon.Hash)
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
@@ -434,7 +427,7 @@ func (tx *DynamicFeeTransaction) Hash() common.Hash {
 	return hash
 }
 
-func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx DynamicFeeTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		DynamicFeeTxType,
 		[]interface{}{
@@ -457,20 +450,20 @@ func (tx DynamicFeeTransaction) RawSignatureValues() (*uint256.Int, *uint256.Int
 	return &tx.V, &tx.R, &tx.S
 }
 
-func (tx *DynamicFeeTransaction) Sender(signer Signer) (common.Address, error) {
+func (tx *DynamicFeeTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), nil
+		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 	tx.from.Store(addr)
 	return addr, nil
 }
 
 // NewTransaction creates an unsigned eip1559 transaction.
-func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to common.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
+func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Address, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, gasTip *uint256.Int, gasFeeCap *uint256.Int, data []byte) *DynamicFeeTransaction {
 	return &DynamicFeeTransaction{
 		CommonTx: CommonTx{
 			ChainID: &chainID,

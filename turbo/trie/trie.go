@@ -24,7 +24,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -33,7 +33,7 @@ import (
 var (
 	// EmptyRoot is the known root hash of an empty trie.
 	// DESCRIBED: docs/programmers_guide/guide.md#root
-	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRoot = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
 	emptyState = crypto.Keccak256Hash(nil)
@@ -60,11 +60,11 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 // Deprecated
 // use package turbo/trie
-func New(root common.Hash) *Trie {
+func New(root libcommon.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != libcommon.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}
 	}
 	return trie
@@ -72,11 +72,11 @@ func New(root common.Hash) *Trie {
 
 // NewTestRLPTrie treats all the data provided to `Update` function as rlp-encoded.
 // it is usually used for testing purposes.
-func NewTestRLPTrie(root common.Hash) *Trie {
+func NewTestRLPTrie(root libcommon.Hash) *Trie {
 	trie := &Trie{
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
-	if (root != common.Hash{}) && root != EmptyRoot {
+	if (root != libcommon.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode{hash: root[:]}
 	}
 	return trie
@@ -258,7 +258,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	hex := keybytesToHex(key)
 
 	var newnode *accountNode
-	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
+	if value.Root == EmptyRoot || value.Root == (libcommon.Hash{}) {
 		newnode = &accountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
 		newnode = &accountNode{*value, hashNode{hash: value.Root[:]}, true, nil, codeSizeUncached}
@@ -321,8 +321,8 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 // to a specific account leaf in the trie.
 type LoadRequestForCode struct {
 	t        *Trie
-	addrHash common.Hash // contract address hash
-	codeHash common.Hash
+	addrHash libcommon.Hash // contract address hash
+	codeHash libcommon.Hash
 	bytecode bool // include the bytecode too
 }
 
@@ -330,11 +330,11 @@ func (lrc *LoadRequestForCode) String() string {
 	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", lrc.addrHash, lrc.codeHash, lrc.bytecode)
 }
 
-func (t *Trie) NewLoadRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *LoadRequestForCode {
+func (t *Trie) NewLoadRequestForCode(addrHash libcommon.Hash, codeHash libcommon.Hash, bytecode bool) *LoadRequestForCode {
 	return &LoadRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-func (t *Trie) NeedLoadCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *LoadRequestForCode) {
+func (t *Trie) NeedLoadCode(addrHash libcommon.Hash, codeHash libcommon.Hash, bytecode bool) (bool, *LoadRequestForCode) {
 	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
 		return false, nil
 	}
@@ -1031,7 +1031,7 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
 // DESCRIBED: docs/programmers_guide/guide.md#root
-func (t *Trie) Hash() common.Hash {
+func (t *Trie) Hash() libcommon.Hash {
 	if t == nil || t.root == nil {
 		return EmptyRoot
 	}
@@ -1039,7 +1039,7 @@ func (t *Trie) Hash() common.Hash {
 	h := t.getHasher()
 	defer returnHasherToPool(h)
 
-	var result common.Hash
+	var result libcommon.Hash
 	_, _ = h.hash(t.root, true, result[:])
 
 	return result
@@ -1058,11 +1058,11 @@ func (t *Trie) getHasher() *hasher {
 // node, it will return the hash of a modified leaf node or extension node, where the
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
-func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, libcommon.Hash) {
 	hexPrefix := keybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.root, hexPrefix, 0)
 	if !gotValue {
-		return false, common.Hash{}
+		return false, libcommon.Hash{}
 	}
 	if accNode.rootCorrect {
 		return true, accNode.Root
@@ -1101,7 +1101,7 @@ func (t *Trie) EvictNode(hex []byte) {
 		// can work with other nodes type
 	}
 
-	var hn common.Hash
+	var hn libcommon.Hash
 	if nd == nil {
 		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
 		return

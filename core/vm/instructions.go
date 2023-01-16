@@ -20,12 +20,14 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -286,7 +288,7 @@ func opAddress(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 
 func opBalance(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	address := common.Address(slot.Bytes20())
+	address := libcommon.Address(slot.Bytes20())
 	slot.Set(interpreter.evm.IntraBlockState().GetBalance(address))
 	return nil, nil
 }
@@ -405,7 +407,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		codeOffset = stack.Pop()
 		length     = stack.Pop()
 	)
-	addr := common.Address(a.Bytes20())
+	addr := libcommon.Address(a.Bytes20())
 	len64 := length.Uint64()
 	codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
 	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
@@ -422,7 +424,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 //
 //	(2) Caller tries to get the code hash of a non-existent account, state should
 //
-// return common.Hash{} and zero will be set as the result.
+// return libcommon.Hash{} and zero will be set as the result.
 //
 //	(3) Caller tries to get the code hash for an account without contract code,
 //
@@ -447,7 +449,7 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 // this account should be regarded as a non-existent account and zero should be returned.
 func opExtCodeHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
-	address := common.Address(slot.Bytes20())
+	address := libcommon.Address(slot.Bytes20())
 	if interpreter.evm.IntraBlockState().Empty(address) {
 		slot.Clear()
 	} else {
@@ -719,7 +721,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	gas := interpreter.evm.callGasTemp
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
-	toAddr := common.Address(addr.Bytes20())
+	toAddr := libcommon.Address(addr.Bytes20())
 	// Get the arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
@@ -757,7 +759,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	gas := interpreter.evm.callGasTemp
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
-	toAddr := common.Address(addr.Bytes20())
+	toAddr := libcommon.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
@@ -791,7 +793,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	gas := interpreter.evm.callGasTemp
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
-	toAddr := common.Address(addr.Bytes20())
+	toAddr := libcommon.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
@@ -821,7 +823,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	gas := interpreter.evm.callGasTemp
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
-	toAddr := common.Address(addr.Bytes20())
+	toAddr := libcommon.Address(addr.Bytes20())
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
@@ -870,7 +872,7 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	}
 	beneficiary := scope.Stack.Pop()
 	callerAddr := scope.Contract.Address()
-	beneficiaryAddr := common.Address(beneficiary.Bytes20())
+	beneficiaryAddr := libcommon.Address(beneficiary.Bytes20())
 	balance := interpreter.evm.IntraBlockState().GetBalance(callerAddr)
 	if interpreter.evm.Config().Debug {
 		if interpreter.cfg.Debug {
@@ -891,7 +893,7 @@ func makeLog(size int) executionFunc {
 		if interpreter.readOnly {
 			return nil, ErrWriteProtection
 		}
-		topics := make([]common.Hash, size)
+		topics := make([]libcommon.Hash, size)
 		stack := scope.Stack
 		mStart, mSize := stack.Pop(), stack.Pop()
 		for i := 0; i < size; i++ {

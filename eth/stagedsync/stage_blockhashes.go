@@ -5,13 +5,13 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
@@ -25,10 +25,10 @@ func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error {
 type BlockHashesCfg struct {
 	db     kv.RwDB
 	tmpDir string
-	cc     *params.ChainConfig
+	cc     *chain.Config
 }
 
-func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *params.ChainConfig) BlockHashesCfg {
+func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config) BlockHashesCfg {
 	return BlockHashesCfg{
 		db:     db,
 		tmpDir: tmpDir,
@@ -56,7 +56,7 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 
 	startKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(startKey, s.BlockNumber)
-	endKey := dbutils.HeaderKey(headNumber+1, common.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
+	endKey := dbutils.HeaderKey(headNumber+1, libcommon.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
 	//todo do we need non canonical headers ?
 	logPrefix := s.LogPrefix()

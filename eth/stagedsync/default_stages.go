@@ -72,7 +72,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return BodiesForward(s, u, ctx, tx, bodies, test, firstCycle)
+				return BodiesForward(s, u, ctx, tx, bodies, test, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)
@@ -240,7 +240,7 @@ func DefaultStages(ctx context.Context, sm prune.Mode, snapshots SnapshotsCfg, h
 	}
 }
 
-// StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
+// StateStages are all stages necessary for basic unwind and stage computation, it is primarily used to process side forks and memory execution.
 func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, blockHashCfg BlockHashesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg) []*Stage {
 	return []*Stage{
 		{
@@ -257,7 +257,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.Bodies,
 			Description: "Download block bodies",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return BodiesForward(s, u, ctx, tx, bodies, false, false)
+				return BodiesForward(s, u, ctx, tx, bodies, false, false, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
 				return UnwindBodiesStage(u, tx, bodies, ctx)

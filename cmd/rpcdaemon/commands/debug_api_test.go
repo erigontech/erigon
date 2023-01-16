@@ -7,9 +7,10 @@ import (
 	"testing"
 
 	jsoniter "github.com/json-iterator/go"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
@@ -45,12 +46,12 @@ func TestTraceBlockByNumber(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(context.Background(), libcommon.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -94,12 +95,12 @@ func TestTraceBlockByHash(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
-	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000)
+	ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(m.Ctx, libcommon.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -135,7 +136,7 @@ func TestTraceTransaction(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		err := api.TraceTransaction(context.Background(), libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -170,7 +171,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 		var norefunds = true
-		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(context.Background(), libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -192,3 +193,69 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 		}
 	}
 }
+
+/*
+func TestStorageRangeAt(t *testing.T) {
+	t.Parallel()
+
+	// Create a state where account 0x010000... has a few storage entries.
+	var (
+		//state, _ = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		addr = common.Address{0x01}
+		keys = []common.Hash{ // hashes of Keys of storage
+			common.HexToHash("340dd630ad21bf010b4e676dbfa9ba9a02175262d1fa356232cfde6cb5b47ef2"),
+			common.HexToHash("426fcb404ab2d5d8e61a3d918108006bbb0a9be65e92235bb10eefbdb6dcd053"),
+			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
+			common.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
+		}
+		storage = storageMap{
+			keys[0]: {Key: &common.Hash{0x02}, Value: common.Hash{0x01}},
+			keys[1]: {Key: &common.Hash{0x04}, Value: common.Hash{0x02}},
+			keys[2]: {Key: &common.Hash{0x01}, Value: common.Hash{0x03}},
+			keys[3]: {Key: &common.Hash{0x03}, Value: common.Hash{0x04}},
+		}
+	)
+	//for _, entry := range storage {
+	//	state.SetState(addr, *entry.Key, entry.Value)
+	//}
+
+	// Check a few combinations of limit and start/end.
+	tests := []struct {
+		start []byte
+		limit int
+		want  StorageRangeResult
+	}{
+		{
+			start: []byte{}, limit: 0,
+			want: StorageRangeResult{storageMap{}, &keys[0]},
+		},
+		{
+			start: []byte{}, limit: 100,
+			want: StorageRangeResult{storage, nil},
+		},
+		{
+			start: []byte{}, limit: 2,
+			want: StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
+		},
+		{
+			start: []byte{0x00}, limit: 4,
+			want: StorageRangeResult{storage, nil},
+		},
+		{
+			start: []byte{0x40}, limit: 2,
+			want: StorageRangeResult{storageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
+		},
+	}
+	for _, test := range tests {
+		//tr, err := state.StorageTrie(addr)
+		//if err != nil {
+		//	t.Error(err)
+		//}
+		result, err := storageRangeAt(stateReader.(*state.PlainState), test.start, test.limit)
+		if err != nil {
+			t.Error(err)
+		}
+		require.EqualValues(t, test.want, result)
+	}
+}
+*/

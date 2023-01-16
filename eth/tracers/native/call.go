@@ -23,6 +23,8 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -37,23 +39,23 @@ func init() {
 }
 
 type callLog struct {
-	Address common.Address `json:"address"`
-	Topics  []common.Hash  `json:"topics"`
-	Data    hexutil.Bytes  `json:"data"`
+	Address libcommon.Address `json:"address"`
+	Topics  []libcommon.Hash  `json:"topics"`
+	Data    hexutil.Bytes     `json:"data"`
 }
 
 type callFrame struct {
-	Type     vm.OpCode      `json:"-"`
-	From     common.Address `json:"from"`
-	Gas      uint64         `json:"gas"`
-	GasUsed  uint64         `json:"gasUsed"`
-	To       common.Address `json:"to,omitempty" rlp:"optional"`
-	Input    []byte         `json:"input" rlp:"optional"`
-	Output   []byte         `json:"output,omitempty" rlp:"optional"`
-	Error    string         `json:"error,omitempty" rlp:"optional"`
-	Revertal string         `json:"revertReason,omitempty"`
-	Calls    []callFrame    `json:"calls,omitempty" rlp:"optional"`
-	Logs     []callLog      `json:"logs,omitempty" rlp:"optional"`
+	Type     vm.OpCode         `json:"-"`
+	From     libcommon.Address `json:"from"`
+	Gas      uint64            `json:"gas"`
+	GasUsed  uint64            `json:"gasUsed"`
+	To       libcommon.Address `json:"to,omitempty" rlp:"optional"`
+	Input    []byte            `json:"input" rlp:"optional"`
+	Output   []byte            `json:"output,omitempty" rlp:"optional"`
+	Error    string            `json:"error,omitempty" rlp:"optional"`
+	Revertal string            `json:"revertReason,omitempty"`
+	Calls    []callFrame       `json:"calls,omitempty" rlp:"optional"`
+	Logs     []callLog         `json:"logs,omitempty" rlp:"optional"`
 	// Placed at end on purpose. The RLP will be decoded to 0 instead of
 	// nil if there are non-empty elements after in the struct.
 	Value *big.Int `json:"value,omitempty" rlp:"optional"`
@@ -75,7 +77,7 @@ func (f *callFrame) processOutput(output []byte, err error) {
 	}
 	f.Error = err.Error()
 	if f.Type == vm.CREATE || f.Type == vm.CREATE2 {
-		f.To = common.Address{}
+		f.To = libcommon.Address{}
 	}
 	if !errors.Is(err, vm.ErrExecutionReverted) || len(output) == 0 {
 		return
@@ -127,7 +129,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, e
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *callTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.callstack[0] = callFrame{
 		Type:  vm.CALL,
 		From:  from,
@@ -172,10 +174,10 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 		// Don't modify the stack
 		mStart := stackData[len(stackData)-1]
 		mSize := stackData[len(stackData)-2]
-		topics := make([]common.Hash, size)
+		topics := make([]libcommon.Hash, size)
 		for i := 0; i < size; i++ {
 			topic := stackData[len(stackData)-2-(i+1)]
-			topics[i] = common.Hash(topic.Bytes32())
+			topics[i] = libcommon.Hash(topic.Bytes32())
 		}
 
 		data := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
@@ -185,7 +187,7 @@ func (t *callTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *callTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *callTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if t.config.OnlyTopCall {
 		return
 	}

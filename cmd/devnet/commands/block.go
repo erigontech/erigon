@@ -3,10 +3,14 @@ package commands
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 const (
@@ -14,11 +18,11 @@ const (
 	sendValue        uint64 = 10000
 )
 
-func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
+func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) {
 	fmt.Printf("Sending %d ETH to %q from %q...\n", value, toAddr, fromAddr)
 
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(fromAddr))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr))
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
@@ -40,12 +44,20 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*common.Hash, error) {
 
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 
+	hashes := map[libcommon.Hash]bool{*hash: true}
+	if _, err = services.SearchReservesForTransactionHash(hashes); err != nil {
+		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	}
+
 	return hash, nil
 }
 
-func callContractTx() (*common.Hash, error) {
+func callContractTx() (*libcommon.Hash, error) {
+	// hashset to hold hashes for search after mining
+	hashes := make(map[libcommon.Hash]bool)
+
 	// get the latest nonce for the next transaction
-	nonce, err := services.GetNonce(models.ReqId, common.HexToAddress(models.DevAddress))
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(models.DevAddress))
 	if err != nil {
 		fmt.Printf("failed to get latest nonce: %s\n", err)
 		return nil, err
@@ -64,18 +76,35 @@ func callContractTx() (*common.Hash, error) {
 		fmt.Printf("failed to send transaction: %v\n", err)
 		return nil, err
 	}
+	hashes[*hash] = true
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 	fmt.Println()
 
-	_, err = services.SearchBlockForTransactionHash(*hash)
+	eventHash, err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find tx in block: %v", err)
-	}
-	fmt.Println()
-
-	if err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address); err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)
 		return nil, err
+	}
+	hashes[*eventHash] = true
+
+	txToBlockMap, err := services.SearchReservesForTransactionHash(hashes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	}
+
+	blockNum := (*txToBlockMap)[*eventHash]
+
+	block, err := requests.GetBlockByNumber(models.ReqId, devnetutils.HexToInt(blockNum), true)
+	if err != nil {
+		return nil, err
+	}
+
+	expectedLog := devnetutils.BuildLog(*eventHash, blockNum, address,
+		devnetutils.GenerateTopic(models.SolContractMethodSignature), hexutil.Bytes{}, hexutil.Uint(1),
+		block.Result.Hash, hexutil.Uint(0), false)
+
+	if err = requests.GetAndCompareLogs(models.ReqId, 0, 20, expectedLog); err != nil {
+		return nil, fmt.Errorf("failed to get logs: %v", err)
 	}
 
 	return hash, nil

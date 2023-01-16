@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func (t *Trie) Print(w io.Writer) {
@@ -293,14 +293,14 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 	}
 }
 
-func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
+func (t *Trie) HashOfHexKey(hexKey []byte) (libcommon.Hash, error) {
 	nd := t.root
 	pos := 0
 	var account bool
 	for pos < len(hexKey) || account {
 		switch n := nd.(type) {
 		case nil:
-			return common.Hash{}, fmt.Errorf("premature nil: pos %d, hexKey %x", pos, hexKey)
+			return libcommon.Hash{}, fmt.Errorf("premature nil: pos %d, hexKey %x", pos, hexKey)
 		case *shortNode:
 			matchlen := prefixLen(hexKey[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
@@ -310,7 +310,7 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 					account = true
 				}
 			} else {
-				return common.Hash{}, fmt.Errorf("too long shortNode key: pos %d, hexKey %x: %s", pos, hexKey, n.fstring(""))
+				return libcommon.Hash{}, fmt.Errorf("too long shortNode key: pos %d, hexKey %x: %s", pos, hexKey, n.fstring(""))
 			}
 		case *duoNode:
 			i1, i2 := n.childrenIdx()
@@ -322,34 +322,34 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 				nd = n.child2
 				pos++
 			default:
-				return common.Hash{}, fmt.Errorf("nil entry in the duoNode: pos %d, hexKey %x", pos, hexKey)
+				return libcommon.Hash{}, fmt.Errorf("nil entry in the duoNode: pos %d, hexKey %x", pos, hexKey)
 			}
 		case *fullNode:
 			child := n.Children[hexKey[pos]]
 			if child == nil {
-				return common.Hash{}, fmt.Errorf("nil entry in the fullNode: pos %d, hexKey %x", pos, hexKey)
+				return libcommon.Hash{}, fmt.Errorf("nil entry in the fullNode: pos %d, hexKey %x", pos, hexKey)
 			}
 			nd = child
 			pos++
 		case valueNode:
-			return common.Hash{}, fmt.Errorf("premature valueNode: pos %d, hexKey %x", pos, hexKey)
+			return libcommon.Hash{}, fmt.Errorf("premature valueNode: pos %d, hexKey %x", pos, hexKey)
 		case *accountNode:
 			nd = n.storage
 			account = false
 		case hashNode:
-			return common.Hash{}, fmt.Errorf("premature hashNode: pos %d, hexKey %x", pos, hexKey)
+			return libcommon.Hash{}, fmt.Errorf("premature hashNode: pos %d, hexKey %x", pos, hexKey)
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	var hash common.Hash
+	var hash libcommon.Hash
 	if hn, ok := nd.(hashNode); ok {
 		copy(hash[:], hn.hash)
 	} else {
 		h := t.newHasherFunc()
 		defer returnHasherToPool(h)
 		if _, err := h.hash(nd, len(hexKey) == 0, hash[:]); err != nil {
-			return common.Hash{}, err
+			return libcommon.Hash{}, err
 		}
 	}
 	return hash, nil

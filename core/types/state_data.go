@@ -1,11 +1,13 @@
 package types
 
-import "github.com/ledgerwatch/erigon/common"
+import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+)
 
 // StateSyncData represents state received from Ethereum Blockchain
 type StateSyncData struct {
 	ID       uint64
-	Contract common.Address
+	Contract libcommon.Address
 	Data     string
-	TxHash   common.Hash
+	TxHash   libcommon.Hash
 }

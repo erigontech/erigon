@@ -21,11 +21,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -34,11 +35,11 @@ type dummyContractRef struct {
 	calledForEach bool
 }
 
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
+func (dummyContractRef) ReturnGas(*big.Int)             {}
+func (dummyContractRef) Address() libcommon.Address     { return libcommon.Address{} }
+func (dummyContractRef) Value() *big.Int                { return new(big.Int) }
+func (dummyContractRef) SetCode(libcommon.Hash, []byte) {}
+func (d *dummyContractRef) ForEachStorage(callback func(key, value libcommon.Hash) bool) {
 	d.calledForEach = true
 }
 func (d *dummyContractRef) SubBalance(amount *big.Int) {}
@@ -63,8 +64,8 @@ func TestStoreCapture(t *testing.T) {
 	)
 	stack.Push(uint256.NewInt(1))
 	stack.Push(uint256.NewInt(0))
-	var index common.Hash
-	logger.CaptureStart(env, common.Address{}, common.Address{}, false, false, nil, 0, nil, nil)
+	var index libcommon.Hash
+	logger.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false, false, nil, 0, nil, nil)
 	logger.CaptureState(0, vm.SSTORE, 0, 0, &vm.ScopeContext{
 		Memory:   mem,
 		Stack:    stack,
@@ -74,7 +75,7 @@ func TestStoreCapture(t *testing.T) {
 	if len(logger.storage[contract.Address()]) == 0 {
 		t.Fatalf("expected exactly 1 changed value on address %x, got %d", contract.Address(), len(logger.storage[contract.Address()]))
 	}
-	exp := common.BigToHash(big.NewInt(1))
+	exp := libcommon.BigToHash(big.NewInt(1))
 	if logger.storage[contract.Address()][index] != exp {
 		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
 	}

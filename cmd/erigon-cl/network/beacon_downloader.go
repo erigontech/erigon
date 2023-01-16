@@ -3,26 +3,28 @@ package network
 import (
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/net/context"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
 // Input: the currently highest slot processed and the list of blocks we want to know process
 // Output: the new last new highest slot processed and an error possibly?
 type ProcessFn func(
 	highestSlotProcessed uint64,
-	highestBlockRootProcessed common.Hash,
+	highestBlockRootProcessed libcommon.Hash,
 	blocks []*cltypes.SignedBeaconBlock) (
 	newHighestSlotProcessed uint64,
-	newHighestBlockRootProcessed common.Hash,
+	newHighestBlockRootProcessed libcommon.Hash,
 	err error)
 
 type ForwardBeaconDownloader struct {
 	ctx                       context.Context
 	highestSlotProcessed      uint64
-	highestBlockRootProcessed common.Hash
+	highestBlockRootProcessed libcommon.Hash
 	targetSlot                uint64
 	rpc                       *rpc.BeaconRpcP2P
 	process                   ProcessFn
@@ -43,7 +45,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *For
 }
 
 // Start begins the gossip listening process.
-func (f *ForwardBeaconDownloader) ReceiveGossip(obj cltypes.ObjectSSZ) {
+func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz_utils.Unmarshaler) {
 	signedBlock := obj.(*cltypes.SignedBeaconBlockBellatrix)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
 		f.addSegment(cltypes.NewSignedBeaconBlock(obj))
@@ -86,14 +88,14 @@ func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed u
 }
 
 // SetHighestProcessedRoot sets the highest processed block root so far.
-func (f *ForwardBeaconDownloader) SetHighestProcessedRoot(root common.Hash) {
+func (f *ForwardBeaconDownloader) SetHighestProcessedRoot(root libcommon.Hash) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.highestBlockRootProcessed = root
 }
 
 // HighestProcessedRoot returns the highest processed block root so far.
-func (f *ForwardBeaconDownloader) HighestProcessedRoot() common.Hash {
+func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.highestBlockRootProcessed
@@ -135,7 +137,7 @@ func (f *ForwardBeaconDownloader) ProcessBlocks() error {
 	defer f.mu.Unlock()
 	var err error
 	var highestSlotProcessed uint64
-	var highestBlockRootProcessed common.Hash
+	var highestBlockRootProcessed libcommon.Hash
 	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, f.segments); err != nil {
 		return err
 	}

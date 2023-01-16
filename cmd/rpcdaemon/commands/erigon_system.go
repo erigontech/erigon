@@ -3,7 +3,8 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -12,9 +13,9 @@ import (
 
 // Forks is a data type to record a list of forks passed by this node
 type Forks struct {
-	GenesisHash common.Hash `json:"genesis"`
-	HeightForks []uint64    `json:"heightForks"`
-	TimeForks   []uint64    `json:"timeForks"`
+	GenesisHash libcommon.Hash `json:"genesis"`
+	HeightForks []uint64       `json:"heightForks"`
+	TimeForks   []uint64       `json:"timeForks"`
 }
 
 // Forks implements erigon_forks. Returns the genesis block hash and a sorted list of all forks block numbers
@@ -46,6 +47,8 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 	var rpcBlockNum rpc.BlockNumber
 	if rpcBlockNumPtr == nil {
 		rpcBlockNum = rpc.LatestExecutedBlockNumber
+	} else {
+		rpcBlockNum = *rpcBlockNumPtr
 	}
 
 	var blockNum uint64

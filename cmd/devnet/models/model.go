@@ -3,13 +3,15 @@ package models
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type (
@@ -77,7 +79,7 @@ const (
 	// ReqId is the request id for each request
 	ReqId = 0
 	// MaxNumberOfBlockChecks is the max number of blocks to look for a transaction in
-	MaxNumberOfBlockChecks = 1
+	MaxNumberOfBlockChecks = 3
 
 	// Latest is the parameter for the latest block
 	Latest BlockNumber = "latest"
@@ -95,6 +97,9 @@ const (
 	NonContractTx TransactionType = "non-contract"
 	// ContractTx is the transaction type for sending ether
 	ContractTx TransactionType = "contract"
+
+	// SolContractMethodSignature is the function signature for the event in the solidity contract definition
+	SolContractMethodSignature = "SubscriptionEvent()"
 
 	// ETHGetTransactionCount represents the eth_getTransactionCount method
 	ETHGetTransactionCount RPCMethod = "eth_getTransactionCount"
@@ -119,12 +124,19 @@ var (
 	// DevSignedPrivateKey is the signed private key for signing transactions
 	DevSignedPrivateKey, _ = crypto.HexToECDSA(hexPrivateKey)
 	// gspec is the geth dev genesis block
-	gspec = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(DevAddress))
+	gspec = core.DeveloperGenesisBlock(uint64(0), libcommon.HexToAddress(DevAddress))
 	// ContractBackend is a simulated backend created using a simulated blockchain
 	ContractBackend = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
+
+	// MethodSubscriptionMap is a container for all the subscription methods
+	MethodSubscriptionMap *map[SubMethod]*MethodSubscription
+
+	// NewHeadsChan is the block cache the eth_NewHeads
+	NewHeadsChan chan interface{}
+	// OldHeads holds a list of visited blocks to recheck transactions
+	//OldHeads []string
 )
 
-// Responses for the rpc calls
 type (
 	// AdminNodeInfoResponse is the response for calls made to admin_nodeInfo
 	AdminNodeInfoResponse struct {
@@ -133,10 +145,27 @@ type (
 	}
 )
 
+// MethodSubscription houses the client subscription, name and channel for its delivery
+type MethodSubscription struct {
+	Client    *rpc.Client
+	ClientSub *rpc.ClientSubscription
+	Name      SubMethod
+	SubChan   chan interface{}
+}
+
+// NewMethodSubscription returns a new MethodSubscription instance
+func NewMethodSubscription(name SubMethod) *MethodSubscription {
+	return &MethodSubscription{
+		Name:    name,
+		SubChan: make(chan interface{}),
+	}
+}
+
 // Block represents a simple block for queries
 type Block struct {
 	Number       *hexutil.Big
-	Transactions []common.Hash
+	Transactions []libcommon.Hash
+	BlockHash    libcommon.Hash
 }
 
 // ParameterFromArgument merges the argument and parameter and returns a flag input string

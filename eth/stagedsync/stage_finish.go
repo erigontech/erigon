@@ -8,11 +8,13 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -20,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type FinishCfg struct {
@@ -141,9 +142,9 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 	notifyFrom++
 
 	var notifyTo = notifyFrom
-	var notifyToHash common.Hash
+	var notifyToHash libcommon.Hash
 	var headersRlp [][]byte
-	if err := tx.ForEach(kv.Headers, libcommon.EncodeTs(notifyFrom), func(k, headerRLP []byte) error {
+	if err := tx.ForEach(kv.Headers, hexutility.EncodeTs(notifyFrom), func(k, headerRLP []byte) error {
 		if len(headerRLP) == 0 {
 			return nil
 		}
@@ -153,7 +154,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			log.Warn("[Finish] failed checking if header is cannonical")
 		}
 
-		headerHash := common.BytesToHash(k[8:])
+		headerHash := libcommon.BytesToHash(k[8:])
 		if notifyToHash == headerHash {
 			headersRlp = append(headersRlp, common2.CopyBytes(headerRLP))
 		}

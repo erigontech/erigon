@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -17,10 +18,10 @@ var _ = (*callFrameMarshaling)(nil)
 func (c callFrame) MarshalJSON() ([]byte, error) {
 	type callFrame0 struct {
 		Type       vm.OpCode      `json:"-"`
-		From       common.Address `json:"from"`
+		From       libcommon.Address `json:"from"`
 		Gas        hexutil.Uint64 `json:"gas"`
 		GasUsed    hexutil.Uint64 `json:"gasUsed"`
-		To         common.Address `json:"to,omitempty" rlp:"optional"`
+		To         libcommon.Address `json:"to,omitempty" rlp:"optional"`
 		Input      hexutil.Bytes  `json:"input" rlp:"optional"`
 		Output     hexutil.Bytes  `json:"output,omitempty" rlp:"optional"`
 		Error      string         `json:"error,omitempty" rlp:"optional"`
@@ -51,10 +52,10 @@ func (c callFrame) MarshalJSON() ([]byte, error) {
 func (c *callFrame) UnmarshalJSON(input []byte) error {
 	type callFrame0 struct {
 		Type     *vm.OpCode      `json:"-"`
-		From     *common.Address `json:"from"`
+		From     *libcommon.Address `json:"from"`
 		Gas      *hexutil.Uint64 `json:"gas"`
 		GasUsed  *hexutil.Uint64 `json:"gasUsed"`
-		To       *common.Address `json:"to,omitempty" rlp:"optional"`
+		To       *libcommon.Address `json:"to,omitempty" rlp:"optional"`
 		Input    *hexutil.Bytes  `json:"input" rlp:"optional"`
 		Output   *hexutil.Bytes  `json:"output,omitempty" rlp:"optional"`
 		Error    *string         `json:"error,omitempty" rlp:"optional"`

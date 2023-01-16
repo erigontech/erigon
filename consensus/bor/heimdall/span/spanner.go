@@ -4,11 +4,11 @@ import (
 	"encoding/hex"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
@@ -16,10 +16,10 @@ import (
 
 type ChainSpanner struct {
 	validatorSet abi.ABI
-	chainConfig  *params.ChainConfig
+	chainConfig  *chain.Config
 }
 
-func NewChainSpanner(validatorSet abi.ABI, chainConfig *params.ChainConfig) *ChainSpanner {
+func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config) *ChainSpanner {
 	return &ChainSpanner{
 		validatorSet: validatorSet,
 		chainConfig:  chainConfig,
@@ -38,7 +38,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 		return nil, err
 	}
 
-	result, err := syscall(common.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
+	result, err := syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 	return &span, nil
 }
 
-func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer common.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
+func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*HeimdallSpan, error)) ([]*valset.Validator, error) {
 	// Use signer as validator in case of bor devent
 	if c.chainConfig.ChainName == networkname.BorDevnetChainName {
 		validators := []*valset.Validator{
@@ -131,7 +131,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		return err
 	}
 
-	_, err = syscall(common.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
+	_, err = syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
 	// apply message
 	return err
 }

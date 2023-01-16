@@ -10,6 +10,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -50,7 +52,7 @@ type AccountSeek struct {
 
 // StorageSeek allows to traverse sub-tree
 type StorageSeek struct {
-	addrHash    common.Hash
+	addrHash    libcommon.Hash
 	incarnation uint64
 	seek        []byte
 }
@@ -64,7 +66,7 @@ type AccountItem struct {
 	sequence int
 	queuePos int
 	flags    uint16
-	addrHash common.Hash
+	addrHash libcommon.Hash
 	account  accounts.Account
 }
 
@@ -75,7 +77,7 @@ type AccountItem struct {
 // to the database yet. The correspondence of an `ai AccountItem` and an `awi AccountWriteItem` implies that
 // `keccak(awi.address) == ai.addrHash`.
 type AccountWriteItem struct {
-	address common.Address
+	address libcommon.Address
 	ai      *AccountItem
 }
 
@@ -83,15 +85,15 @@ type StorageItem struct {
 	sequence    int
 	queuePos    int
 	flags       uint16
-	addrHash    common.Hash
+	addrHash    libcommon.Hash
 	incarnation uint64
-	locHash     common.Hash
+	locHash     libcommon.Hash
 	value       uint256.Int
 }
 
 type StorageWriteItem struct {
-	address  common.Address
-	location common.Hash
+	address  libcommon.Address
+	location libcommon.Hash
 	si       *StorageItem
 }
 
@@ -99,13 +101,13 @@ type CodeItem struct {
 	sequence    int
 	queuePos    int
 	flags       uint16
-	addrHash    common.Hash
+	addrHash    libcommon.Hash
 	incarnation uint64
 	code        []byte
 }
 
 type CodeWriteItem struct {
-	address common.Address
+	address libcommon.Address
 	ci      *CodeItem
 }
 
@@ -563,14 +565,14 @@ func (sc *StateCache) SetAccountRead(address []byte, account *accounts.Account) 
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountRead(addrHash common.Hash, account *accounts.Account) {
+func (sc *StateCache) DeprecatedSetAccountRead(addrHash libcommon.Hash, account *accounts.Account) {
 	var ai AccountItem
 	ai.addrHash.SetBytes(addrHash.Bytes())
 	ai.account.Copy(account)
 	sc.setRead(&ai, false /* absent */)
 }
 
-func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts.Account, bool) {
+func (sc *StateCache) GetAccountByHashedAddress(addrHash libcommon.Hash) (*accounts.Account, bool) {
 	var key AccountItem
 	key.addrHash.SetBytes(addrHash.Bytes())
 	if item, ok := sc.get(&key); ok {
@@ -582,7 +584,7 @@ func (sc *StateCache) GetAccountByHashedAddress(addrHash common.Hash) (*accounts
 	return nil, false
 }
 
-func (sc *StateCache) GetStorageByHashedAddress(addrHash common.Hash, incarnation uint64, locHash common.Hash) ([]byte, bool) {
+func (sc *StateCache) GetStorageByHashedAddress(addrHash libcommon.Hash, incarnation uint64, locHash libcommon.Hash) ([]byte, bool) {
 	key := StorageItem{
 		addrHash:    addrHash,
 		incarnation: incarnation,
@@ -728,7 +730,7 @@ func (sc *StateCache) SetStorageRead(address []byte, incarnation uint64, locatio
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageRead(addrHash common.Hash, incarnation uint64, locHash common.Hash, val []byte) {
+func (sc *StateCache) DeprecatedSetStorageRead(addrHash libcommon.Hash, incarnation uint64, locHash libcommon.Hash, val []byte) {
 	var i StorageItem
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
@@ -740,7 +742,7 @@ func (sc *StateCache) DeprecatedSetStorageRead(addrHash common.Hash, incarnation
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountWrite(addrHash common.Hash, account *accounts.Account) {
+func (sc *StateCache) DeprecatedSetAccountWrite(addrHash libcommon.Hash, account *accounts.Account) {
 	var ai AccountItem
 	copy(ai.addrHash[:], addrHash.Bytes())
 	ai.account.Copy(account)
@@ -750,7 +752,7 @@ func (sc *StateCache) DeprecatedSetAccountWrite(addrHash common.Hash, account *a
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetAccountDelete(addrHash common.Hash) {
+func (sc *StateCache) DeprecatedSetAccountDelete(addrHash libcommon.Hash) {
 	var ai AccountItem
 	copy(ai.addrHash[:], addrHash.Bytes())
 	var awi AccountWriteItem
@@ -759,7 +761,7 @@ func (sc *StateCache) DeprecatedSetAccountDelete(addrHash common.Hash) {
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageDelete(addrHash common.Hash, incarnation uint64, locHash common.Hash) {
+func (sc *StateCache) DeprecatedSetStorageDelete(addrHash libcommon.Hash, incarnation uint64, locHash libcommon.Hash) {
 	var si StorageItem
 	copy(si.addrHash[:], addrHash.Bytes())
 	si.incarnation = incarnation
@@ -770,7 +772,7 @@ func (sc *StateCache) DeprecatedSetStorageDelete(addrHash common.Hash, incarnati
 }
 
 // hack to set hashed addr - we don't have another one in trie stage
-func (sc *StateCache) DeprecatedSetStorageWrite(addrHash common.Hash, incarnation uint64, locHash common.Hash, v []byte) {
+func (sc *StateCache) DeprecatedSetStorageWrite(addrHash libcommon.Hash, incarnation uint64, locHash libcommon.Hash, v []byte) {
 	var si StorageItem
 	copy(si.addrHash[:], addrHash.Bytes())
 	si.incarnation = incarnation

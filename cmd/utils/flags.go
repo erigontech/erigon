@@ -28,15 +28,21 @@ import (
 	"strings"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -51,10 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
 )
 
 // These are all the command line flags we support.
@@ -347,6 +349,16 @@ var (
 	RpcStreamingDisableFlag = cli.BoolFlag{
 		Name:  "rpc.streaming.disable",
 		Usage: "Erigon has enalbed json streaming for some heavy endpoints (like trace_*). It's treadoff: greatly reduce amount of RAM (in some cases from 30GB to 30mb), but it produce invalid json format if error happened in the middle of streaming (because json is not streaming-friendly format)",
+	}
+	RpcBatchLimit = cli.IntFlag{
+		Name:  "rpc.batch.limit",
+		Usage: "Maximum number of requests in a batch",
+		Value: 100,
+	}
+	RpcReturnDataLimit = cli.IntFlag{
+		Name:  "rpc.returndata.limit",
+		Usage: "Maximum number of bytes returned from eth_call or similar invocations",
+		Value: 100_000,
 	}
 	HTTPTraceFlag = cli.BoolFlag{
 		Name:  "http.trace",
@@ -997,7 +1009,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.IsSet(MinerEtherbaseFlag.Name) {
 		etherbase = ctx.String(MinerEtherbaseFlag.Name)
 		if etherbase != "" {
-			cfg.Miner.Etherbase = common.HexToAddress(etherbase)
+			cfg.Miner.Etherbase = libcommon.HexToAddress(etherbase)
 		}
 	}
 
@@ -1165,7 +1177,7 @@ func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	}
 	sz := cfg.MdbxPageSize.Bytes()
 	if !isPowerOfTwo(sz) || sz < 256 || sz > 64*1024 {
-		panic("invalid --db.pagesize: " + DbPageSizeFlag.Usage)
+		panic(fmt.Errorf("invalid --db.pagesize: %s=%d, see: %s", ctx.String(DbPageSizeFlag.Name), sz, DbPageSizeFlag.Usage))
 	}
 }
 
@@ -1227,10 +1239,10 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
 		locals := strings.Split(ctx.String(TxPoolLocalsFlag.Name), ",")
 		for _, account := range locals {
-			if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
+			if trimmed := strings.TrimSpace(account); !libcommon.IsHexAddress(trimmed) {
 				Fatalf("Invalid account in --txpool.locals: %s", trimmed)
 			} else {
-				cfg.Locals = append(cfg.Locals, common.HexToAddress(account))
+				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
 			}
 		}
 	}
@@ -1266,7 +1278,7 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 		senderHexes := SplitAndTrim(ctx.String(TxPoolTraceSendersFlag.Name))
 		cfg.TracedSenders = make([]string, len(senderHexes))
 		for i, senderHex := range senderHexes {
-			sender := common.HexToAddress(senderHex)
+			sender := libcommon.HexToAddress(senderHex)
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
@@ -1340,7 +1352,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 	if etherbase == "" {
 		Fatalf("No etherbase configured")
 	}
-	cfg.Etherbase = common.HexToAddress(etherbase)
+	cfg.Etherbase = libcommon.HexToAddress(etherbase)
 }
 
 func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir string) {
@@ -1354,11 +1366,11 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 	}
 }
 
-func setAuRa(ctx *cli.Context, cfg *params.AuRaConfig, datadir string) {
+func setAuRa(ctx *cli.Context, cfg *chain.AuRaConfig, datadir string) {
 	cfg.DBPath = filepath.Join(datadir, "aura")
 }
 
-func setParlia(ctx *cli.Context, cfg *params.ParliaConfig, datadir string) {
+func setParlia(ctx *cli.Context, cfg *chain.ParliaConfig, datadir string) {
 	cfg.DBPath = filepath.Join(datadir, "parlia")
 }
 
@@ -1400,7 +1412,7 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	if whitelist == "" {
 		return
 	}
-	cfg.Whitelist = make(map[uint64]common.Hash)
+	cfg.Whitelist = make(map[uint64]libcommon.Hash)
 	for _, entry := range strings.Split(whitelist, ",") {
 		parts := strings.Split(entry, "=")
 		if len(parts) != 2 {
@@ -1410,7 +1422,7 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 		if err != nil {
 			Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
 		}
-		var hash common.Hash
+		var hash libcommon.Hash
 		if err = hash.UnmarshalText([]byte(parts[1])); err != nil {
 			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
 		}
@@ -1574,7 +1586,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
-		if developer == (common.Address{}) {
+		if developer == (libcommon.Address{}) {
 			Fatalf("Please specify developer account address using --miner.etherbase")
 		}
 		log.Info("Using developer account", "address", developer)
@@ -1601,7 +1613,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if
 // no URLs are set.
-func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
+func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis libcommon.Hash) {
 	if cfg.EthDiscoveryURLs != nil {
 		return // already set through flags/config
 	}

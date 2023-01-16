@@ -16,6 +16,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -25,9 +26,12 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/torquem-ch/mdbx-go/mdbx"
+	atomic2 "go.uber.org/atomic"
+
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -38,11 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/torquem-ch/mdbx-go/mdbx"
-	atomic2 "go.uber.org/atomic"
 )
 
 var ExecStepsInDB = metrics.NewCounter(`exec_steps_in_db`) //nolint
@@ -62,32 +62,33 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
+	queueLen := rs.QueueLen()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
-	speedTx := float64(count-p.prevCount) / (float64(interval) / float64(time.Second))
+	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
 	//speedBlock := float64(outputBlockNum-p.prevOutputBlockNum) / (float64(interval) / float64(time.Second))
 	var repeatRatio float64
-	if count > p.prevCount {
-		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(count-p.prevCount)
+	if doneCount > p.prevCount {
+		repeatRatio = 100.0 * float64(repeatCount-p.prevRepeatCount) / float64(doneCount-p.prevCount)
 	}
 	log.Info(fmt.Sprintf("[%s] Transaction replay", p.logPrefix),
 		//"workers", workerCount,
-		"blk", outputBlockNum, "step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
-		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"resultCh", fmt.Sprintf("%d/%d", len(resultCh), cap(resultCh)),
-		"resultQueue", fmt.Sprintf("%d/%d", rwsLen, queueSize),
+		"pipe", fmt.Sprintf("%d/%d->%d/%d->%d/%d", queueLen, queueSize, rwsLen, queueSize, len(resultCh), cap(resultCh)),
 		"resultsSize", common.ByteCount(resultsSize),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
+		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
 	//var txNums []string
@@ -98,7 +99,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, count, inputBlo
 	//log.Info(fmt.Sprintf("[%s] Transaction replay queue", logPrefix), "txNums", s)
 
 	p.prevTime = currentTime
-	p.prevCount = count
+	p.prevCount = doneCount
 	p.prevOutputBlockNum = outputBlockNum
 	p.prevRepeatCount = repeatCount
 }
@@ -191,7 +192,7 @@ func ExecV3(ctx context.Context,
 	var rwsLock sync.RWMutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
-	queueSize := workerCount * 4
+	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
@@ -216,11 +217,20 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(tx)
 
 		notifyReceived := func() { rwsReceiveCond.Signal() }
+		var t time.Time
+		var lastBlockNum uint64
 		for outputTxNum.Load() < maxTxNum.Load() {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case txTask := <-resultCh:
+				if txTask.BlockNum > lastBlockNum {
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = txTask.BlockNum
+					t = time.Now()
+				}
 				if err := func() error {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
@@ -229,11 +239,12 @@ func ExecV3(ctx context.Context,
 					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 						return err
 					}
-					syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 					return nil
 				}(); err != nil {
 					return err
 				}
+
+				syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 			}
 		}
 		return nil
@@ -442,7 +453,7 @@ func ExecV3(ctx context.Context,
 		defer agg.KeepInDB(ethconfig.HistoryV3AggregationStep)
 	}
 
-	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		var err error
 		if parallel {
 			if err = chainDb.View(ctx, func(tx kv.Tx) error {
@@ -474,8 +485,6 @@ func ExecV3(ctx context.Context,
 	var blockNum uint64
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
-		t := time.Now()
-
 		inputBlockNum.Store(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
@@ -492,7 +501,7 @@ Loop:
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
+		getHashFn := func(n uint64) common.Hash {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -509,15 +518,18 @@ Loop:
 			}
 
 			func() {
-				rwsLock.RLock()
-				needWait := rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
-				rwsLock.RUnlock()
+				needWait := rs.QueueLen() > queueSize
+				if !needWait {
+					rwsLock.RLock()
+					needWait = rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
+					rwsLock.RUnlock()
+				}
 				if !needWait {
 					return
 				}
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				for rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rs.QueueLen() > queueSize || rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -562,13 +574,30 @@ Loop:
 
 				if sender, ok := txs[txIndex].GetSender(); ok {
 					txTask.Sender = &sender
+				} else {
+					sender, err := signer.Sender(txTask.Tx)
+					if err != nil {
+						return err
+					}
+					txTask.Sender = &sender
+					log.Warn("[Execution] expencive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
 			}
 
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
+						currentQueueSize := rs.AddWork(txTask)
+						if currentQueueSize > queueSize {
+							time.Sleep(100 * time.Microsecond)
+						} else {
+							rwsLock.RLock()
+							needWait := rws.Len() > queueSize
+							rwsLock.RUnlock()
+							if needWait {
+								time.Sleep(100 * time.Microsecond)
+							}
+						}
 					}
 				} else {
 					rs.AddWork(txTask)
@@ -619,7 +648,6 @@ Loop:
 			inputTxNum++
 		}
 
-		core.BlockExecutionTimer.UpdateDuration(t)
 		if !parallel {
 			syncMetrics[stages.Execution].Set(blockNum)
 
@@ -757,7 +785,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
-	chainConfig *params.ChainConfig, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
 	var err error
@@ -937,7 +965,7 @@ func reconstituteStep(last bool,
 	var inputTxNum uint64 = startTxNum
 	var b *types.Block
 	var txKey [8]byte
-	getHeaderFunc := func(hash common2.Hash, number uint64) (h *types.Header) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
 		if err = chainDb.View(ctx, func(tx kv.Tx) error {
 			h, err = blockReader.Header(ctx, tx, hash, number)
 			if err != nil {
@@ -967,7 +995,7 @@ func reconstituteStep(last bool,
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
-		getHashFn := func(n uint64) common2.Hash {
+		getHashFn := func(n uint64) common.Hash {
 			getHashFnMute.Lock()
 			defer getHashFnMute.Unlock()
 			return f(n)
@@ -1207,7 +1235,7 @@ func reconstituteStep(last bool,
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
-	chainConfig *params.ChainConfig, genesis *core.Genesis) (err error) {
+	chainConfig *chain.Config, genesis *core.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()
@@ -1221,24 +1249,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
+	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if !ok {
-		return fmt.Errorf("mininmax txNum not found in snapshot blocks: %d", agg.EndTxNumMinimax())
-	}
-	if blockNum == 0 {
-		return fmt.Errorf("not enough transactions in the history data")
-	}
-	blockNum--
-	var txNum uint64
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+		if !ok {
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
+		}
+		if blockNum == 0 {
+			return fmt.Errorf("not enough transactions in the history data")
+		}
+		blockNum--
 		txNum, err = rawdb.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return err
@@ -1257,8 +1280,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		Flags(func(u uint) uint {
 			return mdbx.UtterlyNoSync | mdbx.NoMetaSync | mdbx.NoMemInit | mdbx.LifoReclaim | mdbx.WriteMap
 		}).
-		WriteMergeThreshold(2 * 8192).
-		PageSize(uint64(4 * datasize.KB)).
+		PageSize(uint64(8 * datasize.KB)).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.ReconTablesCfg }).
 		Open()
 	if err != nil {

@@ -4,11 +4,11 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -31,7 +31,7 @@ type GenesisContractsClient struct {
 	stateReceiverABI      abi.ABI
 	ValidatorContract     string
 	StateReceiverContract string
-	chainConfig           *params.ChainConfig
+	chainConfig           *chain.Config
 }
 
 const (
@@ -40,7 +40,7 @@ const (
 )
 
 func NewGenesisContractsClient(
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	validatorContract,
 	stateReceiverContract string,
 ) *GenesisContractsClient {
@@ -75,7 +75,7 @@ func (gc *GenesisContractsClient) CommitState(
 	}
 
 	log.Trace("→ committing new state", "eventRecord", event.String())
-	_, err = syscall(common.HexToAddress(gc.StateReceiverContract), data)
+	_, err = syscall(libcommon.HexToAddress(gc.StateReceiverContract), data)
 
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func (gc *GenesisContractsClient) LastStateId(syscall consensus.SystemCall,
 		return nil, err
 	}
 
-	result, err := syscall(common.HexToAddress(gc.StateReceiverContract), data)
+	result, err := syscall(libcommon.HexToAddress(gc.StateReceiverContract), data)
 	if err != nil {
 		return nil, err
 	}

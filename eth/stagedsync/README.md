@@ -45,7 +45,7 @@ state.unwindOrder = []*Stage{
 	}
 ```
 
-## Preprocessing with [ETL](/common/etl/)
+## Preprocessing with [ETL](https://github.com/ledgerwatch/erigon-lib/tree/main/etl)
 
 Some stages use our ETL framework to sort data by keys before inserting it into the database.
 
@@ -69,7 +69,7 @@ Each stage consists of 2 functions `ExecFunc` that progesses the stage forward a
 
 Most of the stages can work offline though it isn't implemented in the current version.
 
-We can add/remove stages, so exact stage numbers may change - but order and names stay the same. 
+We can add/remove stages, so exact stage numbers may change - but order and names stay the same.
 
 ### Stage 1: [Download Headers Stage](/eth/stagedsync/stage_headers.go)
 
@@ -147,7 +147,7 @@ This stage doesn't use a network connection.
 
 [TODO]
 
-### Stages [11, 12](/eth/stagedsync/stage_indexes.go), [13](/eth/stagedsync/stage_log_index.go), and [14](/eth/stagedsync/stage_txlookup.go): Generate Indexes 
+### Stages [11, 12](/eth/stagedsync/stage_indexes.go), [13](/eth/stagedsync/stage_log_index.go), and [14](/eth/stagedsync/stage_txlookup.go): Generate Indexes
 
 There are 4 indexes that are generated during sync.
 

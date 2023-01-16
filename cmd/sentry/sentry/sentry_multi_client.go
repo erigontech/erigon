@@ -13,6 +13,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -28,13 +30,11 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -253,12 +253,12 @@ type MultiClient struct {
 	sentries      []direct.SentryClient
 	headHeight    uint64
 	headTime      uint64
-	headHash      common.Hash
+	headHash      libcommon.Hash
 	headTd        *uint256.Int
-	ChainConfig   *params.ChainConfig
+	ChainConfig   *chain.Config
 	heightForks   []uint64
 	timeForks     []uint64
-	genesisHash   common.Hash
+	genesisHash   libcommon.Hash
 	networkId     uint64
 	db            kv.RwDB
 	Engine        consensus.Engine
@@ -272,8 +272,8 @@ type MultiClient struct {
 func NewMultiClient(
 	db kv.RwDB,
 	nodeName string,
-	chainConfig *params.ChainConfig,
-	genesisHash common.Hash,
+	chainConfig *chain.Config,
+	genesisHash libcommon.Hash,
 	engine consensus.Engine,
 	networkID uint64,
 	sentries []direct.SentryClient,
@@ -327,7 +327,7 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
+	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
@@ -393,13 +393,15 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
 	if len(pkt) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
-			PeerId: peerID,
+		if cs.Hd.InitialCycle() {
+			outreq := proto_sentry.PeerUselessRequest{
+				PeerId: peerID,
+			}
+			if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
 		// No point processing empty response
 		return nil
 	}
@@ -535,7 +537,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
-	cs.Bd.AddToPrefetch(request.Block)
+	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
@@ -552,19 +554,21 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 	if err := rlp.DecodeBytes(inreq.Data, &request); err != nil {
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
-	txs, uncles := request.BlockRawBodiesPacket.Unpack()
+	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
 	if len(txs) == 0 && len(uncles) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
-			PeerId: inreq.PeerId,
+		if cs.Hd.InitialCycle() {
+			outreq := proto_sentry.PeerUselessRequest{
+				PeerId: inreq.PeerId,
+			}
+			if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+				return fmt.Errorf("sending peer useless request: %v", err)
+			}
+			log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
-			return fmt.Errorf("sending peer useless request: %v", err)
-		}
-		log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
 		// No point processing empty response
 		return nil
 	}
-	cs.Bd.DeliverBodies(&txs, &uncles, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
+	cs.Bd.DeliverBodies(txs, uncles, withdrawals, uint64(len(inreq.Data)), ConvertH512ToPeerID(inreq.PeerId))
 	return nil
 }
 

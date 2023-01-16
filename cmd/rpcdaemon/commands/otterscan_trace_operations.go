@@ -4,7 +4,8 @@ import (
 	"context"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -19,10 +20,10 @@ const (
 )
 
 type InternalOperation struct {
-	Type  OperationType  `json:"type"`
-	From  common.Address `json:"from"`
-	To    common.Address `json:"to"`
-	Value *hexutil.Big   `json:"value"`
+	Type  OperationType     `json:"type"`
+	From  libcommon.Address `json:"from"`
+	To    libcommon.Address `json:"to"`
+	Value *hexutil.Big      `json:"value"`
 }
 
 type OperationsTracer struct {
@@ -38,7 +39,7 @@ func NewOperationsTracer(ctx context.Context) *OperationsTracer {
 	}
 }
 
-func (t *OperationsTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *OperationsTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	if typ == vm.CALL && value.Uint64() != 0 {
 		t.Results = append(t.Results, &InternalOperation{OP_TRANSFER, from, to, (*hexutil.Big)(value.ToBig())})
 		return

@@ -11,11 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/valyala/fastjson"
+
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 func compareBlocks(b, bg *EthBlockByNumber) bool {
@@ -293,22 +294,22 @@ func compareBalances(balance, balanceg *EthBalance) bool {
 	return true
 }
 
-func extractAccountMap(ma *DebugModifiedAccounts) map[common.Address]struct{} {
+func extractAccountMap(ma *DebugModifiedAccounts) map[libcommon.Address]struct{} {
 	r := ma.Result
-	rset := make(map[common.Address]struct{})
+	rset := make(map[libcommon.Address]struct{})
 	for _, a := range r {
 		rset[a] = struct{}{}
 	}
 	return rset
 }
 
-func printStorageRange(sm map[common.Hash]storageEntry) {
+func printStorageRange(sm map[libcommon.Hash]storageEntry) {
 	for k := range sm {
 		fmt.Printf("%x\n", k)
 	}
 }
 
-func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
+func compareStorageRanges(sm, smg map[libcommon.Hash]storageEntry) bool {
 	for k, v := range sm {
 		vg, ok := smg[k]
 		if !ok {
@@ -347,11 +348,11 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	// block in which the transaction was included
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
 	// hash of the transaction
-	TxHash common.Hash    `json:"transactionHash" gencodec:"required"`
+	TxHash libcommon.Hash    `json:"transactionHash" gencodec:"required"`
 	// index of the transaction in the block
 	TxIndex hexutil.Uint  `json:"transactionIndex" gencodec:"required"`
 	// hash of the block in which the transaction was included
-	BlockHash common.Hash `json:"blockHash"`
+	BlockHash libcommon.Hash `json:"blockHash"`
 	// index of the log in the receipt
 	Index hexutil.Uint    `json:"logIndex" gencodec:"required"`
 
@@ -424,16 +425,16 @@ func compareReceipts(receipt, receiptg *EthReceipt) bool {
 	return true
 }
 
-func getTopics(v *fastjson.Value) []common.Hash {
-	topicSet := make(map[common.Hash]struct{})
+func getTopics(v *fastjson.Value) []libcommon.Hash {
+	topicSet := make(map[libcommon.Hash]struct{})
 	r := v.GetArray("result")
 	for _, l := range r {
 		for _, t := range l.GetArray("topics") {
-			topic := common.HexToHash(t.String())
+			topic := libcommon.HexToHash(t.String())
 			topicSet[topic] = struct{}{}
 		}
 	}
-	topics := make([]common.Hash, len(topicSet))
+	topics := make([]libcommon.Hash, len(topicSet))
 	i := 0
 	for t := range topicSet {
 		topics[i] = t
@@ -442,8 +443,8 @@ func getTopics(v *fastjson.Value) []common.Hash {
 	return topics
 }
 
-func compareAccountRanges(erigon, geth map[common.Address]state.DumpAccount) bool {
-	allAddresses := make(map[common.Address]struct{})
+func compareAccountRanges(erigon, geth map[libcommon.Address]state.DumpAccount) bool {
+	allAddresses := make(map[libcommon.Address]struct{})
 	for k := range erigon {
 		allAddresses[k] = struct{}{}
 	}
@@ -494,12 +495,12 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	rg := gethProof.Result
 
 	/*
-	   	Address      common.Address  `json:"address"`
+	   	Address      libcommon.Address  `json:"address"`
 	   	AccountProof []string        `json:"accountProof"`
 	   	Balance      *hexutil.Big    `json:"balance"`
-	   	CodeHash     common.Hash     `json:"codeHash"`
+	   	CodeHash     libcommon.Hash     `json:"codeHash"`
 	   	Nonce        hexutil.Uint64  `json:"nonce"`
-	   	StorageHash  common.Hash     `json:"storageHash"`
+	   	StorageHash  libcommon.Hash     `json:"storageHash"`
 	   	StorageProof []StorageResult `json:"storageProof"`
 	   }
 	   type StorageResult struct {

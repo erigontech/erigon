@@ -3,10 +3,11 @@ package state
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -16,7 +17,6 @@ type HistoryReaderV3 struct {
 	ac    *libstate.Aggregator22Context
 	txNum uint64
 	trace bool
-	tx    kv.Tx
 	ttx   kv.TemporalTx
 }
 
@@ -30,157 +30,58 @@ func (hr *HistoryReaderV3) SetAc(ac *libstate.Aggregator22Context) {
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		hr.ttx = ttx
+	} else {
+		panic("why")
 	}
-	hr.tx = tx
 }
 func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
-func (hr *HistoryReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	var enc []byte
 	var ok bool
 	var err error
-	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGet(temporal.Accounts, address.Bytes(), hr.txNum)
-	} else {
-		enc, ok, err = hr.ac.ReadAccountDataNoStateWithRecent(address.Bytes(), hr.txNum)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if ok {
-		if len(enc) == 0 {
-			if hr.trace {
-				fmt.Printf("ReadAccountData [%x] => []\n", address)
-			}
-			return nil, nil
-		}
-		var a accounts.Account
-		if err := accounts.DeserialiseV3(&a, enc); err != nil {
-			return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
-		}
-		if hr.trace {
-			fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
-		}
-		return &a, nil
-	}
-	enc, err = hr.tx.GetOne(kv.PlainState, address.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
-	if len(enc) == 0 {
+	enc, ok, err = hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
 		}
-		return nil, nil
+		return nil, err
 	}
 	var a accounts.Account
 	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, fmt.Errorf("ReadAccountData(%x): %w", address, err)
 	}
-
 	if hr.trace {
 		fmt.Printf("ReadAccountData [%x] => [nonce: %d, balance: %d, codeHash: %x]\n", address, a.Nonce, &a.Balance, a.CodeHash)
 	}
 	return &a, nil
 }
 
-func (hr *HistoryReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	var enc []byte
-	var ok bool
-	var err error
-	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGet(temporal.Storage, append(address.Bytes(), key.Bytes()...), hr.txNum)
-	} else {
-		enc, ok, err = hr.ac.ReadAccountStorageNoStateWithRecent(address.Bytes(), key.Bytes(), hr.txNum)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		k := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
-		enc, err = hr.tx.GetOne(kv.PlainState, k)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if hr.trace {
-		if enc == nil {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => []\n", address, key.Bytes())
-		} else {
-			fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, key.Bytes(), enc)
-		}
-	}
-	if enc == nil {
-		return nil, nil
-	}
-	return enc, nil
+func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+	enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), hexutility.EncodeTs(incarnation)...), key.Bytes(), hr.txNum)
+	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	var enc []byte
-	var ok bool
-	var err error
-	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGet(temporal.Code, address.Bytes(), hr.txNum)
-	} else {
-		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		enc, err = hr.tx.GetOne(kv.Code, codeHash[:])
-		if err != nil {
-			return nil, err
-		}
-	}
-	if hr.trace {
-		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, enc)
-	}
-	return enc, nil
+	enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	return enc, err
 }
 
-func (hr *HistoryReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	var enc []byte
-	var ok bool
-	var size int
-	var err error
-	if hr.ttx != nil {
-		enc, ok, err = hr.ttx.HistoryGet(temporal.Code, address.Bytes(), hr.txNum)
-	} else {
-		enc, ok, err = hr.ac.ReadAccountCodeNoStateWithRecent(address.Bytes(), hr.txNum)
-	}
-	size = len(enc)
-	if err != nil {
-		return 0, err
-	}
-	if !ok {
-		enc, err := hr.tx.GetOne(kv.Code, codeHash[:])
-		if err != nil {
-			return 0, err
-		}
-		size = len(enc)
-	}
-	if err != nil {
-		return 0, err
-	}
-	if hr.trace {
-		fmt.Printf("ReadAccountCodeSize [%x] => [%d]\n", address, size)
-	}
-	return size, nil
+func (hr *HistoryReaderV3) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+	enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	return len(enc), err
 }
 
-func (hr *HistoryReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (hr *HistoryReaderV3) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
 /*
-func (s *HistoryReaderV3) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (s *HistoryReaderV3) ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error {
 	acc, err := s.ReadAccountData(addr)
 	if err != nil {
 		return err
@@ -217,7 +118,7 @@ func (s *HistoryReaderV3) ForEachStorage(addr common.Address, startLocation comm
 	}
 	numDeletes := st.Len() - overrideCounter
 
-	var lastKey common.Hash
+	var lastKey libcommon.Hash
 	iterator := s.ac.IterateStorageHistory(startLocation.Bytes(), nil, s.txNum)
 	for iterator.HasNext() {
 		k, vs, p := iterator.Next()
@@ -265,7 +166,7 @@ func (s *HistoryReaderV3) ForEachStorage(addr common.Address, startLocation comm
 */
 
 /*
-func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Hash, cb func(key, seckey common.Hash, value uint256.Int) bool, maxResults int) error {
+func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcommon.Hash, cb func(key, seckey libcommon.Hash, value uint256.Int) bool, maxResults int) error {
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
@@ -280,7 +181,7 @@ func (s *PlainState) ForEachStorage(addr common.Address, startLocation common.Ha
 	}
 	binary.BigEndian.PutUint64(k[length.Addr:], acc.Incarnation)
 	copy(k[length.Addr+length.Incarnation:], startLocation[:])
-	var lastKey common.Hash
+	var lastKey libcommon.Hash
 	overrideCounter := 0
 	min := &storageItem{key: startLocation}
 	if t, ok := s.storage[addr]; ok {
