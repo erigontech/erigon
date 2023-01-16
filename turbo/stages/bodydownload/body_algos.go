@@ -36,9 +36,6 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
-	log.Debug("UpdateFromDb", "bd.requestedLow", bd.requestedLow)
-	bd.lowWaitUntil = 0
-	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
 	bd.requestedMap = make(map[TripleHash]uint64)
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
@@ -74,14 +71,13 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 
 // RequestMoreBodies - returns nil if nothing to request
 func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
-	log.Debug("RequestMoreBodies", "bd.requestedLow", bd.requestedLow)
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
 	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
 		// Check if we reached the highest allowed request block number, and turn back
-		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
+		if blockNum >= bd.maxProgress {
 			break // Avoid tight loop
 		}
 		if bd.delivered.Contains(blockNum) {
@@ -220,7 +216,6 @@ func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
 func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals, lenOfP2PMsg uint64, peerID [64]byte) {
-	log.Debug("DeliverBodies", "peer", fmt.Sprintf("%x", peerID), "len", len(txs))
 	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
@@ -270,7 +265,6 @@ Loop:
 		default:
 			break Loop
 		}
-		log.Debug("GetDeliveried", "peer", fmt.Sprintf("%x", delivery.peerID), "len", len(delivery.txs))
 
 		if delivery.txs == nil {
 			log.Warn("nil transactions delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
@@ -302,11 +296,9 @@ Loop:
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
 			blockNum, ok := bd.requestedMap[tripleHash]
 			if !ok {
-				log.Debug("undelivered")
 				undelivered++
 				continue
 			}
-			log.Debug("deliverying", "blockNum", blockNum)
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
@@ -341,7 +333,6 @@ func (bd *BodyDownload) NextProcessingCount() uint64 {
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
 	bd.requestedLow += i
-	log.Debug("NextProcessingCount", "bd.requestedLow", bd.requestedLow)
 	return i
 }
 
@@ -403,7 +394,7 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
-	for bd.bodyCacheSize > 256*1024*1024 {
+	for bd.bodyCacheSize > bd.bodyCacheLimit {
 		item, _ := bd.bodyCache.DeleteMax()
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)

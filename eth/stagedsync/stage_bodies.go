@@ -278,7 +278,7 @@ func BodiesForward(
 			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
-			log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
+			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.bd.DeliveryNotify:

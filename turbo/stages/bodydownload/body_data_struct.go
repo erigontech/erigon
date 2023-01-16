@@ -43,13 +43,11 @@ type BodyDownload struct {
 	requests         map[uint64]*BodyRequest
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
-	requestHigh      uint64
-	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
-	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	deliveredCount   float64
 	wastedCount      float64
 	bodyCache        *btree.BTreeG[BodyTreeItem]
 	bodyCacheSize    int
+	bodyCacheLimit   int // Limit of body Cache size
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -61,10 +59,10 @@ type BodyRequest struct {
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownload {
+func NewBodyDownload(engine consensus.Engine, bodyCacheLimit int) *BodyDownload {
 	bd := &BodyDownload{
 		requestedMap:     make(map[TripleHash]uint64),
-		outstandingLimit: uint64(outstandingLimit),
+		bodyCacheLimit:   bodyCacheLimit,
 		delivered:        roaring64.New(),
 		deliveriesH:      make(map[uint64]*types.Header),
 		requests:         make(map[uint64]*BodyRequest),
@@ -75,10 +73,8 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		// that there is something to collect
 		DeliveryNotify: make(chan struct{}, 1),
 		// delivery channel needs to have enough capacity not to create contention
-		// between delivery and collections. since we assume that there will be
-		// no more than `outstandingLimit+MaxBodiesInRequest` requested
-		// deliveries, this is a good number for the channel capacity
-		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
+		// between delivery and collections
+		deliveryCh: make(chan Delivery, 2*MaxBodiesInRequest),
 		Engine:     engine,
 		bodyCache:  btree.NewG[BodyTreeItem](32, func(a, b BodyTreeItem) bool { return a.blockNum < b.blockNum }),
 	}
