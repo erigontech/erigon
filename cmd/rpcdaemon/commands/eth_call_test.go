@@ -78,7 +78,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	m, bankAddress, contractAddress := chainWithDeployedContract(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 
-	prune(t, m.DB, pruneTo)
+	pruneTest(t, m.DB, pruneTo)
 
 	agg := m.HistoryV3Components()
 
@@ -375,7 +375,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 	return m, bankAddress, contractAddr
 }
 
-func prune(t *testing.T, db kv.RwDB, pruneTo uint64) {
+func pruneTest(t *testing.T, db kv.RwDB, pruneTo uint64) {
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	assert.NoError(t, err)
