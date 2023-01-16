@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"runtime"
 	"sort"
 	"sync"
@@ -44,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	emath "github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
@@ -83,6 +85,7 @@ type Config struct {
 	MinFeeCap             uint64
 	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
 	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
+	OverrideShanghaiTime  *big.Int
 }
 
 var DefaultConfig = Config{
@@ -95,9 +98,10 @@ var DefaultConfig = Config{
 	BaseFeeSubPoolLimit: 10_000,
 	QueuedSubPoolLimit:  10_000,
 
-	MinFeeCap:    1,
-	AccountSlots: 16, //TODO: to choose right value (16 to be compatible with Geth)
-	PriceBump:    10, // Price bump percentage to replace an already existing transaction
+	MinFeeCap:            1,
+	AccountSlots:         16, //TODO: to choose right value (16 to be compatible with Geth)
+	PriceBump:            10, // Price bump percentage to replace an already existing transaction
+	OverrideShanghaiTime: nil,
 }
 
 // Pool is interface for the transaction pool
@@ -166,6 +170,7 @@ const (
 	InsufficientFunds   DiscardReason = 19
 	NotReplaced         DiscardReason = 20 // There was an existing transaction with the same sender and nonce, not enough price bump to replace
 	DuplicateHash       DiscardReason = 21 // There was an existing transaction with the same hash
+	InitCodeTooLarge    DiscardReason = 22 // EIP-3860 - transaction init code is too large
 )
 
 func (r DiscardReason) String() string {
@@ -214,6 +219,8 @@ func (r DiscardReason) String() string {
 		return "could not replace existing tx"
 	case DuplicateHash:
 		return "existing tx with same hash"
+	case InitCodeTooLarge:
+		return "initcode too large"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}
@@ -320,9 +327,11 @@ type TxPool struct {
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
 	blockGasLimit           atomic.Uint64
+	shanghaiTime            *big.Int
+	isPostShanghai          atomic.Bool
 }
 
-func New(newTxs chan types.Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int) (*TxPool, error) {
+func New(newTxs chan types.Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU(10_000, nil)
 	if err != nil {
 		return nil, err
@@ -360,6 +369,7 @@ func New(newTxs chan types.Hashes, coreDB kv.RoDB, cfg Config, cache kvcache.Cac
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		promoted:                make(types.Hashes, 0, 32*1024),
+		shanghaiTime:            shanghaiTime,
 	}, nil
 }
 
@@ -608,6 +618,8 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		return false, 0, nil // Too early
 	}
 
+	isShanghai := p.isShanghai()
+
 	txs.Resize(uint(cmp.Min(int(n), len(p.pending.best.ms))))
 	var toRemove []*metaTx
 	count := 0
@@ -645,7 +657,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 			// make sure we have enough gas in the caller to add this transaction.
 			// not an exact science using intrinsic gas but as close as we could hope for at
 			// this stage
-			intrinsicGas, _ := CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true)
+			intrinsicGas, _ := CalcIntrinsicGas(uint64(mt.Tx.DataLen), uint64(mt.Tx.DataNonZeroLen), nil, mt.Tx.Creation, true, true, isShanghai)
 			if intrinsicGas > availableGas {
 				// we might find another TX with a low enough intrinsic gas to include so carry on
 				continue
@@ -712,6 +724,13 @@ func (p *TxPool) AddRemoteTxs(_ context.Context, newTxs types.TxSlots) {
 }
 
 func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.CacheView) DiscardReason {
+	isShanghai := p.isShanghai()
+	if isShanghai {
+		if txn.DataLen > fixedgas.MaxInitCodeSize {
+			return InitCodeTooLarge
+		}
+	}
+
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !isLocal && uint256.NewInt(p.cfg.MinFeeCap).Cmp(&txn.FeeCap) == 1 {
 		if txn.Traced {
@@ -719,7 +738,7 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return UnderPriced
 	}
-	gas, reason := CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true)
+	gas, reason := CalcIntrinsicGas(uint64(txn.DataLen), uint64(txn.DataNonZeroLen), nil, txn.Creation, true, true, isShanghai)
 	if txn.Traced {
 		log.Info(fmt.Sprintf("TX TRACING: validateTx intrinsic gas idHash=%x gas=%d", txn.IDHash, gas))
 	}
@@ -761,6 +780,31 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		return InsufficientFunds
 	}
 	return Success
+}
+
+func (p *TxPool) isShanghai() bool {
+	// once this flag has been set for the first time we no longer need to check the timestamp
+	set := p.isPostShanghai.Load()
+	if set {
+		return true
+	}
+	if p.shanghaiTime == nil {
+		return false
+	}
+	shanghaiTime := p.shanghaiTime.Uint64()
+
+	// a zero here means shanghai is always active
+	if shanghaiTime == 0 {
+		p.isPostShanghai.Swap(true)
+		return true
+	}
+
+	now := big.NewInt(time.Now().Unix())
+	is := now.Uint64() >= shanghaiTime
+	if is {
+		p.isPostShanghai.Swap(true)
+	}
+	return is
 }
 
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
@@ -1805,7 +1849,7 @@ func (p *TxPool) deprecatedForEach(_ context.Context, f func(rlp, sender []byte,
 }
 
 // CalcIntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028 bool) (uint64, DiscardReason) {
+func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessList, isContractCreation, isHomestead, isEIP2028, isShanghai bool) (uint64, DiscardReason) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -1822,22 +1866,67 @@ func CalcIntrinsicGas(dataLen, dataNonZeroLen uint64, accessList types.AccessLis
 		if isEIP2028 {
 			nonZeroGas = fixedgas.TxDataNonZeroGasEIP2028
 		}
-		if (math.MaxUint64-gas)/nonZeroGas < nz {
+
+		product, overflow := emath.SafeMul(nz, nonZeroGas)
+		if overflow {
 			return 0, GasUintOverflow
 		}
-		gas += nz * nonZeroGas
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0, GasUintOverflow
+		}
 
 		z := dataLen - nz
-		if (math.MaxUint64-gas)/fixedgas.TxDataZeroGas < z {
+
+		product, overflow = emath.SafeMul(z, fixedgas.TxDataZeroGas)
+		if overflow {
 			return 0, GasUintOverflow
 		}
-		gas += z * fixedgas.TxDataZeroGas
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0, GasUintOverflow
+		}
+
+		if isContractCreation && isShanghai {
+			numWords := toWordSize(dataLen)
+			product, overflow = emath.SafeMul(numWords, fixedgas.InitCodeWordGas)
+			if overflow {
+				return 0, GasUintOverflow
+			}
+			gas, overflow = emath.SafeAdd(gas, product)
+			if overflow {
+				return 0, GasUintOverflow
+			}
+		}
 	}
 	if accessList != nil {
-		gas += uint64(len(accessList)) * fixedgas.TxAccessListAddressGas
-		gas += uint64(accessList.StorageKeys()) * fixedgas.TxAccessListStorageKeyGas
+		product, overflow := emath.SafeMul(uint64(len(accessList)), fixedgas.TxAccessListAddressGas)
+		if overflow {
+			return 0, GasUintOverflow
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0, GasUintOverflow
+		}
+
+		product, overflow = emath.SafeMul(uint64(accessList.StorageKeys()), fixedgas.TxAccessListStorageKeyGas)
+		if overflow {
+			return 0, GasUintOverflow
+		}
+		gas, overflow = emath.SafeAdd(gas, product)
+		if overflow {
+			return 0, GasUintOverflow
+		}
 	}
 	return gas, Success
+}
+
+// toWordSize returns the ceiled word size required for memory expansion.
+func toWordSize(size uint64) uint64 {
+	if size > math.MaxUint64-31 {
+		return math.MaxUint64/32 + 1
+	}
+	return (size + 31) / 32
 }
 
 var PoolChainConfigKey = []byte("chain_config")
