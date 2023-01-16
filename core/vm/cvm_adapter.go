@@ -37,6 +37,10 @@ func (cvm *CVMAdapter) Config() Config {
 	return cvm.Cvm.Config()
 }
 
+func (cvm *CVMAdapter) Cancel() {
+	// no-op
+}
+
 func (cvm *CVMAdapter) ChainConfig() *chain.Config {
 	return params.AllProtocolChanges
 }
