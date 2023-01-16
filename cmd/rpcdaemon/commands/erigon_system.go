@@ -47,6 +47,8 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 	var rpcBlockNum rpc.BlockNumber
 	if rpcBlockNumPtr == nil {
 		rpcBlockNum = rpc.LatestExecutedBlockNumber
+	} else {
+		rpcBlockNum = *rpcBlockNumPtr
 	}
 
 	var blockNum uint64
