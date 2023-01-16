@@ -79,7 +79,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	for blockNum := uint64(bd.requestedLow); len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
 		// Check if we reached the highest allowed request block number, and turn back
 		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
 			break // Avoid tight loop
