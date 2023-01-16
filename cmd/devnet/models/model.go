@@ -68,8 +68,6 @@ const (
 	PrivateApiParamNoMine = "localhost:9091"
 	// HttpApiParam is the http.api default parameter for rpcdaemon
 	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity"
-	//// WSParam is the ws default parameter for rpcdaemon
-	//WSParam = ""
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
@@ -133,8 +131,9 @@ var (
 
 	// NewHeadsChan is the block cache the eth_NewHeads
 	NewHeadsChan chan interface{}
-	// OldHeads holds a list of visited blocks to recheck transactions
-	//OldHeads []string
+
+	//QuitNodeChan is the channel for receiving a quit signal on all nodes
+	QuitNodeChan chan bool
 )
 
 type (
