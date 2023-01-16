@@ -27,10 +27,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -181,7 +183,7 @@ type Config struct {
 
 	ImportMode bool
 
-	BadBlockHash common.Hash // hash of the block marked as bad
+	BadBlockHash libcommon.Hash // hash of the block marked as bad
 
 	Snapshot   Snapshot
 	Downloader *downloadercfg.Cfg
@@ -193,7 +195,7 @@ type Config struct {
 	ExternalSnapshotDownloaderAddr string
 
 	// Whitelist of required block number -> hash values to accept
-	Whitelist map[uint64]common.Hash `toml:"-"`
+	Whitelist map[uint64]libcommon.Hash `toml:"-"`
 
 	// Mining options
 	Miner params.MiningConfig
@@ -202,9 +204,9 @@ type Config struct {
 	Ethash ethash.Config
 
 	Clique params.ConsensusSnapshotConfig
-	Aura   params.AuRaConfig
-	Parlia params.ParliaConfig
-	Bor    params.BorConfig
+	Aura   chain.AuRaConfig
+	Parlia chain.ParliaConfig
+	Bor    chain.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool core.TxPoolConfig

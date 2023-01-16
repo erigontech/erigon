@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
@@ -96,7 +96,7 @@ func (b *WitnessBuilder) makeHashNode(n node, force bool, hashNodeFunc HashNodeF
 	case hashNode:
 		return n, nil
 	default:
-		var hash common.Hash
+		var hash libcommon.Hash
 		if _, err := hashNodeFunc(n, force, hash[:]); err != nil {
 			return hashNode{}, err
 		}
@@ -110,7 +110,7 @@ func (b *WitnessBuilder) addHashOp(n hashNode) error {
 	}
 
 	var op OperatorHash
-	op.Hash = common.BytesToHash(n.hash)
+	op.Hash = libcommon.BytesToHash(n.hash)
 
 	b.operands = append(b.operands, &op)
 	return nil

@@ -25,8 +25,9 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -74,7 +75,7 @@ func TestCalcDifficulty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	config := &params.ChainConfig{HomesteadBlock: big.NewInt(1150000)}
+	config := &chain.Config{HomesteadBlock: big.NewInt(1150000)}
 
 	for name, test := range tests {
 		number := new(big.Int).Sub(test.CurrentBlocknumber, big.NewInt(1))
@@ -103,8 +104,8 @@ func randSlice(min, max uint32) []byte {
 func TestDifficultyCalculators(t *testing.T) {
 	rand.Seed(2)
 
-	wrap := func(f func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int) func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
-		return func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash common.Hash) *big.Int {
+	wrap := func(f func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int) func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int {
+		return func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentUncleHash libcommon.Hash) *big.Int {
 			return f(time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
 		}
 	}
@@ -126,7 +127,7 @@ func TestDifficultyCalculators(t *testing.T) {
 		}
 		bombDelay := rand.Uint64() % 50_000_000
 		for i, pair := range []struct {
-			bigFn  func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, uncleHash common.Hash) *big.Int
+			bigFn  func(time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, uncleHash libcommon.Hash) *big.Int
 			u256Fn func(time uint64, parent *types.Header) *big.Int
 		}{
 			{wrap(FrontierDifficultyCalulator), CalcDifficultyFrontierU256},
@@ -152,7 +153,7 @@ func BenchmarkDifficultyCalculator(b *testing.B) {
 	x1 := makeDifficultyCalculator(1000000)
 	x2 := MakeDifficultyCalculatorU256(1000000)
 	h := &types.Header{
-		ParentHash: common.Hash{},
+		ParentHash: libcommon.Hash{},
 		UncleHash:  types.EmptyUncleHash,
 		Difficulty: big.NewInt(0xffffff),
 		Number:     big.NewInt(500000),

@@ -7,6 +7,8 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -24,7 +26,7 @@ type JsonStreamLogger struct {
 	firstCapture bool
 
 	locations common.Hashes // For sorting
-	storage   map[common.Address]Storage
+	storage   map[libcommon.Address]Storage
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
@@ -36,7 +38,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 	logger := &JsonStreamLogger{
 		ctx:          ctx,
 		stream:       stream,
-		storage:      make(map[common.Address]Storage),
+		storage:      make(map[libcommon.Address]Storage),
 		firstCapture: true,
 	}
 	if cfg != nil {
@@ -50,11 +52,11 @@ func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 
-func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -89,7 +91,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 		// capture SLOAD opcodes and record the read entry in the local storage
 		if op == vm.SLOAD && stack.Len() >= 1 {
 			var (
-				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
 				value   uint256.Int
 			)
 			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
@@ -99,8 +101,8 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 		// capture SSTORE opcodes and record the written entry in the local storage.
 		if op == vm.SSTORE && stack.Len() >= 2 {
 			var (
-				value   = common.Hash(stack.Data[stack.Len()-2].Bytes32())
-				address = common.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   = libcommon.Hash(stack.Data[stack.Len()-2].Bytes32())
+				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
 			)
 			l.storage[contract.Address()][address] = value
 			outputStorage = true

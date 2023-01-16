@@ -2,19 +2,21 @@ package changeset
 
 import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/ethdb"
 )
 
 // GetModifiedAccounts returns a list of addresses that were modified in the block range
 // [startNum:endNum)
-func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]common.Address, error) {
-	changedAddrs := make(map[common.Address]struct{})
+func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]libcommon.Address, error) {
+	changedAddrs := make(map[libcommon.Address]struct{})
 	if err := ForRange(db, kv.AccountChangeSet, startNum, endNum, func(blockN uint64, k, v []byte) error {
-		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+		changedAddrs[libcommon.BytesToAddress(k)] = struct{}{}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -25,7 +27,7 @@ func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]common.Address, e
 	}
 
 	idx := 0
-	result := make([]common.Address, len(changedAddrs))
+	result := make([]libcommon.Address, len(changedAddrs))
 	for addr := range changedAddrs {
 		copy(result[idx][:], addr[:])
 		idx++
@@ -42,7 +44,7 @@ func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint6
 		return err
 	}
 	defer c.Close()
-	return ethdb.Walk(c, common2.EncodeTs(from), 0, func(k, v []byte) (bool, error) {
+	return ethdb.Walk(c, hexutility.EncodeTs(from), 0, func(k, v []byte) (bool, error) {
 		var err error
 		blockN, k, v, err = historyv2.FromDBFormat(k, v)
 		if err != nil {

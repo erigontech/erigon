@@ -2,14 +2,15 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // TripleHash is type to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
-type TripleHash [3 * common.HashLength]byte
+type TripleHash [3 * length.Hash]byte
 
 const MaxBodiesInRequest = 1024
 
@@ -47,7 +48,7 @@ type BodyDownload struct {
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
-	Hashes    []common.Hash
+	Hashes    []libcommon.Hash
 	peerID    [64]byte
 	waitUntil uint64
 }

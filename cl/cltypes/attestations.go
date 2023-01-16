@@ -4,10 +4,13 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	ssz "github.com/prysmaticlabs/fastssz"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 // Full signed attestation
@@ -185,7 +188,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 	if fieldSet&2 > 0 {
 		data.BeaconBlockHash = defaultData.BeaconBlockHash
 	} else {
-		data.BeaconBlockHash = common.BytesToHash(buf[n : n+32])
+		data.BeaconBlockHash = libcommon.BytesToHash(buf[n : n+32])
 		n += 32
 	}
 
@@ -199,7 +202,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 	if fieldSet&8 > 0 {
 		data.Source.Root = defaultData.Source.Root
 	} else {
-		data.Source.Root = common.BytesToHash(buf[n : n+32])
+		data.Source.Root = libcommon.BytesToHash(buf[n : n+32])
 		n += 32
 	}
 
@@ -213,7 +216,7 @@ func DecodeAttestationDataForStorage(buf []byte, defaultData *AttestationData) (
 	if fieldSet&32 > 0 {
 		data.Target.Root = defaultData.Target.Root
 	} else {
-		data.Target.Root = common.BytesToHash(buf[n : n+32])
+		data.Target.Root = libcommon.BytesToHash(buf[n : n+32])
 		n += 32
 	}
 	return
@@ -524,7 +527,7 @@ func (i *IndexedAttestation) HashTreeRootWith(hh *ssz.Hasher) (err error) {
 type AttestationData struct {
 	Slot            uint64
 	Index           uint64
-	BeaconBlockHash common.Hash
+	BeaconBlockHash libcommon.Hash
 	Source          *Checkpoint
 	Target          *Checkpoint
 }
@@ -546,6 +549,19 @@ func (a *AttestationData) MarshalSSZ() ([]byte, error) {
 	copy(buf[48:], source)
 	copy(buf[88:], target)
 	return buf, nil
+}
+
+// MarshalSSZ ssz marshals the AttestationData object
+func (a *AttestationData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+	dst = buf
+
+	var dataMarshalled []byte
+	dataMarshalled, err = a.MarshalSSZ()
+	if err != nil {
+		return
+	}
+	dst = append(dst, dataMarshalled...)
+	return
 }
 
 // UnmarshalSSZ ssz unmarshals the AttestationData object
@@ -579,7 +595,7 @@ func (a *AttestationData) UnmarshalSSZ(buf []byte) error {
 
 // SizeSSZ returns the ssz encoded size in bytes for the AttestationData object
 func (a *AttestationData) SizeSSZ() int {
-	return 2*common.BlockNumberLength + common.HashLength + a.Source.SizeSSZ()*2
+	return 2*common.BlockNumberLength + length.Hash + a.Source.SizeSSZ()*2
 }
 
 // HashTreeRoot ssz hashes the AttestationData object

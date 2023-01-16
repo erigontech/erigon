@@ -17,7 +17,8 @@
 package core
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -29,7 +30,7 @@ type RemovedLogsEvent struct{ Logs []*types.Log }
 
 type ChainEvent struct {
 	Block *types.Block
-	Hash  common.Hash
+	Hash  libcommon.Hash
 	Logs  []*types.Log
 }
 

@@ -1,7 +1,8 @@
 package bodydownload
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -21,7 +22,7 @@ func NewPrefetchedBlocks() *PrefetchedBlocks {
 	return &PrefetchedBlocks{blocks: cache}
 }
 
-func (pb *PrefetchedBlocks) Get(hash common.Hash) (*types.Header, *types.RawBody) {
+func (pb *PrefetchedBlocks) Get(hash libcommon.Hash) (*types.Header, *types.RawBody) {
 	if val, ok := pb.blocks.Get(hash); ok && val != nil {
 		if block, ok := val.(types.RawBlock); ok {
 			return block.Header, block.Body

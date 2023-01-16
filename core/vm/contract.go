@@ -18,13 +18,12 @@ package vm
 
 import (
 	"github.com/holiman/uint256"
-
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // ContractRef is a reference to the contract's backing object
 type ContractRef interface {
-	Address() common.Address
+	Address() libcommon.Address
 }
 
 // AccountRef implements ContractRef.
@@ -34,10 +33,10 @@ type ContractRef interface {
 // proves difficult because of the cached jump destinations which
 // are fetched from the parent contract (i.e. the caller), which
 // is a ContractRef.
-type AccountRef common.Address
+type AccountRef libcommon.Address
 
 // Address casts AccountRef to a Address
-func (ar AccountRef) Address() common.Address { return (common.Address)(ar) }
+func (ar AccountRef) Address() libcommon.Address { return (libcommon.Address)(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef
@@ -45,16 +44,16 @@ type Contract struct {
 	// CallerAddress is the result of the caller which initialised this
 	// contract. However when the "call method" is delegated this value
 	// needs to be initialised to that of the caller's caller.
-	CallerAddress common.Address
+	CallerAddress libcommon.Address
 	caller        ContractRef
 	self          ContractRef
-	jumpdests     map[common.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
-	analysis      []uint64                 // Locally cached result of JUMPDEST analysis
+	jumpdests     map[libcommon.Hash][]uint64 // Aggregated result of JUMPDEST analysis.
+	analysis      []uint64                    // Locally cached result of JUMPDEST analysis
 	skipAnalysis  bool
 
 	Code     []byte
-	CodeHash common.Hash
-	CodeAddr *common.Address
+	CodeHash libcommon.Hash
+	CodeAddr *libcommon.Address
 	Input    []byte
 
 	Gas   uint64
@@ -69,7 +68,7 @@ func NewContract(caller ContractRef, object ContractRef, value *uint256.Int, gas
 		// Reuse JUMPDEST analysis from parent context if available.
 		c.jumpdests = parent.jumpdests
 	} else {
-		c.jumpdests = make(map[common.Hash][]uint64)
+		c.jumpdests = make(map[libcommon.Hash][]uint64)
 	}
 
 	// Gas should be a pointer so it can safely be reduced through the run
@@ -112,7 +111,7 @@ func (c *Contract) isCode(udest uint64) bool {
 	// Do we have a contract hash already?
 	// If we do have a hash, that means it's a 'regular' contract. For regular
 	// contracts ( not temporary initcode), we store the analysis in a map
-	if c.CodeHash != (common.Hash{}) {
+	if c.CodeHash != (libcommon.Hash{}) {
 		// Does parent context have the analysis?
 		analysis, exist := c.jumpdests[c.CodeHash]
 		if !exist {
@@ -162,7 +161,7 @@ func (c *Contract) GetOp(n uint64) OpCode {
 //
 // Caller will recursively call caller when the contract is a delegate
 // call, including that of caller's caller.
-func (c *Contract) Caller() common.Address {
+func (c *Contract) Caller() libcommon.Address {
 	return c.CallerAddress
 }
 
@@ -176,7 +175,7 @@ func (c *Contract) UseGas(gas uint64) (ok bool) {
 }
 
 // Address returns the contracts address
-func (c *Contract) Address() common.Address {
+func (c *Contract) Address() libcommon.Address {
 	return c.self.Address()
 }
 
@@ -187,7 +186,7 @@ func (c *Contract) Value() *uint256.Int {
 
 // SetCallCode sets the code of the contract and address of the backing data
 // object
-func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []byte) {
+func (c *Contract) SetCallCode(addr *libcommon.Address, hash libcommon.Hash, code []byte) {
 	c.Code = code
 	c.CodeHash = hash
 	c.CodeAddr = addr
@@ -195,7 +194,7 @@ func (c *Contract) SetCallCode(addr *common.Address, hash common.Hash, code []by
 
 // SetCodeOptionalHash can be used to provide code, but it's optional to provide hash.
 // In case hash is not provided, the jumpdest analysis will not be saved to the parent context
-func (c *Contract) SetCodeOptionalHash(addr *common.Address, codeAndHash *codeAndHash) {
+func (c *Contract) SetCodeOptionalHash(addr *libcommon.Address, codeAndHash *codeAndHash) {
 	c.Code = codeAndHash.code
 	c.CodeHash = codeAndHash.hash
 	c.CodeAddr = addr

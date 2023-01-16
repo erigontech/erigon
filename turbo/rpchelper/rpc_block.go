@@ -3,8 +3,9 @@ package rpchelper
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -17,7 +18,7 @@ var UnknownBlockError = &rpc.CustomError{
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
+	if forkchoiceHeadHash != (libcommon.Hash{}) {
 		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
 		if forkchoiceHeadNum != nil {
 			return *forkchoiceHeadNum, nil
@@ -34,7 +35,7 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if forkchoiceFinalizedHash != (common.Hash{}) {
+	if forkchoiceFinalizedHash != (libcommon.Hash{}) {
 		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
 		if forkchoiceFinalizedNum != nil {
 			return *forkchoiceFinalizedNum, nil
@@ -46,7 +47,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
 	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
-	if forkchoiceSafeHash != (common.Hash{}) {
+	if forkchoiceSafeHash != (libcommon.Hash{}) {
 		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
 		if forkchoiceSafeNum != nil {
 			return *forkchoiceSafeNum, nil

@@ -22,15 +22,18 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/turbo/stages"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenerateChain(t *testing.T) {
@@ -51,7 +54,7 @@ func TestGenerateChain(t *testing.T) {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &core.Genesis{
-		Config: &params.ChainConfig{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
+		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := stages.MockWithGenesis(t, gspec, key1, false)

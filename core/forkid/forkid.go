@@ -26,10 +26,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var (
@@ -54,12 +56,12 @@ type ID struct {
 type Filter func(id ID) error
 
 // NewID calculates the Ethereum fork ID from the chain config, genesis hash, head height and time.
-func NewID(config *params.ChainConfig, genesis common.Hash, headHeight, headTime uint64) ID {
+func NewID(config *chain.Config, genesis libcommon.Hash, headHeight, headTime uint64) ID {
 	heightForks, timeForks := GatherForks(config)
 	return NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
-func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) ID {
+func NewIDFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) ID {
 	// Calculate the starting checksum from the genesis hash
 	hash := crc32.ChecksumIEEE(genesis[:])
 
@@ -85,7 +87,7 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
 
-func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) [4]byte {
+func NextForkHashFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) [4]byte {
 	id := NewIDFromForks(heightForks, timeForks, genesis, headHeight, headTime)
 	if id.Next == 0 {
 		return id.Hash
@@ -97,12 +99,12 @@ func NextForkHashFromForks(heightForks, timeForks []uint64, genesis common.Hash,
 
 // NewFilterFromForks creates a filter that returns if a fork ID should be rejected or not
 // based on the provided current head.
-func NewFilterFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
+func NewFilterFromForks(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
 	return newFilter(heightForks, timeForks, genesis, headHeight, headTime)
 }
 
 // NewStaticFilter creates a filter at block zero.
-func NewStaticFilter(config *params.ChainConfig, genesis common.Hash) Filter {
+func NewStaticFilter(config *chain.Config, genesis libcommon.Hash) Filter {
 	heightForks, timeForks := GatherForks(config)
 	return newFilter(heightForks, timeForks, genesis, 0, 0)
 }
@@ -113,7 +115,7 @@ func forkIsTimeBased(fork uint64) bool {
 	return fork >= 1670000000
 }
 
-func newFilter(heightForks, timeForks []uint64, genesis common.Hash, headHeight, headTime uint64) Filter {
+func newFilter(heightForks, timeForks []uint64, genesis libcommon.Hash, headHeight, headTime uint64) Filter {
 	var forks []uint64
 	forks = append(forks, heightForks...)
 	forks = append(forks, timeForks...)
@@ -213,9 +215,9 @@ func checksumToBytes(hash uint32) [4]byte {
 }
 
 // GatherForks gathers all the known forks and creates a sorted list out of them.
-func GatherForks(config *params.ChainConfig) (heightForks []uint64, timeForks []uint64) {
+func GatherForks(config *chain.Config) (heightForks []uint64, timeForks []uint64) {
 	// Gather all the fork block numbers via reflection
-	kind := reflect.TypeOf(params.ChainConfig{})
+	kind := reflect.TypeOf(chain.Config{})
 	conf := reflect.ValueOf(config).Elem()
 
 	for i := 0; i < kind.NumField(); i++ {

@@ -7,17 +7,18 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
 	chainConfig = params.AllProtocolChanges
-	address     = common.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+	address     = libcommon.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 )
 
 func TestStarknetTxDecodeRLP(t *testing.T) {
@@ -114,7 +115,7 @@ func generatePrivateKey(t testing.TB) string {
 	return hex.EncodeToString(crypto.FromECDSA(privateKey))
 }
 
-func starknetTransaction(chainId *big.Int, address common.Address) *StarknetTransaction {
+func starknetTransaction(chainId *big.Int, address libcommon.Address) *StarknetTransaction {
 	return &StarknetTransaction{
 		CommonTx: CommonTx{
 			ChainID: uint256.NewInt(chainId.Uint64()),

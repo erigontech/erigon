@@ -4,10 +4,11 @@ import (
 	"context"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -17,7 +18,7 @@ func TestFiltersDeadlock_Test(t *testing.T) {
 	f := rpchelper.New(context.TODO(), nil, nil, nil, func() {})
 	crit := filters.FilterCriteria{
 		Addresses: nil,
-		Topics:    [][]common.Hash{},
+		Topics:    [][]libcommon.Hash{},
 	}
 	subCount := 20
 	logCount := 100

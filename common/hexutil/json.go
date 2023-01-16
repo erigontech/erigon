@@ -23,6 +23,8 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 )
 
 var (
@@ -71,38 +73,7 @@ func (b *Bytes) UnmarshalText(input []byte) error {
 
 // String returns the hex encoding of b.
 func (b Bytes) String() string {
-	return Encode(b)
-}
-
-// UnmarshalFixedJSON decodes the input as a string with 0x prefix. The length of out
-// determines the required input length. This function is commonly used to implement the
-// UnmarshalJSON method for fixed-size types.
-func UnmarshalFixedJSON(typ reflect.Type, input, out []byte) error {
-	if !isString(input) {
-		return errNonString(typ)
-	}
-	return wrapTypeError(UnmarshalFixedText(typ.String(), input[1:len(input)-1], out), typ)
-}
-
-// UnmarshalFixedText decodes the input as a string with 0x prefix. The length of out
-// determines the required input length. This function is commonly used to implement the
-// UnmarshalText method for fixed-size types.
-func UnmarshalFixedText(typname string, input, out []byte) error {
-	raw, err := checkText(input, true)
-	if err != nil {
-		return err
-	}
-	if len(raw)/2 != len(out) {
-		return fmt.Errorf("hex string has length %d, want %d for %s", len(raw), len(out)*2, typname)
-	}
-	// Pre-verify syntax before modifying out.
-	for _, b := range raw {
-		if decodeNibble(b) == badNibble {
-			return ErrSyntax
-		}
-	}
-	hex.Decode(out, raw)
-	return nil
+	return hexutility.Encode(b)
 }
 
 // UnmarshalFixedUnprefixedText decodes the input as a string with optional 0x prefix. The

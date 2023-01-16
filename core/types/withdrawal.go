@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"io"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -33,10 +35,10 @@ import (
 // Withdrawal represents a validator withdrawal from the consensus layer.
 // See EIP-4895: Beacon chain push withdrawals as operations.
 type Withdrawal struct {
-	Index     uint64         `json:"index"`          // monotonically increasing identifier issued by consensus layer
-	Validator uint64         `json:"validatorIndex"` // index of validator associated with withdrawal
-	Address   common.Address `json:"address"`        // target address for withdrawn ether
-	Amount    uint64         `json:"amount"`         // value of withdrawal in GWei
+	Index     uint64            `json:"index"`          // monotonically increasing identifier issued by consensus layer
+	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
+	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
+	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -98,7 +100,7 @@ func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
 
 func (obj *Withdrawal) EncodingSizeSSZ() int {
 	// Validator Index (8 bytes) + Index (8 bytes) + Amount (8 bytes) + address length
-	return 24 + common.AddressLength
+	return 24 + length.Addr
 }
 
 func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporary

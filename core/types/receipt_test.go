@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -53,24 +55,24 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		// Erigon: all the legacy formats are removed intentionally
 	}
 
-	tx := NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
+	tx := NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
 	receipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
 		Logs: []*Log{
 			{
-				Address: common.BytesToAddress([]byte{0x11}),
-				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Address: libcommon.BytesToAddress([]byte{0x11}),
+				Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
 				Data:    []byte{0x01, 0x00, 0xff},
 			},
 			{
-				Address: common.BytesToAddress([]byte{0x01, 0x11}),
-				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Address: libcommon.BytesToAddress([]byte{0x01, 0x11}),
+				Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
 				Data:    []byte{0x01, 0x00, 0xff},
 			},
 		},
 		TxHash:          tx.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
 	}
 	receipt.Bloom = CreateBloom(Receipts{receipt})
@@ -125,8 +127,8 @@ func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 // Tests that receipt data can be correctly derived from the contextual infos
 func TestDeriveFields(t *testing.T) {
 	// Create a few transactions to have receipts for
-	to2 := common.HexToAddress("0x2")
-	to3 := common.HexToAddress("0x3")
+	to2 := libcommon.HexToAddress("0x2")
+	to3 := libcommon.HexToAddress("0x3")
 	txs := Transactions{
 		&LegacyTx{
 			CommonTx: CommonTx{
@@ -163,43 +165,43 @@ func TestDeriveFields(t *testing.T) {
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 1,
 			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x11})},
-				{Address: common.BytesToAddress([]byte{0x01, 0x11})},
+				{Address: libcommon.BytesToAddress([]byte{0x11})},
+				{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
 			},
 			TxHash:          txs[0].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+			ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 			GasUsed:         1,
 		},
 		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
+			PostState:         libcommon.Hash{2}.Bytes(),
 			CumulativeGasUsed: 3,
 			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x22})},
-				{Address: common.BytesToAddress([]byte{0x02, 0x22})},
+				{Address: libcommon.BytesToAddress([]byte{0x22})},
+				{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
 			},
 			TxHash:          txs[1].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+			ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 			GasUsed:         2,
 		},
 		&Receipt{
 			Type:              AccessListTxType,
-			PostState:         common.Hash{3}.Bytes(),
+			PostState:         libcommon.Hash{3}.Bytes(),
 			CumulativeGasUsed: 6,
 			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x33})},
-				{Address: common.BytesToAddress([]byte{0x03, 0x33})},
+				{Address: libcommon.BytesToAddress([]byte{0x33})},
+				{Address: libcommon.BytesToAddress([]byte{0x03, 0x33})},
 			},
 			TxHash:          txs[2].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x03, 0x33, 0x33}),
+			ContractAddress: libcommon.BytesToAddress([]byte{0x03, 0x33, 0x33}),
 			GasUsed:         3,
 		},
 	}
 	// Clear all the computed fields and re-derive them
 	number := big.NewInt(1)
-	hash := common.BytesToHash([]byte{0x03, 0x14})
+	hash := libcommon.BytesToHash([]byte{0x03, 0x14})
 
 	clearComputedFieldsOnReceipts(t, receipts)
-	if err := receipts.DeriveFields(hash, number.Uint64(), txs, []common.Address{common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0}), common.BytesToAddress([]byte{0x0})}); err != nil {
+	if err := receipts.DeriveFields(hash, number.Uint64(), txs, []libcommon.Address{libcommon.BytesToAddress([]byte{0x0}), libcommon.BytesToAddress([]byte{0x0}), libcommon.BytesToAddress([]byte{0x0})}); err != nil {
 		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 	}
 	// Iterate over all the computed fields and check that they're correct
@@ -225,8 +227,8 @@ func TestDeriveFields(t *testing.T) {
 		if receipts[i].GasUsed != txs[i].GetGas() {
 			t.Errorf("receipts[%d].GasUsed = %d, want %d", i, receipts[i].GasUsed, txs[i].GetGas())
 		}
-		if txs[i].GetTo() != nil && receipts[i].ContractAddress != (common.Address{}) {
-			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), (common.Address{}).String())
+		if txs[i].GetTo() != nil && receipts[i].ContractAddress != (libcommon.Address{}) {
+			t.Errorf("receipts[%d].ContractAddress = %s, want %s", i, receipts[i].ContractAddress.String(), (libcommon.Address{}).String())
 		}
 		from, _ := txs[i].Sender(*signer)
 		contractAddress := crypto.CreateAddress(from, txs[i].GetNonce())
@@ -298,11 +300,11 @@ func clearComputedFieldsOnReceipts(t *testing.T, receipts Receipts) {
 func clearComputedFieldsOnReceipt(t *testing.T, receipt *Receipt) {
 	t.Helper()
 
-	receipt.TxHash = common.Hash{}
-	receipt.BlockHash = common.Hash{}
+	receipt.TxHash = libcommon.Hash{}
+	receipt.BlockHash = libcommon.Hash{}
 	receipt.BlockNumber = big.NewInt(math.MaxUint32)
 	receipt.TransactionIndex = math.MaxUint32
-	receipt.ContractAddress = common.Address{}
+	receipt.ContractAddress = libcommon.Address{}
 	receipt.GasUsed = 0
 
 	clearComputedFieldsOnLogs(t, receipt.Logs)
@@ -320,8 +322,8 @@ func clearComputedFieldsOnLog(t *testing.T, log *Log) {
 	t.Helper()
 
 	log.BlockNumber = math.MaxUint32
-	log.BlockHash = common.Hash{}
-	log.TxHash = common.Hash{}
+	log.BlockHash = libcommon.Hash{}
+	log.TxHash = libcommon.Hash{}
 	log.TxIndex = math.MaxUint32
 	log.Index = math.MaxUint32
 }

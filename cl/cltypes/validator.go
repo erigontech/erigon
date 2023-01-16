@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -14,7 +16,7 @@ type DepositData struct {
 	WithdrawalCredentials [32]byte // 32 byte
 	Amount                uint64
 	Signature             [96]byte
-	Root                  common.Hash // Ignored if not for hashing
+	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
 func (d *DepositData) MarshalSSZ() ([]byte, error) {
@@ -95,7 +97,7 @@ func (d *Deposit) SizeSSZ() int {
 func (d *Deposit) HashTreeRoot() ([32]byte, error) {
 	proofLeaves := make([][32]byte, DepositProofLength)
 	for i, segProof := range d.Proof {
-		proofLeaves[i] = common.BytesToHash(segProof)
+		proofLeaves[i] = libcommon.BytesToHash(segProof)
 	}
 
 	proofRoot, err := merkle_tree.ArraysRoot(proofLeaves, 64)

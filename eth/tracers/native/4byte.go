@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -47,10 +49,10 @@ func init() {
 //	}
 type fourByteTracer struct {
 	noopTracer
-	ids               map[string]int   // ids aggregates the 4byte ids found
-	interrupt         uint32           // Atomic flag to signal execution interruption
-	reason            error            // Textual reason for the interruption
-	activePrecompiles []common.Address // Updated on CaptureStart based on given rules
+	ids               map[string]int      // ids aggregates the 4byte ids found
+	interrupt         uint32              // Atomic flag to signal execution interruption
+	reason            error               // Textual reason for the interruption
+	activePrecompiles []libcommon.Address // Updated on CaptureStart based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
@@ -63,7 +65,7 @@ func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (tracers.Tracer,
 }
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in eth/tracers/js/tracer.go
-func (t *fourByteTracer) isPrecompiled(addr common.Address) bool {
+func (t *fourByteTracer) isPrecompiled(addr libcommon.Address) bool {
 	for _, p := range t.activePrecompiles {
 		if p == addr {
 			return true
@@ -79,7 +81,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *fourByteTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *fourByteTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	// Update list of precompiles based on current block
 	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
@@ -91,7 +93,7 @@ func (t *fourByteTracer) CaptureStart(env *vm.EVM, from common.Address, to commo
 }
 
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *fourByteTracer) CaptureEnter(op vm.OpCode, from common.Address, to common.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *fourByteTracer) CaptureEnter(op vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	// Skip if tracing was interrupted
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return

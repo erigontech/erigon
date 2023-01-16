@@ -25,13 +25,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -47,11 +47,11 @@ type LightClient struct {
 	chainTip      *ChainTipSubscriber
 
 	verbose              bool
-	highestSeen          uint64      // Highest ETH1 block seen.
-	highestValidated     uint64      // Highest ETH2 slot validated.
-	highestProcessedRoot common.Hash // Highest processed ETH2 block root.
-	lastEth2ParentRoot   common.Hash // Last ETH2 Parent root.
-	finalizedEth1Hash    common.Hash
+	highestSeen          uint64       // Highest ETH1 block seen.
+	highestValidated     uint64       // Highest ETH2 slot validated.
+	highestProcessedRoot common2.Hash // Highest processed ETH2 block root.
+	lastEth2ParentRoot   common2.Hash // Last ETH2 Parent root.
+	finalizedEth1Hash    common2.Hash
 	recentHashesCache    *lru.Cache
 	db                   kv.RwDB
 	rpc                  *rpc.BeaconRpcP2P

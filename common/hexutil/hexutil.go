@@ -80,14 +80,6 @@ func MustDecode(input string) []byte {
 	return dec
 }
 
-// Encode encodes b as a hex string with 0x prefix.
-func Encode(b []byte) string {
-	enc := make([]byte, len(b)*2+2)
-	copy(enc, "0x")
-	hex.Encode(enc[2:], b)
-	return string(enc)
-}
-
 // DecodeUint64 decodes a hex string with 0x prefix as a quantity.
 func DecodeUint64(input string) (uint64, error) {
 	raw, err := checkNumber(input)

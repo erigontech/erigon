@@ -3,7 +3,8 @@ package vm
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 )
@@ -21,11 +22,11 @@ type CVM struct {
 	intraBlockState evmtypes.IntraBlockState
 }
 
-func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, common.Address, error) {
+func (cvm *CVM) Create(caller ContractRef, code []byte) ([]byte, libcommon.Address, error) {
 	address := crypto.CreateAddress(caller.Address(), cvm.intraBlockState.GetNonce(caller.Address()))
 	cvm.intraBlockState.SetCode(address, code)
 	fmt.Println(">>>> Create Starknet Contract", address.Hex())
-	return code, common.Address{}, nil
+	return code, libcommon.Address{}, nil
 
 	//TODO:: execute cairo construct
 	//ret, err := cvm.run(code)

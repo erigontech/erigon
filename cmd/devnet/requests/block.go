@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -28,7 +29,7 @@ func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBloc
 	return b, nil
 }
 
-func GetTransactionCount(reqId int, address common.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
+func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount
 
@@ -43,7 +44,7 @@ func GetTransactionCount(reqId int, address common.Address, blockNum models.Bloc
 	return b, nil
 }
 
-func SendTransaction(reqId int, signedTx *types.Transaction) (*common.Hash, error) {
+func SendTransaction(reqId int, signedTx *types.Transaction) (*libcommon.Hash, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthSendRawTransaction
 

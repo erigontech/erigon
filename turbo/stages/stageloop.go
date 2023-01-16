@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -16,11 +17,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/consensus"
+
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -29,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -38,14 +38,14 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.Hash, err error) {
+func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash libcommon.Hash, err error) {
 	if pendingPayloadStatus := hd.GetPendingPayloadStatus(); pendingPayloadStatus != nil {
 		if err != nil {
 			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
 			hd.PayloadStatusCh <- *pendingPayloadStatus
 		}
-	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (common.Hash{}) {
+	} else if pendingPayloadHash := hd.GetPendingPayloadHash(); pendingPayloadHash != (libcommon.Hash{}) {
 		if err != nil {
 			hd.PayloadStatusCh <- engineapi.PayloadStatus{CriticalError: err}
 		} else {
@@ -69,12 +69,12 @@ func SendPayloadStatus(hd *headerdownload.HeaderDownload, headBlockHash common.H
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(
 	ctx context.Context,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *shards.Notifications,
-	updateHead func(ctx context.Context, headHeight, headTime uint64, hash common.Hash, td *uint256.Int),
+	updateHead func(ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 ) {
@@ -125,9 +125,9 @@ func StageLoop(
 	}
 }
 
-func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
-	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash common.Hash, td *uint256.Int),
-) (headBlockHash common.Hash, err error) {
+func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
+	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
+) (headBlockHash libcommon.Hash, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -188,7 +188,7 @@ func StageLoopStep(ctx context.Context, chainConfig *params.ChainConfig, db kv.R
 		// Update sentry status for peers to see our sync status
 		var headTd *big.Int
 		var head uint64
-		var headHash common.Hash
+		var headHash libcommon.Hash
 		var plainStateVersion uint64
 		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
@@ -289,7 +289,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, B
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-		stateSync.UnwindTo(unwindPoint, common.Hash{})
+		stateSync.UnwindTo(unwindPoint, libcommon.Hash{})
 		if err = stateSync.RunUnwind(nil, batch); err != nil {
 			return err
 		}

@@ -4,10 +4,11 @@ import (
 	"context"
 	"sync/atomic"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
 )
@@ -16,14 +17,14 @@ import (
 // implementation can work with local Ethereum object or with Remote (grpc-based) one
 // this is reason why all methods are accepting context and returning error
 type ApiBackend interface {
-	Etherbase(ctx context.Context) (common.Address, error)
+	Etherbase(ctx context.Context) (libcommon.Address, error)
 	NetVersion(ctx context.Context) (uint64, error)
 	NetPeerCount(ctx context.Context) (uint64, error)
 	ProtocolVersion(ctx context.Context) (uint64, error)
 	ClientVersion(ctx context.Context) (string, error)
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply), requestor *atomic.Value) error
-	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error)
+	BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error)
 	EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
 	EngineNewPayloadV2(ctx context.Context, payload *types2.ExecutionPayloadV2) (*remote.EnginePayloadStatus, error)
 	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)

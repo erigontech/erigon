@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const NumberLength = 8
@@ -28,7 +28,7 @@ func DecodeBlockNumber(number []byte) (uint64, error) {
 }
 
 // HeaderKey = num (uint64 big endian) + hash
-func HeaderKey(number uint64, hash common.Hash) []byte {
+func HeaderKey(number uint64, hash libcommon.Hash) []byte {
 	k := make([]byte, NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, number)
 	copy(k[NumberLength:], hash[:])
@@ -36,7 +36,7 @@ func HeaderKey(number uint64, hash common.Hash) []byte {
 }
 
 // BlockBodyKey = num (uint64 big endian) + hash
-func BlockBodyKey(number uint64, hash common.Hash) []byte {
+func BlockBodyKey(number uint64, hash libcommon.Hash) []byte {
 	k := make([]byte, NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, number)
 	copy(k[NumberLength:], hash[:])
@@ -52,7 +52,7 @@ func LogKey(blockNumber uint64, txId uint32) []byte {
 }
 
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
-func BloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
+func BloomBitsKey(bit uint, section uint64, hash libcommon.Hash) []byte {
 	key := append(make([]byte, 10), hash.Bytes()...)
 
 	binary.BigEndian.PutUint16(key[0:], uint16(bit))
@@ -63,7 +63,7 @@ func BloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
 
 // AddrHash + KeyHash
 // Only for trie
-func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
+func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
 	compositeKey := make([]byte, 0, length.Hash+length.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
@@ -72,7 +72,7 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 
 // AddrHash + incarnation + KeyHash
 // For contract storage
-func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
+func GenerateCompositeStorageKey(addressHash libcommon.Hash, incarnation uint64, seckey libcommon.Hash) []byte {
 	compositeKey := make([]byte, length.Hash+length.Incarnation+length.Hash)
 	copy(compositeKey, addressHash[:])
 	binary.BigEndian.PutUint64(compositeKey[length.Hash:], incarnation)
@@ -80,10 +80,10 @@ func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, se
 	return compositeKey
 }
 
-func ParseCompositeStorageKey(compositeKey []byte) (common.Hash, uint64, common.Hash) {
+func ParseCompositeStorageKey(compositeKey []byte) (libcommon.Hash, uint64, libcommon.Hash) {
 	prefixLen := length.Hash + length.Incarnation
 	addrHash, inc := ParseStoragePrefix(compositeKey[:prefixLen])
-	var key common.Hash
+	var key libcommon.Hash
 	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
 	return addrHash, inc, key
 }
@@ -98,10 +98,10 @@ func PlainGenerateCompositeStorageKey(address []byte, incarnation uint64, key []
 	return compositeKey
 }
 
-func PlainParseCompositeStorageKey(compositeKey []byte) (common.Address, uint64, common.Hash) {
+func PlainParseCompositeStorageKey(compositeKey []byte) (libcommon.Address, uint64, libcommon.Hash) {
 	prefixLen := length.Addr + length.Incarnation
 	addr, inc := PlainParseStoragePrefix(compositeKey[:prefixLen])
-	var key common.Hash
+	var key libcommon.Hash
 	copy(key[:], compositeKey[prefixLen:prefixLen+length.Hash])
 	return addr, inc, key
 }
@@ -131,15 +131,15 @@ func PlainGenerateStoragePrefix(address []byte, incarnation uint64) []byte {
 	return prefix
 }
 
-func PlainParseStoragePrefix(prefix []byte) (common.Address, uint64) {
-	var addr common.Address
+func PlainParseStoragePrefix(prefix []byte) (libcommon.Address, uint64) {
+	var addr libcommon.Address
 	copy(addr[:], prefix[:length.Addr])
 	inc := binary.BigEndian.Uint64(prefix[length.Addr : length.Addr+length.Incarnation])
 	return addr, inc
 }
 
-func ParseStoragePrefix(prefix []byte) (common.Hash, uint64) {
-	var addrHash common.Hash
+func ParseStoragePrefix(prefix []byte) (libcommon.Hash, uint64) {
+	var addrHash libcommon.Hash
 	copy(addrHash[:], prefix[:length.Hash])
 	inc := binary.BigEndian.Uint64(prefix[length.Hash : length.Hash+length.Incarnation])
 	return addrHash, inc

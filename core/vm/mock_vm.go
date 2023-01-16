@@ -5,8 +5,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
@@ -77,11 +77,11 @@ type dummyContractRef struct {
 	calledForEach bool
 }
 
-func (dummyContractRef) ReturnGas(*big.Int)          {}
-func (dummyContractRef) Address() common.Address     { return common.Address{} }
-func (dummyContractRef) Value() *big.Int             { return new(big.Int) }
-func (dummyContractRef) SetCode(common.Hash, []byte) {}
-func (d *dummyContractRef) ForEachStorage(callback func(key, value common.Hash) bool) {
+func (dummyContractRef) ReturnGas(*big.Int)             {}
+func (dummyContractRef) Address() libcommon.Address     { return libcommon.Address{} }
+func (dummyContractRef) Value() *big.Int                { return new(big.Int) }
+func (dummyContractRef) SetCode(libcommon.Hash, []byte) {}
+func (d *dummyContractRef) ForEachStorage(callback func(key, value libcommon.Hash) bool) {
 	d.calledForEach = true
 }
 func (d *dummyContractRef) SubBalance(amount *big.Int) {}

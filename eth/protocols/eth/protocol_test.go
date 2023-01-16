@@ -21,16 +21,18 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/assert"
 )
 
 // Tests that the custom union field encoder and decoder works correctly.
 func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {
 	// Create a "random" hash for testing
-	var hash common.Hash
+	var hash libcommon.Hash
 	for i := range hash {
 		hash[i] = byte(i)
 	}
@@ -98,17 +100,17 @@ func TestEth66EmptyMessages(t *testing.T) {
 		// Headers
 		BlockHeadersPacket66{1111, BlockHeadersPacket([]*types.Header{})},
 		// Bodies
-		GetBlockBodiesPacket66{1111, GetBlockBodiesPacket([]common.Hash{})},
+		GetBlockBodiesPacket66{1111, GetBlockBodiesPacket([]libcommon.Hash{})},
 		BlockBodiesPacket66{1111, BlockBodiesPacket([]*types.Body{})},
 		BlockBodiesRLPPacket66{1111, BlockBodiesRLPPacket([]rlp.RawValue{})},
 		// Node data
-		GetNodeDataPacket66{1111, GetNodeDataPacket([]common.Hash{})},
+		GetNodeDataPacket66{1111, GetNodeDataPacket([]libcommon.Hash{})},
 		NodeDataPacket66{1111, NodeDataPacket([][]byte{})},
 		// Receipts
-		GetReceiptsPacket66{1111, GetReceiptsPacket([]common.Hash{})},
+		GetReceiptsPacket66{1111, GetReceiptsPacket([]libcommon.Hash{})},
 		ReceiptsPacket66{1111, ReceiptsPacket([][]*types.Receipt{})},
 		// Transactions
-		GetPooledTransactionsPacket66{1111, GetPooledTransactionsPacket([]common.Hash{})},
+		GetPooledTransactionsPacket66{1111, GetPooledTransactionsPacket([]libcommon.Hash{})},
 		PooledTransactionsPacket66{1111, PooledTransactionsPacket([]types.Transaction{})},
 		PooledTransactionsRLPPacket66{1111, PooledTransactionsRLPPacket([]rlp.RawValue{})},
 	} {
@@ -129,7 +131,7 @@ func TestEth66Messages(t *testing.T) {
 		blockBodyRlp rlp.RawValue
 		txs          []types.Transaction
 		txRlps       []rlp.RawValue
-		hashes       []common.Hash
+		hashes       []libcommon.Hash
 		receipts     []*types.Receipt
 		receiptsRlp  rlp.RawValue
 
@@ -169,9 +171,9 @@ func TestEth66Messages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hashes = []common.Hash{
-		common.HexToHash("deadc0de"),
-		common.HexToHash("feedbeef"),
+	hashes = []libcommon.Hash{
+		libcommon.HexToHash("deadc0de"),
+		libcommon.HexToHash("feedbeef"),
 	}
 	byteSlices := [][]byte{
 		common.FromHex("deadc0de"),
@@ -185,13 +187,13 @@ func TestEth66Messages(t *testing.T) {
 				CumulativeGasUsed: 1,
 				Logs: []*types.Log{
 					{
-						Address: common.BytesToAddress([]byte{0x11}),
-						Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+						Address: libcommon.BytesToAddress([]byte{0x11}),
+						Topics:  []libcommon.Hash{libcommon.HexToHash("dead"), libcommon.HexToHash("beef")},
 						Data:    []byte{0x01, 0x00, 0xff},
 					},
 				},
 				TxHash:          hashes[0],
-				ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+				ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 				GasUsed:         111111,
 			},
 		}
@@ -211,7 +213,7 @@ func TestEth66Messages(t *testing.T) {
 			common.FromHex("e8820457e4a000000000000000000000000000000000000000000000000000000000deadc0de050580"),
 		},
 		{
-			GetBlockHeadersPacket66{1111, &GetBlockHeadersPacket{HashOrNumber{common.Hash{}, 9999}, 5, 5, false}},
+			GetBlockHeadersPacket66{1111, &GetBlockHeadersPacket{HashOrNumber{libcommon.Hash{}, 9999}, 5, 5, false}},
 			common.FromHex("ca820457c682270f050580"),
 		},
 		{
