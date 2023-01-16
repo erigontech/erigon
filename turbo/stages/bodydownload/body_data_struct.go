@@ -2,6 +2,7 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/google/btree"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
@@ -20,6 +21,13 @@ type Delivery struct {
 	uncles          [][]*types.Header
 	withdrawals     []types.Withdrawals
 	lenOfP2PMessage uint64
+}
+
+// BodyQueueItem is part of the body cache kept in memory
+type BodyTreeItem struct {
+	blockNum    uint64
+	payloadSize int
+	rawBody     *types.RawBody
 }
 
 // BodyDownload represents the state of body downloading process
@@ -41,8 +49,8 @@ type BodyDownload struct {
 	deliveredCount   float64
 	wastedCount      float64
 	bodiesAdded      bool
-	bodyCache        map[uint64]*types.RawBody
-	UsingExternalTx  bool
+	bodyCache        *btree.BTreeG[BodyTreeItem]
+	bodyCacheSize    int
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
@@ -70,10 +78,10 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		// delivery channel needs to have enough capacity not to create contention
 		// between delivery and collections. since we assume that there will be
 		// no more than `outstandingLimit+MaxBodiesInRequest` requested
-		// deliveris, this is a good number for the channel capacity
+		// deliveries, this is a good number for the channel capacity
 		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
 		Engine:     engine,
-		bodyCache:  make(map[uint64]*types.RawBody),
+		bodyCache:  btree.NewG[BodyTreeItem](32, func(a, b BodyTreeItem) bool { return a.blockNum < b.blockNum }),
 	}
 	return bd
 }

@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -22,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 4
+const requestLoopCutOff int = 16
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -32,14 +31,13 @@ type BodiesCfg struct {
 	blockPropagator adapter.BlockPropagator
 	timeout         int
 	chanConfig      chain.Config
-	batchSize       datasize.ByteSize
 	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
 	historyV3       bool
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, batchSize datasize.ByteSize, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, batchSize: batchSize, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -62,7 +60,6 @@ func BodiesForward(
 	var d1, d2, d3, d4, d5, d6 time.Duration
 	var err error
 	useExternalTx := tx != nil
-	cfg.bd.UsingExternalTx = true // To turn off temporary bodies table
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
@@ -130,24 +127,12 @@ func BodiesForward(
 	noProgressCount := 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
-	// create a temporary bucket to fire the bodies into as we start to collect them
-	// this will allow us to restart the bodies stage and not request bodies we already have
-	// once the bodies stage is complete this bucket is dropped
-	if !useExternalTx {
-		err = tx.ClearBucket(kv.BodiesStage)
-		if err != nil {
-			return err
-		}
-	}
-
-	var blockNum uint64
 	loopBody := func() (bool, error) {
 		// always check if a new request is needed at the start of the loop
 		// this will check for timed out old requests and attempt to send them again
 		start := time.Now()
 		currentTime := uint64(time.Now().Unix())
-		var newBlockNum uint64
-		req, newBlockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+		req, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, currentTime, cfg.blockPropagator)
 		if err != nil {
 			return false, fmt.Errorf("request more bodies: %w", err)
 		}
@@ -167,7 +152,6 @@ func BodiesForward(
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
 			log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
-			blockNum = newBlockNum
 		}
 
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -178,8 +162,7 @@ func BodiesForward(
 		for req != nil && sentToPeer {
 			start := time.Now()
 			currentTime := uint64(time.Now().Unix())
-			var newBlockNum uint64
-			req, newBlockNum, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, blockNum, currentTime, cfg.blockPropagator)
+			req, err = cfg.bd.RequestMoreBodies(tx, cfg.blockReader, currentTime, cfg.blockPropagator)
 			if err != nil {
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
@@ -196,7 +179,6 @@ func BodiesForward(
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
 				log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
-				blockNum = newBlockNum
 			}
 
 			loopCount++
@@ -231,11 +213,7 @@ func BodiesForward(
 					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
 				}
 
-				rawBody, err := cfg.bd.GetBlockFromCache(tx, nextBlock)
-				if err != nil {
-					log.Error(fmt.Sprintf("[%s] Error getting body from cache", logPrefix), "err", err)
-					return false, err
-				}
+				rawBody := cfg.bd.GetBodyFromCache(nextBlock)
 				if rawBody == nil {
 					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
 				}
@@ -301,11 +279,11 @@ func BodiesForward(
 			} else {
 				noProgressCount = 0 // Reset, there was progress
 			}
-			logDownloadingBodies(logPrefix, bodyProgress, headerProgress-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount)
+			logDownloadingBodies(logPrefix, bodyProgress, headerProgress-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, cfg.bd.BodyCacheSize())
 			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount
-			//log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
+			log.Info("Timings", "d1", d1, "d2", d2, "d3", d3, "d4", d4, "d5", d5, "d6", d6)
 		case <-timer.C:
 			log.Trace("RequestQueueTime (bodies) ticked")
 		case <-cfg.bd.DeliveryNotify:
@@ -329,9 +307,7 @@ func BodiesForward(
 
 	// remove the temporary bucket for bodies stage
 	if !useExternalTx {
-		tx.ClearBucket(kv.BodiesStage)
-		err = tx.Commit()
-		if err != nil {
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	} else {
@@ -347,7 +323,7 @@ func BodiesForward(
 	return nil
 }
 
-func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64) {
+func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDelivered uint64, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount float64, bodyCacheSize int) {
 	speed := (deliveredCount - prevDeliveredCount) / float64(logInterval/time.Second)
 	wastedSpeed := (wastedCount - prevWastedCount) / float64(logInterval/time.Second)
 	if speed == 0 && wastedSpeed == 0 {
@@ -363,6 +339,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
 		"delivered", totalDelivered,
+		"cache", libcommon.ByteCount(uint64(bodyCacheSize)),
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),
 	)
