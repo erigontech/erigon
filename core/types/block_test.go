@@ -408,13 +408,13 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Index:     44555666,
 		Validator: 89,
 		Address:   libcommon.HexToAddress("0x690b9a9e9aa1c9db991c7721a92d351db4fac990"),
-		Amount:    *uint256.NewInt(2 * params.Ether),
+		Amount:    2,
 	}
 	withdrawals[1] = &Withdrawal{
 		Index:     44555667,
 		Validator: 37,
 		Address:   libcommon.HexToAddress("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5"),
-		Amount:    *uint256.NewInt(5 * params.Ether),
+		Amount:    5_000_000_000,
 	}
 
 	block := NewBlock(&header, nil, nil, nil, withdrawals)
