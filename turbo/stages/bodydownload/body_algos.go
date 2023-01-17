@@ -75,11 +75,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
-		// Check if we reached the highest allowed request block number, and turn back
-		if blockNum >= bd.maxProgress {
-			break // Avoid tight loop
-		}
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			log.Debug("Body already delivered", "blockNum", blockNum)
@@ -88,6 +84,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 
 		if req, ok := bd.requests[blockNum]; ok {
 			if currentTime < req.waitUntil {
+				log.Debug("Request for body is still outstanding", "blockNum", blockNum)
 				continue
 			}
 			bd.peerMap[req.peerID]++
