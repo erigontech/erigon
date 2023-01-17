@@ -579,6 +579,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			}
 			hd.highestInDb = link.blockHeight
 		}
+		lastTime = link.header.Time
 		link.persisted = true
 		link.header = nil // Drop header reference to free memory, as we won't need it anymore
 		link.headerRaw = nil
@@ -588,7 +589,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 				hd.moveLinkToQueue(child, InsertQueueID)
 			}
 		}
-		lastTime = link.header.Time
 		if link.blockHeight == hd.latestMinedBlockNumber {
 			return false, true, 0, lastTime, nil
 		}
