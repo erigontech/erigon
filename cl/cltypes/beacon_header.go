@@ -62,7 +62,10 @@ type SignedBeaconBlockHeader struct {
 }
 
 func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) []byte {
-	return append(dst, append(b.Header.EncodeSSZ(dst), b.Signature[:]...)...)
+	buf := dst
+	buf = b.Header.EncodeSSZ(buf)
+	buf = append(buf, b.Signature[:]...)
+	return buf
 }
 
 func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte) error {

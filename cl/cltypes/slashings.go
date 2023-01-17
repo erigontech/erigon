@@ -12,8 +12,8 @@ type ProposerSlashing struct {
 
 func (p *ProposerSlashing) EncodeSSZ(dst []byte) []byte {
 	buf := dst
-	buf = append(buf, p.Header1.EncodeSSZ(buf)...)
-	buf = append(buf, p.Header2.EncodeSSZ(buf)...)
+	buf = p.Header1.EncodeSSZ(buf)
+	buf = p.Header2.EncodeSSZ(buf)
 	return buf
 }
 
@@ -51,7 +51,7 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation
 }
 
-func (a *AttesterSlashing) EncodeSSZ(dst []byte) []byte {
+func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	offset := 8
 	// Write offsets
@@ -59,9 +59,16 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) []byte {
 	offset += a.Attestation_1.EncodingSizeSSZ()
 	buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
 	// Write the attestations
-	buf = a.Attestation_1.Data.EncodeSSZ(buf)
-	buf = a.Attestation_2.Data.EncodeSSZ(buf)
-	return buf
+	var err error
+	buf, err = a.Attestation_1.EncodeSSZ(buf)
+	if err != nil {
+		return nil, err
+	}
+	buf, err = a.Attestation_2.EncodeSSZ(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
 }
 
 func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {

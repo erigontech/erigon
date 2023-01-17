@@ -115,31 +115,34 @@ func (b *BeaconBlock) Version() clparams.StateVersion {
 func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
-
+	//start := len(buf)
 	offset := getBeaconBlockMinimumSize(b.Version)
 	// Write "easy" fields
 	buf = append(buf, b.RandaoReveal[:]...)
 	buf = b.Eth1Data.EncodeSSZ(buf)
+	if len(b.Graffiti) != 32 {
+		return nil, fmt.Errorf("bad graffiti length")
+	}
 	buf = append(buf, b.Graffiti...)
 	// Write offsets for proposer slashings
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-	offset += uint32(len(b.ProposerSlashings) * 416)
+	offset += uint32(len(b.ProposerSlashings)) * 416
 	// Attester slashings offset
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
 	for _, slashing := range b.AttesterSlashings {
-		offset += uint32(slashing.EncodingSizeSSZ() + 4)
+		offset += uint32(slashing.EncodingSizeSSZ()) + 4
 	}
 	// Attestation offset
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
 	for _, attestation := range b.Attestations {
-		offset += uint32(attestation.EncodingSizeSSZ() + 4)
+		offset += uint32(attestation.EncodingSizeSSZ()) + 4
 	}
 	// Deposits offset
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-	offset += uint32(len(b.Deposits) * 1240)
+	offset += uint32(len(b.Deposits)) * 1240
 	// Voluntary Exit offset
 	buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-	offset += uint32(len(b.VoluntaryExits) * 112)
+	offset += uint32(len(b.VoluntaryExits)) * 112
 	// Encode Sync Aggregate
 	if b.Version >= clparams.AltairVersion {
 		buf = b.SyncAggregate.EncodeSSZ(buf)
@@ -173,8 +176,12 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 		buf = append(buf, ssz_utils.OffsetSSZ(uint32(subOffset))...)
 		subOffset += attesterSlashing.EncodingSizeSSZ()
 	}
+
 	for _, attesterSlashing := range b.AttesterSlashings {
-		buf = attesterSlashing.EncodeSSZ(buf)
+		buf, err = attesterSlashing.EncodeSSZ(buf)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Attestation
 	subOffset = len(b.Attestations) * 4
@@ -251,6 +258,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	}
 	// Decode graffiti.
 	b.Graffiti = libcommon.Copy(buf[168:200])
+
 	// Decode offsets
 	offSetProposerSlashings := ssz_utils.DecodeOffset(buf[200:])
 	offsetAttesterSlashings := ssz_utils.DecodeOffset(buf[204:])
@@ -433,7 +441,7 @@ func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
 }
 
 func (b *SignedBeaconBlock) MarshalSSZ() ([]byte, error) {
-	var dst []byte
+	dst := make([]byte, 0, b.SizeSSZ())
 	var err error
 	dst = append(dst, ssz_utils.OffsetSSZ(100)...)
 	dst = append(dst, b.Signature[:]...)

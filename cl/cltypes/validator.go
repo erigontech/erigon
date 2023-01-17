@@ -60,7 +60,7 @@ func (d *DepositData) HashTreeRoot() ([32]byte, error) {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof [][]byte
+	Proof [][]byte // 33 X 32 size.
 	Data  *DepositData
 }
 
