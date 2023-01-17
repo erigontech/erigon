@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -454,6 +455,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
 		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value)
+		// Special case for EOF, if the initcode or deployed code is
+		// invalid, the tx is considered valid (so update nonce), but
+		// is to be treated as an exceptional abort (so burn all gas).
+		if errors.Is(vmerr, vm.ErrInvalidEOF) {
+			st.gas = 0
+			st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
+		}
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
