@@ -92,6 +92,9 @@ var PrecompiledContractsIstanbulForBSC = map[libcommon.Address]PrecompiledContra
 	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
+
+	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
+	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidate{},
 }
 
 var PrecompiledContractsNano = map[libcommon.Address]PrecompiledContract{
@@ -104,6 +107,9 @@ var PrecompiledContractsNano = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
+
+	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidateNano{},
+	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateNano{},
 }
 
 var PrecompiledContractsIsMoran = map[libcommon.Address]PrecompiledContract{
@@ -116,6 +122,9 @@ var PrecompiledContractsIsMoran = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
 	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
+
+	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
+	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateMoran{},
 }
 
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
