@@ -337,12 +337,14 @@ Loop:
 	return bd.requestedLow, uint64(delivered), nil
 }
 
+const processingCap uint64 = 200
+
 // NextProcessingCount returns the count of contiguous block numbers ready to process from the
 // requestedLow minimum value.
 // the requestedLow count is increased by the number returned
 func (bd *BodyDownload) NextProcessingCount() uint64 {
 	var i uint64
-	for i = 0; bd.delivered.Contains(bd.requestedLow + i); i++ {
+	for i = 0; bd.delivered.Contains(bd.requestedLow + i) && i < processingCap; i++ {
 	}
 	return i
 }

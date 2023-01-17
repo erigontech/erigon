@@ -44,14 +44,14 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(
 
 // BodiesForward progresses Bodies stage in the forward direction
 func BodiesForward(
-	s *StageState,
-	u Unwinder,
-	ctx context.Context,
-	tx kv.RwTx,
-	cfg BodiesCfg,
-	test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
-	firstCycle bool,
-	quiet bool,
+    s *StageState,
+    u Unwinder,
+    ctx context.Context,
+    tx kv.RwTx,
+    cfg BodiesCfg,
+    test bool, // Set to true in tests, allows the stage to fail rather than wait indefinitely
+    firstCycle bool,
+    quiet bool,
 ) error {
 	var doUpdate bool
 	if cfg.snapshots != nil && s.BlockNumber < cfg.snapshots.BlocksAvailable() {
@@ -69,7 +69,6 @@ func BodiesForward(
 		}
 		defer tx.Rollback()
 	}
-	timeout := cfg.timeout
 
 	// this update is required, because cfg.bd.UpdateFromDb(tx) below reads it and initialises requestedLow accordingly
 	// if not done, it will cause downloading from block 1
@@ -94,6 +93,7 @@ func BodiesForward(
 	}
 
 	logPrefix := s.LogPrefix()
+	timeout := cfg.timeout
 	if headerProgress <= bodyProgress+16 {
 		// When processing small number of blocks, we can afford wasting more bandwidth but get blocks quicker
 		timeout = 1
@@ -127,7 +127,7 @@ func BodiesForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
-	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
+	var noProgressCount uint = 0 // How many times the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
 	loopBody := func() (bool, error) {
