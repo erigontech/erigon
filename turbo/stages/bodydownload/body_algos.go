@@ -82,6 +82,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
+			log.Debug("Body already delivered", "blockNum", blockNum)
 			continue
 		}
 
@@ -99,6 +100,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		var err error
 		if _, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.delivered.Add(blockNum)
+			log.Debug("Body already in the cache", "blockNum", blockNum)
 			continue
 		}
 
@@ -117,6 +119,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			// we want to avoid an infinite loop if the header was populated in deliveriesH before the block
 			// was added to the prefetched cache
 			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
+				log.Debug("Body already prefetched 1", "blockNum", blockNum)
 				request = false
 			}
 		} else {
@@ -134,6 +137,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			}
 
 			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
+				log.Debug("Body already prefetched 2", "blockNum", blockNum)
 				request = false
 			} else {
 				bd.deliveriesH[blockNum] = header
@@ -153,10 +157,12 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 						bd.requestedMap[tripleHash] = blockNum
 					} else {
 						bd.addBodyToCache(blockNum, block.RawBody())
+						log.Debug("Body already in the DB", "blockNum", blockNum)
 						request = false
 					}
 				} else {
 					bd.addBodyToCache(blockNum, &types.RawBody{})
+					log.Debug("Body is empty", "blockNum", blockNum)
 					request = false
 				}
 			}
