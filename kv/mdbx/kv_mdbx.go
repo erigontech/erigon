@@ -1722,24 +1722,23 @@ func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, ord
 	if !orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) <= 0 {
 		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", toPrefix, fromPrefix)
 	}
-	s, err := tx.newStreamCursor(table)
+	c, err := tx.Cursor(table)
 	if err != nil {
 		return nil, err
 	}
-	s.fromPrefix = fromPrefix
-	s.toPrefix = toPrefix
-	s.orderAscend = orderAscend
-	s.limit = limit
+	s := &cursor2stream{c: c, ctx: tx.ctx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: limit}
+	tx.streams = append(tx.streams, s)
 	if orderAscend {
 		s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
-	} else {
-		if fromPrefix == nil {
-			s.nextK, s.nextV, s.nextErr = s.c.Last()
-		} else {
-			s.nextK, s.nextV, s.nextErr = s.c.SeekExact(fromPrefix)
-			if s.nextK == nil { // no such key
-				s.nextK, s.nextV, s.nextErr = s.c.Prev()
-			}
+		return s, nil
+	}
+
+	if fromPrefix == nil {
+		s.nextK, s.nextV, s.nextErr = s.c.Last()
+	} else { // seek exactly to given key or previous one
+		s.nextK, s.nextV, s.nextErr = s.c.SeekExact(fromPrefix)
+		if s.nextK == nil { // no such key
+			s.nextK, s.nextV, s.nextErr = s.c.Prev()
 		}
 	}
 	return s, nil
@@ -1752,15 +1751,6 @@ func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit i
 }
 func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, false, limit)
-}
-func (tx *MdbxTx) newStreamCursor(table string) (*cursor2stream, error) {
-	c, err := tx.Cursor(table)
-	if err != nil {
-		return nil, err
-	}
-	s := &cursor2stream{c: c, ctx: tx.ctx}
-	tx.streams = append(tx.streams, s)
-	return s, nil
 }
 
 type cursor2stream struct {
