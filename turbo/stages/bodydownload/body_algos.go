@@ -172,6 +172,8 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	}
 	if bodyReq != nil && len(bodyReq.BlockNums) > 0 {
 		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
+	} else {
+		log.Debug("Returned Body request empty", "bd.requestedLow", bd.requestedLow)
 	}
 	return bodyReq, nil
 }
