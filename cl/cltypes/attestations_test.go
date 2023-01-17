@@ -48,14 +48,14 @@ func TestAttestationHashTest(t *testing.T) {
 
 func TestEncodeForStorage(t *testing.T) {
 	enc := cltypes.EncodeAttestationsForStorage(attestations)
-	require.Less(t, len(enc), attestations[0].SizeSSZ()*len(attestations))
+	require.Less(t, len(enc), attestations[0].EncodingSizeSSZ()*len(attestations))
 	decAttestations, err := cltypes.DecodeAttestationsForStorage(enc)
 	require.NoError(t, err)
 	require.Equal(t, attestations, decAttestations)
 }
 
 func TestAttestationMarshalUnmarmashal(t *testing.T) {
-	marshalled, err := attestations[0].MarshalSSZ()
+	marshalled, err := attestations[0].EncodeSSZ(nil)
 	require.NoError(t, err)
 	assert.Equal(t, common.Bytes2Hex(marshalled[:]), expectedAttestationMarshalled)
 	testData2 := &cltypes.Attestation{}

@@ -75,7 +75,7 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 
 func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock) (bool, error) {
 	proposer := s.state.ValidatorAt(int(block.Block.ProposerIndex))
-	sigRoot, err := block.Block.Body.HashTreeRoot()
+	sigRoot, err := block.Block.Body.HashSSZ()
 	if err != nil {
 		return false, err
 	}

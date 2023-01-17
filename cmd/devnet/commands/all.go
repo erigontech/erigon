@@ -47,4 +47,7 @@ func ExecuteAllMethods() {
 		return
 	}
 	fmt.Println()
+
+	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
+	models.QuitNodeChan <- true
 }

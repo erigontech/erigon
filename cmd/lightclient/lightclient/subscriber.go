@@ -16,7 +16,7 @@ import (
 type ChainTipSubscriber struct {
 	ctx context.Context
 
-	currBlock *cltypes.BeaconBlockBellatrix // Most recent gossipped block
+	currBlock *cltypes.BeaconBlock // Most recent gossipped block
 
 	lastUpdate       *cltypes.LightClientUpdate
 	started          bool
@@ -71,8 +71,8 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	defer c.mu.Unlock()
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
-		block := &cltypes.SignedBeaconBlockBellatrix{}
-		if err := block.UnmarshalSSZ(data.Data); err != nil {
+		block := &cltypes.SignedBeaconBlock{}
+		if err := block.UnmarshalSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 
@@ -124,7 +124,7 @@ func (c *ChainTipSubscriber) PopLastUpdate() *cltypes.LightClientUpdate {
 	return update
 }
 
-func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlockBellatrix {
+func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlock {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Check if we are up to date

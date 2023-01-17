@@ -239,7 +239,7 @@ func (l *LightClient) importBlockIfPossible() {
 	if curr.Slot > l.highestValidated+maxChainExtension {
 		return
 	}
-	currentRoot, err := curr.HashTreeRoot()
+	currentRoot, err := curr.HashSSZ()
 	if err != nil {
 		log.Warn("Could not send beacon block to ETH1", "err", err)
 		return

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
@@ -69,13 +70,13 @@ const (
 type GossipTopic struct {
 	Name     TopicName
 	Codec    func(*pubsub.Subscription, *pubsub.Topic) communication.GossipCodec
-	Typ      communication.Packet
+	Typ      clonable.Clonable
 	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
-	Typ:      &cltypes.SignedBeaconBlockBellatrix{},
+	Typ:      &cltypes.SignedBeaconBlock{},
 	Codec:    ssz_snappy.NewGossipCodec,
 	CodecStr: "ssz_snappy",
 }
