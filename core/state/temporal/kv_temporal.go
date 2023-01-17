@@ -2,12 +2,16 @@ package temporal
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
@@ -30,6 +34,7 @@ import (
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
+type tParseIncarnation func(v []byte) (uint64, error)
 
 type DB struct {
 	kv.RwDB
@@ -38,10 +43,11 @@ type DB struct {
 
 	convertV3toV2   tConvertV3toV2
 	restoreCodeHash tRestoreCodeHash
+	parseInc        tParseIncarnation
 }
 
-func New(kv kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash) *DB {
-	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv), convertV3toV2: cb1, restoreCodeHash: cb2}
+func New(kv kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation) *DB {
+	return &DB{RwDB: kv, agg: agg, hitoryV3: kvcfg.HistoryV3.FromDB(kv), convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3}
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
@@ -130,6 +136,57 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs kv.Pairs, err error) {
+	if tx.hitoryV3 {
+		switch name {
+		case AccountsDomain:
+			panic("not implemented yet")
+		case StorageDomain:
+			//it := tx.agg.StorageHistoryRIterateChanged(asOfTs, math.MaxUint64, tx)
+			toKey, _ := kv.NextSubtree(k1)
+			fromKey2 := append(common.Copy(k1), fromKey...)
+			it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
+
+			accData, err := tx.GetOne(kv.PlainState, k1)
+			if err != nil {
+				return nil, err
+			}
+			inc, err := tx.db.parseInc(accData)
+			if err != nil {
+				return nil, err
+			}
+			startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
+			copy(startkey, k1)
+			binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
+			copy(startkey[length.Addr+length.Incarnation:], fromKey)
+
+			toPrefix := make([]byte, length.Addr+length.Incarnation)
+			copy(toPrefix, k1)
+			binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
+
+			it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
+			if err != nil {
+				return nil, err
+			}
+			it3 := stream.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
+				return append(append([]byte{}, k[:20]...), k[28:]...), v
+			})
+			//for it3.HasNext() {
+			//	k, v, err := it3.Next()
+			//	fmt.Printf("PlainState: %x, %x, %s\n", k, v, err)
+			//}
+
+			//TODO: seems MergePairs can't handle "amount" request
+			return stream.MergePairs(it, it3), nil
+		case CodeDomain:
+			panic("not implemented yet")
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
+	}
+
+	panic("not implemented yet")
+}
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsDomain:
@@ -208,28 +265,28 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
-	} else {
-		switch name {
-		case AccountsHistory:
-			v, ok, err = historyv2.FindByHistory(tx.accHistoryC, tx.accChangesC, false, key, ts)
-			if err != nil {
-				return nil, false, err
-			}
-			if !ok || len(v) == 0 {
-				return v, ok, nil
-			}
-			v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
-			if err != nil {
-				return nil, false, err
-			}
-			return v, true, nil
-		case StorageHistory:
-			return historyv2.FindByHistory(tx.storageHistoryC, tx.storageChangesC, true, key, ts)
-		case CodeHistory:
-			return nil, false, fmt.Errorf("ErigonV2 doesn't support CodeHistory")
-		default:
-			return nil, false, fmt.Errorf("unexpected history name: %s", name)
+	}
+
+	switch name {
+	case AccountsHistory:
+		v, ok, err = historyv2.FindByHistory(tx.accHistoryC, tx.accChangesC, false, key, ts)
+		if err != nil {
+			return nil, false, err
 		}
+		if !ok || len(v) == 0 {
+			return v, ok, nil
+		}
+		v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
+		if err != nil {
+			return nil, false, err
+		}
+		return v, true, nil
+	case StorageHistory:
+		return historyv2.FindByHistory(tx.storageHistoryC, tx.storageChangesC, true, key, ts)
+	case CodeHistory:
+		return nil, false, fmt.Errorf("ErigonV2 doesn't support CodeHistory")
+	default:
+		return nil, false, fmt.Errorf("unexpected history name: %s", name)
 	}
 }
 
@@ -268,34 +325,34 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64) (
 		default:
 			return nil, fmt.Errorf("unexpected history name: %s", name)
 		}
-	} else {
-		var bm *roaring64.Bitmap
-		switch name {
-		case LogTopicIdx:
-			bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
-			if err != nil {
-				return nil, err
-			}
-			bm = bitmapdb.CastBitmapTo64(bm32)
-		case LogAddrIdx:
-			bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
-			if err != nil {
-				return nil, err
-			}
-			bm = bitmapdb.CastBitmapTo64(bm32)
-		case TracesFromIdx:
-			bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
-			if err != nil {
-				return nil, err
-			}
-		case TracesToIdx:
-			bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unexpected history name: %s", name)
-		}
-		return bitmapdb.NewBitmapStream(bm), nil
 	}
+
+	var bm *roaring64.Bitmap
+	switch name {
+	case LogTopicIdx:
+		bm32, err := bitmapdb.Get(tx, kv.LogTopicIndex, key, uint32(fromTs), uint32(toTs))
+		if err != nil {
+			return nil, err
+		}
+		bm = bitmapdb.CastBitmapTo64(bm32)
+	case LogAddrIdx:
+		bm32, err := bitmapdb.Get(tx, kv.LogAddressIndex, key, uint32(fromTs), uint32(toTs))
+		if err != nil {
+			return nil, err
+		}
+		bm = bitmapdb.CastBitmapTo64(bm32)
+	case TracesFromIdx:
+		bm, err = bitmapdb.Get64(tx, kv.CallFromIndex, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+	case TracesToIdx:
+		bm, err = bitmapdb.Get64(tx, kv.CallToIndex, key, fromTs, toTs)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
+	}
+	return bitmapdb.NewBitmapStream(bm), nil
 }

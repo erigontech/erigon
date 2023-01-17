@@ -65,6 +65,15 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash li
 	}
 	engine := api.engine()
 
+	if api.historyV3(tx) {
+		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		minTxNum, err := rawdb.TxNums.Min(tx, *number)
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		return storageRangeAtV3(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
+	}
+
 	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -73,9 +82,6 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash li
 		return StorageRangeResult{}, nil
 	}
 
-	if api.historyV3(tx) {
-		panic("not implemented!")
-	}
 	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txIndex, api._agg, api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
