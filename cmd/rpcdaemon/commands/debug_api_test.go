@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -24,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var dumper = spew.ConfigState{Indent: "   "}
+var dumper = spew.ConfigState{Indent: "    "}
 
 var debugTraceTransactionTests = []struct {
 	txHash      string
