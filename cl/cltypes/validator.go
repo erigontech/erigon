@@ -19,13 +19,13 @@ type DepositData struct {
 	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
-func (d *DepositData) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, d.SizeSSZ())
-	copy(buf, d.PubKey[:])
-	copy(buf[48:], d.WithdrawalCredentials[:])
-	ssz_utils.MarshalUint64SSZ(buf[80:], d.Amount)
-	copy(buf[88:], d.Signature[:])
-	return buf, nil
+func (d *DepositData) EncodeSSZ(dst []byte) []byte {
+	buf := dst
+	buf = append(buf, d.PubKey[:]...)
+	buf = append(buf, d.WithdrawalCredentials[:]...)
+	buf = append(buf, ssz_utils.Uint64SSZ(d.Amount)...)
+	buf = append(buf, d.Signature[:]...)
+	return buf
 }
 
 func (d *DepositData) UnmarshalSSZ(buf []byte) error {
@@ -60,22 +60,18 @@ func (d *DepositData) HashTreeRoot() ([32]byte, error) {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof [][]byte
+	Proof [][]byte // 33 X 32 size.
 	Data  *DepositData
 }
 
-func (d *Deposit) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, d.SizeSSZ())
-	for i, proofSeg := range d.Proof {
-		copy(buf[i*32:], proofSeg)
-	}
+func (d *Deposit) EncodeSSZ(dst []byte) []byte {
 
-	dataEnc, err := d.Data.MarshalSSZ()
-	if err != nil {
-		return nil, err
+	buf := dst
+	for _, proofSeg := range d.Proof {
+		buf = append(buf, proofSeg...)
 	}
-	copy(buf[33*32:], dataEnc)
-	return buf, nil
+	buf = d.Data.EncodeSSZ(buf)
+	return buf
 }
 
 func (d *Deposit) UnmarshalSSZ(buf []byte) error {
@@ -90,7 +86,11 @@ func (d *Deposit) UnmarshalSSZ(buf []byte) error {
 	return d.Data.UnmarshalSSZ(buf[33*32:])
 }
 
-func (d *Deposit) SizeSSZ() int {
+func (d *Deposit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return d.UnmarshalSSZ(buf)
+}
+
+func (d *Deposit) EncodingSizeSSZ() int {
 	return 1240
 }
 
@@ -118,14 +118,11 @@ type VoluntaryExit struct {
 	ValidatorIndex uint64
 }
 
-func (e *VoluntaryExit) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, e.SizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, e.Epoch)
-	ssz_utils.MarshalUint64SSZ(buf[8:], e.ValidatorIndex)
-	return buf, nil
+func (e *VoluntaryExit) EncodeSSZ(buf []byte) []byte {
+	return append(buf, append(ssz_utils.Uint64SSZ(e.Epoch), ssz_utils.Uint64SSZ(e.ValidatorIndex)...)...)
 }
 
-func (e *VoluntaryExit) UnmarshalSSZ(buf []byte) error {
+func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
 	e.Epoch = ssz_utils.UnmarshalUint64SSZ(buf)
 	e.ValidatorIndex = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	return nil
@@ -146,12 +143,9 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte
 }
 
-func (e *SignedVoluntaryExit) MarshalSSZ() ([]byte, error) {
-	marshalledExit, err := e.VolunaryExit.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return append(marshalledExit, e.Signature[:]...), nil
+func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
+	buf := e.VolunaryExit.EncodeSSZ(dst)
+	return append(buf, e.Signature[:]...)
 }
 
 func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
@@ -159,11 +153,15 @@ func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
 
-	if err := e.VolunaryExit.UnmarshalSSZ(buf); err != nil {
+	if err := e.VolunaryExit.DecodeSSZ(buf); err != nil {
 		return err
 	}
 	copy(e.Signature[:], buf[16:])
 	return nil
+}
+
+func (e *SignedVoluntaryExit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return e.UnmarshalSSZ(buf)
 }
 
 func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
@@ -178,6 +176,6 @@ func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
 	return utils.Keccak256(exitRoot[:], sigRoot[:]), nil
 }
 
-func (e *SignedVoluntaryExit) SizeSSZ() int {
+func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
 	return 96 + e.VolunaryExit.SizeSSZ()
 }
