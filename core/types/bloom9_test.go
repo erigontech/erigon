@@ -22,7 +22,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -57,7 +58,7 @@ func TestBloom(t *testing.T) {
 
 // TestBloomExtensively does some more thorough tests
 func TestBloomExtensively(t *testing.T) {
-	var exp = common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
+	var exp = libcommon.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
 	var b Bloom
 	// Add 100 "random" things
 	for i := 0; i < 100; i++ {
@@ -99,29 +100,29 @@ func BenchmarkCreateBloom(b *testing.B) {
 
 	var txs = Transactions{
 		NewContractCreation(1, one, 1, one, nil),
-		NewTransaction(2, common.HexToAddress("0x2"), two, 2, two, nil),
+		NewTransaction(2, libcommon.HexToAddress("0x2"), two, 2, two, nil),
 	}
 	var rSmall = Receipts{
 		&Receipt{
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 1,
 			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x11})},
-				{Address: common.BytesToAddress([]byte{0x01, 0x11})},
+				{Address: libcommon.BytesToAddress([]byte{0x11})},
+				{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
 			},
 			TxHash:          txs[0].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+			ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 			GasUsed:         1,
 		},
 		&Receipt{
-			PostState:         common.Hash{2}.Bytes(),
+			PostState:         libcommon.Hash{2}.Bytes(),
 			CumulativeGasUsed: 3,
 			Logs: []*Log{
-				{Address: common.BytesToAddress([]byte{0x22})},
-				{Address: common.BytesToAddress([]byte{0x02, 0x22})},
+				{Address: libcommon.BytesToAddress([]byte{0x22})},
+				{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
 			},
 			TxHash:          txs[1].Hash(),
-			ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+			ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 			GasUsed:         2,
 		},
 	}
@@ -138,7 +139,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			bl = CreateBloom(rSmall)
 		}
 		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		var exp = libcommon.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
 		got := crypto.Keccak256Hash(bl.Bytes())
 		if got != exp {
 			b.Errorf("Got %x, exp %x", got, exp)
@@ -151,7 +152,7 @@ func BenchmarkCreateBloom(b *testing.B) {
 			bl = CreateBloom(rLarge)
 		}
 		b.StopTimer()
-		var exp = common.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
+		var exp = libcommon.HexToHash("c384c56ece49458a427c67b90fefe979ebf7104795be65dc398b280f24104949")
 		got := crypto.Keccak256Hash(bl.Bytes())
 		if got != exp {
 			b.Errorf("Got %x, exp %x", got, exp)

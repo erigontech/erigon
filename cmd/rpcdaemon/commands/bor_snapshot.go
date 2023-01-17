@@ -7,27 +7,28 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/xsleonard/go-merkle"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 )
 
 type Snapshot struct {
-	config *params.BorConfig // Consensus engine parameters to fine tune behavior
+	config *chain.BorConfig // Consensus engine parameters to fine tune behavior
 
-	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
-	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
-	ValidatorSet *ValidatorSet             `json:"validatorSet"` // Validator set at this moment
-	Recents      map[uint64]common.Address `json:"recents"`      // Set of recent signers for spam protections
+	Number       uint64                       `json:"number"`       // Block number where the snapshot was created
+	Hash         libcommon.Hash               `json:"hash"`         // Block hash where the snapshot was created
+	ValidatorSet *ValidatorSet                `json:"validatorSet"` // Validator set at this moment
+	Recents      map[uint64]libcommon.Address `json:"recents"`      // Set of recent signers for spam protections
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
@@ -62,7 +63,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetAuthor retrieves the author a block.
-func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) {
+func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*libcommon.Address, error) {
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -86,7 +87,7 @@ func (api *BorImpl) GetAuthor(number *rpc.BlockNumber) (*common.Address, error) 
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
+func (api *BorImpl) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 	// init chain db
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
@@ -113,7 +114,7 @@ func (api *BorImpl) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error) {
 	// init chain db
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
@@ -145,7 +146,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *BorImpl) GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, error) {
 	// init chain db
 	ctx := context.Background()
 	tx, err := api.db.BeginRo(ctx)
@@ -174,10 +175,10 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 }
 
 // GetCurrentProposer gets the current proposer
-func (api *BorImpl) GetCurrentProposer() (common.Address, error) {
+func (api *BorImpl) GetCurrentProposer() (libcommon.Address, error) {
 	snap, err := api.GetSnapshot(nil)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 	return snap.ValidatorSet.GetProposer().Address, nil
 }
@@ -248,7 +249,7 @@ func (s *Snapshot) copy() *Snapshot {
 		Number:       s.Number,
 		Hash:         s.Hash,
 		ValidatorSet: s.ValidatorSet.Copy(),
-		Recents:      make(map[uint64]common.Address),
+		Recents:      make(map[uint64]libcommon.Address),
 	}
 	for block, signer := range s.Recents {
 		cpy.Recents[block] = signer
@@ -258,7 +259,7 @@ func (s *Snapshot) copy() *Snapshot {
 }
 
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
-func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error) {
+func (s *Snapshot) GetSignerSuccessionNumber(signer libcommon.Address) (int, error) {
 	validators := s.ValidatorSet.Validators
 	proposer := s.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
@@ -280,8 +281,8 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error)
 }
 
 // signers retrieves the list of authorized signers in ascending order.
-func (s *Snapshot) signers() []common.Address {
-	sigs := make([]common.Address, 0, len(s.ValidatorSet.Validators))
+func (s *Snapshot) signers() []libcommon.Address {
+	sigs := make([]libcommon.Address, 0, len(s.ValidatorSet.Validators))
 	for _, sig := range s.ValidatorSet.Validators {
 		sigs = append(sigs, sig.Address)
 	}
@@ -404,7 +405,7 @@ func snapshot(ctx context.Context, api *BorImpl, db kv.Tx, borDb kv.Tx, header *
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash libcommon.Hash) (*Snapshot, error) {
 	blob, err := borDb.GetOne(kv.BorSeparate, append([]byte("bor-"), hash[:]...))
 	if err != nil {
 		return nil, err

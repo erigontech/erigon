@@ -8,29 +8,30 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type IssuanceCfg struct {
 	db              kv.RwDB
-	chainConfig     *params.ChainConfig
+	chainConfig     *chain.Config
 	blockReader     services.FullBlockReader
 	enabledIssuance bool
 }
 
-func StageIssuanceCfg(db kv.RwDB, chainConfig *params.ChainConfig, blockReader services.FullBlockReader, enabledIssuance bool) IssuanceCfg {
+func StageIssuanceCfg(db kv.RwDB, chainConfig *chain.Config, blockReader services.FullBlockReader, enabledIssuance bool) IssuanceCfg {
 	return IssuanceCfg{
 		db:              db,
 		chainConfig:     chainConfig,
@@ -56,7 +57,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if cfg.chainConfig.Consensus != params.EtHashConsensus || !cfg.enabledIssuance || headNumber == s.BlockNumber {
+	if cfg.chainConfig.Consensus != chain.EtHashConsensus || !cfg.enabledIssuance || headNumber == s.BlockNumber {
 		if !useExternalTx {
 			if err = tx.Commit(); err != nil {
 				return err
@@ -86,7 +87,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 	if err != nil {
 		return err
 	}
-	for k, v, err := headerC.Seek(common2.EncodeTs(currentBlockNumber)); k != nil && !stopped; k, v, err = headerC.Next() {
+	for k, v, err := headerC.Seek(hexutility.EncodeTs(currentBlockNumber)); k != nil && !stopped; k, v, err = headerC.Next() {
 		if err != nil {
 			return err
 		}
@@ -109,7 +110,7 @@ func SpawnStageIssuance(cfg IssuanceCfg, s *StageState, tx kv.RwTx, ctx context.
 			return err
 		}
 
-		if hash != common.BytesToHash(k[8:]) {
+		if hash != libcommon.BytesToHash(k[8:]) {
 			continue
 		}
 		var header types.Header

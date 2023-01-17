@@ -10,16 +10,16 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -39,7 +39,7 @@ type MiningExecCfg struct {
 	db          kv.RwDB
 	miningState MiningState
 	notifier    ChainEventNotifier
-	chainConfig params.ChainConfig
+	chainConfig chain.Config
 	engine      consensus.Engine
 	blockReader services.FullBlockReader
 	vmConfig    *vm.Config
@@ -54,7 +54,7 @@ func StageMiningExecCfg(
 	db kv.RwDB,
 	miningState MiningState,
 	notifier ChainEventNotifier,
-	chainConfig params.ChainConfig,
+	chainConfig chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	tmpdir string,
@@ -105,7 +105,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		return nil
 	}
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
 	// Short circuit if there is no available pending transactions.
 	// But if we disable empty precommit already, ignore it. Since
@@ -226,7 +226,7 @@ func getNextTransactions(
 			continue
 		}
 
-		var sender common.Address
+		var sender libcommon.Address
 		copy(sender[:], txSlots.Senders.At(i))
 
 		// Check if tx nonce is too low
@@ -243,10 +243,10 @@ func getNextTransactions(
 	return types.NewTransactionsFixedOrder(txs), count, nil
 }
 
-func filterBadTransactions(transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {
+func filterBadTransactions(transactions []types.Transaction, config chain.Config, blockNumber uint64, baseFee *big.Int, simulationTx *memdb.MemoryMutation) ([]types.Transaction, error) {
 	initialCnt := len(transactions)
 	var filtered []types.Transaction
-	gasBailout := config.Consensus == params.ParliaConsensus
+	gasBailout := config.Consensus == chain.ParliaConsensus
 
 	missedTxs := 0
 	noSenderCnt := 0
@@ -361,7 +361,7 @@ func filterBadTransactions(transactions []types.Transaction, config params.Chain
 	return filtered, nil
 }
 
-func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig params.ChainConfig, vmConfig *vm.Config, getHeader func(hash common.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase common.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64) (types.Logs, bool, error) {
+func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig chain.Config, vmConfig *vm.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase libcommon.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64) (types.Logs, bool, error) {
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
@@ -372,8 +372,8 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 
 	parentHeader := getHeader(header.ParentHash, header.Number.Uint64()-1)
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig params.ChainConfig, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
-		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
+	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
+		ibs.Prepare(txn.Hash(), libcommon.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
 		snap := ibs.Snapshot()
 		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())

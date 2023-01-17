@@ -24,8 +24,9 @@ import (
 	"math/big"
 	"math/bits"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -148,29 +149,15 @@ type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
 	TD              *big.Int
-	Head            common.Hash
-	Genesis         common.Hash
+	Head            libcommon.Hash
+	Genesis         libcommon.Hash
 	ForkID          forkid.ID
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
 type NewBlockHashesPacket []struct {
-	Hash   common.Hash // Hash of one particular block being announced
-	Number uint64      // Number of one particular block being announced
-}
-
-// Unpack retrieves the block hashes and numbers from the announcement packet
-// and returns them in a split flat format that's more consistent with the
-// internal data structures.
-func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
-	var (
-		hashes  = make([]common.Hash, len(*p))
-		numbers = make([]uint64, len(*p))
-	)
-	for i, body := range *p {
-		hashes[i], numbers[i] = body.Hash, body.Number
-	}
-	return hashes, numbers
+	Hash   libcommon.Hash // Hash of one particular block being announced
+	Number uint64         // Number of one particular block being announced
 }
 
 // TransactionsPacket is the network packet for broadcasting new transactions.
@@ -183,7 +170,7 @@ func (tp TransactionsPacket) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range tp {
 		txsLen++
-		txLen := int(tx.Size())
+		txLen := tx.EncodingSize()
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -237,14 +224,14 @@ type GetBlockHeadersPacket66 struct {
 
 // HashOrNumber is a combined field for specifying an origin block.
 type HashOrNumber struct {
-	Hash   common.Hash // Block hash from which to retrieve headers (excludes Number)
-	Number uint64      // Block hash from which to retrieve headers (excludes Hash)
+	Hash   libcommon.Hash // Block hash from which to retrieve headers (excludes Number)
+	Number uint64         // Block hash from which to retrieve headers (excludes Hash)
 }
 
 // EncodeRLP is a specialized encoder for HashOrNumber to encode only one of the
 // two contained union fields.
 func (hn *HashOrNumber) EncodeRLP(w io.Writer) error {
-	if hn.Hash == (common.Hash{}) {
+	if hn.Hash == (libcommon.Hash{}) {
 		return rlp.Encode(w, hn.Number)
 	}
 	if hn.Number != 0 {
@@ -370,7 +357,7 @@ func (request *NewBlockPacket) SanityCheck() error {
 }
 
 // GetBlockBodiesPacket represents a block body query.
-type GetBlockBodiesPacket []common.Hash
+type GetBlockBodiesPacket []libcommon.Hash
 
 // GetBlockBodiesPacket represents a block body query over eth/66.
 type GetBlockBodiesPacket66 struct {
@@ -379,10 +366,10 @@ type GetBlockBodiesPacket66 struct {
 }
 
 // BlockBodiesPacket is the network packet for block content distribution.
-type BlockBodiesPacket []*BlockBody
+type BlockBodiesPacket []*types.Body
 
 // BlockRawBodiesPacket is the network packet for block content distribution.
-type BlockRawBodiesPacket []*BlockRawBody
+type BlockRawBodiesPacket []*types.RawBody
 
 // BlockBodiesPacket is the network packet for block content distribution over eth/66.
 type BlockBodiesPacket66 struct {
@@ -407,268 +394,6 @@ type BlockBodiesRLPPacket66 struct {
 	BlockBodiesRLPPacket
 }
 
-// BlockBody represents the data content of a single block.
-type BlockBody struct {
-	Transactions []types.Transaction // Transactions contained within a block
-	Uncles       []*types.Header     // Uncles contained within a block
-	Withdrawals  []*types.Withdrawal // Withdrawals contained within a block
-}
-
-// BlockRawBody represents the data content of a single block.
-type BlockRawBody struct {
-	Transactions [][]byte            // Transactions contained within a block
-	Uncles       []*types.Header     // Uncles contained within a block
-	Withdrawals  []*types.Withdrawal // Withdrawals contained within a block
-}
-
-func (bb BlockBody) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of Transactions
-	encodingSize++
-	var txsLen int
-	for _, tx := range bb.Transactions {
-		txsLen++
-		txLen := int(tx.Size())
-		if txLen >= 56 {
-			txsLen += (bits.Len(uint(txLen)) + 7) / 8
-		}
-		txsLen += txLen
-	}
-	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
-	}
-	encodingSize += txsLen
-	// size of Uncles
-	encodingSize++
-	var unclesLen int
-	for _, uncle := range bb.Uncles {
-		unclesLen++
-		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
-		}
-		unclesLen += uncleLen
-	}
-	if unclesLen >= 56 {
-		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
-	}
-	encodingSize += unclesLen
-	var b [33]byte
-	// prefix
-	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode Transactions
-	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
-		return err
-	}
-	for _, tx := range bb.Transactions {
-		if err := tx.EncodeRLP(w); err != nil {
-			return err
-		}
-	}
-	// encode Uncles
-	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
-		return err
-	}
-	for _, uncle := range bb.Uncles {
-		if err := uncle.EncodeRLP(w); err != nil {
-			return err
-		}
-	}
-	// encode withdrawals
-	if bb.Withdrawals != nil {
-		if err := types.EncodeStructSizePrefix(len(bb.Withdrawals), w, b[:]); err != nil {
-			return err
-		}
-		for _, withdrawal := range bb.Withdrawals {
-			if err := withdrawal.EncodeRLP(w); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (bb *BlockBody) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
-	}
-	// decode Transactions
-	if _, err = s.List(); err != nil {
-		return err
-	}
-	var tx types.Transaction
-	for tx, err = types.DecodeRLPTransaction(s); err == nil; tx, err = types.DecodeRLPTransaction(s) {
-		bb.Transactions = append(bb.Transactions, tx)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Transactions
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	// decode Uncles
-	if _, err = s.List(); err != nil {
-		return err
-	}
-	for err == nil {
-		var uncle types.Header
-		if err = uncle.DecodeRLP(s); err != nil {
-			break
-		}
-		bb.Uncles = append(bb.Uncles, &uncle)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Uncles
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	// decode Withdrawals
-	if _, err = s.List(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			bb.Withdrawals = nil
-			return s.ListEnd()
-		}
-		return err
-	}
-	bb.Withdrawals = []*types.Withdrawal{}
-	for err == nil {
-		var withdrawal types.Withdrawal
-		if err = withdrawal.DecodeRLP(s); err != nil {
-			break
-		}
-		bb.Withdrawals = append(bb.Withdrawals, &withdrawal)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Withdrawals
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	return s.ListEnd()
-}
-
-// Unpack retrieves the transactions and uncles from the range packet and returns
-// them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesPacket) Unpack() ([][]types.Transaction, [][]*types.Header) {
-	var (
-		txset    = make([][]types.Transaction, len(*p))
-		uncleset = make([][]*types.Header, len(*p))
-	)
-	for i, body := range *p {
-		txset[i], uncleset[i] = body.Transactions, body.Uncles
-	}
-	return txset, uncleset
-}
-
-func (rb BlockRawBody) EncodeRLP(w io.Writer) error {
-	encodingSize := 0
-	// size of Transactions
-	encodingSize++
-	var txsLen int
-	for _, tx := range rb.Transactions {
-		txsLen++
-		var txLen = len(tx)
-		if txLen >= 56 {
-			txsLen += (bits.Len(uint(txLen)) + 7) / 8
-		}
-		txsLen += txLen
-	}
-	if txsLen >= 56 {
-		encodingSize += (bits.Len(uint(txsLen)) + 7) / 8
-	}
-	encodingSize += txsLen
-	// size of Uncles
-	encodingSize++
-	var unclesLen int
-	for _, uncle := range rb.Uncles {
-		unclesLen++
-		uncleLen := uncle.EncodingSize()
-		if uncleLen >= 56 {
-			unclesLen += (bits.Len(uint(uncleLen)) + 7) / 8
-		}
-		unclesLen += uncleLen
-	}
-	if unclesLen >= 56 {
-		encodingSize += (bits.Len(uint(unclesLen)) + 7) / 8
-	}
-	encodingSize += unclesLen
-	var b [33]byte
-	// prefix
-	if err := types.EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
-		return err
-	}
-	// encode Transactions
-	if err := types.EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
-		return err
-	}
-	for _, tx := range rb.Transactions {
-		if _, err := w.Write(tx); err != nil {
-			return err
-		}
-	}
-	// encode Uncles
-	if err := types.EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
-		return err
-	}
-	for _, uncle := range rb.Uncles {
-		if err := uncle.EncodeRLP(w); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (rb *BlockRawBody) DecodeRLP(s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return err
-	}
-	// decode Transactions
-	if _, err = s.List(); err != nil {
-		return err
-	}
-	var tx []byte
-	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		if tx == nil {
-			fmt.Printf("BlockRawBody.DecodeRLP tx nil\n")
-		}
-		rb.Transactions = append(rb.Transactions, tx)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Transactions
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	// decode Uncles
-	if _, err = s.List(); err != nil {
-		return err
-	}
-	for err == nil {
-		var uncle types.Header
-		if err = uncle.DecodeRLP(s); err != nil {
-			break
-		}
-		rb.Uncles = append(rb.Uncles, &uncle)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Uncles
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	return s.ListEnd()
-}
-
 // Unpack retrieves the transactions, uncles, and withdrawals from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
 func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.Withdrawals) {
@@ -684,7 +409,7 @@ func (p *BlockRawBodiesPacket) Unpack() ([][][]byte, [][]*types.Header, []types.
 }
 
 // GetNodeDataPacket represents a trie node data query.
-type GetNodeDataPacket []common.Hash
+type GetNodeDataPacket []libcommon.Hash
 
 // GetNodeDataPacket represents a trie node data query over eth/66.
 type GetNodeDataPacket66 struct {
@@ -702,7 +427,7 @@ type NodeDataPacket66 struct {
 }
 
 // GetReceiptsPacket represents a block receipts query.
-type GetReceiptsPacket []common.Hash
+type GetReceiptsPacket []libcommon.Hash
 
 // GetReceiptsPacket represents a block receipts query over eth/66.
 type GetReceiptsPacket66 struct {
@@ -729,10 +454,10 @@ type ReceiptsRLPPacket66 struct {
 }
 
 // NewPooledTransactionHashesPacket represents a transaction announcement packet.
-type NewPooledTransactionHashesPacket []common.Hash
+type NewPooledTransactionHashesPacket []libcommon.Hash
 
 // GetPooledTransactionsPacket represents a transaction query.
-type GetPooledTransactionsPacket []common.Hash
+type GetPooledTransactionsPacket []libcommon.Hash
 
 type GetPooledTransactionsPacket66 struct {
 	RequestId uint64
@@ -749,7 +474,7 @@ func (ptp PooledTransactionsPacket) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range ptp {
 		txsLen++
-		txLen := int(tx.Size())
+		txLen := tx.EncodingSize()
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}
@@ -804,7 +529,7 @@ func (ptp66 PooledTransactionsPacket66) EncodeRLP(w io.Writer) error {
 	var txsLen int
 	for _, tx := range ptp66.PooledTransactionsPacket {
 		txsLen++
-		txLen := int(tx.Size())
+		txLen := tx.EncodingSize()
 		if txLen >= 56 {
 			txsLen += (bits.Len(uint(txLen)) + 7) / 8
 		}

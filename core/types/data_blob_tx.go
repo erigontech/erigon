@@ -8,6 +8,9 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -55,7 +58,7 @@ func (*ECDSASignature) FixedLength() uint64 {
 	return 1 + 32 + 32
 }
 
-type AddressSSZ common.Address
+type AddressSSZ libcommon.Address
 
 func (addr *AddressSSZ) Deserialize(dr *codec.DecodingReader) error {
 	if addr == nil {
@@ -158,13 +161,13 @@ func (tdv *TxDataView) UnmarshalText(text []byte) error {
 	return conv.DynamicBytesUnmarshalText((*[]byte)(tdv), text[:])
 }
 
-func ReadHashes(dr *codec.DecodingReader, hashes *[]common.Hash, length uint64) error {
+func ReadHashes(dr *codec.DecodingReader, hashes *[]libcommon.Hash, length uint64) error {
 	if uint64(len(*hashes)) != length {
 		// re-use space if available (for recycling old state objects)
 		if uint64(cap(*hashes)) >= length {
 			*hashes = (*hashes)[:length]
 		} else {
-			*hashes = make([]common.Hash, length)
+			*hashes = make([]libcommon.Hash, length)
 		}
 	}
 	dst := *hashes
@@ -176,7 +179,7 @@ func ReadHashes(dr *codec.DecodingReader, hashes *[]common.Hash, length uint64) 
 	return nil
 }
 
-func ReadHashesLimited(dr *codec.DecodingReader, hashes *[]common.Hash, limit uint64) error {
+func ReadHashesLimited(dr *codec.DecodingReader, hashes *[]libcommon.Hash, limit uint64) error {
 	scope := dr.Scope()
 	if scope%32 != 0 {
 		return fmt.Errorf("bad deserialization scope, cannot decode hashes list")
@@ -188,7 +191,7 @@ func ReadHashesLimited(dr *codec.DecodingReader, hashes *[]common.Hash, limit ui
 	return ReadHashes(dr, hashes, length)
 }
 
-func WriteHashes(ew *codec.EncodingWriter, hashes []common.Hash) error {
+func WriteHashes(ew *codec.EncodingWriter, hashes []libcommon.Hash) error {
 	for i := range hashes {
 		if err := ew.Write(hashes[i][:]); err != nil {
 			return err
@@ -197,10 +200,10 @@ func WriteHashes(ew *codec.EncodingWriter, hashes []common.Hash) error {
 	return nil
 }
 
-type VersionedHashesView []common.Hash
+type VersionedHashesView []libcommon.Hash
 
 func (vhv *VersionedHashesView) Deserialize(dr *codec.DecodingReader) error {
-	return ReadHashesLimited(dr, (*[]common.Hash)(vhv), MAX_VERSIONED_HASHES_LIST_SIZE)
+	return ReadHashesLimited(dr, (*[]libcommon.Hash)(vhv), MAX_VERSIONED_HASHES_LIST_SIZE)
 }
 
 func (vhv VersionedHashesView) Serialize(w *codec.EncodingWriter) error {
@@ -215,10 +218,10 @@ func (vhv *VersionedHashesView) FixedLength() uint64 {
 	return 0 // it's a list, no fixed length
 }
 
-type StorageKeysView []common.Hash
+type StorageKeysView []libcommon.Hash
 
 func (skv *StorageKeysView) Deserialize(dr *codec.DecodingReader) error {
-	return ReadHashesLimited(dr, (*[]common.Hash)(skv), MAX_ACCESS_LIST_STORAGE_KEYS)
+	return ReadHashesLimited(dr, (*[]libcommon.Hash)(skv), MAX_ACCESS_LIST_STORAGE_KEYS)
 }
 
 func (skv StorageKeysView) Serialize(w *codec.EncodingWriter) error {
@@ -318,12 +321,12 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 		GasTipCap:           tx.GasTipCap,
 		GasFeeCap:           tx.GasFeeCap,
 		Gas:                 tx.Gas,
-		To:                  AddressOptionalSSZ{Address: (*AddressSSZ)(copyAddressPtr((*common.Address)(tx.To.Address)))},
+		To:                  AddressOptionalSSZ{Address: (*AddressSSZ)(copyAddressPtr((*libcommon.Address)(tx.To.Address)))},
 		Value:               tx.Value,
 		Data:                common.CopyBytes(tx.Data),
 		AccessList:          make([]AccessTuple, len(tx.AccessList)),
 		MaxFeePerDataGas:    tx.MaxFeePerDataGas,
-		BlobVersionedHashes: make([]common.Hash, len(tx.BlobVersionedHashes)),
+		BlobVersionedHashes: make([]libcommon.Hash, len(tx.BlobVersionedHashes)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
 	copy(cpy.BlobVersionedHashes, tx.BlobVersionedHashes)
@@ -369,7 +372,9 @@ func (stx SignedBlobTx) GetGas() uint64   { return uint64(stx.Message.Gas) }
 func (stx SignedBlobTx) GetDataGas() uint64 {
 	return params.DataGasPerBlob * uint64(len(stx.Message.BlobVersionedHashes))
 }
-func (stx SignedBlobTx) GetTo() *common.Address { return (*common.Address)(stx.Message.To.Address) }
+func (stx SignedBlobTx) GetTo() *libcommon.Address {
+	return (*libcommon.Address)(stx.Message.To.Address)
+}
 func (stx SignedBlobTx) GetAmount() uint256.Int { return uint256.Int(stx.Message.Value) }
 func (stx SignedBlobTx) GetData() []byte        { return stx.Message.Data }
 func (stx SignedBlobTx) GetValue() *uint256.Int {
@@ -423,33 +428,33 @@ func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
 	return &fee
 }
 
-func (stx *SignedBlobTx) GetDataHashes() []common.Hash {
-	return []common.Hash(stx.Message.BlobVersionedHashes)
+func (stx *SignedBlobTx) GetDataHashes() []libcommon.Hash {
+	return []libcommon.Hash(stx.Message.BlobVersionedHashes)
 }
 
 // TODO
-func (stx *SignedBlobTx) Sender(signer Signer) (common.Address, error) {
+func (stx *SignedBlobTx) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := stx.from.Load(); sc != nil {
-		return sc.(common.Address), nil
+		return sc.(libcommon.Address), nil
 	}
 
 	addr, err := signer.Sender(stx)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 
 	stx.from.Store(addr)
 	return addr, nil
 }
 
-func (stx *SignedBlobTx) GetSender() (common.Address, bool) {
+func (stx *SignedBlobTx) GetSender() (libcommon.Address, bool) {
 	if sc := stx.from.Load(); sc != nil {
-		return sc.(common.Address), true
+		return sc.(libcommon.Address), true
 	}
-	return common.Address{}, false
+	return libcommon.Address{}, false
 }
 
-func (stx *SignedBlobTx) SetSender(addr common.Address) {
+func (stx *SignedBlobTx) SetSender(addr libcommon.Address) {
 	stx.from.Store(addr)
 }
 
@@ -479,7 +484,7 @@ func (stx *SignedBlobTx) WithSignature(signer Signer, sig []byte) (Transaction, 
 	return cpy, nil
 }
 
-func (tx *SignedBlobTx) FakeSign(address common.Address) (Transaction, error) {
+func (tx *SignedBlobTx) FakeSign(address libcommon.Address) (Transaction, error) {
 	cpy := tx.copy()
 	cpy.Signature.R = Uint256View(*u256.Num1)
 	cpy.Signature.S = Uint256View(*u256.Num1)
@@ -493,7 +498,7 @@ func (tx *SignedBlobTx) GetAccessList() AccessList {
 	return AccessList(tx.Message.AccessList)
 }
 
-func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
+func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:            stx.GetNonce(),
 		gasLimit:         stx.GetGas(),
@@ -524,7 +529,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 }
 
 // Hash computes the hash (but not for signatures!)
-func (stx *SignedBlobTx) Hash() common.Hash {
+func (stx *SignedBlobTx) Hash() libcommon.Hash {
 	return prefixedSSZHash(BlobTxType, stx)
 }
 
@@ -554,17 +559,8 @@ func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *
 	return tx.Signature.GetV(), tx.Signature.GetR(), tx.Signature.GetS()
 }
 
-func (stx SignedBlobTx) SigningHash(chainID *big.Int) common.Hash {
+func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedSSZHash(BlobTxType, &stx.Message)
-}
-
-func (stx *SignedBlobTx) Size() common.StorageSize {
-	if size := stx.size.Load(); size != nil {
-		return size.(common.StorageSize)
-	}
-	c := stx.EncodingSize()
-	stx.size.Store(common.StorageSize(c))
-	return common.StorageSize(c)
 }
 
 func (tx SignedBlobTx) EncodingSize() int {

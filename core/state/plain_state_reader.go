@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -26,7 +26,7 @@ func NewPlainStateReader(db kv.Getter) *PlainStateReader {
 	}
 }
 
-func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (r *PlainStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := r.db.GetOne(kv.PlainState, address.Bytes())
 	if err != nil {
 		return nil, err
@@ -41,7 +41,7 @@ func (r *PlainStateReader) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
-func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (r *PlainStateReader) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, err := r.db.GetOne(kv.PlainState, compositeKey)
 	if err != nil {
@@ -53,7 +53,7 @@ func (r *PlainStateReader) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (r *PlainStateReader) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (r *PlainStateReader) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash.Bytes(), emptyCodeHash) {
 		return nil, nil
 	}
@@ -64,12 +64,12 @@ func (r *PlainStateReader) ReadAccountCode(address common.Address, incarnation u
 	return code, err
 }
 
-func (r *PlainStateReader) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (r *PlainStateReader) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	code, err := r.ReadAccountCode(address, incarnation, codeHash)
 	return len(code), err
 }
 
-func (r *PlainStateReader) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (r *PlainStateReader) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	b, err := r.db.GetOne(kv.IncarnationMap, address.Bytes())
 	if err != nil {
 		return 0, err

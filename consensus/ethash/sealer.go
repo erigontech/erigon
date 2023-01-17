@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -72,8 +73,8 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 const remoteSealerTimeout = 1 * time.Second
 
 type remoteSealer struct {
-	works        map[common.Hash]*types.Block
-	rates        map[common.Hash]hashrate
+	works        map[libcommon.Hash]*types.Block
+	rates        map[libcommon.Hash]hashrate
 	currentBlock *types.Block
 	currentWork  [4]string
 	notifyCtx    context.Context
@@ -102,15 +103,15 @@ type sealTask struct {
 // mineResult wraps the pow solution parameters for the specified block.
 type mineResult struct {
 	nonce     types.BlockNonce
-	mixDigest common.Hash
-	hash      common.Hash
+	mixDigest libcommon.Hash
+	hash      libcommon.Hash
 
 	errc chan error
 }
 
 // hashrate wraps the hash rate submitted by the remote sealer.
 type hashrate struct {
-	id   common.Hash
+	id   libcommon.Hash
 	ping time.Time
 	rate uint64
 
@@ -131,8 +132,8 @@ func startRemoteSealer(ethash *Ethash, urls []string, noverify bool) *remoteSeal
 		notifyURLs:   urls,
 		notifyCtx:    ctx,
 		cancelNotify: cancel,
-		works:        make(map[common.Hash]*types.Block),
-		rates:        make(map[common.Hash]hashrate),
+		works:        make(map[libcommon.Hash]*types.Block),
+		rates:        make(map[libcommon.Hash]hashrate),
 		workCh:       make(chan *sealTask),
 		fetchWorkCh:  make(chan *sealWork),
 		submitWorkCh: make(chan *mineResult),
@@ -228,8 +229,8 @@ func (s *remoteSealer) loop() {
 func (s *remoteSealer) makeWork(block *types.Block) {
 	hash := s.ethash.SealHash(block.Header())
 	s.currentWork[0] = hash.Hex()
-	s.currentWork[1] = common.BytesToHash(SeedHash(block.NumberU64())).Hex()
-	s.currentWork[2] = common.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
+	s.currentWork[1] = libcommon.BytesToHash(SeedHash(block.NumberU64())).Hex()
+	s.currentWork[2] = libcommon.BytesToHash(new(big.Int).Div(two256, block.Difficulty()).Bytes()).Hex()
 	s.currentWork[3] = hexutil.EncodeBig(block.Number())
 
 	// Trace the seal work fetched by remote sealer.
@@ -282,7 +283,7 @@ func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []
 // submitWork verifies the submitted pow solution, returning
 // whether the solution was accepted or not (not can be both a bad pow as well as
 // any other error, like no pending work or stale mining result).
-func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash) bool {
+func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest libcommon.Hash, sealhash libcommon.Hash) bool {
 	if s.currentBlock == nil {
 		s.ethash.config.Log.Warn("Pending work without block", "sealhash", sealhash)
 		return false

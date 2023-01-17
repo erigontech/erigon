@@ -20,12 +20,12 @@ import (
 	"hash"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Config are the configuration options for the Interpreter
@@ -44,7 +44,7 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
-func (vmConfig *Config) HasEip3860(rules *params.Rules) bool {
+func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	for _, eip := range vmConfig.ExtraEips {
 		if eip == 3860 {
 			return true
@@ -92,8 +92,8 @@ type VM struct {
 	evm *EVM
 	cfg Config
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
+	hasherBuf libcommon.Hash // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse

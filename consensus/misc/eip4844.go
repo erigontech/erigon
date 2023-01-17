@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -65,7 +67,7 @@ func CountBlobs(txs []types.Transaction) int {
 }
 
 // VerifyEip4844Header verifies that the header is not malformed
-func VerifyEip4844Header(config *params.ChainConfig, parent, header *types.Header) error {
+func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
 	if header.ExcessDataGas == nil {
 		return fmt.Errorf("header is missing excessDataGas")
 	}

@@ -17,19 +17,15 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/libp2p/go-libp2p-core/protocol"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
-// packet simply needs to implement clone so that it can be instantiated within the generic
-type Packet interface {
-	Clone() Packet
-}
-
 // context includes the original stream, the raw decompressed bytes, the codec the context was generated from, and the protocol ID
 type StreamContext struct {
-	Packet   Packet
+	Packet   clonable.Clonable
 	Protocol protocol.ID
 	Codec    StreamCodec
 	Stream   network.Stream
@@ -43,7 +39,7 @@ func (c *StreamContext) String() string {
 
 type GossipContext struct {
 	// the packet
-	Packet Packet
+	Packet clonable.Clonable
 	// the topic of the message
 	Topic *pubsub.Topic
 	// the actual message
@@ -61,8 +57,8 @@ type StreamCodec interface {
 	CloseReader() error
 
 	Write(payload []byte) (n int, err error)
-	WritePacket(pck Packet, prefix ...byte) (err error)
-	Decode(Packet) (ctx *StreamContext, err error)
+	WritePacket(pck clonable.Clonable, prefix ...byte) (err error)
+	Decode(clonable.Clonable) (ctx *StreamContext, err error)
 
 	Read(payload []byte) (n int, err error)
 	ReadByte() (b byte, err error)
@@ -71,8 +67,8 @@ type StreamCodec interface {
 // GossipCodec describes a wire format for pubsub messages
 // it is linked to a single topiC
 type GossipCodec interface {
-	WritePacket(ctx context.Context, pck Packet) (err error)
-	Decode(context.Context, Packet) (*GossipContext, error)
+	WritePacket(ctx context.Context, pck clonable.Clonable) (err error)
+	Decode(context.Context, clonable.Clonable) (*GossipContext, error)
 }
 
 func (c *GossipContext) String() string {
@@ -82,7 +78,7 @@ func (c *GossipContext) String() string {
 // the empty packet doesn't implement any serialization, so it means to skip.
 type EmptyPacket struct{}
 
-func (e *EmptyPacket) Clone() Packet {
+func (e *EmptyPacket) Clone() clonable.Clonable {
 	return &EmptyPacket{}
 }
 
@@ -91,7 +87,7 @@ type ErrorMessage struct {
 	Message []byte `json:"message"`
 }
 
-func (typ *ErrorMessage) Clone() Packet {
+func (typ *ErrorMessage) Clone() clonable.Clonable {
 	return &ErrorMessage{}
 }
 

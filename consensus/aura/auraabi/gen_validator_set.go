@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -89,7 +91,7 @@ type ValidatorSetTransactorRaw struct {
 }
 
 // NewValidatorSet creates a new instance of ValidatorSet, bound to a specific deployed contract.
-func NewValidatorSet(address common.Address, backend bind.ContractBackend) (*ValidatorSet, error) {
+func NewValidatorSet(address libcommon.Address, backend bind.ContractBackend) (*ValidatorSet, error) {
 	contract, err := bindValidatorSet(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -98,7 +100,7 @@ func NewValidatorSet(address common.Address, backend bind.ContractBackend) (*Val
 }
 
 // NewValidatorSetCaller creates a new read-only instance of ValidatorSet, bound to a specific deployed contract.
-func NewValidatorSetCaller(address common.Address, caller bind.ContractCaller) (*ValidatorSetCaller, error) {
+func NewValidatorSetCaller(address libcommon.Address, caller bind.ContractCaller) (*ValidatorSetCaller, error) {
 	contract, err := bindValidatorSet(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -107,7 +109,7 @@ func NewValidatorSetCaller(address common.Address, caller bind.ContractCaller) (
 }
 
 // NewValidatorSetTransactor creates a new write-only instance of ValidatorSet, bound to a specific deployed contract.
-func NewValidatorSetTransactor(address common.Address, transactor bind.ContractTransactor) (*ValidatorSetTransactor, error) {
+func NewValidatorSetTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ValidatorSetTransactor, error) {
 	contract, err := bindValidatorSet(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -116,7 +118,7 @@ func NewValidatorSetTransactor(address common.Address, transactor bind.ContractT
 }
 
 // NewValidatorSetFilterer creates a new log filterer instance of ValidatorSet, bound to a specific deployed contract.
-func NewValidatorSetFilterer(address common.Address, filterer bind.ContractFilterer) (*ValidatorSetFilterer, error) {
+func NewValidatorSetFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ValidatorSetFilterer, error) {
 	contract, err := bindValidatorSet(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -125,7 +127,7 @@ func NewValidatorSetFilterer(address common.Address, filterer bind.ContractFilte
 }
 
 // bindValidatorSet binds a generic wrapper to an already deployed contract.
-func bindValidatorSet(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindValidatorSet(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ValidatorSetABI))
 	if err != nil {
 		return nil, err
@@ -205,15 +207,15 @@ func (_ValidatorSet *ValidatorSetCallerSession) EmitInitiateChangeCallable() (bo
 // GetValidators is a free data retrieval call binding the contract method 0xb7ab4db5.
 //
 // Solidity: function getValidators() returns(address[] validators)
-func (_ValidatorSet *ValidatorSetCaller) GetValidators(opts *bind.CallOpts) ([]common.Address, error) {
+func (_ValidatorSet *ValidatorSetCaller) GetValidators(opts *bind.CallOpts) ([]libcommon.Address, error) {
 	var out []interface{}
 	err := _ValidatorSet.contract.Call(opts, &out, "getValidators")
 
 	if err != nil {
-		return *new([]common.Address), err
+		return *new([]libcommon.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new([]common.Address)).(*[]common.Address)
+	out0 := *abi.ConvertType(out[0], new([]libcommon.Address)).(*[]libcommon.Address)
 
 	return out0, err
 
@@ -222,21 +224,21 @@ func (_ValidatorSet *ValidatorSetCaller) GetValidators(opts *bind.CallOpts) ([]c
 // GetValidators is a free data retrieval call binding the contract method 0xb7ab4db5.
 //
 // Solidity: function getValidators() returns(address[] validators)
-func (_ValidatorSet *ValidatorSetSession) GetValidators() ([]common.Address, error) {
+func (_ValidatorSet *ValidatorSetSession) GetValidators() ([]libcommon.Address, error) {
 	return _ValidatorSet.Contract.GetValidators(&_ValidatorSet.CallOpts)
 }
 
 // GetValidators is a free data retrieval call binding the contract method 0xb7ab4db5.
 //
 // Solidity: function getValidators() returns(address[] validators)
-func (_ValidatorSet *ValidatorSetCallerSession) GetValidators() ([]common.Address, error) {
+func (_ValidatorSet *ValidatorSetCallerSession) GetValidators() ([]libcommon.Address, error) {
 	return _ValidatorSet.Contract.GetValidators(&_ValidatorSet.CallOpts)
 }
 
 // ShouldValidatorReport is a free data retrieval call binding the contract method 0xcbd2d528.
 //
 // Solidity: function shouldValidatorReport(address _reportingValidator, address _maliciousValidator, uint256 _blockNumber) view returns(bool)
-func (_ValidatorSet *ValidatorSetCaller) ShouldValidatorReport(opts *bind.CallOpts, _reportingValidator common.Address, _maliciousValidator common.Address, _blockNumber *big.Int) (bool, error) {
+func (_ValidatorSet *ValidatorSetCaller) ShouldValidatorReport(opts *bind.CallOpts, _reportingValidator libcommon.Address, _maliciousValidator libcommon.Address, _blockNumber *big.Int) (bool, error) {
 	var out []interface{}
 	err := _ValidatorSet.contract.Call(opts, &out, "shouldValidatorReport", _reportingValidator, _maliciousValidator, _blockNumber)
 
@@ -253,14 +255,14 @@ func (_ValidatorSet *ValidatorSetCaller) ShouldValidatorReport(opts *bind.CallOp
 // ShouldValidatorReport is a free data retrieval call binding the contract method 0xcbd2d528.
 //
 // Solidity: function shouldValidatorReport(address _reportingValidator, address _maliciousValidator, uint256 _blockNumber) view returns(bool)
-func (_ValidatorSet *ValidatorSetSession) ShouldValidatorReport(_reportingValidator common.Address, _maliciousValidator common.Address, _blockNumber *big.Int) (bool, error) {
+func (_ValidatorSet *ValidatorSetSession) ShouldValidatorReport(_reportingValidator libcommon.Address, _maliciousValidator libcommon.Address, _blockNumber *big.Int) (bool, error) {
 	return _ValidatorSet.Contract.ShouldValidatorReport(&_ValidatorSet.CallOpts, _reportingValidator, _maliciousValidator, _blockNumber)
 }
 
 // ShouldValidatorReport is a free data retrieval call binding the contract method 0xcbd2d528.
 //
 // Solidity: function shouldValidatorReport(address _reportingValidator, address _maliciousValidator, uint256 _blockNumber) view returns(bool)
-func (_ValidatorSet *ValidatorSetCallerSession) ShouldValidatorReport(_reportingValidator common.Address, _maliciousValidator common.Address, _blockNumber *big.Int) (bool, error) {
+func (_ValidatorSet *ValidatorSetCallerSession) ShouldValidatorReport(_reportingValidator libcommon.Address, _maliciousValidator libcommon.Address, _blockNumber *big.Int) (bool, error) {
 	return _ValidatorSet.Contract.ShouldValidatorReport(&_ValidatorSet.CallOpts, _reportingValidator, _maliciousValidator, _blockNumber)
 }
 
@@ -376,7 +378,7 @@ func (it *ValidatorSetInitiateChangeIterator) Close() error {
 // ValidatorSetInitiateChange represents a InitiateChange event raised by the ValidatorSet contract.
 type ValidatorSetInitiateChange struct {
 	ParentHash [32]byte
-	NewSet     []common.Address
+	NewSet     []libcommon.Address
 	Raw        types.Log // Blockchain specific contextual infos
 }
 

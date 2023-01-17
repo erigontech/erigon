@@ -7,8 +7,9 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	len2 "github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
 )
@@ -45,7 +46,7 @@ func (hb *StarkStatsBuilder) leafHash(length int, keyHex []byte, val rlphacks.Rl
 	var lenPrefix [4]byte
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 	inputSize := totalLen + pt
-	if inputSize > common.HashLength {
+	if inputSize > len2.Hash {
 		inputSize = 32
 	}
 	hb.sizeStack = append(hb.sizeStack, inputSize)
@@ -109,13 +110,13 @@ func (hb *StarkStatsBuilder) branch(set uint16) error {
 	return hb.branchHash(set)
 }
 
-func (hb *StarkStatsBuilder) hash(_ common.Hash) {
+func (hb *StarkStatsBuilder) hash(_ libcommon.Hash) {
 	hb.sizeStack = append(hb.sizeStack, 32)
 }
 
-func (hb *StarkStatsBuilder) code(_ []byte) common.Hash {
+func (hb *StarkStatsBuilder) code(_ []byte) libcommon.Hash {
 	hb.sizeStack = append(hb.sizeStack, 32)
-	return common.Hash{}
+	return libcommon.Hash{}
 }
 
 func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64, balance *uint256.Int, nonce uint64, fieldSet uint32) (err error) {

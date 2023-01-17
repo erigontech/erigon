@@ -27,8 +27,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	ethereum "github.com/ledgerwatch/erigon"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
@@ -51,7 +53,7 @@ func TestSimulatedBackend(t *testing.T) {
 	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
 	// should return an error if the tx is not found
-	txHash := common.HexToHash("2")
+	txHash := libcommon.HexToHash("2")
 	_, isPending, err := sim.TransactionByHash(context.Background(), txHash)
 
 	if isPending {
@@ -112,7 +114,7 @@ const deployedCode = `60806040526004361061003b576000357c010000000000000000000000
 // expected return value contains "hello world"
 var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
+func simTestBackend(t *testing.T, testAddr libcommon.Address) *SimulatedBackend {
 	expectedBal := uint256.NewInt(10000000000)
 	return NewSimulatedBackend(t,
 		core.GenesisAlloc{
@@ -536,7 +538,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 	sim := NewSimulatedBackend(t, core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 
-	recipient := common.HexToAddress("deadbeef")
+	recipient := libcommon.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
 		message     ethereum.CallMsg

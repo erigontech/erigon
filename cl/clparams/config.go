@@ -20,8 +20,9 @@ import (
 	"math/big"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -104,8 +105,8 @@ type NetworkConfig struct {
 }
 
 type GenesisConfig struct {
-	GenesisValidatorRoot common.Hash // Merkle Root at Genesis
-	GenesisTime          uint64      // Unix time at Genesis
+	GenesisValidatorRoot libcommon.Hash // Merkle Root at Genesis
+	GenesisTime          uint64         // Unix time at Genesis
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -172,15 +173,15 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
 	MainnetNetwork: {
-		GenesisValidatorRoot: common.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
+		GenesisValidatorRoot: libcommon.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
 		GenesisTime:          1606824023,
 	},
 	SepoliaNetwork: {
-		GenesisValidatorRoot: common.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
+		GenesisValidatorRoot: libcommon.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
 		GenesisTime:          1655733600,
 	},
 	GoerliNetwork: {
-		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
+		GenesisValidatorRoot: libcommon.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
 	},
 }
@@ -391,12 +392,12 @@ type BeaconChainConfig struct {
 	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                common.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true"`                  // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64         `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string         `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"`            // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultFeeRecipient              common.Address // DefaultFeeRecipient where the transaction fee goes to.
-	EthBurnAddressHex                string         // EthBurnAddressHex is the constant eth address written in hex format to burn fees in that network. the default is 0x0
-	DefaultBuilderGasLimit           uint64         // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true"`                  // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"`            // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultFeeRecipient              libcommon.Address // DefaultFeeRecipient where the transaction fee goes to.
+	EthBurnAddressHex                string            // EthBurnAddressHex is the constant eth address written in hex format to burn fees in that network. the default is 0x0
+	DefaultBuilderGasLimit           uint64            // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.

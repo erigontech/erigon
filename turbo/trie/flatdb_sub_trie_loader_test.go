@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))

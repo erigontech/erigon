@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleWriter *VerkleTreeWriter) error {
@@ -69,7 +71,7 @@ func RegeneratePedersenAccounts(outTx kv.RwTx, readTx kv.Tx, workers uint64, ver
 				codeSize = uint64(len(code))
 			}
 			jobs <- &regeneratePedersenAccountsJob{
-				address:  common.BytesToAddress(k),
+				address:  libcommon.BytesToAddress(k),
 				account:  acc,
 				codeSize: codeSize,
 			}
@@ -128,7 +130,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 		}
 	}()
 
-	var address common.Address
+	var address libcommon.Address
 	var incarnation uint64
 	for k, v, err := plainStateCursor.First(); k != nil; k, v, err = plainStateCursor.Next() {
 		if err != nil {
@@ -155,7 +157,7 @@ func RegeneratePedersenStorage(outTx kv.RwTx, readTx kv.Tx, workers uint64, verk
 				return err
 			}
 			incarnation = acc.Incarnation
-			address = common.BytesToAddress(k)
+			address = libcommon.BytesToAddress(k)
 		}
 	}
 
@@ -231,7 +233,7 @@ func RegeneratePedersenCode(outTx kv.RwTx, readTx kv.Tx, workers uint64, verkleW
 		}
 
 		jobs <- &regeneratePedersenCodeJob{
-			address: common.BytesToAddress(k),
+			address: libcommon.BytesToAddress(k),
 			code:    common.CopyBytes(code),
 		}
 		select {

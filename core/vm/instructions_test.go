@@ -26,6 +26,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -632,8 +634,8 @@ func TestCreate2Addreses(t *testing.T) {
 		},
 	} {
 
-		origin := common.BytesToAddress(common.FromHex(tt.origin))
-		salt := common.BytesToHash(common.FromHex(tt.salt))
+		origin := libcommon.BytesToAddress(common.FromHex(tt.origin))
+		salt := libcommon.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
 		codeHash := crypto.Keccak256(code)
 		address := crypto.CreateAddress2(origin, salt, codeHash)
@@ -646,7 +648,7 @@ func TestCreate2Addreses(t *testing.T) {
 			gas, _ := gasCreate2(params.GasTable{}, nil, nil, stack, nil, 0)
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
-		expected := common.BytesToAddress(common.FromHex(tt.expected))
+		expected := libcommon.BytesToAddress(common.FromHex(tt.expected))
 		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}
@@ -657,20 +659,20 @@ func TestDataHash(t *testing.T) {
 	type testcase struct {
 		name   string
 		idx    uint64
-		expect common.Hash
-		hashes []common.Hash
+		expect libcommon.Hash
+		hashes []libcommon.Hash
 	}
 	var (
-		zero  = common.Hash{0}
-		one   = common.Hash{1}
-		two   = common.Hash{2}
-		three = common.Hash{3}
+		zero  = libcommon.Hash{0}
+		one   = libcommon.Hash{1}
+		two   = libcommon.Hash{2}
+		three = libcommon.Hash{3}
 	)
 	for _, tt := range []testcase{
-		{name: "[{1}]", idx: 0, expect: one, hashes: []common.Hash{one}},
-		{name: "[1,{2},3]", idx: 2, expect: three, hashes: []common.Hash{one, two, three}},
-		{name: "out-of-bounds (empty)", idx: 10, expect: zero, hashes: []common.Hash{}},
-		{name: "out-of-bounds", idx: 25, expect: zero, hashes: []common.Hash{one, two, three}},
+		{name: "[{1}]", idx: 0, expect: one, hashes: []libcommon.Hash{one}},
+		{name: "[1,{2},3]", idx: 2, expect: three, hashes: []libcommon.Hash{one, two, three}},
+		{name: "out-of-bounds (empty)", idx: 10, expect: zero, hashes: []libcommon.Hash{}},
+		{name: "out-of-bounds", idx: 25, expect: zero, hashes: []libcommon.Hash{one, two, three}},
 	} {
 		var (
 			env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{DataHashes: tt.hashes}, nil, params.TestChainConfig, Config{})

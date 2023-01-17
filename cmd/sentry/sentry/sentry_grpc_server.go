@@ -25,8 +25,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -35,11 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const (
@@ -244,7 +244,7 @@ func ConvertH512ToPeerID(h512 *proto_types.H512) [64]byte {
 
 func makeP2PServer(
 	p2pConfig p2p.Config,
-	genesisHash common.Hash,
+	genesisHash libcommon.Hash,
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
 	var urls []string
@@ -271,7 +271,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	startSync func(bestHash common.Hash) error,
+	startSync func(bestHash libcommon.Hash) error,
 ) error {
 	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
@@ -576,7 +576,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
-			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
+			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return ss.startSync(ctx, bestHash, peerID)
@@ -693,7 +693,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 	})
 }
 
-func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
+func (ss *GrpcServer) startSync(ctx context.Context, bestHash libcommon.Hash, peerID [64]byte) error {
 	switch ss.Protocol.Version {
 	case eth.ETH66, eth.ETH67:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{

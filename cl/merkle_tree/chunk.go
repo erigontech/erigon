@@ -1,4 +1,4 @@
-package state_encoding
+package merkle_tree
 
 import "encoding/binary"
 

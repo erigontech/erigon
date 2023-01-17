@@ -25,7 +25,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -35,23 +37,23 @@ import (
 
 type account struct{}
 
-func (account) SubBalance(amount *big.Int)                          {}
-func (account) AddBalance(amount *big.Int)                          {}
-func (account) SetAddress(common.Address)                           {}
-func (account) Value() *big.Int                                     { return nil }
-func (account) SetBalance(*big.Int)                                 {}
-func (account) SetNonce(uint64)                                     {}
-func (account) Balance() *uint256.Int                               { return &uint256.Int{} }
-func (account) Address() common.Address                             { return common.Address{} }
-func (account) SetCode(common.Hash, []byte)                         {}
-func (account) ForEachStorage(cb func(key, value common.Hash) bool) {}
+func (account) SubBalance(amount *big.Int)                             {}
+func (account) AddBalance(amount *big.Int)                             {}
+func (account) SetAddress(libcommon.Address)                           {}
+func (account) Value() *big.Int                                        { return nil }
+func (account) SetBalance(*big.Int)                                    {}
+func (account) SetNonce(uint64)                                        {}
+func (account) Balance() *uint256.Int                                  { return &uint256.Int{} }
+func (account) Address() libcommon.Address                             { return libcommon.Address{} }
+func (account) SetCode(libcommon.Hash, []byte)                         {}
+func (account) ForEachStorage(cb func(key, value libcommon.Hash) bool) {}
 
 type dummyStatedb struct {
 	state.IntraBlockState
 }
 
-func (*dummyStatedb) GetRefund() uint64                           { return 1337 }
-func (*dummyStatedb) GetBalance(addr common.Address) *uint256.Int { return &uint256.Int{} }
+func (*dummyStatedb) GetRefund() uint64                              { return 1337 }
+func (*dummyStatedb) GetBalance(addr libcommon.Address) *uint256.Int { return &uint256.Int{} }
 
 type vmContext struct {
 	blockCtx evmtypes.BlockContext
@@ -62,7 +64,7 @@ func testCtx() *vmContext {
 	return &vmContext{blockCtx: evmtypes.BlockContext{BlockNumber: 1}, txCtx: evmtypes.TxContext{GasPrice: uint256.NewInt(100000)}}
 }
 
-func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *params.ChainConfig, contractCode []byte) (json.RawMessage, error) {
+func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, contractCode []byte) (json.RawMessage, error) {
 	var (
 		env             = vm.NewEVM(vmctx.blockCtx, vmctx.txCtx, &dummyStatedb{}, chaincfg, vm.Config{Debug: true, Tracer: tracer})
 		gasLimit uint64 = 31000
@@ -186,7 +188,7 @@ func TestHaltBetweenSteps(t *testing.T) {
 	scope := &vm.ScopeContext{
 		Contract: vm.NewContract(&account{}, &account{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
-	tracer.CaptureStart(env, common.Address{}, common.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
+	tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 0, uint256.NewInt(0), []byte{} /* code */)
 	tracer.CaptureState(0, 0, 0, 0, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
@@ -207,7 +209,7 @@ func TestNoStepExec(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
-		tracer.CaptureStart(env, common.Address{}, common.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
+		tracer.CaptureStart(env, libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
 		tracer.CaptureEnd(nil, 0, nil)
 		ret, err := tracer.GetResult()
 		if err != nil {
@@ -231,7 +233,7 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &params.ChainConfig{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, DAOForkSupport: false, TangerineWhistleBlock: big.NewInt(0), TangerineWhistleHash: common.Hash{}, SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(params.EthashConfig), Clique: nil}
+	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, DAOForkSupport: false, TangerineWhistleBlock: big.NewInt(0), TangerineWhistleHash: libcommon.Hash{}, SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
 	chaincfg.ByzantiumBlock = big.NewInt(100)
 	chaincfg.IstanbulBlock = big.NewInt(200)
 	chaincfg.BerlinBlock = big.NewInt(300)

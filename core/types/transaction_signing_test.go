@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -128,7 +129,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 			continue
 		}
 
-		addr := common.HexToAddress(test.addr)
+		addr := libcommon.HexToAddress(test.addr)
 		if from != addr {
 			t.Errorf("%d: expected %x got %x", i, addr, from)
 		}
@@ -138,8 +139,8 @@ func TestEIP155SigningVitalik(t *testing.T) {
 
 func TestChainId(t *testing.T) {
 	key, _ := defaultTestKey()
-	addr := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
+	accesses := AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 
 	var signedBlobTx Transaction = &SignedBlobTx{
 		Message: BlobTxMessage{
@@ -153,7 +154,7 @@ func TestChainId(t *testing.T) {
 		name string
 		tx   Transaction
 	}{
-		{"legacy_tx", NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)},
+		{"legacy_tx", NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)},
 		{"signed_blob_tx", signedBlobTx},
 	}
 
@@ -187,7 +188,7 @@ func TestSigning_SignedBlobDataTx(t *testing.T) {
 	t.Parallel()
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	accesses := AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+	accesses := AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 
 	chainId := uint256.NewInt(18)
 	var signedBlobTx Transaction = &SignedBlobTx{

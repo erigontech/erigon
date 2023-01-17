@@ -21,21 +21,22 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
 //
 // excessDataGas must be set to the excessDataGas value from the *parent* block header, and can be
 // nil if the parent block is not of EIP-4844 type. It is read only.
-func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashFunc func(n uint64) common.Hash, engine consensus.EngineReader, author *common.Address) evmtypes.BlockContext {
+func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
-	var beneficiary common.Address
+	var beneficiary libcommon.Address
 	if author == nil {
 		beneficiary, _ = engine.Author(header) // Ignore error, we're past header validation
 	} else {
@@ -49,14 +50,14 @@ func NewEVMBlockContext(header *types.Header, excessDataGas *big.Int, blockHashF
 		}
 	}
 
-	var prevRandDao *common.Hash
+	var prevRandDao *libcommon.Hash
 	if header.Difficulty.Cmp(serenity.SerenityDifficulty) == 0 {
 		// EIP-4399. We use SerenityDifficulty (i.e. 0) as a telltale of Proof-of-Stake blocks.
 		prevRandDao = &header.MixDigest
 	}
 
 	var transferFunc evmtypes.TransferFunc
-	if engine != nil && engine.Type() == params.BorConsensus {
+	if engine != nil && engine.Type() == chain.BorConsensus {
 		transferFunc = BorTransfer
 	} else {
 		transferFunc = Transfer
@@ -91,12 +92,12 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) *types.Header) func(n uint64) common.Hash {
+func GetHashFn(ref *types.Header, getHeader func(hash libcommon.Hash, number uint64) *types.Header) func(n uint64) libcommon.Hash {
 	// Cache will initially contain [refHash.parent],
 	// Then fill up with [refHash.p, refHash.pp, refHash.ppp, ...]
-	var cache []common.Hash
+	var cache []libcommon.Hash
 
-	return func(n uint64) common.Hash {
+	return func(n uint64) libcommon.Hash {
 		// If there's no hash cache yet, make one
 		if len(cache) == 0 {
 			cache = append(cache, ref.ParentHash)
@@ -120,18 +121,18 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				return lastKnownHash
 			}
 		}
-		return common.Hash{}
+		return libcommon.Hash{}
 	}
 }
 
 // CanTransfer checks whether there are enough funds in the address' account to make a transfer.
 // This does not take the necessary gas in to account to make the transfer valid.
-func CanTransfer(db evmtypes.IntraBlockState, addr common.Address, amount *uint256.Int) bool {
+func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *uint256.Int) bool {
 	return !db.GetBalance(addr).Lt(amount)
 }
 
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
-func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	if !bailout {
 		db.SubBalance(sender, amount)
 	}
@@ -139,7 +140,7 @@ func Transfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amo
 }
 
 // BorTransfer transfer in Bor
-func BorTransfer(db evmtypes.IntraBlockState, sender, recipient common.Address, amount *uint256.Int, bailout bool) {
+func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	// get inputs before
 	input1 := db.GetBalance(sender).Clone()
 	input2 := db.GetBalance(recipient).Clone()

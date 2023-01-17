@@ -25,7 +25,9 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -36,13 +38,13 @@ import (
 )
 
 // prestateTrace is the result of a prestateTrace run.
-type prestateTrace = map[common.Address]*account
+type prestateTrace = map[libcommon.Address]*account
 
 type account struct {
-	Balance string                      `json:"balance"`
-	Code    string                      `json:"code"`
-	Nonce   uint64                      `json:"nonce"`
-	Storage map[common.Hash]common.Hash `json:"storage"`
+	Balance string                            `json:"balance"`
+	Code    string                            `json:"code"`
+	Nonce   uint64                            `json:"nonce"`
+	Storage map[libcommon.Hash]libcommon.Hash `json:"storage"`
 }
 
 // testcase defines a single test to check the stateDiff tracer against.

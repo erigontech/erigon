@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -29,7 +31,7 @@ import (
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
 // - gas limit check
 // - basefee check
-func VerifyEip1559Header(config *params.ChainConfig, parent, header *types.Header) error {
+func VerifyEip1559Header(config *chain.Config, parent, header *types.Header) error {
 	// Verify that the gas limit remains within allowed bounds
 	parentGasLimit := parent.GasLimit
 	if !config.IsLondon(parent.Number.Uint64()) {
@@ -52,7 +54,7 @@ func VerifyEip1559Header(config *params.ChainConfig, parent, header *types.Heade
 }
 
 // CalcBaseFee calculates the basefee of the header.
-func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
+func CalcBaseFee(config *chain.Config, parent *types.Header) *big.Int {
 	// If the current block is the first EIP-1559 block, return the InitialBaseFee.
 	if !config.IsLondon(parent.Number.Uint64()) {
 		return new(big.Int).SetUint64(params.InitialBaseFee)
@@ -92,7 +94,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 	}
 }
 
-func getBaseFeeChangeDenominator(borConfig *params.BorConfig, number uint64) uint64 {
+func getBaseFeeChangeDenominator(borConfig *chain.BorConfig, number uint64) uint64 {
 	// If we're running bor based chain post delhi hardfork, return the new value
 	if borConfig != nil && borConfig.IsDelhi(number) {
 		return params.BaseFeeChangeDenominatorPostDelhi
