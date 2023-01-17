@@ -635,18 +635,18 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	//if ms.HistoryV3 {
-		//if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
-		//	return err
-		//}
-		//if err := ms.DB.UpdateAsync(ms.Ctx, func(tx kv.RwTx) error {
-		//	ms.agg.SetTx(tx)
-		//	if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
-		//		return err
-		//	}
-		//	return nil
-		//}); err != nil {
-		//	return err
-		//}
+	//if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
+	//	return err
+	//}
+	//if err := ms.DB.UpdateAsync(ms.Ctx, func(tx kv.RwTx) error {
+	//	ms.agg.SetTx(tx)
+	//	if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
+	//		return err
+	//	}
+	//	return nil
+	//}); err != nil {
+	//	return err
+	//}
 	//}
 	return nil
 }
