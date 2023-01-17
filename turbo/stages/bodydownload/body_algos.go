@@ -170,7 +170,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			bd.delivered.Add(blockNum)
 		}
 	}
-	if len(bodyReq.BlockNums) > 0 {
+	if bodyReq != nil && len(bodyReq.BlockNums) > 0 {
 		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
 	}
 	return bodyReq, nil
