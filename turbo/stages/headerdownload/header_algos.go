@@ -491,7 +491,7 @@ func (hd *HeaderDownload) UpdateRetryTime(req *HeaderRequest, currentTime time.T
 func (hd *HeaderDownload) RequestSkeleton() *HeaderRequest {
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()
-	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "top seen height", hd.topSeenHeightPoW, "highestInDb", hd.highestInDb)
+	log.Debug("[Downloader] Request skeleton", "anchors", len(hd.anchors), "highestInDb", hd.highestInDb)
 	stride := uint64(8 * 192)
 	var length uint64 = 192
 	// Include one header that we have already, to make sure the responses are not empty and do not get penalised when we are at the tip of the chain
@@ -958,9 +958,6 @@ func (hi *HeaderInserter) BestHeaderChanged() bool {
 func (hd *HeaderDownload) ProcessHeader(sh ChainSegmentHeader, newBlock bool, peerID [64]byte) bool {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
-	if sh.Number > hd.topSeenHeightPoW && (newBlock || hd.seenAnnounces.Seen(sh.Hash)) {
-		hd.topSeenHeightPoW = sh.Number
-	}
 	if sh.Number > hd.stats.RespMaxBlock {
 		hd.stats.RespMaxBlock = sh.Number
 	}
