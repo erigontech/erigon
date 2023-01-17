@@ -92,7 +92,7 @@ type VMInterpreter interface {
 	DecrementDepth()
 	Depth() int
 	SetCallGasTemp(gas uint64)
-	GetCallGasTemp() uint64
+	CallGasTemp() uint64
 	StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
 	DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
 	CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error)
