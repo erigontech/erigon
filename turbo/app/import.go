@@ -64,6 +64,10 @@ func importChain(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	err = ethereum.Init(stack, ethCfg)
+	if err != nil {
+		return err
+	}
 
 	if err := ImportChain(ethereum, ethereum.ChainDB(), ctx.Args().First()); err != nil {
 		return err
