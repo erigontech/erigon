@@ -129,10 +129,15 @@ type Ethereum struct {
 
 	networkID uint64
 
-	lock              sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
-	chainConfig       *chain.Config
-	genesisBlock      *types.Block
-	genesisHash       libcommon.Hash
+	lock         sync.RWMutex // Protects the variadic fields (e.g. gas price and etherbase)
+	chainConfig  *chain.Config
+	genesisBlock *types.Block
+	genesisHash  libcommon.Hash
+
+	ethBackendRPC      *privateapi.EthBackendServer
+	miningRPC          txpool_proto.MiningServer
+	stateChangesClient txpool2.StateChangesClient
+
 	miningSealingQuit chan struct{}
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
@@ -653,6 +658,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		return nil, err
 	}
 
+	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
+
 	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
@@ -660,225 +667,11 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	return backend, nil
 }
 func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
+	ethBackendRPC, miningRPC, stateDiffClient := backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient
 	blockReader := backend.blockReader
 	ctx := backend.sentryCtx
 	chainKv := backend.chainDB
-	chainConfig := backend.chainConfig
-	dirs := stack.Config().Dirs
-	genesis := backend.genesisBlock
-	kvRPC := backend.kvRPC
-	tmpdir := dirs.Tmp
 	var err error
-
-	var currentBlock *types.Block
-	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock = rawdb.ReadCurrentBlock(tx)
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	var miningRPC txpool_proto.MiningServer
-	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
-	if config.DeprecatedTxPool.Disable {
-		backend.txPool2GrpcServer = &txpool2.GrpcDisabled{}
-	} else {
-		//cacheConfig := kvcache.DefaultCoherentCacheConfig
-		//cacheConfig.MetricsLabel = "txpool"
-
-		backend.newTxs2 = make(chan types2.Hashes, 1024)
-		//defer close(newTxs)
-		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
-		)
-		if err != nil {
-			return err
-		}
-	}
-
-	backend.notifyMiningAboutNewTxs = make(chan struct{}, 1)
-	backend.miningSealingQuit = make(chan struct{})
-	backend.pendingBlocks = make(chan *types.Block, 1)
-	backend.minedBlocks = make(chan *types.Block, 1)
-
-	miner := stagedsync.NewMiningState(&config.Miner)
-	backend.pendingBlocks = miner.PendingResultCh
-	backend.minedBlocks = miner.MiningResultCh
-
-	// proof-of-work mining
-	mining := stagedsync.New(
-		stagedsync.MiningStages(backend.sentryCtx,
-			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB),
-			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
-			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
-		), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
-
-	var ethashApi *ethash.API
-	if casted, ok := backend.engine.(*ethash.Ethash); ok {
-		ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-	}
-
-	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error) {
-		miningStatePos := stagedsync.NewProposingState(&config.Miner)
-		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
-		proposingSync := stagedsync.New(
-			stagedsync.MiningStages(backend.sentryCtx,
-				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB),
-				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
-				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, blockReader, nil, config.HistoryV3, backend.agg),
-				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
-			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder)
-		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
-			return nil, err
-		}
-		block := <-miningStatePos.MiningResultPOSCh
-		return block, nil
-	}
-
-	// Initialize ethbackend
-	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events,
-		blockReader, chainConfig, assembleBlockPOS, backend.sentriesClient.Hd, config.Miner.EnabledPOS)
-	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi)
-
-	var creds credentials.TransportCredentials
-	if stack.Config().PrivateApiAddr != "" {
-		if stack.Config().TLSConnection {
-			creds, err = grpcutil.TLS(stack.Config().TLSCACert, stack.Config().TLSCertFile, stack.Config().TLSKeyFile)
-			if err != nil {
-				return err
-			}
-		}
-		backend.privateAPI, err = privateapi.StartGrpc(
-			kvRPC,
-			ethBackendRPC,
-			backend.txPool2GrpcServer,
-			miningRPC,
-			stack.Config().PrivateApiAddr,
-			stack.Config().PrivateApiRateLimit,
-			creds,
-			stack.Config().HealthCheck)
-		if err != nil {
-			return fmt.Errorf("private api: %w", err)
-		}
-	}
-
-	// If we choose not to run a consensus layer, run our embedded.
-	if !config.ExternalCL && clparams.EmbeddedSupported(config.NetworkID) {
-		genesisCfg, networkCfg, beaconCfg := clparams.GetConfigsByNetwork(clparams.NetworkType(config.NetworkID))
-		if err != nil {
-			return err
-		}
-		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
-			IpAddr:        config.LightClientDiscoveryAddr,
-			Port:          int(config.LightClientDiscoveryPort),
-			TCPPort:       uint(config.LightClientDiscoveryTCPPort),
-			GenesisConfig: genesisCfg,
-			NetworkConfig: networkCfg,
-			BeaconConfig:  beaconCfg,
-		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, nil, handshake.LightClientRule)
-		if err != nil {
-			return err
-		}
-
-		lc, err := lightclient.NewLightClient(ctx, memdb.New(), genesisCfg, beaconCfg, ethBackendRPC, client, currentBlock.NumberU64(), false)
-		if err != nil {
-			return err
-		}
-		bs, err := clcore.RetrieveBeaconState(ctx,
-			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
-
-		if err != nil {
-			return err
-		}
-
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
-			return err
-		}
-
-		go lc.Start()
-	}
-
-	if currentBlock == nil {
-		currentBlock = genesis
-	}
-	// We start the transaction pool on startup, for a couple of reasons:
-	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
-	// to initialize it properly.
-	// 2) we cannot propose for block 1 regardless.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		baseFee := uint64(0)
-		if currentBlock.BaseFee() != nil {
-			baseFee = currentBlock.BaseFee().Uint64()
-		}
-		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
-		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
-
-	}()
-
-	if !config.DeprecatedTxPool.Disable {
-		backend.txPool2Fetch.ConnectCore()
-		backend.txPool2Fetch.ConnectSentries()
-		var newTxsBroadcaster *txpool2.NewSlotsStreams
-		if casted, ok := backend.txPool2GrpcServer.(*txpool2.GrpcServer); ok {
-			newTxsBroadcaster = casted.NewSlotsStreams
-		}
-		go txpool2.MainLoop(backend.sentryCtx,
-			backend.txPool2DB, backend.chainDB,
-			backend.txPool2, backend.newTxs2, backend.txPool2Send, newTxsBroadcaster,
-			func() {
-				select {
-				case backend.notifyMiningAboutNewTxs <- struct{}{}:
-				default:
-				}
-			})
-	}
-	go func() {
-		defer debug.LogPanic()
-		for {
-			select {
-			case b := <-backend.minedBlocks:
-				// Add mined header and block body before broadcast. This is because the broadcast call
-				// will trigger the staged sync which will require headers and blocks to be available
-				// in their respective cache in the download stage. If not found, it would cause a
-				// liveness issue for the chain.
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
-					log.Error("add mined block to header downloader", "err", err)
-				}
-				backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
-
-				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
-				//rpcdaemon
-				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
-					log.Error("txpool rpc mined block broadcast", "err", err)
-				}
-				log.Trace("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
-				backend.sentriesClient.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
-					{
-						Number: b.NumberU64(),
-						Hash:   b.Hash(),
-					},
-				})
-
-			case b := <-backend.pendingBlocks:
-				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
-					log.Error("txpool rpc pending block broadcast", "err", err)
-				}
-			case <-backend.sentriesClient.Hd.QuitPoWMining:
-				return
-			}
-		}
-	}()
-
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
-		return err
-	}
 
 	backend.stagedSync = stagedsync.New(backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder)
 
