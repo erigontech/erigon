@@ -205,7 +205,6 @@ func BodiesForward(
 				log.Debug("Body was nil when reading from cache", "block", nextBlock)
 				cfg.bd.NotDelivered(nextBlock)
 				write = false
-				break
 			}
 			if !write {
 				continue
