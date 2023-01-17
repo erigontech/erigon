@@ -78,13 +78,11 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
-			log.Debug("Body already delivered", "blockNum", blockNum)
 			continue
 		}
 
 		if req, ok := bd.requests[blockNum]; ok {
 			if currentTime < req.waitUntil {
-				log.Debug("Request for body is still outstanding", "blockNum", blockNum)
 				continue
 			}
 			bd.peerMap[req.peerID]++
@@ -97,7 +95,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		var err error
 		if _, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.delivered.Add(blockNum)
-			log.Debug("Body already in the cache", "blockNum", blockNum)
 			continue
 		}
 
@@ -116,7 +113,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			// we want to avoid an infinite loop if the header was populated in deliveriesH before the block
 			// was added to the prefetched cache
 			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
-				log.Debug("Body already prefetched 1", "blockNum", blockNum)
 				request = false
 			}
 		} else {
@@ -134,7 +130,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			}
 
 			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
-				log.Debug("Body already prefetched 2", "blockNum", blockNum)
 				request = false
 			} else {
 				bd.deliveriesH[blockNum] = header
@@ -154,12 +149,10 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 						bd.requestedMap[tripleHash] = blockNum
 					} else {
 						bd.addBodyToCache(blockNum, block.RawBody())
-						log.Debug("Body already in the DB", "blockNum", blockNum)
 						request = false
 					}
 				} else {
 					bd.addBodyToCache(blockNum, &types.RawBody{})
-					log.Debug("Body is empty", "blockNum", blockNum)
 					request = false
 				}
 			}
@@ -175,9 +168,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", blockNums[0], "max", blockNums[len(blockNums)-1])
-	} else {
-		log.Debug("Returned Body request empty", "bd.requestedLow", bd.requestedLow, "bd.maxProgress", bd.maxProgress)
 	}
 	return bodyReq, nil
 }
