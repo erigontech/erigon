@@ -158,6 +158,24 @@ func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool
 	return nil, false
 }
 
+func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var sub *GossipSubscription
+	for topic, currSub := range s.subscriptions {
+		if strings.Contains(topic, string(BeaconBlockTopic)) {
+			sub = currSub
+		}
+	}
+	return sub
+}
+
+func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.subscriptions[topic] = sub
+}
+
 // starts listening to a specific topic (forwarding its messages to the gossip manager channel)
 func (s *GossipManager) ListenTopic(topic string) error {
 	s.mu.RLock()
@@ -205,9 +223,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	s.subManager.mu.Lock()
-	s.subManager.subscriptions[path] = sub
-	s.subManager.mu.Unlock()
+	s.subManager.AddSubscription(path, sub)
 	return sub, nil
 }
 

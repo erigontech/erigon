@@ -18,7 +18,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -258,13 +257,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	// Check how many peers are subscribed to beacon block
-	var sub *GossipSubscription
-	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(BeaconBlockTopic)) {
-			sub = currSub
-		}
-	}
+	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())
