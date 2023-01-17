@@ -18,8 +18,8 @@ package vm
 
 import (
 	"hash"
-	"sync/atomic"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -85,11 +85,26 @@ type EVMInterpreter struct {
 	jt *JumpTable // EVM instruction table
 }
 
+type VMInterpreter interface {
+	VMInterface
+	Cancelled() bool
+	IncrementDepth()
+	DecrementDepth()
+	Depth() int
+	SetCallGasTemp(gas uint64)
+	GetCallGasTemp() uint64
+	StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
+	DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
+	CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error)
+	Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
+	Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
+}
+
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
 type VM struct {
-	evm *EVM
+	evm VMInterpreter
 	cfg Config
 
 	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
@@ -111,7 +126,7 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
-func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
+func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
 	case evm.ChainRules().IsCancun:
@@ -165,8 +180,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
 	// Increment the call depth which is restricted to 1024
-	in.evm.depth++
-	defer func() { in.evm.depth-- }()
+	in.evm.IncrementDepth()
+	defer func() { in.evm.DecrementDepth() }()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -213,9 +228,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.Depth(), err) //nolint:errcheck
 				} else {
-					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
+					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.evm.Depth(), err)
 				}
 			}
 		}()
@@ -227,7 +242,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	steps := 0
 	for {
 		steps++
-		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
+		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
 		if in.cfg.Debug {
@@ -279,7 +294,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.evm.Depth(), err) //nolint:errcheck
 			logged = true
 		}
 		// execute the operation

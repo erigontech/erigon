@@ -449,6 +449,14 @@ func (evm *EVM) SysCreate(caller ContractRef, code []byte, gas uint64, endowment
 	return
 }
 
+func (evm *EVM) GetCallGasTemp() uint64 {
+	return evm.callGasTemp
+}
+
+func (evm *EVM) SetCallGasTemp(gas uint64) {
+	evm.callGasTemp = gas
+}
+
 // ChainConfig returns the environment's chain configuration
 func (evm *EVM) Config() Config {
 	return evm.config
@@ -465,6 +473,18 @@ func (evm *EVM) ChainRules() *chain.Rules {
 
 func (evm *EVM) Context() evmtypes.BlockContext {
 	return evm.context
+}
+
+func (evm *EVM) Depth() int {
+	return evm.depth
+}
+
+func (evm *EVM) IncrementDepth() {
+	evm.depth++
+}
+
+func (evm *EVM) DecrementDepth() {
+	evm.depth--
 }
 
 func (evm *EVM) TxContext() evmtypes.TxContext {
