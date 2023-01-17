@@ -28,7 +28,7 @@ import (
 )
 
 func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
-	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		// If we fail the minimum gas availability invariant, fail (0)
 		if contract.Gas <= params.SstoreSentryGasEIP2200 {
 			return 0, errors.New("not enough gas for reentrancy sentry")
@@ -107,7 +107,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 // whose storage is being read) is not yet in accessed_storage_keys,
 // charge 2100 gas and add the pair to accessed_storage_keys.
 // If the pair is already in accessed_storage_keys, charge 100 gas.
-func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasSLoadEIP2929(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	loc := stack.Peek()
 	slot := libcommon.Hash(loc.Bytes32())
 	// Check slot presence in the access list
@@ -125,7 +125,7 @@ func gasSLoadEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memo
 // > If the target is not in accessed_addresses,
 // > charge COLD_ACCOUNT_ACCESS_COST gas, and add the address to accessed_addresses.
 // > Otherwise, charge WARM_STORAGE_READ_COST gas.
-func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasExtCodeCopyEIP2929(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	// memory expansion first (dynamic part of pre-2929 implementation)
 	gas, err := gasExtCodeCopy(evm, contract, stack, mem, memorySize)
 	if err != nil {
@@ -152,7 +152,7 @@ func gasExtCodeCopyEIP2929(evm *EVM, contract *Contract, stack *stack.Stack, mem
 // - extcodehash,
 // - extcodesize,
 // - (ext) balance
-func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasEip2929AccountCheck(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	addr := libcommon.Address(stack.Peek().Bytes20())
 	// Check slot presence in the access list
 	if !evm.IntraBlockState().AddressInAccessList(addr) {
@@ -165,7 +165,7 @@ func gasEip2929AccountCheck(evm *EVM, contract *Contract, stack *stack.Stack, me
 }
 
 func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
-	return func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	return func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		addr := libcommon.Address(stack.Back(1).Bytes20())
 		// Check slot presence in the access list
 		warmAccess := evm.IntraBlockState().AddressInAccessList(addr)
@@ -228,7 +228,7 @@ var (
 
 // makeSelfdestructGasFn can create the selfdestruct dynamic gas function for EIP-2929 and EIP-2539
 func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
-	gasFunc := func(evm *EVM, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	gasFunc := func(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		var (
 			gas     uint64
 			address = libcommon.Address(stack.Peek().Bytes20())
