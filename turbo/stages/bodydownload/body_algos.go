@@ -76,7 +76,6 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
 	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
-		log.Debug("Body", "blockNum", blockNum)
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			log.Debug("Body already delivered", "blockNum", blockNum)
@@ -174,8 +173,9 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			bd.delivered.Add(blockNum)
 		}
 	}
-	if bodyReq != nil && len(bodyReq.BlockNums) > 0 {
-		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
+	if len(blockNums) > 0 {
+		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
+		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", blockNums[0], "max", blockNums[len(blockNums)-1])
 	} else {
 		log.Debug("Returned Body request empty", "bd.requestedLow", bd.requestedLow, "bd.maxProgress", bd.maxProgress)
 	}
