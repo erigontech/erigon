@@ -724,7 +724,7 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 			Index:     w.Index,
 			Validator: w.ValidatorIndex,
 			Address:   gointerfaces.ConvertH160toAddress(w.Address),
-			Amount:    *gointerfaces.ConvertH256ToUint256Int(w.Amount),
+			Amount:    w.Amount,
 		})
 	}
 	return out
@@ -737,7 +737,7 @@ func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
 			Index:          w.Index,
 			ValidatorIndex: w.Validator,
 			Address:        gointerfaces.ConvertAddressToH160(w.Address),
-			Amount:         gointerfaces.ConvertUint256IntToH256(&w.Amount),
+			Amount:         w.Amount,
 		})
 	}
 	return out
