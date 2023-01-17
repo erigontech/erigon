@@ -294,7 +294,6 @@ type HeaderDownload struct {
 	highestInDb            uint64 // Height of the highest block header in the database
 	initialCycle           bool   // Whether downloader is used in the initial cycle, and is allowed to issue more requests when previous responses created or moved an anchor
 	fetchingNew            bool   // Set when the stage that is actively fetching the headers is in progress
-	topSeenHeightPoW       uint64
 	latestMinedBlockNumber uint64
 	QuitPoWMining          chan struct{}
 	trace                  bool
