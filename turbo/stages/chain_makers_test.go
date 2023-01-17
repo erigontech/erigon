@@ -100,6 +100,10 @@ func TestGenerateChain(t *testing.T) {
 	}
 
 	tx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
 	defer tx.Rollback()
 
 	st := state.New(state.NewPlainStateReader(tx))
