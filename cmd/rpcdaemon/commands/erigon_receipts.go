@@ -212,6 +212,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	if logOptions.LogCount == 0 && logOptions.BlockCount == 0 {
 		logOptions = filters.DefaultLogFilterOptions()
 	}
+	if logOptions.BloomFilterSize >= 1000000 {
+		return nil, fmt.Errorf("bloom filter size should not be greater than 1000000")
+	}
+	if logOptions.BloomFilterSize == 0 {
+		logOptions.BloomFilterSize = filters.DefaultLogFilterOptions().BloomFilterSize
+	}
 	erigonLogs := types.ErigonLogs{}
 	tx, beginErr := api.db.BeginRo(ctx)
 	if beginErr != nil {
@@ -234,125 +240,129 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			return nil, err
 		}
 	}
-
-	blockNumbers := bitmapdb.NewBitmap()
-	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
-		return erigonLogs, err
-	}
-	if blockNumbers.IsEmpty() {
-		return erigonLogs, nil
-	}
-
-	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
-	for _, v := range crit.Addresses {
-		addrMap[v] = struct{}{}
-	}
-	topicsMap := make(map[libcommon.Hash]struct{})
-	for i := range crit.Topics {
-		for j := range crit.Topics {
-			topicsMap[crit.Topics[i][j]] = struct{}{}
-		}
-	}
-
-	// latest logs that match the filter crit
-	iter := blockNumbers.ReverseIterator()
 	var logCount, blockCount uint64
-	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
-			return nil, err
+	for i := latest; i >= 0; i -= logOptions.BloomFilterSize {
+		var start uint64
+		if latest >= logOptions.BloomFilterSize {
+			start = latest - logOptions.BloomFilterSize
 		}
-
-		blockNumber := uint64(iter.Next())
-		var logIndex uint
-		var txIndex uint
-		var blockLogs []*types.Log
-		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
-		if err != nil {
-			return nil, err
+		blockNumbers := bitmapdb.NewBitmap()
+		defer bitmapdb.ReturnToPool(blockNumbers)
+		if err := applyFilters(blockNumbers, tx, start, latest, crit); err != nil {
+			return erigonLogs, err
 		}
-		for it.HasNext() {
-			k, v, err := it.Next()
-			if err != nil {
-				return erigonLogs, err
-			}
-			var logs types.Logs
-			if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
-				return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
-			}
-			for _, log := range logs {
-				log.Index = logIndex
-				logIndex++
-			}
-			var filtered types.Logs
-			if logOptions.IgnoreTopicsOrder {
-				filtered = logs.CointainTopics(addrMap, topicsMap)
-			} else {
-				filtered = logs.Filter(addrMap, crit.Topics)
-			}
-			if len(filtered) == 0 {
-				continue
-			}
-			txIndex = uint(binary.BigEndian.Uint32(k[8:]))
-			for i := range filtered {
-				filtered[i].TxIndex = txIndex
-			}
-			for i := len(filtered) - 1; i >= 0; i-- {
-				blockLogs = append(blockLogs, filtered[i])
-				logCount++
-			}
-			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-				continue
-			}
-		}
-		blockCount++
-		if len(blockLogs) == 0 {
+		if blockNumbers.IsEmpty() {
 			continue
 		}
-
-		header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
-		if err != nil {
-			return nil, err
+		addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
+		for _, v := range crit.Addresses {
+			addrMap[v] = struct{}{}
 		}
-		if header == nil {
-			return nil, fmt.Errorf("block header not found: %d", blockNumber)
-		}
-		timestamp := header.Time
-
-		blockHash := header.Hash()
-
-		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			return nil, fmt.Errorf("block not found %d", blockNumber)
-		}
-		for _, log := range blockLogs {
-			erigonLog := &types.ErigonLog{}
-			erigonLog.BlockNumber = blockNumber
-			erigonLog.BlockHash = blockHash
-			if log.TxIndex == uint(len(body.Transactions)) {
-				erigonLog.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
-			} else {
-				erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+		topicsMap := make(map[libcommon.Hash]struct{})
+		for i := range crit.Topics {
+			for j := range crit.Topics {
+				topicsMap[crit.Topics[i][j]] = struct{}{}
 			}
-			erigonLog.Timestamp = timestamp
-			erigonLog.Address = log.Address
-			erigonLog.Topics = log.Topics
-			erigonLog.Data = log.Data
-			erigonLog.Index = log.Index
-			erigonLog.Removed = log.Removed
-			erigonLogs = append(erigonLogs, erigonLog)
 		}
+		// latest logs that match the filter crit
+		iter := blockNumbers.ReverseIterator()
 
-		if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
-			return erigonLogs, nil
-		}
-		if logOptions.BlockCount != 0 && logOptions.BlockCount == blockCount {
-			return erigonLogs, nil
+		for iter.HasNext() {
+			if err = ctx.Err(); err != nil {
+				return nil, err
+			}
+			blockNumber := uint64(iter.Next())
+			var logIndex uint
+			var txIndex uint
+			var blockLogs []*types.Log
+			it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
+			if err != nil {
+				return nil, err
+			}
+			for it.HasNext() {
+				if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+					continue
+				}
+				k, v, err := it.Next()
+				if err != nil {
+					return erigonLogs, err
+				}
+				var logs types.Logs
+				if err := cbor.Unmarshal(&logs, bytes.NewReader(v)); err != nil {
+					return erigonLogs, fmt.Errorf("receipt unmarshal failed:  %w", err)
+				}
+				for _, log := range logs {
+					log.Index = logIndex
+					logIndex++
+				}
+				var filtered types.Logs
+				if logOptions.IgnoreTopicsOrder {
+					filtered = logs.CointainTopics(addrMap, topicsMap)
+				} else {
+					filtered = logs.Filter(addrMap, crit.Topics)
+				}
+				if len(filtered) == 0 {
+					continue
+				}
+				txIndex = uint(binary.BigEndian.Uint32(k[8:]))
+				for i := range filtered {
+					filtered[i].TxIndex = txIndex
+				}
+				for i := len(filtered) - 1; i >= 0; i-- {
+					blockLogs = append(blockLogs, filtered[i])
+					logCount++
+				}
+			}
+			blockCount++
+			if len(blockLogs) == 0 {
+				continue
+			}
+
+			header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
+			if err != nil {
+				return nil, err
+			}
+			if header == nil {
+				return nil, fmt.Errorf("block header not found: %d", blockNumber)
+			}
+			timestamp := header.Time
+
+			blockHash := header.Hash()
+
+			body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+			if err != nil {
+				return nil, err
+			}
+			if body == nil {
+				return nil, fmt.Errorf("block not found %d", blockNumber)
+			}
+			for _, log := range blockLogs {
+				erigonLog := &types.ErigonLog{}
+				erigonLog.BlockNumber = blockNumber
+				erigonLog.BlockHash = blockHash
+				if log.TxIndex == uint(len(body.Transactions)) {
+					erigonLog.TxHash = types.ComputeBorTxHash(blockNumber, blockHash)
+				} else {
+					erigonLog.TxHash = body.Transactions[log.TxIndex].Hash()
+				}
+				erigonLog.Timestamp = timestamp
+				erigonLog.Address = log.Address
+				erigonLog.Topics = log.Topics
+				erigonLog.Data = log.Data
+				erigonLog.Index = log.Index
+				erigonLog.Removed = log.Removed
+				erigonLogs = append(erigonLogs, erigonLog)
+			}
+
+			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
+				return erigonLogs, nil
+			}
+			if logOptions.BlockCount != 0 && logOptions.BlockCount == blockCount {
+				return erigonLogs, nil
+			}
 		}
 	}
+
 	return erigonLogs, nil
 }
 

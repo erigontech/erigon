@@ -38,11 +38,13 @@ type LogFilterOptions struct {
 	LogCount          uint64 `json:"logCount,omitempty"`
 	BlockCount        uint64 `json:"blockCount,omitempty"`
 	IgnoreTopicsOrder bool   `json:"ignoreTopicsOrder,omitempty"`
+	BloomFilterSize   uint64 `json:"bloomFilterSize,omitempty"`
 }
 
 func DefaultLogFilterOptions() LogFilterOptions {
 	return LogFilterOptions{
-		BlockCount: 1,
+		BlockCount:      1,
+		BloomFilterSize: 50000,
 	}
 }
 
