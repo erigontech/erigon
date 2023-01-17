@@ -634,7 +634,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
-	if ms.HistoryV3 {
+	//if ms.HistoryV3 {
 		//if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
 		//	return err
 		//}
@@ -647,7 +647,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		//}); err != nil {
 		//	return err
 		//}
-	}
+	//}
 	return nil
 }
 
