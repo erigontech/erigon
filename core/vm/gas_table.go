@@ -252,7 +252,7 @@ func makeGasLog(n uint64) gasFunc {
 	}
 }
 
-func gasKeccak256(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasKeccak256(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -273,7 +273,7 @@ func gasKeccak256(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem
 // pureMemoryGascost is used by several operations, which aside from their
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
-func pureMemoryGascost(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func pureMemoryGascost(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	return memoryGasCost(mem, memorySize)
 }
 
@@ -286,7 +286,7 @@ var (
 	gasCreate  = pureMemoryGascost
 )
 
-func gasCreate2(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreate2(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -307,7 +307,7 @@ func gasCreate2(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *
 	return gas, nil
 }
 
-func gasCreateEip3860(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreateEip3860(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -326,7 +326,7 @@ func gasCreateEip3860(evm VMInterpreter, contract *Contract, stack *stack.Stack,
 	return gas, nil
 }
 
-func gasCreate2Eip3860(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasCreate2Eip3860(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -345,7 +345,7 @@ func gasCreate2Eip3860(evm VMInterpreter, contract *Contract, stack *stack.Stack
 	return gas, nil
 }
 
-func gasExpFrontier(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasExpFrontier(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	expByteLen := uint64((stack.Data[stack.Len()-2].BitLen() + 7) / 8)
 
 	var (
@@ -358,7 +358,7 @@ func gasExpFrontier(evm VMInterpreter, contract *Contract, stack *stack.Stack, m
 	return gas, nil
 }
 
-func gasExpEIP160(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
+func gasExpEIP160(_ VMInterpreter, contract *Contract, stack *stack.Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	expByteLen := uint64((stack.Data[stack.Len()-2].BitLen() + 7) / 8)
 
 	var (
@@ -427,6 +427,7 @@ func gasCallCode(evm VMInterpreter, contract *Contract, stack *stack.Stack, mem 
 	var callGasTemp uint64
 	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	evm.SetCallGasTemp(callGasTemp)
+
 	if err != nil {
 		return 0, err
 	}
@@ -441,9 +442,11 @@ func gasDelegateCall(evm VMInterpreter, contract *Contract, stack *stack.Stack, 
 	if err != nil {
 		return 0, err
 	}
+
 	var callGasTemp uint64
 	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	evm.SetCallGasTemp(callGasTemp)
+
 	if err != nil {
 		return 0, err
 	}
@@ -459,9 +462,11 @@ func gasStaticCall(evm VMInterpreter, contract *Contract, stack *stack.Stack, me
 	if err != nil {
 		return 0, err
 	}
+
 	var callGasTemp uint64
 	callGasTemp, err = callGas(evm.ChainRules().IsTangerineWhistle, contract.Gas, gas, stack.Back(0))
 	evm.SetCallGasTemp(callGasTemp)
+
 	if err != nil {
 		return 0, err
 	}
