@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -54,7 +53,7 @@ type Contract struct {
 
 	Code      []byte
 	Container *Container
-	CodeHash  common.Hash
+	CodeHash  libcommon.Hash
 	CodeAddr  *libcommon.Address
 	Input     []byte
 

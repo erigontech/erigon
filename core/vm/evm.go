@@ -20,11 +20,11 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -353,15 +353,15 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			// If the initcode is EOF, verify it is well-formed.
 			var c Container
 			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
-				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
 			}
 			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-				return nil, common.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
 			}
 			contract.Container = &c
 		} else if fromEOF {
 			// Don't allow EOF contract to execute legacy initcode.
-			return nil, common.Address{}, gas, ErrLegacyCode
+			return nil, libcommon.Address{}, gas, ErrLegacyCode
 		}
 	}
 
