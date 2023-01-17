@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 16
+const requestLoopCutOff int = 8
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -215,7 +215,8 @@ func BodiesForward(
 
 				rawBody := cfg.bd.GetBodyFromCache(nextBlock)
 				if rawBody == nil {
-					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
+					log.Debug("Body was nil when reading from cache", "block", nextBlock)
+					break
 				}
 
 				// Txn & uncle roots are verified via bd.requestedMap
@@ -243,6 +244,7 @@ func BodiesForward(
 						return false, fmt.Errorf("saving Bodies progress: %w", err)
 					}
 				}
+				cfg.bd.AdvanceLow()
 			}
 		}
 
