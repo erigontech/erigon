@@ -463,12 +463,10 @@ func (a *AttestationData) EncodeSSZ(dst []byte) []byte {
 func (a *AttestationData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
 	dst = buf
 
-	var dataMarshalled []byte
-	dataMarshalled, err = a.MarshalSSZ()
+	dst = a.EncodeSSZ(dst)
 	if err != nil {
 		return
 	}
-	dst = append(dst, dataMarshalled...)
 	return
 }
 
