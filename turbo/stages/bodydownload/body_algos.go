@@ -170,13 +170,9 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			bd.delivered.Add(blockNum)
 		}
 	}
-	if len(blockNums) > 0 {
-		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		for _, num := range blockNums {
-			bd.requests[num] = bodyReq
-		}
+	if len(bodyReq.BlockNums) > 0 {
+		log.Debug("Returned Body request", "bd.requestedLow", bd.requestedLow, "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
 	}
-
 	return bodyReq, nil
 }
 
@@ -210,6 +206,12 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {
+	if len(bodyReq.BlockNums) > 0 {
+		log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
+	}
+	for _, num := range bodyReq.BlockNums {
+		bd.requests[num] = bodyReq
+	}
 	bodyReq.waitUntil = timeWithTimeout
 	bodyReq.peerID = peer
 }
