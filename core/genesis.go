@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
@@ -89,14 +88,6 @@ type AuthorityRoundSeal struct {
 	Step uint64 `json:"step"`
 	/// Seal signature.
 	Signature common.Hash `json:"signature"`
-}
-
-var genesisTmpDB kv.RwDB
-var genesisDBLock *sync.Mutex
-
-func init() {
-	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(os.TempDir()).MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
-	genesisDBLock = &sync.Mutex{}
 }
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
@@ -379,9 +370,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		genesisDBLock.Lock()
-		defer genesisDBLock.Unlock()
-		tx, err := genesisTmpDB.BeginRw(context.Background())
+		tmpDB := mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).MustOpen()
+		defer tmpDB.Close()
+		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
 			panic(err)
 		}
