@@ -151,7 +151,6 @@ func BodiesForward(
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
-			log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
 		}
 
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -178,7 +177,6 @@ func BodiesForward(
 				start = time.Now()
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
-				log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
 			}
 
 			loopCount++
