@@ -345,6 +345,10 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
 }
 
+func (bd *BodyDownload) NotDelivered(blockNum uint64) {
+	bd.delivered.Remove(blockNum)
+}
+
 func (bd *BodyDownload) GetPenaltyPeers() [][64]byte {
 	peers := make([][64]byte, len(bd.peerMap))
 	i := 0

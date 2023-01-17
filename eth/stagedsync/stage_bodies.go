@@ -199,53 +199,54 @@ func BodiesForward(
 
 		toProcess := cfg.bd.NextProcessingCount()
 
-		if toProcess > 0 {
-			var i uint64
-			for i = 0; i < toProcess; i++ {
-				nextBlock := requestedLow + i
+		write := true
+		for i := uint64(0); i < toProcess; i++ {
+			nextBlock := requestedLow + i
+			rawBody := cfg.bd.GetBodyFromCache(nextBlock)
+			if rawBody == nil {
+				log.Debug("Body was nil when reading from cache", "block", nextBlock)
+				cfg.bd.NotDelivered(nextBlock)
+				write = false
+				break
+			}
+			if !write {
+				continue
+			}
+			header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
+			if err != nil {
+				return false, err
+			}
+			blockHeight := header.Number.Uint64()
+			if blockHeight != nextBlock {
+				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
+			}
 
-				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
-				if err != nil {
+			// Txn & uncle roots are verified via bd.requestedMap
+			err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
+			if err != nil {
+				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
+				u.UnwindTo(blockHeight-1, header.Hash())
+				return true, nil
+			}
+
+			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			if err != nil {
+				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+			}
+			if cfg.historyV3 && ok {
+				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return false, err
 				}
-				blockHeight := header.Number.Uint64()
-				if blockHeight != nextBlock {
-					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
-				}
-
-				rawBody := cfg.bd.GetBodyFromCache(nextBlock)
-				if rawBody == nil {
-					log.Debug("Body was nil when reading from cache", "block", nextBlock)
-					break
-				}
-
-				// Txn & uncle roots are verified via bd.requestedMap
-				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
-				if err != nil {
-					log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-					u.UnwindTo(blockHeight-1, header.Hash())
-					return true, nil
-				}
-
-				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
-				if err != nil {
-					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
-				}
-				if cfg.historyV3 && ok {
-					if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
-						return false, err
-					}
-				}
-
-				if blockHeight > bodyProgress {
-					bodyProgress = blockHeight
-					if err = s.Update(tx, blockHeight); err != nil {
-						return false, fmt.Errorf("saving Bodies progress: %w", err)
-					}
-				}
-				cfg.bd.AdvanceLow()
 			}
+
+			if blockHeight > bodyProgress {
+				bodyProgress = blockHeight
+				if err = s.Update(tx, blockHeight); err != nil {
+					return false, fmt.Errorf("saving Bodies progress: %w", err)
+				}
+			}
+			cfg.bd.AdvanceLow()
 		}
 
 		if !quiet && toProcess > 0 {
