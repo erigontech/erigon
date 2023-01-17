@@ -1782,14 +1782,14 @@ func (s *cursor2stream) HasNext() bool {
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
-func (s *cursor2stream) Next() ([]byte, []byte, error) {
+func (s *cursor2stream) Next() (k, v []byte, err error) {
 	select {
 	case <-s.ctx.Done():
 		return nil, nil, s.ctx.Err()
 	default:
 	}
 	s.limit--
-	k, v, err := s.nextK, s.nextV, s.nextErr
+	k, v, err = s.nextK, s.nextV, s.nextErr
 	if s.orderAscend {
 		s.nextK, s.nextV, s.nextErr = s.c.Next()
 	} else {
