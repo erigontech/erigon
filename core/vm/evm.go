@@ -150,6 +150,31 @@ func (evm *EVM) Cancelled() bool {
 	return atomic.LoadInt32(&evm.abort) == 1
 }
 
+// Depth returns the current call stack depth
+func (evm *EVM) Depth() int {
+	return evm.depth
+}
+
+// IncrementDepth increments the call stack depth
+func (evm *EVM) IncrementDepth() {
+	evm.depth++
+}
+
+// DecrementDepth decrements the call stack depth
+func (evm *EVM) DecrementDepth() {
+	evm.depth--
+}
+
+// CallGasTemp returns the callGasTemp for the EVM
+func (evm *EVM) CallGasTemp() uint64 {
+	return evm.callGasTemp
+}
+
+// SetCallGasTemp sets the callGasTemp for the EVM
+func (evm *EVM) SetCallGasTemp(gas uint64) {
+	evm.callGasTemp = gas
+}
+
 // Interpreter returns the current interpreter
 func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
@@ -459,18 +484,22 @@ func (evm *EVM) ChainConfig() *chain.Config {
 	return evm.chainConfig
 }
 
+// ChainRules returns the environment's chain rules
 func (evm *EVM) ChainRules() *chain.Rules {
 	return evm.chainRules
 }
 
+// Context returns the EVM's BlockContext
 func (evm *EVM) Context() evmtypes.BlockContext {
 	return evm.context
 }
 
+// TxContext returns the EVM's TxContext
 func (evm *EVM) TxContext() evmtypes.TxContext {
 	return evm.txContext
 }
 
+// IntraBlockState returns the EVM's IntraBlockState
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }
