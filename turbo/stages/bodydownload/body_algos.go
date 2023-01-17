@@ -332,8 +332,11 @@ func (bd *BodyDownload) NextProcessingCount() uint64 {
 	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
 		bd.delivered.Remove(bd.requestedLow + i)
 	}
-	bd.requestedLow += i
 	return i
+}
+
+func (bd *BodyDownload) AdvanceLow() {
+	bd.requestedLow++
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
