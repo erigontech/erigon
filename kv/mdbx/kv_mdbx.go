@@ -554,126 +554,6 @@ func (db *MdbxKV) AllBuckets() kv.TableCfg {
 	return db.buckets
 }
 
-func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if !bytes.HasPrefix(k, prefix) {
-			break
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (tx *MdbxTx) Prefix(table string, prefix []byte) (kv.Pairs, error) {
-	nextPrefix, ok := kv.NextSubtree(prefix)
-	if !ok {
-		return tx.Range(table, prefix, nil)
-	}
-	return tx.Range(table, prefix, nextPrefix)
-}
-
-func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
-	if toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
-		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
-	}
-	s, err := tx.newStreamCursor(table)
-	if err != nil {
-		return nil, err
-	}
-	s.toPrefix = toPrefix
-	s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
-	return s, nil
-}
-func (tx *MdbxTx) newStreamCursor(table string) (*cursor2stream, error) {
-	c, err := tx.Cursor(table)
-	if err != nil {
-		return nil, err
-	}
-	s := &cursor2stream{c: c, ctx: tx.ctx}
-	tx.streams = append(tx.streams, s)
-	return s, nil
-}
-
-type cursor2stream struct {
-	c            kv.Cursor
-	nextK, nextV []byte
-	nextErr      error
-	toPrefix     []byte
-	ctx          context.Context
-}
-
-func (s *cursor2stream) Close() { s.c.Close() }
-func (s *cursor2stream) HasNext() bool {
-	if s.toPrefix == nil {
-		return s.nextK != nil
-	}
-	if s.nextK == nil {
-		return false
-	}
-	return bytes.Compare(s.nextK, s.toPrefix) < 0
-}
-func (s *cursor2stream) Next() ([]byte, []byte, error) {
-	k, v, err := s.nextK, s.nextV, s.nextErr
-	select {
-	case <-s.ctx.Done():
-		return nil, nil, s.ctx.Err()
-	default:
-	}
-	s.nextK, s.nextV, s.nextErr = s.c.Next()
-	return k, v, err
-}
-
-func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
-	if amount == 0 {
-		return nil
-	}
-	c, err := tx.Cursor(bucket)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-
-	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		if err := walker(k, v); err != nil {
-			return err
-		}
-		amount--
-	}
-	return nil
-}
-
 func (tx *MdbxTx) ViewID() uint64 { return tx.tx.ID() }
 
 func (tx *MdbxTx) CollectMetrics() {
@@ -1786,4 +1666,164 @@ func bucketSlice(b kv.TableCfg) []string {
 		return strings.Compare(buckets[i], buckets[j]) < 0
 	})
 	return buckets
+}
+
+func (tx *MdbxTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byte) error) error {
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if !bytes.HasPrefix(k, prefix) {
+			break
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (tx *MdbxTx) Prefix(table string, prefix []byte) (kv.Pairs, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return tx.Range(table, prefix, nil)
+	}
+	return tx.Range(table, prefix, nextPrefix)
+}
+
+func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend bool, limit int) (kv.Pairs, error) {
+	if orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
+		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
+	}
+	if !orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) <= 0 {
+		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", toPrefix, fromPrefix)
+	}
+	s, err := tx.newStreamCursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s.fromPrefix = fromPrefix
+	s.toPrefix = toPrefix
+	s.orderAscend = orderAscend
+	s.limit = limit
+	if orderAscend {
+		s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
+	} else {
+		if fromPrefix == nil {
+			s.nextK, s.nextV, s.nextErr = s.c.Last()
+		} else {
+			s.nextK, s.nextV, s.nextErr = s.c.SeekExact(fromPrefix)
+			if s.nextK == nil { // no such key
+				s.nextK, s.nextV, s.nextErr = s.c.Prev()
+			}
+		}
+	}
+	return s, nil
+}
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
+	return tx.RangeAscend(table, fromPrefix, toPrefix, -1)
+}
+func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, true, limit)
+}
+func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, false, limit)
+}
+func (tx *MdbxTx) newStreamCursor(table string) (*cursor2stream, error) {
+	c, err := tx.Cursor(table)
+	if err != nil {
+		return nil, err
+	}
+	s := &cursor2stream{c: c, ctx: tx.ctx}
+	tx.streams = append(tx.streams, s)
+	return s, nil
+}
+
+type cursor2stream struct {
+	c                    kv.Cursor
+	nextK, nextV         []byte
+	nextErr              error
+	fromPrefix, toPrefix []byte
+	orderAscend          bool
+	limit                int
+	ctx                  context.Context
+}
+
+func (s *cursor2stream) Close() { s.c.Close() }
+func (s *cursor2stream) HasNext() bool {
+	if s.nextErr != nil {
+		return true // always true when error, then next call to .Next() will return this error
+	}
+	if s.nextK == nil || s.limit == 0 {
+		return false // end or limit
+	}
+	if s.toPrefix == nil {
+		return s.nextK != nil // nil is marker of End/Start of Table
+	}
+
+	//Asc:  [from, to) AND from > to
+	//Desc: [from, to) AND from < to
+	cmp := bytes.Compare(s.nextK, s.toPrefix)
+	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
+}
+func (s *cursor2stream) Next() ([]byte, []byte, error) {
+	select {
+	case <-s.ctx.Done():
+		return nil, nil, s.ctx.Err()
+	default:
+	}
+	s.limit--
+	k, v, err := s.nextK, s.nextV, s.nextErr
+	if s.orderAscend {
+		s.nextK, s.nextV, s.nextErr = s.c.Next()
+	} else {
+		s.nextK, s.nextV, s.nextErr = s.c.Prev()
+	}
+	return k, v, err
+}
+
+func (tx *MdbxTx) ForAmount(bucket string, fromPrefix []byte, amount uint32, walker func(k, v []byte) error) error {
+	if amount == 0 {
+		return nil
+	}
+	c, err := tx.Cursor(bucket)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	for k, v, err := c.Seek(fromPrefix); k != nil && amount > 0; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		if err := walker(k, v); err != nil {
+			return err
+		}
+		amount--
+	}
+	return nil
 }

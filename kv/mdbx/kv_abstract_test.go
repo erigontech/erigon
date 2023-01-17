@@ -205,7 +205,7 @@ func TestRemoteKvStream(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
-	require, ctx, writeDB := require.New(t), context.Background(), memdb.NewTestDB(t)
+	ctx, writeDB := context.Background(), memdb.NewTestDB(t)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
 		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil))
@@ -215,11 +215,12 @@ func TestRemoteKvStream(t *testing.T) {
 	}()
 
 	cc, err := grpc.Dial("", grpc.WithInsecure(), grpc.WithContextDialer(func(ctx context.Context, url string) (net.Conn, error) { return conn.Dial() }))
-	require.NoError(err)
+	require.NoError(t, err)
 	db, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), remote.NewKVClient(cc)).Open()
-	require.NoError(err)
-	require.True(db.EnsureVersionCompatibility())
+	require.NoError(t, err)
+	require.True(t, db.EnsureVersionCompatibility())
 
+	require := require.New(t)
 	require.NoError(writeDB.Update(ctx, func(tx kv.RwTx) error {
 		wc, err := tx.RwCursorDupSort(kv.PlainState)
 		require.NoError(err)
@@ -286,6 +287,46 @@ func TestRemoteKvStream(t *testing.T) {
 	})
 	require.NoError(err)
 
+	// Limit
+	err = db.View(ctx, func(tx kv.Tx) error {
+		cntRange := func(from, to []byte) (i int) {
+			it, err := tx.RangeAscend(kv.PlainState, from, to, 2)
+			require.NoError(err)
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(err)
+				i++
+			}
+			return i
+		}
+
+		require.Equal(2, cntRange([]byte{2}, []byte{4}))
+		require.Equal(2, cntRange(nil, []byte{4}))
+		require.Equal(2, cntRange([]byte{2}, nil))
+		require.Equal(2, cntRange(nil, nil))
+		return nil
+	})
+	require.NoError(err)
+
+	err = db.View(ctx, func(tx kv.Tx) error {
+		cntRange := func(from, to []byte) (i int) {
+			it, err := tx.RangeDescend(kv.PlainState, from, to, 2)
+			require.NoError(err)
+			for it.HasNext() {
+				_, _, err := it.Next()
+				require.NoError(err)
+				i++
+			}
+			return i
+		}
+
+		require.Equal(2, cntRange([]byte{4}, []byte{2}))
+		require.Equal(0, cntRange(nil, []byte{4}))
+		require.Equal(2, cntRange([]byte{2}, nil))
+		require.Equal(2, cntRange(nil, nil))
+		return nil
+	})
+	require.NoError(err)
 }
 
 func setupDatabases(t *testing.T, logger log.Logger, f mdbx.TableCfgFunc) (writeDBs []kv.RwDB, readDBs []kv.RwDB) {

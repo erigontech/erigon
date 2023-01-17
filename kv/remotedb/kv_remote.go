@@ -632,15 +632,29 @@ func (tx *remoteTx) Prefix(table string, prefix []byte) (kv.Pairs, error) {
 	}
 	return tx.Range(table, prefix, nextPrefix)
 }
-
-func (tx *remoteTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
-	stream, err := tx.db.remoteKV.Range(tx.ctx, &remote.RangeReq{TxID: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix})
+func (tx *remoteTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend bool, limit int) (kv.Pairs, error) {
+	req := &remote.RangeReq{TxID: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: orderAscend}
+	if limit >= 0 {
+		ulimit := uint64(limit)
+		req.Limit = &ulimit
+	}
+	stream, err := tx.db.remoteKV.Range(tx.ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	it := &grpc2Pairs[*remote.Pairs]{stream: stream}
 	//tx.streams = append(tx.streams, it)
 	return it, nil
+}
+
+func (tx *remoteTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
+	return tx.RangeAscend(table, fromPrefix, toPrefix, -1)
+}
+func (tx *remoteTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, true, limit)
+}
+func (tx *remoteTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, false, limit)
 }
 
 type grpcStream[Msg any] interface {
@@ -691,6 +705,9 @@ func (it *grpc2Pairs[Msg]) Close() {
 	//_ = it.stream.CloseSend()
 }
 func (it *grpc2Pairs[Msg]) Next() ([]byte, []byte, error) {
+	if it.lastErr != nil {
+		return nil, nil, it.lastErr
+	}
 	k := it.lastKeys[it.i]
 	v := it.lastValues[it.i]
 	it.i++

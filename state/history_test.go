@@ -318,7 +318,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
+	tx, err := db.BeginRwAsync(ctx)
 	require.NoError(tb, err)
 	h.SetTx(tx)
 	defer tx.Rollback()
@@ -383,10 +383,12 @@ func TestIterateChanged(t *testing.T) {
 	var keys, vals []string
 	ic := h.MakeContext()
 	ic.SetTx(roTx)
+
 	it := ic.IterateChanged(2, 20, roTx)
 	defer it.Close()
 	for it.HasNext() {
-		k, v := it.Next(nil, nil)
+		k, v, err := it.Next()
+		require.NoError(t, err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
 	}
@@ -434,7 +436,8 @@ func TestIterateChanged(t *testing.T) {
 	it = ic.IterateChanged(995, 1000, roTx)
 	keys, vals = keys[:0], vals[:0]
 	for it.HasNext() {
-		k, v := it.Next(nil, nil)
+		k, v, err := it.Next()
+		require.NoError(t, err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
 	}
@@ -473,6 +476,7 @@ func TestIterateChanged2(t *testing.T) {
 	var keys, vals []string
 	ic := h.MakeContext()
 	ic.SetTx(roTx)
+
 	ic.IterateRecentlyChanged(2, 20, roTx, func(k, v []byte) error {
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))

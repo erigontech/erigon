@@ -985,7 +985,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 }
 
 // nolint
-func (d *Domain) warmup(txFrom, limit uint64, tx kv.Tx) error {
+func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
 	domainKeysCursor, err := tx.CursorDupSort(d.keysTable)
 	if err != nil {
 		return fmt.Errorf("create %s domain cursor: %w", d.filenameBase, err)
@@ -1027,7 +1027,7 @@ func (d *Domain) warmup(txFrom, limit uint64, tx kv.Tx) error {
 		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
 	}
 
-	return d.History.warmup(txFrom, limit, tx)
+	return d.History.warmup(ctx, txFrom, limit, tx)
 }
 
 func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool) {

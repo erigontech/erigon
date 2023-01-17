@@ -95,28 +95,18 @@ func (m *MergePairsStream) Next() ([]byte, []byte, error) {
 	m.advanceY()
 	return k, v, err
 }
-func (m *MergePairsStream) Keys() ([][]byte, error)   { return naiveKeys(m) }
-func (m *MergePairsStream) Values() ([][]byte, error) { return naiveValues(m) }
+func (m *MergePairsStream) ToArray() (keys, values [][]byte, err error) { return NaivePairs2Arr(m) }
 
-func naiveKeys(it kv.Pairs) (keys [][]byte, err error) {
+func NaivePairs2Arr(it kv.Pairs) (keys, values [][]byte, err error) {
 	for it.HasNext() {
-		k, _, err := it.Next()
+		k, v, err := it.Next()
 		if err != nil {
-			return keys, err
+			return keys, values, err
 		}
 		keys = append(keys, k)
-	}
-	return keys, nil
-}
-func naiveValues(it kv.Pairs) (values [][]byte, err error) {
-	for it.HasNext() {
-		_, v, err := it.Next()
-		if err != nil {
-			return values, err
-		}
 		values = append(values, v)
 	}
-	return values, nil
+	return keys, values, nil
 }
 
 // PairsWithErrorStream - return N, keys and then error
@@ -134,4 +124,53 @@ func (m *PairsWithErrorStream) Next() ([]byte, []byte, error) {
 	}
 	m.i++
 	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
+}
+
+// TransformStream - analog `map` (in terms of map-filter-reduce pattern)
+type TransformStream[K, V any] struct {
+	it        kv.Stream[K, V]
+	transform func(K, V) (K, V)
+}
+
+func TransformPairs(it kv.Pairs, transform func(k, v []byte) ([]byte, []byte)) *TransformStream[[]byte, []byte] {
+	return &TransformStream[[]byte, []byte]{it: it, transform: transform}
+}
+func Transform[K, V any](it kv.Stream[K, V], transform func(K, V) (K, V)) *TransformStream[K, V] {
+	return &TransformStream[K, V]{it: it, transform: transform}
+}
+func (m *TransformStream[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *TransformStream[K, V]) Next() (K, V, error) {
+	k, v, err := m.it.Next()
+	if err != nil {
+		return k, v, err
+	}
+	newK, newV := m.transform(k, v)
+	return newK, newV, nil
+}
+
+// FilterStream - analog `map` (in terms of map-filter-reduce pattern)
+type FilterStream[K, V any] struct {
+	it     kv.Stream[K, V]
+	filter func(K, V) bool
+}
+
+func FilterPairs(it kv.Pairs, filter func(k, v []byte) bool) *FilterStream[[]byte, []byte] {
+	return &FilterStream[[]byte, []byte]{it: it, filter: filter}
+}
+func Filter[K, V any](it kv.Stream[K, V], filter func(K, V) bool) *FilterStream[K, V] {
+	return &FilterStream[K, V]{it: it, filter: filter}
+}
+func (m *FilterStream[K, V]) HasNext() bool { return m.it.HasNext() }
+func (m *FilterStream[K, V]) Next() (k K, v V, err error) {
+	for m.it.HasNext() {
+		k, v, err = m.it.Next()
+		if err != nil {
+			return k, v, err
+		}
+		if !m.filter(k, v) {
+			continue
+		}
+		return k, v, nil
+	}
+	return k, v, nil
 }

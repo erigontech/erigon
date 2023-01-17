@@ -19,6 +19,7 @@ package state
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	math2 "math"
 	"runtime"
@@ -443,7 +444,9 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 	step := a.EndTxNumMinimax() / a.aggregationStep
 	for ; step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep; step++ {
 		if err := a.buildFilesInBackground(ctx, step, db); err != nil {
-			log.Warn("buildFilesInBackground", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Warn("buildFilesInBackground", "err", err)
+			}
 			break
 		}
 	}
@@ -555,7 +558,7 @@ func (a *AggregatorV3) Unwind(ctx context.Context, txUnwindTo uint64, stateLoad 
 	return nil
 }
 
-func (a *AggregatorV3) Warmup(txFrom, limit uint64) {
+func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) {
 	if a.db == nil {
 		return
 	}
@@ -568,14 +571,14 @@ func (a *AggregatorV3) Warmup(txFrom, limit uint64) {
 	a.warmupWorking.Store(true)
 	go func() {
 		defer a.warmupWorking.Store(false)
-		if err := a.db.View(context.Background(), func(tx kv.Tx) error {
-			if err := a.accounts.warmup(txFrom, limit, tx); err != nil {
+		if err := a.db.View(ctx, func(tx kv.Tx) error {
+			if err := a.accounts.warmup(ctx, txFrom, limit, tx); err != nil {
 				return err
 			}
-			if err := a.storage.warmup(txFrom, limit, tx); err != nil {
+			if err := a.storage.warmup(ctx, txFrom, limit, tx); err != nil {
 				return err
 			}
-			if err := a.code.warmup(txFrom, limit, tx); err != nil {
+			if err := a.code.warmup(ctx, txFrom, limit, tx); err != nil {
 				return err
 			}
 			if err := a.logAddrs.warmup(txFrom, limit, tx); err != nil {
@@ -676,7 +679,11 @@ func (a *AggregatorV3) PruneWithTiemout(ctx context.Context, timeout time.Durati
 }
 
 func (a *AggregatorV3) Prune(ctx context.Context, limit uint64) error {
-	a.Warmup(0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
+	//ctx, cancel := context.WithCancel(ctx)
+	//defer cancel()
+	//go func() {
+	//	a.Warmup(ctx, 0, cmp.Max(a.aggregationStep, limit)) // warmup is asyn and moving faster than data deletion
+	//}()
 	return a.prune(ctx, 0, a.maxTxNum.Load(), limit)
 }
 
@@ -1220,6 +1227,18 @@ func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 		return 0, false, err
 	}
 	return len(code), noState, nil
+}
+
+func (ac *Aggregator22Context) AccountHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
+	return ac.accounts.IterateChanged(startTxNum, endTxNum, roTx)
+}
+
+func (ac *Aggregator22Context) StorageHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
+	return ac.storage.IterateChanged(startTxNum, endTxNum, roTx)
+}
+
+func (ac *Aggregator22Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, roTx kv.Tx) *WalkAsOfIter {
+	return ac.storage.WalkAsOf(startTxNum, from, to, roTx, amount)
 }
 
 type FilesStats22 struct {

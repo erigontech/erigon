@@ -392,7 +392,7 @@ func (si *LocalityIterator) advance() {
 
 func (si *LocalityIterator) HasNext() bool { return si.hasNext }
 func (si *LocalityIterator) Progress() float64 {
-	return ((float64(si.progress) / float64(si.totalOffsets)) * 100) / 2
+	return (float64(si.progress) / float64(si.totalOffsets)) * 100
 }
 func (si *LocalityIterator) FilesAmount() uint64 { return si.filesAmount }
 

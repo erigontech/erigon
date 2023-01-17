@@ -76,7 +76,8 @@ type KvServer struct {
 	txsMapLock *sync.RWMutex
 	txs        map[uint64]*threadSafeTx
 
-	trace bool
+	trace     bool
+	rangeStep int // make sure `s.with` has limited time
 }
 
 type threadSafeTx struct {
@@ -90,8 +91,9 @@ type Snapsthots interface {
 
 func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots) *KvServer {
 	return &KvServer{
-		trace: false,
-		kv:    db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
+		trace:     false,
+		rangeStep: 1024,
+		kv:        db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
 		blockSnapshots: snapshots, historySnapshots: historySnapshots,
 		txs: map[uint64]*threadSafeTx{}, txsMapLock: &sync.RWMutex{},
 	}
@@ -563,52 +565,92 @@ func (s *KvServer) IndexRange(req *remote.IndexRangeReq, stream remote.KV_IndexR
 }
 
 func (s *KvServer) Range(req *remote.RangeReq, stream remote.KV_RangeServer) error {
-	if req.ToPrefix != nil && bytes.Compare(req.FromPrefix, req.ToPrefix) >= 0 {
-		return fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", req.FromPrefix, req.ToPrefix)
+	orderAscend, fromPrefix, toPrefix := req.OrderAscend, req.FromPrefix, req.ToPrefix
+	if orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
+		return fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
 	}
+	if !orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) <= 0 {
+		return fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", toPrefix, fromPrefix)
+	}
+
 	var k, v []byte
 
-	if req.FromPrefix == nil {
-		req.FromPrefix = []byte{}
+	if req.OrderAscend && fromPrefix == nil {
+		fromPrefix = []byte{}
 	}
-	const step = 1024 // make sure `s.with` has limited time
-	for from := req.FromPrefix; from != nil; from = k {
-		if req.ToPrefix != nil && bytes.Compare(from, req.ToPrefix) >= 0 {
+
+	limit := -1
+	if req.Limit != nil {
+		limit = int(*req.Limit)
+	}
+	var it kv.Pairs
+	var err error
+	var skipFirst = false
+
+	step := s.rangeStep
+	if limit > 0 {
+		step = cmp.Min(s.rangeStep, limit) // make sure `s.with` has limited time
+	}
+	for from := fromPrefix; ; from = k {
+		if (req.OrderAscend && from == nil) || limit == 0 {
 			break
 		}
-		resp := &remote.Pairs{}
-		if err := s.with(req.TxID, func(tx kv.Tx) error {
-			c, err := tx.Cursor(req.Table)
-			if err != nil {
-				return err
+		if toPrefix != nil {
+			cmp := bytes.Compare(from, toPrefix)
+			hasNext := (orderAscend && cmp < 0) || (!orderAscend && cmp > 0)
+			if !hasNext {
+				break
 			}
-			defer c.Close()
-			i := 0
-			for k, v, err = c.Seek(from); k != nil; k, v, err = c.Next() {
+		}
+
+		resp := &remote.Pairs{}
+		if err = s.with(req.TxID, func(tx kv.Tx) error {
+			if orderAscend {
+				it, err = tx.RangeAscend(req.Table, from, toPrefix, step)
 				if err != nil {
 					return err
 				}
-				if req.ToPrefix != nil && bytes.Compare(k, req.ToPrefix) >= 0 {
-					break
-				}
-
-				resp.Keys = append(resp.Keys, k)
-				resp.Values = append(resp.Values, v)
-
-				i++
-				if i > step {
-					break
+			} else {
+				it, err = tx.RangeDescend(req.Table, from, toPrefix, step)
+				if err != nil {
+					return err
 				}
 			}
-			k = common.Copy(k)
+			k = nil
+			for it.HasNext() {
+				k, v, err = it.Next()
+				if err != nil {
+					return err
+				}
+				resp.Keys = append(resp.Keys, k)
+				resp.Values = append(resp.Values, v)
+				limit--
+			}
+			if k != nil {
+				k = common.Copy(k)
+				if req.OrderAscend {
+					k = append(k, []byte{01}...)
+				} else {
+					if skipFirst {
+						resp.Keys = resp.Keys[1:]
+						resp.Values = resp.Values[1:]
+					}
+					skipFirst = true
+					//TODO: prevvvv???
+					//k = k, []byte{01}...)
+				}
+			}
 			return nil
 		}); err != nil {
 			return err
 		}
+
 		if len(resp.Keys) > 0 {
 			if err := stream.Send(resp); err != nil {
 				return err
 			}
+		} else {
+			break
 		}
 	}
 	return nil

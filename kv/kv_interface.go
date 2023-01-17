@@ -312,18 +312,28 @@ type Tx interface {
 	Cursor(table string) (Cursor, error)
 	CursorDupSort(table string) (CursorDupSort, error) // CursorDupSort - can be used if bucket has mdbx.DupSort flag
 
-	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
-	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
-	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
+	DBSize() (uint64, error)
+
+	// --- High-Level methods: more abstract, server-side-streaming-friendly ---
 
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
-	// Range(nil, to) means [StartOfTable, to)
-	// PrefixScan can be implemented as `Range(Table, prefix, kv.NextSubtree(prefix))`
+	// Range(nil, to)   means [StartOfTable, to)
 	Range(table string, fromPrefix, toPrefix []byte) (Pairs, error)
+	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
+	// Limit -1 means Unlimited
+	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (Pairs, error)
+	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
+	// example: RangeDescend("Table", "B", "A", -1)
+	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (Pairs, error)
+	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (Pairs, error)
 
-	DBSize() (uint64, error)
+	// --- High-Level deprecated methods ---
+
+	ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error
+	ForPrefix(table string, prefix []byte, walker func(k, v []byte) error) error
+	ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error
 }
 
 // RwTx

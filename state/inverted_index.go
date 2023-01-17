@@ -812,7 +812,6 @@ func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx 
 			bitmap.RunOptimize()
 		case <-ctx.Done():
 			err := ctx.Err()
-			log.Warn("index collate cancelled", "err", err)
 			return nil, err
 		default:
 		}

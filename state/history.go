@@ -871,7 +871,7 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	})
 }
 
-func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
+func (h *History) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
 	historyKeysCursor, err := tx.CursorDupSort(h.indexKeysTable)
 	if err != nil {
 		return fmt.Errorf("create %s history cursor: %w", h.filenameBase, err)
@@ -902,6 +902,12 @@ func (h *History) warmup(txFrom, limit uint64, tx kv.Tx) error {
 		txTo = txFrom + limit
 	}
 	for ; err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+		if err != nil {
+			return err
+		}
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		txNum := binary.BigEndian.Uint64(k)
 		if txNum >= txTo {
 			break
@@ -1316,6 +1322,249 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	return nil, false, nil
 }
 
+func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, amount int) *WalkAsOfIter {
+	hi := WalkAsOfIter{
+		hasNextInDb:  true,
+		roTx:         roTx,
+		indexTable:   hc.h.indexTable,
+		idxKeysTable: hc.h.indexKeysTable,
+		valsTable:    hc.h.historyValsTable,
+		from:         from, to: to, amount: amount,
+	}
+
+	hc.indexFiles.Ascend(func(item ctxItem) bool {
+		if item.endTxNum <= startTxNum {
+			return true
+		}
+		// TODO: seek(from)
+		g := item.getter
+		g.Reset(0)
+		if g.HasNext() {
+			key, offset := g.NextUncompressed()
+			heap.Push(&hi.h, &ReconItem{g: g, key: key, startTxNum: item.startTxNum, endTxNum: item.endTxNum, txNum: item.endTxNum, startOffset: offset, lastOffset: offset})
+			hi.hasNextInFiles = true
+		}
+		hi.total += uint64(item.getter.Size())
+		return true
+	})
+	hi.hc = hc
+	hi.compressVals = hc.h.compressVals
+	hi.startTxNum = startTxNum
+	binary.BigEndian.PutUint64(hi.startTxKey[:], startTxNum)
+	hi.advanceInDb()
+	hi.advanceInFiles()
+	hi.advance()
+	return &hi
+}
+
+type WalkAsOfIter struct {
+	roTx          kv.Tx
+	txNum2kCursor kv.CursorDupSort
+	idxCursor     kv.CursorDupSort
+	hc            *HistoryContext
+	valsTable     string
+	idxKeysTable  string
+	indexTable    string
+
+	from, to []byte
+	amount   int
+
+	nextFileKey []byte
+	nextDbKey   []byte
+	nextDbVal   []byte
+	nextFileVal []byte
+	nextVal     []byte
+	nextKey     []byte
+
+	h              ReconHeap
+	total          uint64
+	startTxNum     uint64
+	advFileCnt     int
+	advDbCnt       int
+	startTxKey     [8]byte
+	txnKey         [8]byte
+	hasNextInFiles bool
+	hasNextInDb    bool
+	compressVals   bool
+
+	k, v []byte
+}
+
+func (hi *WalkAsOfIter) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
+
+func (hi *WalkAsOfIter) Close() {
+	if hi.idxCursor != nil {
+		hi.idxCursor.Close()
+	}
+	if hi.txNum2kCursor != nil {
+		hi.txNum2kCursor.Close()
+	}
+}
+
+func (hi *WalkAsOfIter) advanceInFiles() {
+	hi.advFileCnt++
+	for hi.h.Len() > 0 {
+		top := heap.Pop(&hi.h).(*ReconItem)
+		key := top.key
+		var idxVal []byte
+		if hi.compressVals {
+			idxVal, _ = top.g.Next(nil)
+		} else {
+			idxVal, _ = top.g.NextUncompressed()
+		}
+		if top.g.HasNext() {
+			if hi.compressVals {
+				top.key, _ = top.g.Next(nil)
+			} else {
+				top.key, _ = top.g.NextUncompressed()
+			}
+			if hi.to == nil || bytes.Compare(top.key, hi.to) < 0 {
+				heap.Push(&hi.h, top)
+			}
+		}
+
+		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by Seek()
+			continue
+		}
+
+		if bytes.Equal(key, hi.nextFileKey) {
+			continue
+		}
+		ef, _ := eliasfano32.ReadEliasFano(idxVal)
+		n, ok := ef.Search(hi.startTxNum)
+		if !ok {
+			continue
+		}
+
+		hi.nextFileKey = key
+		binary.BigEndian.PutUint64(hi.txnKey[:], n)
+		search := ctxItem{startTxNum: top.startTxNum, endTxNum: top.endTxNum}
+		historyItem, ok := hi.hc.historyFiles.Get(search)
+		if !ok {
+			panic(fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextFileKey))
+		}
+		offset := historyItem.reader.Lookup2(hi.txnKey[:], hi.nextFileKey)
+		g := historyItem.getter
+		g.Reset(offset)
+		if hi.compressVals {
+			hi.nextFileVal, _ = g.Next(nil)
+		} else {
+			hi.nextFileVal, _ = g.NextUncompressed()
+		}
+		hi.nextFileKey = key
+		return
+	}
+	hi.hasNextInFiles = false
+}
+
+func (hi *WalkAsOfIter) advanceInDb() {
+	hi.advDbCnt++
+	var k []byte
+	var err error
+	if hi.idxCursor == nil {
+		if hi.idxCursor, err = hi.roTx.CursorDupSort(hi.indexTable); err != nil {
+			// TODO pass error properly around
+			panic(err)
+		}
+		if hi.txNum2kCursor, err = hi.roTx.CursorDupSort(hi.idxKeysTable); err != nil {
+			panic(err)
+		}
+		if k, _, err = hi.idxCursor.Seek(hi.from); err != nil {
+			// TODO pass error properly around
+			panic(err)
+		}
+	} else {
+		if k, _, err = hi.idxCursor.NextNoDup(); err != nil {
+			panic(err)
+		}
+	}
+	for ; k != nil; k, _, err = hi.idxCursor.NextNoDup() {
+		if err != nil {
+			panic(err)
+		}
+		if hi.to != nil && bytes.Compare(k, hi.to) >= 0 {
+			break
+		}
+
+		foundTxNumVal, err := hi.idxCursor.SeekBothRange(k, hi.startTxKey[:])
+		if err != nil {
+			panic(err)
+		}
+		if foundTxNumVal == nil {
+			continue
+		}
+		//txNum := binary.BigEndian.Uint64(foundTxNumVal)
+		//if txNum >= hi.endTxNum {
+		//	continue
+		//}
+		hi.nextDbKey = append(hi.nextDbKey[:0], k...)
+		vn, err := hi.txNum2kCursor.SeekBothRange(foundTxNumVal, k)
+		if err != nil {
+			panic(err)
+		}
+		valNum := binary.BigEndian.Uint64(vn[len(vn)-8:])
+		if valNum == 0 {
+			// This is special valNum == 0, which is empty value
+			hi.nextDbVal = hi.nextDbVal[:0]
+			return
+		}
+		v, err := hi.roTx.GetOne(hi.valsTable, vn[len(vn)-8:])
+		if err != nil {
+			panic(err)
+		}
+		hi.nextDbVal = append(hi.nextDbVal[:0], v...)
+		return
+	}
+	hi.idxCursor.Close()
+	hi.idxCursor = nil
+	hi.hasNextInDb = false
+}
+
+func (hi *WalkAsOfIter) advance() {
+	if hi.hasNextInFiles {
+		if hi.hasNextInDb {
+			c := bytes.Compare(hi.nextFileKey, hi.nextDbKey)
+			if c < 0 {
+				hi.nextKey = append(hi.nextKey[:0], hi.nextFileKey...)
+				hi.nextVal = append(hi.nextVal[:0], hi.nextFileVal...)
+				hi.advanceInFiles()
+			} else if c > 0 {
+				hi.nextKey = append(hi.nextKey[:0], hi.nextDbKey...)
+				hi.nextVal = append(hi.nextVal[:0], hi.nextDbVal...)
+				hi.advanceInDb()
+			} else {
+				hi.nextKey = append(hi.nextKey[:0], hi.nextFileKey...)
+				hi.nextVal = append(hi.nextVal[:0], hi.nextFileVal...)
+				hi.advanceInDb()
+				hi.advanceInFiles()
+			}
+		} else {
+			hi.nextKey = append(hi.nextKey[:0], hi.nextFileKey...)
+			hi.nextVal = append(hi.nextVal[:0], hi.nextFileVal...)
+			hi.advanceInFiles()
+		}
+	} else if hi.hasNextInDb {
+		hi.nextKey = append(hi.nextKey[:0], hi.nextDbKey...)
+		hi.nextVal = append(hi.nextVal[:0], hi.nextDbVal...)
+		hi.advanceInDb()
+	} else {
+		hi.nextKey = nil
+		hi.nextVal = nil
+	}
+}
+
+func (hi *WalkAsOfIter) HasNext() bool {
+	return hi.amount > 0 && (hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil)
+}
+
+func (hi *WalkAsOfIter) Next() ([]byte, []byte, error) {
+	hi.amount--
+	hi.k = append(hi.k[:0], hi.nextKey...)
+	hi.v = append(hi.v[:0], hi.nextVal...)
+	hi.advance()
+	return hi.k, hi.v, nil
+}
+
 func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
 	hi := HistoryIterator1{
 		hasNextInDb:  true,
@@ -1381,6 +1630,8 @@ type HistoryIterator1 struct {
 	hasNextInFiles bool
 	hasNextInDb    bool
 	compressVals   bool
+
+	k, v []byte
 }
 
 func (hi *HistoryIterator1) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
@@ -1544,11 +1795,11 @@ func (hi *HistoryIterator1) HasNext() bool {
 	return hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil
 }
 
-func (hi *HistoryIterator1) Next(keyBuf, valBuf []byte) ([]byte, []byte) {
-	k := append(keyBuf, hi.nextKey...)
-	v := append(valBuf, hi.nextVal...)
+func (hi *HistoryIterator1) Next() ([]byte, []byte, error) {
+	hi.k = append(hi.k[:0], hi.nextKey...)
+	hi.v = append(hi.v[:0], hi.nextVal...)
 	hi.advance()
-	return k, v
+	return hi.k, hi.v, nil
 }
 
 func (hc *HistoryContext) IterateRecentlyChanged(startTxNum, endTxNum uint64, roTx kv.Tx, f func([]byte, []byte) error) error {
