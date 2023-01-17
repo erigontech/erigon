@@ -81,7 +81,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 // CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *fourByteTracer) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *fourByteTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	// Update list of precompiles based on current block
 	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)

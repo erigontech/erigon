@@ -29,6 +29,9 @@ func main() {
 	// start the first erigon node in a go routine
 	node.Start(&wg)
 
+	// send a quit signal to the quit channels when done making checks
+	node.QuitOnSignal(&wg)
+
 	// sleep for seconds to allow the nodes fully start up
 	time.Sleep(time.Second * 10)
 

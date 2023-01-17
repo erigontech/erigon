@@ -459,6 +459,19 @@ func (a *AttestationData) EncodeSSZ(dst []byte) []byte {
 	return buf
 }
 
+// MarshalSSZ ssz marshals the AttestationData object
+func (a *AttestationData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
+	dst = buf
+
+	var dataMarshalled []byte
+	dataMarshalled, err = a.MarshalSSZ()
+	if err != nil {
+		return
+	}
+	dst = append(dst, dataMarshalled...)
+	return
+}
+
 // UnmarshalSSZ ssz unmarshals the AttestationData object
 func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	var err error
