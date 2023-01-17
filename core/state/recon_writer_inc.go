@@ -4,8 +4,10 @@ import (
 	"bytes"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -39,7 +41,7 @@ func (w *StateReconWriterInc) SetChainTx(chainTx kv.Tx) {
 	w.chainTx = chainTx
 }
 
-func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *StateReconWriterInc) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	addr := address.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); !ok || stateTxNum != w.txNum {
 		return nil
@@ -53,7 +55,7 @@ func (w *StateReconWriterInc) UpdateAccountData(address common.Address, original
 	return nil
 }
 
-func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *StateReconWriterInc) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumCode(addr); !ok || stateTxNum != w.txNum {
 		return nil
@@ -67,7 +69,7 @@ func (w *StateReconWriterInc) UpdateAccountCode(address common.Address, incarnat
 	return nil
 }
 
-func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *StateReconWriterInc) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	addr := address.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); ok && stateTxNum == w.txNum {
 		//fmt.Printf("delete account [%x]=>{} txNum: %d\n", address, w.txNum)
@@ -100,7 +102,7 @@ func (w *StateReconWriterInc) DeleteAccount(address common.Address, original *ac
 	return nil
 }
 
-func (w *StateReconWriterInc) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *StateReconWriterInc) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	addr, k := address.Bytes(), key.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumStorage(addr, k); !ok || stateTxNum != w.txNum {
 		return nil
@@ -115,6 +117,6 @@ func (w *StateReconWriterInc) WriteAccountStorage(address common.Address, incarn
 	return nil
 }
 
-func (w *StateReconWriterInc) CreateContract(address common.Address) error {
+func (w *StateReconWriterInc) CreateContract(address libcommon.Address) error {
 	return nil
 }

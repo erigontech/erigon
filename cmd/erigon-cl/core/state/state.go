@@ -1,9 +1,10 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -12,7 +13,7 @@ type HashFunc func([]byte) ([32]byte, error)
 type BeaconState struct {
 	// State fields
 	genesisTime                  uint64
-	genesisValidatorsRoot        common.Hash
+	genesisValidatorsRoot        libcommon.Hash
 	slot                         uint64
 	fork                         *cltypes.Fork
 	latestBlockHeader            *cltypes.BeaconBlockHeader

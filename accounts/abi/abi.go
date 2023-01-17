@@ -24,7 +24,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -242,7 +243,7 @@ func (abi *ABI) MethodById(sigdata []byte) (*Method, error) {
 
 // EventByID looks an event up by its topic hash in the
 // ABI and returns nil if none found.
-func (abi *ABI) EventByID(topic common.Hash) (*Event, error) {
+func (abi *ABI) EventByID(topic libcommon.Hash) (*Event, error) {
 	for _, event := range abi.Events {
 		if bytes.Equal(event.ID.Bytes(), topic.Bytes()) {
 			//nolint:scopelint

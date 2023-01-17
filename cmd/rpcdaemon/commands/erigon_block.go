@@ -8,10 +8,11 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -56,7 +57,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 }
 
 // GetHeaderByHash implements erigon_getHeaderByHash. Returns a block's header given a block's hash.
-func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -173,7 +174,7 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, libcommon.Hash{}, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -184,7 +185,7 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 	return response, err
 }
 
-func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[libcommon.Address]*hexutil.Big, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -202,11 +203,11 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 	}
 	defer c.Close()
 
-	startkey := common2.EncodeTs(blockNumber)
+	startkey := hexutility.EncodeTs(blockNumber)
 
 	decodeFn := historyv2.Mapper[kv.AccountChangeSet].Decode
 
-	balancesMapping := make(map[common.Address]*hexutil.Big)
+	balancesMapping := make(map[libcommon.Address]*hexutil.Big)
 
 	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
 	if err != nil {
@@ -228,7 +229,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 		oldBalance := oldAcc.Balance
 
-		address := common.BytesToAddress(addressBytes)
+		address := libcommon.BytesToAddress(addressBytes)
 
 		newAcc, err := newReader.ReadAccountData(address)
 		if err != nil {

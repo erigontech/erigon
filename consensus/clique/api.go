@@ -55,7 +55,7 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
+func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
@@ -70,7 +70,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetSigners retrieves the list of authorized signers at the specified block.
-func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
@@ -91,7 +91,7 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]common.Address, error) {
 }
 
 // GetSignersAtHash retrieves the list of authorized signers at the specified block.
-func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *API) GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
@@ -104,11 +104,11 @@ func (api *API) GetSignersAtHash(hash common.Hash) ([]common.Address, error) {
 }
 
 // Proposals returns the current proposals the node tries to uphold and vote on.
-func (api *API) Proposals() map[common.Address]bool {
+func (api *API) Proposals() map[libcommon.Address]bool {
 	api.clique.lock.RLock()
 	defer api.clique.lock.RUnlock()
 
-	proposals := make(map[common.Address]bool)
+	proposals := make(map[libcommon.Address]bool)
 	for address, auth := range api.clique.proposals {
 		proposals[address] = auth
 	}
@@ -117,7 +117,7 @@ func (api *API) Proposals() map[common.Address]bool {
 
 // Propose injects a new authorization proposal that the signer will attempt to
 // push through.
-func (api *API) Propose(address common.Address, auth bool) {
+func (api *API) Propose(address libcommon.Address, auth bool) {
 	api.clique.lock.Lock()
 	defer api.clique.lock.Unlock()
 
@@ -126,7 +126,7 @@ func (api *API) Propose(address common.Address, auth bool) {
 
 // Discard drops a currently running proposal, stopping the signer from casting
 // further votes (either for or against).
-func (api *API) Discard(address common.Address) {
+func (api *API) Discard(address libcommon.Address) {
 	api.clique.lock.Lock()
 	defer api.clique.lock.Unlock()
 
@@ -135,7 +135,7 @@ func (api *API) Discard(address common.Address) {
 
 type status struct {
 	InturnPercent float64                `json:"inturnPercent"`
-	SigningStatus map[common.Address]int `json:"sealerActivity"`
+	SigningStatus map[libcommon.Address]int `json:"sealerActivity"`
 	NumBlocks     uint64                 `json:"numBlocks"`
 }
 
@@ -163,7 +163,7 @@ func (api *API) Status() (*status, error) {
 		start = 1
 		numBlocks = end - start
 	}
-	signStatus := make(map[common.Address]int)
+	signStatus := make(map[libcommon.Address]int)
 	for _, s := range signers {
 		signStatus[s] = 0
 	}

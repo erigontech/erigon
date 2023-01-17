@@ -23,8 +23,9 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -43,7 +44,7 @@ import (
 )
 
 func TestPrestateTracerCreate2(t *testing.T) {
-	unsignedTx := types.NewTransaction(1, common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+	unsignedTx := types.NewTransaction(1, libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		uint256.NewInt(0), 5000000, uint256.NewInt(1), []byte{})
 
 	privateKeyECDSA, err := ecdsa.GenerateKey(crypto.S256(), rand.Reader)
@@ -72,7 +73,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	context := evmtypes.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
-		Coinbase:    common.Address{},
+		Coinbase:    libcommon.Address{},
 		BlockNumber: 8000000,
 		Time:        5,
 		Difficulty:  big.NewInt(0x30000),
@@ -83,7 +84,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
 	// the address
-	alloc[common.HexToAddress("0x00000000000000000000000000000000deadbeef")] = core.GenesisAccount{
+	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = core.GenesisAccount{
 		Nonce:   1,
 		Code:    hexutil.MustDecode("0x63deadbeef60005263cafebabe6004601c6000F560005260206000F3"),
 		Balance: big.NewInt(1),

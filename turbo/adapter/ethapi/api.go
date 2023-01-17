@@ -22,35 +22,37 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // CallArgs represents the arguments for a call.
 type CallArgs struct {
-	From                 *common.Address   `json:"from"`
-	To                   *common.Address   `json:"to"`
-	Gas                  *hexutil.Uint64   `json:"gas"`
-	GasPrice             *hexutil.Big      `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
-	Value                *hexutil.Big      `json:"value"`
-	Nonce                *hexutil.Uint64   `json:"nonce"`
-	Data                 *hexutil.Bytes    `json:"data"`
-	AccessList           *types.AccessList `json:"accessList"`
-	ChainID              *hexutil.Big      `json:"chainId,omitempty"`
+	From                 *libcommon.Address `json:"from"`
+	To                   *libcommon.Address `json:"to"`
+	Gas                  *hexutil.Uint64    `json:"gas"`
+	GasPrice             *hexutil.Big       `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big       `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
+	Value                *hexutil.Big       `json:"value"`
+	Nonce                *hexutil.Uint64    `json:"nonce"`
+	Data                 *hexutil.Bytes     `json:"data"`
+	AccessList           *types.AccessList  `json:"accessList"`
+	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
 
 // from retrieves the transaction sender address.
-func (arg *CallArgs) from() common.Address {
+func (arg *CallArgs) from() libcommon.Address {
 	if arg.From == nil {
-		return common.Address{}
+		return libcommon.Address{}
 	}
 	return *arg.From
 }
@@ -153,11 +155,11 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 // if statDiff is set, all diff will be applied first and then execute the call
 // message.
 type Account struct {
-	Nonce     *hexutil.Uint64              `json:"nonce"`
-	Code      *hexutil.Bytes               `json:"code"`
-	Balance   **hexutil.Big                `json:"balance"`
-	State     *map[common.Hash]uint256.Int `json:"state"`
-	StateDiff *map[common.Hash]uint256.Int `json:"stateDiff"`
+	Nonce     *hexutil.Uint64                 `json:"nonce"`
+	Code      *hexutil.Bytes                  `json:"code"`
+	Balance   **hexutil.Big                   `json:"balance"`
+	State     *map[libcommon.Hash]uint256.Int `json:"state"`
+	StateDiff *map[libcommon.Hash]uint256.Int `json:"stateDiff"`
 }
 
 func NewRevertError(result *core.ExecutionResult) *RevertError {
@@ -168,7 +170,7 @@ func NewRevertError(result *core.ExecutionResult) *RevertError {
 	}
 	return &RevertError{
 		error:  err,
-		reason: hexutil.Encode(result.Revert()),
+		reason: hexutility.Encode(result.Revert()),
 	}
 }
 
@@ -286,10 +288,10 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
 func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
-	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, common.Hash{})
+	return RPCMarshalBlockExDeprecated(block, inclTx, fullTx, nil, libcommon.Hash{})
 }
 
-func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash) (map[string]interface{}, error) {
+func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash libcommon.Hash) (map[string]interface{}, error) {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
@@ -325,7 +327,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		fields["transactions"] = transactions
 	}
 	uncles := block.Uncles()
-	uncleHashes := make([]common.Hash, len(uncles))
+	uncleHashes := make([]libcommon.Hash, len(uncles))
 	for i, uncle := range uncles {
 		uncleHashes[i] = uncle.Hash()
 	}
@@ -364,30 +366,30 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash      `json:"blockHash"`
-	BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	From             common.Address    `json:"from"`
-	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice,omitempty"`
-	Tip              *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap           *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	Hash             common.Hash       `json:"hash"`
-	Input            hexutil.Bytes     `json:"input"`
-	Nonce            hexutil.Uint64    `json:"nonce"`
-	To               *common.Address   `json:"to"`
-	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	Value            *hexutil.Big      `json:"value"`
-	Type             hexutil.Uint64    `json:"type"`
-	Accesses         *types.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	V                *hexutil.Big      `json:"v"`
-	R                *hexutil.Big      `json:"r"`
-	S                *hexutil.Big      `json:"s"`
+	BlockHash        *libcommon.Hash    `json:"blockHash"`
+	BlockNumber      *hexutil.Big       `json:"blockNumber"`
+	From             libcommon.Address  `json:"from"`
+	Gas              hexutil.Uint64     `json:"gas"`
+	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
+	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	Hash             libcommon.Hash     `json:"hash"`
+	Input            hexutil.Bytes      `json:"input"`
+	Nonce            hexutil.Uint64     `json:"nonce"`
+	To               *libcommon.Address `json:"to"`
+	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
+	Value            *hexutil.Big       `json:"value"`
+	Type             hexutil.Uint64     `json:"type"`
+	Accesses         *types.AccessList  `json:"accessList,omitempty"`
+	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
+	V                *hexutil.Big       `json:"v"`
+	R                *hexutil.Big       `json:"r"`
+	S                *hexutil.Big       `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	// Determine the signer. For replay-protected transactions, use the most permissive
 	// signer, because we assume that signers are backwards-compatible with old
 	// transactions. For non-protected transactions, the homestead signer signer is used
@@ -431,7 +433,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
 		// if the transaction has been mined, compute the effective gas price
-		if baseFee != nil && blockHash != (common.Hash{}) {
+		if baseFee != nil && blockHash != (libcommon.Hash{}) {
 			// price = min(tip, gasFeeCap - baseFee) + baseFee
 			price := math.BigMin(new(big.Int).Add(t.Tip.ToBig(), baseFee), t.FeeCap.ToBig())
 			result.GasPrice = (*hexutil.Big)(price)
@@ -445,7 +447,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 	if err != nil {
 		log.Warn("sender recovery", "err", err)
 	}
-	if blockHash != (common.Hash{}) {
+	if blockHash != (libcommon.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
@@ -455,7 +457,7 @@ func newRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 
 // newRPCBorTransaction returns a Bor transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
-func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockHash common.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
+func newRPCBorTransaction(opaqueTx types.Transaction, txHash libcommon.Hash, blockHash libcommon.Hash, blockNumber uint64, index uint64, baseFee *big.Int) *RPCTransaction {
 	tx := opaqueTx.(*types.LegacyTx)
 	result := &RPCTransaction{
 		Type:     hexutil.Uint64(tx.Type()),
@@ -465,14 +467,14 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockH
 		Hash:     txHash,
 		Input:    hexutil.Bytes(tx.GetData()),
 		Nonce:    hexutil.Uint64(tx.GetNonce()),
-		From:     common.Address{},
+		From:     libcommon.Address{},
 		To:       tx.GetTo(),
 		Value:    (*hexutil.Big)(tx.GetValue().ToBig()),
 		V:        (*hexutil.Big)(big.NewInt(0)),
 		R:        (*hexutil.Big)(big.NewInt(0)),
 		S:        (*hexutil.Big)(big.NewInt(0)),
 	}
-	if blockHash != (common.Hash{}) {
+	if blockHash != (libcommon.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
 		result.TransactionIndex = (*hexutil.Uint64)(&index)
@@ -483,7 +485,7 @@ func newRPCBorTransaction(opaqueTx types.Transaction, txHash common.Hash, blockH
 /*
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
 func newRPCPendingTransaction(tx types.Transaction) *RPCTransaction {
-	return newRPCTransaction(tx, common.Hash{}, 0, 0)
+	return newRPCTransaction(tx, libcommon.Hash{}, 0, 0)
 }
 */
 
@@ -525,7 +527,7 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 
 /*
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockHash(b *types.Block, hash common.Hash) *RPCTransaction {
+func newRPCTransactionFromBlockHash(b *types.Block, hash libcommon.Hash) *RPCTransaction {
 	for idx, tx := range b.Transactions() {
 		if tx.Hash() == hash {
 			return newRPCTransactionFromBlockIndex(b, uint64(idx))
@@ -561,7 +563,7 @@ func (s *PublicTransactionPoolAPI) GetBlockTransactionCountByNumber(ctx context.
 }
 
 // GetBlockTransactionCountByHash returns the number of transactions in the block with the given hash.
-func (s *PublicTransactionPoolAPI) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) *hexutil.Uint {
+func (s *PublicTransactionPoolAPI) GetBlockTransactionCountByHash(ctx context.Context, blockHash libcommon.Hash) *hexutil.Uint {
 	if block, _ := s.b.BlockByHash(ctx, blockHash); block != nil {
 		n := hexutil.Uint(len(block.Transactions()))
 		return &n
@@ -578,7 +580,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionByBlockNumberAndIndex(ctx conte
 }
 
 // GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
-func (s *PublicTransactionPoolAPI) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) *RPCTransaction {
+func (s *PublicTransactionPoolAPI) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, index hexutil.Uint) *RPCTransaction {
 	if block, _ := s.b.BlockByHash(ctx, blockHash); block != nil {
 		return newRPCTransactionFromBlockIndex(block, uint64(index))
 	}
@@ -594,7 +596,7 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByBlockNumberAndIndex(ctx co
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
-func (s *PublicTransactionPoolAPI) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) hexutil.Bytes {
+func (s *PublicTransactionPoolAPI) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, index hexutil.Uint) hexutil.Bytes {
 	if block, _ := s.b.BlockByHash(ctx, blockHash); block != nil {
 		return newRPCRawTransactionFromBlockIndex(block, uint64(index))
 	}
@@ -602,7 +604,7 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByBlockHashAndIndex(ctx cont
 }
 
 // GetTransactionCount returns the number of transactions the given address has sent for the given block number
-func (s *PublicTransactionPoolAPI) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+func (s *PublicTransactionPoolAPI) GetTransactionCount(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	// Ask transaction pool for the nonce which includes pending transactions
 	if blockNr, ok := blockNrOrHash.Number(); ok && blockNr == rpc.PendingBlockNumber {
 		nonce, err := s.b.GetPoolNonce(ctx, address)
@@ -621,7 +623,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionCount(ctx context.Context, addr
 }
 
 // GetTransactionByHash returns the transaction for the given hash
-func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, hash common.Hash) (*RPCTransaction, error) {
+func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, hash libcommon.Hash) (*RPCTransaction, error) {
 	// Try to return an already finalized transaction
 	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
 	if err != nil {
@@ -640,7 +642,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionByHash(ctx context.Context, has
 }
 
 // GetRawTransactionByHash returns the bytes of the transaction for the given hash.
-func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {
+func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, hash libcommon.Hash) (hexutil.Bytes, error) {
 	// Retrieve a finalized transaction, or a pooled otherwise
 	tx, _, _, _, err := s.b.GetTransaction(ctx, hash)
 	if err != nil {
@@ -666,7 +668,7 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 }
 
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
-func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, hash libcommon.Hash) (map[string]interface{}, error) {
 	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
 	if err != nil {
 		return nil, nil
@@ -709,7 +711,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 		fields["logs"] = [][]*types.Log{}
 	}
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
-	if receipt.ContractAddress != (common.Address{}) {
+	if receipt.ContractAddress != (libcommon.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	return fields, nil
@@ -717,8 +719,8 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 // SendTxArgs represents the arguments to sumbit a new transaction into the transaction pool.
 type SendTxArgs struct {
-	From     common.Address  `json:"from"`
-	To       *common.Address `json:"to"`
+	From     libcommon.Address  `json:"from"`
+	To       *libcommon.Address `json:"to"`
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasPrice *hexutil.Big    `json:"gasPrice"`
 	MaxPriorityFeePerGas      *hexutil.Big    `json:"tip"`
@@ -864,24 +866,24 @@ func (args *SendTxArgs) toTransaction() types.Transaction {
 }
 
 // SubmitTransaction is a helper function that submits tx to txPool and logs a message.
-func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (common.Hash, error) {
+func SubmitTransaction(ctx context.Context, b Backend, tx types.Transaction) (libcommon.Hash, error) {
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(tx.GetPrice().ToBig(), tx.GetGas(), b.RPCTxFeeCap()); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	if !b.UnprotectedAllowed() && !tx.Protected() {
 		// Ensure only eip155 signed transactions are submitted if EIP155Required is set.
-		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+		return libcommon.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 	if err := b.SendTx(ctx, tx); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	// Print a log with full tx details for manual investigations and interventions
 	signer := types.MakeSigner(b.ChainConfig(), b.CurrentBlock().Number().Uint64())
 	from, err := tx.Sender(*signer)
 	if err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 
 	if tx.GetTo() == nil {
@@ -916,10 +918,10 @@ func (s *PublicTransactionPoolAPI) FillTransaction(ctx context.Context, args Sen
 
 // SendRawTransaction will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce.
-func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (common.Hash, error) {
+func (s *PublicTransactionPoolAPI) SendRawTransaction(ctx context.Context, input hexutil.Bytes) (libcommon.Hash, error) {
 	tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(input), 0))
 	if err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	return SubmitTransaction(ctx, s.b, tx)
 }

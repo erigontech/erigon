@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -116,7 +117,7 @@ func TestMarshalPubkey(t *testing.T) {
 
 func TestSign(t *testing.T) {
 	key, _ := HexToECDSA(testPrivHex)
-	addr := common.HexToAddress(testAddrHex)
+	addr := libcommon.HexToAddress(testAddrHex)
 
 	msg := Keccak256([]byte("foo"))
 	sig, err := Sign(msg, key)
@@ -155,7 +156,7 @@ func TestInvalidSign(t *testing.T) {
 
 func TestNewContractAddress(t *testing.T) {
 	key, _ := HexToECDSA(testPrivHex)
-	addr := common.HexToAddress(testAddrHex)
+	addr := libcommon.HexToAddress(testAddrHex)
 	genAddr := PubkeyToAddress(key.PublicKey)
 	// sanity check before using addr to create contract address
 	checkAddr(t, genAddr, addr)
@@ -163,9 +164,9 @@ func TestNewContractAddress(t *testing.T) {
 	caddr0 := CreateAddress(addr, 0)
 	caddr1 := CreateAddress(addr, 1)
 	caddr2 := CreateAddress(addr, 2)
-	checkAddr(t, common.HexToAddress("333c3310824b7c685133f2bedb2ca4b8b4df633d"), caddr0)
-	checkAddr(t, common.HexToAddress("8bda78331c916a08481428e4b07c96d3e916d165"), caddr1)
-	checkAddr(t, common.HexToAddress("c9ddedf451bc62ce88bf9292afb13df35b670699"), caddr2)
+	checkAddr(t, libcommon.HexToAddress("333c3310824b7c685133f2bedb2ca4b8b4df633d"), caddr0)
+	checkAddr(t, libcommon.HexToAddress("8bda78331c916a08481428e4b07c96d3e916d165"), caddr1)
+	checkAddr(t, libcommon.HexToAddress("c9ddedf451bc62ce88bf9292afb13df35b670699"), caddr2)
 }
 
 func TestLoadECDSA(t *testing.T) {
@@ -299,7 +300,7 @@ func checkhash(t *testing.T, name string, f func([]byte) []byte, msg, exp []byte
 	}
 }
 
-func checkAddr(t *testing.T, addr0, addr1 common.Address) {
+func checkAddr(t *testing.T, addr0, addr1 libcommon.Address) {
 	if addr0 != addr1 {
 		t.Fatalf("address mismatch: want: %x have: %x", addr0, addr1)
 	}

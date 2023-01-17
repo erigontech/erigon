@@ -1,32 +1,27 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	ssz "github.com/prysmaticlabs/fastssz"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
 type Checkpoint struct {
 	Epoch uint64
-	Root  common.Hash
+	Root  libcommon.Hash
 }
 
-func (c *Checkpoint) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-	dst = ssz.MarshalUint64(dst, c.Epoch)
-	dst = append(dst, c.Root[:]...)
-	return
+func (c *Checkpoint) EncodeSSZ(buf []byte) []byte {
+	return append(buf, append(ssz_utils.Uint64SSZ(c.Epoch), c.Root[:]...)...)
 }
 
-func (c *Checkpoint) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, 0, c.SizeSSZ())
-	return c.MarshalSSZTo(buf)
-}
-
-func (c *Checkpoint) UnmarshalSSZ(buf []byte) error {
+func (c *Checkpoint) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
-	if size != uint64(c.SizeSSZ()) {
+	if size != uint64(c.EncodingSizeSSZ()) {
 		return ssz.ErrSize
 	}
 
@@ -39,26 +34,10 @@ func (c *Checkpoint) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-func (c *Checkpoint) SizeSSZ() int {
-	return common.BlockNumberLength + common.HashLength
+func (c *Checkpoint) EncodingSizeSSZ() int {
+	return length.BlockNum + length.Hash
 }
 
-func (c *Checkpoint) HashTreeRoot() ([32]byte, error) {
-	leaves := [][32]byte{
-		merkle_tree.Uint64Root(c.Epoch),
-		c.Root,
-	}
-	return merkle_tree.ArraysRoot(leaves, 2)
-}
-
-func (c *Checkpoint) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	var root common.Hash
-	root, err = c.HashTreeRoot()
-	if err != nil {
-		return
-	}
-
-	hh.PutBytes(root[:])
-
-	return
+func (c *Checkpoint) HashSSZ() ([32]byte, error) {
+	return merkle_tree.ArraysRoot([][32]byte{merkle_tree.Uint64Root(c.Epoch), c.Root}, 2)
 }

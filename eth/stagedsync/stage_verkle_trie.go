@@ -4,20 +4,21 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/cmd/verkle/verkletrie"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (common.Hash, error) {
+func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context) (libcommon.Hash, error) {
 	var err error
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
-			return common.Hash{}, err
+			return libcommon.Hash{}, err
 		}
 		defer tx.Rollback()
 	}
@@ -27,27 +28,27 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	}
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	verkleWriter := verkletrie.NewVerkleTreeWriter(tx, cfg.tmpDir)
 	if err := verkletrie.IncrementAccount(tx, tx, 10, verkleWriter, from, to); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
-	var newRoot common.Hash
+	var newRoot libcommon.Hash
 	if newRoot, err = verkletrie.IncrementStorage(tx, tx, 10, verkleWriter, from, to); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	if cfg.checkRoot {
 		header := rawdb.ReadHeaderByNumber(tx, to)
 		if header.Root != newRoot {
-			return common.Hash{}, fmt.Errorf("invalid verkle root, header has %x, computed: %x", header.Root, newRoot)
+			return libcommon.Hash{}, fmt.Errorf("invalid verkle root, header has %x, computed: %x", header.Root, newRoot)
 		}
 	}
 	if err := s.Update(tx, to); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	if err := stages.SaveStageProgress(tx, stages.VerkleTrie, to); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	if !useExternalTx {
 		return newRoot, tx.Commit()

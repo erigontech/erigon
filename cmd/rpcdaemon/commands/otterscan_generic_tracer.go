@@ -3,16 +3,17 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type GenericTracer interface {
@@ -21,7 +22,7 @@ type GenericTracer interface {
 	Found() bool
 }
 
-func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum uint64, chainConfig *params.ChainConfig, tracer GenericTracer) error {
+func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum uint64, chainConfig *chain.Config, tracer GenericTracer) error {
 	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
 	if err != nil {
 		return err
@@ -39,7 +40,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum)
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)

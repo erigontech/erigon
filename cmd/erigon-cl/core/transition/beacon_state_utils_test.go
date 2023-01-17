@@ -5,11 +5,12 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -59,17 +60,18 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 	}
 	headerArr := [32]byte{}
 	copy(headerArr[:], header)
-	return cltypes.NewBeaconBlock(&cltypes.BeaconBlockBellatrix{
+	return &cltypes.BeaconBlock{
 		Slot:          19,
 		ProposerIndex: 1947,
 		ParentRoot:    headerArr,
-		Body: &cltypes.BeaconBodyBellatrix{
+		Body: &cltypes.BeaconBody{
 			Graffiti:         make([]byte, 32),
 			Eth1Data:         &cltypes.Eth1Data{},
 			SyncAggregate:    &cltypes.SyncAggregate{},
 			ExecutionPayload: emptyBlock,
+			Version:          clparams.BellatrixVersion,
 		},
-	})
+	}
 }
 
 func TestComputeShuffledIndex(t *testing.T) {
@@ -273,7 +275,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	badProposerInd.ProposerIndex = 0
 
 	badParentRoot := getTestBlock(t)
-	badParentRoot.ParentRoot = common.Hash{}
+	badParentRoot.ParentRoot = libcommon.Hash{}
 
 	badBlockBodyHash := getTestBlock(t)
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
@@ -429,7 +431,7 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 42,
 		BlockHash:    [32]byte{4, 5, 6},
 	}
-	eth1dataAHash, err := Eth1DataA.HashTreeRoot()
+	eth1dataAHash, err := Eth1DataA.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
@@ -438,7 +440,7 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 43,
 		BlockHash:    [32]byte{6, 5, 4},
 	}
-	eth1dataBHash, err := Eth1DataB.HashTreeRoot()
+	eth1dataBHash, err := Eth1DataB.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
@@ -486,7 +488,7 @@ func TestProcessEth1Data(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			gotEth1Data := tc.state.Eth1Data()
-			gotHash, err := gotEth1Data.HashTreeRoot()
+			gotHash, err := gotEth1Data.HashSSZ()
 			if err != nil {
 				t.Fatalf("unable to hash output eth1data: %v", err)
 			}

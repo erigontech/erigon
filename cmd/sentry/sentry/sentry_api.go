@@ -5,20 +5,21 @@ import (
 	"math/rand"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 )
 
 // Methods of sentry called by Core
 
-func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash common.Hash, td *uint256.Int) {
+func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash libcommon.Hash, td *uint256.Int) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
 	cs.headHeight = height
@@ -98,7 +99,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 					Origin:  eth.HashOrNumber{Hash: req.Hash},
 				},
 			}
-			if req.Hash == (common.Hash{}) {
+			if req.Hash == (libcommon.Hash{}) {
 				reqData.Origin.Number = req.Number
 			}
 			bytes, err := rlp.EncodeToBytes(reqData)

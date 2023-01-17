@@ -14,7 +14,7 @@ func TestAggregateMarshal(t *testing.T) {
 			Aggregate:       attestations[0],
 		},
 	}
-	enc, err := agg.MarshalSSZ()
+	enc, err := agg.EncodedSSZ(nil)
 	require.NoError(t, err)
 	require.Equal(t, agg.SizeSSZ(), len(enc))
 	agg2 := &cltypes.SignedAggregateAndProof{}

@@ -24,12 +24,14 @@ import (
 	"fmt"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 )
 
 func TestV2HashBuilding(t *testing.T) {
@@ -46,7 +48,7 @@ func TestV2HashBuilding(t *testing.T) {
 			fmt.Printf("Duplicate!\n")
 		}
 	}
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	valueLong := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	valueShort := []byte("VAL")
 	for i, key := range keys {
@@ -108,7 +110,7 @@ func TestV2Resolution(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	slices.Sort(keys)
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
 		tr.Update([]byte(key), value)
@@ -157,7 +159,7 @@ func TestV2Resolution(t *testing.T) {
 	if _, _, _, err := GenStructStep(rl.Retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
-	tr1 := New(common.Hash{})
+	tr1 := New(libcommon.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
@@ -187,19 +189,19 @@ func TestV2Resolution(t *testing.T) {
 // In order to prevent the branch node on top of the extension node, we will need to manipulate
 // the `groups` array and truncate it to the level of the accounts
 func TestEmbeddedStorage(t *testing.T) {
-	var accountAddress = common.Address{3, 4, 5, 6}
+	var accountAddress = libcommon.Address{3, 4, 5, 6}
 	addrHash := crypto.Keccak256(accountAddress[:])
 	incarnation := make([]byte, 8)
 	binary.BigEndian.PutUint64(incarnation, uint64(2))
-	var location1 = common.Hash{1}
+	var location1 = libcommon.Hash{1}
 	locationKey1 := append(append([]byte{}, addrHash...), crypto.Keccak256(location1[:])...)
-	var location2 = common.Hash{2}
+	var location2 = libcommon.Hash{2}
 	locationKey2 := append(append([]byte{}, addrHash...), crypto.Keccak256(location2[:])...)
-	var location3 = common.Hash{3}
+	var location3 = libcommon.Hash{3}
 	locationKey3 := append(append([]byte{}, addrHash...), crypto.Keccak256(location3[:])...)
 	var keys = []string{string(locationKey1), string(locationKey2), string(locationKey3)}
 	slices.Sort(keys)
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	valueShort := []byte("VAL")
 	for _, key := range keys {
 		tr.Update([]byte(key)[length.Hash:], valueShort)
@@ -476,7 +478,7 @@ func TestBranchesOnly(t *testing.T) {
 		succ.Reset()
 		succ.Write(key.k)
 		if curr.Len() > 0 {
-			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, key.hasTree}, groups, hasTree, hasHash, false)
+			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, &GenStructStepHashData{libcommon.Hash{}, key.hasTree}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -486,7 +488,7 @@ func TestBranchesOnly(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
-	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepHashData{common.Hash{}, false}, groups, hasTree, hasHash, false); err != nil {
+	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, &GenStructStepHashData{libcommon.Hash{}, false}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	require.Equal(t, 7, i)
@@ -639,7 +641,7 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 		currhasTree = succhasTree
 		succhasTree = key.hasTree
 		if curr.Len() > 0 {
-			v := &GenStructStepHashData{common.Hash{}, currhasTree}
+			v := &GenStructStepHashData{libcommon.Hash{}, currhasTree}
 			groups, hasTree, hasHash, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, hc /* hashCollector */, v, groups, hasTree, hasHash, trace)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
@@ -650,7 +652,7 @@ func TestStorageWithoutBranchNodeInRoot(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	currhasTree = succhasTree
-	v := &GenStructStepHashData{common.Hash{}, currhasTree}
+	v := &GenStructStepHashData{libcommon.Hash{}, currhasTree}
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), []byte{}, hb, hc /* hashCollector */, v, groups, hasTree, hasHash, trace); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
@@ -713,7 +715,7 @@ func Test2(t *testing.T) {
 				curr.Bytes(), succ.Bytes(), hb,
 				func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 					return nil
-				}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(key.v)}, groups, hasTree, hasHash, false)
+				}, /* hashCollector */ &GenStructStepHashData{Hash: libcommon.BytesToHash(key.v)}, groups, hasTree, hasHash, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -725,7 +727,7 @@ func Test2(t *testing.T) {
 	// Produce the key which is specially modified version of `curr` (only different in the last nibble)
 	if _, _, _, err = GenStructStep(func(_ []byte) bool { return false }, curr.Bytes(), succ.Bytes(), hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		return nil
-	}, /* hashCollector */ &GenStructStepHashData{Hash: common.BytesToHash(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
+	}, /* hashCollector */ &GenStructStepHashData{Hash: libcommon.BytesToHash(keys[len(keys)-1].v)}, groups, hasTree, hasHash, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 }

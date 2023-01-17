@@ -13,15 +13,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
@@ -49,7 +51,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/node"
@@ -90,7 +91,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().StringSliceVar(&cfg.API, "http.api", []string{"eth", "erigon"}, "API's offered over the HTTP-RPC interface: eth,erigon,web3,net,debug,trace,txpool,db. Supported methods: https://github.com/ledgerwatch/erigon/tree/devel/cmd/rpcdaemon")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.Gascap, "rpc.gascap", 50_000_000, "Sets a cap on gas that can be used in eth_call/estimateGas")
 	rootCmd.PersistentFlags().Uint64Var(&cfg.MaxTraces, "trace.maxtraces", 200, "Sets a limit on traces that can be returned in trace_filter")
-	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets")
+	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketEnabled, "ws", false, "Enable Websockets - Same port as HTTP")
 	rootCmd.PersistentFlags().BoolVar(&cfg.WebsocketCompression, "ws.compression", false, "Enable Websocket compression (RFC 7692)")
 	rootCmd.PersistentFlags().StringVar(&cfg.RpcAllowListFilePath, utils.RpcAccessListFlag.Name, "", "Specify granular (method-by-method) API allowlist")
 	rootCmd.PersistentFlags().UintVar(&cfg.RpcBatchConcurrency, utils.RpcBatchConcurrencyFlag.Name, 2, utils.RpcBatchConcurrencyFlag.Usage)
@@ -310,7 +311,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 		db = rwKv
 
-		var cc *params.ChainConfig
+		var cc *chain.Config
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 			if err != nil {
@@ -395,7 +396,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			})
 			if histV3Enabled {
 				log.Info("HistoryV3", "enable", histV3Enabled)
-				db = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
+				db = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 			}
 			stateCache = kvcache.NewDummy()
 		} else {
@@ -668,7 +669,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	jwtSecret := make([]byte, 32)
 	rand.Read(jwtSecret)
 
-	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutil.Encode(jwtSecret)), 0600); err != nil {
+	if err := os.WriteFile(cfg.JWTSecretPath, []byte(hexutility.Encode(jwtSecret)), 0600); err != nil {
 		return nil, err
 	}
 	log.Info("Generated JWT secret", "path", cfg.JWTSecretPath)

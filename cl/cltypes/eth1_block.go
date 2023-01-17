@@ -3,6 +3,8 @@ package cltypes
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -133,7 +135,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 			b.Body.Withdrawals[i].DecodeSSZ(buf[(*withdrawalOffset)+uint32(i)*44:])
 		}
 		// Cache withdrawal root.
-		b.Header.WithdrawalsHash = new(common.Hash)
+		b.Header.WithdrawalsHash = new(libcommon.Hash)
 		withdrawalRoot, err := b.Withdrawals().HashSSZ(16)
 		if err != nil {
 			return err
@@ -197,6 +199,6 @@ func (b *Eth1Block) HashSSZ() ([32]byte, error) {
 	return b.Header.HashSSZ()
 }
 
-func (b *Eth1Block) Hash() common.Hash {
+func (b *Eth1Block) Hash() libcommon.Hash {
 	return b.Header.Hash()
 }

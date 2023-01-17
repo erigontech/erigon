@@ -46,7 +46,7 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz_utils.ObjectSSZ) error {
+func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ) error {
 	forkDigest := make([]byte, 4)
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -99,7 +99,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.ObjectSSZ) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ) error {
 	objSize := list[0].SizeSSZ()
 
 	r := bytes.NewReader(data)

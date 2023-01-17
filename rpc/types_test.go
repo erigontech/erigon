@@ -20,7 +20,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/math"
 )
 
@@ -89,10 +90,10 @@ func TestBlockNumberOrHash_UnmarshalJSON(t *testing.T) {
 		14: {`someString`, true, BlockNumberOrHash{}},
 		15: {`""`, true, BlockNumberOrHash{}},
 		16: {``, true, BlockNumberOrHash{}},
-		17: {`"0x0000000000000000000000000000000000000000000000000000000000000000"`, false, BlockNumberOrHashWithHash(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
-		18: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000"}`, false, BlockNumberOrHashWithHash(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
-		19: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000","requireCanonical":false}`, false, BlockNumberOrHashWithHash(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
-		20: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000","requireCanonical":true}`, false, BlockNumberOrHashWithHash(common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), true)},
+		17: {`"0x0000000000000000000000000000000000000000000000000000000000000000"`, false, BlockNumberOrHashWithHash(libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
+		18: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000"}`, false, BlockNumberOrHashWithHash(libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
+		19: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000","requireCanonical":false}`, false, BlockNumberOrHashWithHash(libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), false)},
+		20: {`{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000000","requireCanonical":true}`, false, BlockNumberOrHashWithHash(libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"), true)},
 		21: {`{"blockNumber":"0x1"}`, false, BlockNumberOrHashWithNumber(1)},
 		22: {`{"blockNumber":"pending"}`, false, BlockNumberOrHashWithNumber(PendingBlockNumber)},
 		23: {`{"blockNumber":"latest"}`, false, BlockNumberOrHashWithNumber(LatestBlockNumber)},

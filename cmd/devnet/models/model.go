@@ -3,9 +3,10 @@ package models
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -67,8 +68,6 @@ const (
 	PrivateApiParamNoMine = "localhost:9091"
 	// HttpApiParam is the http.api default parameter for rpcdaemon
 	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity"
-	//// WSParam is the ws default parameter for rpcdaemon
-	//WSParam = ""
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
@@ -123,7 +122,7 @@ var (
 	// DevSignedPrivateKey is the signed private key for signing transactions
 	DevSignedPrivateKey, _ = crypto.HexToECDSA(hexPrivateKey)
 	// gspec is the geth dev genesis block
-	gspec = core.DeveloperGenesisBlock(uint64(0), common.HexToAddress(DevAddress))
+	gspec = core.DeveloperGenesisBlock(uint64(0), libcommon.HexToAddress(DevAddress))
 	// ContractBackend is a simulated backend created using a simulated blockchain
 	ContractBackend = backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, 1_000_000)
 
@@ -132,8 +131,9 @@ var (
 
 	// NewHeadsChan is the block cache the eth_NewHeads
 	NewHeadsChan chan interface{}
-	// OldHeads holds a list of visited blocks to recheck transactions
-	//OldHeads []string
+
+	//QuitNodeChan is the channel for receiving a quit signal on all nodes
+	QuitNodeChan chan bool
 )
 
 type (
@@ -163,8 +163,8 @@ func NewMethodSubscription(name SubMethod) *MethodSubscription {
 // Block represents a simple block for queries
 type Block struct {
 	Number       *hexutil.Big
-	Transactions []common.Hash
-	BlockHash    common.Hash
+	Transactions []libcommon.Hash
+	BlockHash    libcommon.Hash
 }
 
 // ParameterFromArgument merges the argument and parameter and returns a flag input string

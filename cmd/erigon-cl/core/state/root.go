@@ -1,9 +1,10 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
@@ -85,7 +86,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
-		dataRoot, err := b.eth1Data.HashTreeRoot()
+		dataRoot, err := b.eth1Data.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -168,7 +169,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(18): PreviousJustifiedCheckpoint
 	if b.isLeafDirty(PreviousJustifiedCheckpointLeafIndex) {
-		checkpointRoot, err := b.previousJustifiedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.previousJustifiedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -177,7 +178,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(19): CurrentJustifiedCheckpoint
 	if b.isLeafDirty(CurrentJustifiedCheckpointLeafIndex) {
-		checkpointRoot, err := b.currentJustifiedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.currentJustifiedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -186,7 +187,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(20): FinalizedCheckpoint
 	if b.isLeafDirty(FinalizedCheckpointLeafIndex) {
-		checkpointRoot, err := b.finalizedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.finalizedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -231,7 +232,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	return nil
 }
 
-func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf common.Hash) {
+func (b *BeaconState) updateLeaf(idx StateLeafIndex, leaf libcommon.Hash) {
 	// Update leaf with new value.
 	b.leaves[idx] = leaf
 	// Now leaf is clean :).

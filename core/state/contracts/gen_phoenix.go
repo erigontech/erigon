@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -33,15 +35,15 @@ const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":
 var PhoenixBin = "0x6080604052348015600f57600080fd5b5060c48061001e6000396000f3fe60806040526004361060295760003560e01c806335f46994146034578063d09de08a14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605e565b6000ff5b60008054600101905556fea26469706673582212208a7813270390a5ca21790c2447b46da471493e99b652d00cbd4751eb47b7e70164736f6c637827302e372e352d646576656c6f702e323032302e31322e392b636f6d6d69742e65623737656430380058"
 
 // DeployPhoenix deploys a new Ethereum contract, binding an instance of Phoenix to it.
-func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Phoenix, error) {
+func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Phoenix, error) {
 	parsed, err := abi.JSON(strings.NewReader(PhoenixABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(PhoenixBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 	return address, tx, &Phoenix{PhoenixCaller: PhoenixCaller{contract: contract}, PhoenixTransactor: PhoenixTransactor{contract: contract}, PhoenixFilterer: PhoenixFilterer{contract: contract}}, nil
 }
@@ -106,7 +108,7 @@ type PhoenixTransactorRaw struct {
 }
 
 // NewPhoenix creates a new instance of Phoenix, bound to a specific deployed contract.
-func NewPhoenix(address common.Address, backend bind.ContractBackend) (*Phoenix, error) {
+func NewPhoenix(address libcommon.Address, backend bind.ContractBackend) (*Phoenix, error) {
 	contract, err := bindPhoenix(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func NewPhoenix(address common.Address, backend bind.ContractBackend) (*Phoenix,
 }
 
 // NewPhoenixCaller creates a new read-only instance of Phoenix, bound to a specific deployed contract.
-func NewPhoenixCaller(address common.Address, caller bind.ContractCaller) (*PhoenixCaller, error) {
+func NewPhoenixCaller(address libcommon.Address, caller bind.ContractCaller) (*PhoenixCaller, error) {
 	contract, err := bindPhoenix(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func NewPhoenixCaller(address common.Address, caller bind.ContractCaller) (*Phoe
 }
 
 // NewPhoenixTransactor creates a new write-only instance of Phoenix, bound to a specific deployed contract.
-func NewPhoenixTransactor(address common.Address, transactor bind.ContractTransactor) (*PhoenixTransactor, error) {
+func NewPhoenixTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*PhoenixTransactor, error) {
 	contract, err := bindPhoenix(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +135,7 @@ func NewPhoenixTransactor(address common.Address, transactor bind.ContractTransa
 }
 
 // NewPhoenixFilterer creates a new log filterer instance of Phoenix, bound to a specific deployed contract.
-func NewPhoenixFilterer(address common.Address, filterer bind.ContractFilterer) (*PhoenixFilterer, error) {
+func NewPhoenixFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*PhoenixFilterer, error) {
 	contract, err := bindPhoenix(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func NewPhoenixFilterer(address common.Address, filterer bind.ContractFilterer) 
 }
 
 // bindPhoenix binds a generic wrapper to an already deployed contract.
-func bindPhoenix(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindPhoenix(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(PhoenixABI))
 	if err != nil {
 		return nil, err

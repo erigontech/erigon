@@ -8,11 +8,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type SentinelServer struct {
@@ -133,14 +133,14 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 		log.Warn("[Sentinel Gossip] Error Forwarding Packet", "err", err)
 	}
 	// Compute data
-	u := pkt.Packet.(ssz.Marshaler)
+	u := pkt.Packet.(ssz_utils.Marshaler)
 	var data []byte
 	// Make data
 	if data, err = u.MarshalSSZ(); err != nil {
 		return err
 	}
 	switch pkt.Packet.(type) {
-	case *cltypes.SignedBeaconBlockBellatrix:
+	case *cltypes.SignedBeaconBlock:
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data)
 	case *cltypes.SignedAggregateAndProof:
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data)

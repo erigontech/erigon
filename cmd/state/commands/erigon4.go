@@ -15,18 +15,18 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -65,7 +64,7 @@ var erigon4Cmd = &cobra.Command{
 	},
 }
 
-func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
+func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -147,7 +146,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		}
 		agg.SetTx(rwTx)
 		agg.SetTxNum(0)
-		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper23{w: agg}); err != nil {
+		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper23{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 
@@ -199,7 +198,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, historyTx, hash, number)
 		if err != nil {
 			panic(err)
@@ -326,8 +325,8 @@ func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat
 	return s
 }
 
-func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *ReaderWrapper23, ww *WriterWrapper23, chainConfig *params.ChainConfig,
-	engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
+func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *ReaderWrapper23, ww *WriterWrapper23, chainConfig *chain2.Config,
+	engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
 ) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
@@ -476,7 +475,7 @@ type WriterWrapper23 struct {
 	w        *libstate.Aggregator
 }
 
-func (rw *ReaderWrapper23) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -513,7 +512,7 @@ func (rw *ReaderWrapper23) ReadAccountData(address common.Address) (*accounts.Ac
 	return &a, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -527,19 +526,19 @@ func (rw *ReaderWrapper23) ReadAccountStorage(address common.Address, incarnatio
 	return enc, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (rw *ReaderWrapper23) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (rw *ReaderWrapper23) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (rw *ReaderWrapper23) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	var l int
 	l++
 	if account.Nonce > 0 {
@@ -609,27 +608,27 @@ func (ww *WriterWrapper23) UpdateAccountData(address common.Address, original, a
 	return nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (ww *WriterWrapper23) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (ww *WriterWrapper23) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (ww *WriterWrapper23) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) CreateContract(address common.Address) error {
+func (ww *WriterWrapper23) CreateContract(address libcommon.Address) error {
 	return nil
 }

@@ -3,16 +3,17 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningFinishCfg struct {
 	db          kv.RwDB
-	chainConfig params.ChainConfig
+	chainConfig chain.Config
 	engine      consensus.Engine
 	sealCancel  chan struct{}
 	miningState MiningState
@@ -20,7 +21,7 @@ type MiningFinishCfg struct {
 
 func StageMiningFinishCfg(
 	db kv.RwDB,
-	chainConfig params.ChainConfig,
+	chainConfig chain.Config,
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},

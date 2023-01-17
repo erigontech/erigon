@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -631,8 +633,8 @@ func TestCreate2Addreses(t *testing.T) {
 		},
 	} {
 
-		origin := common.BytesToAddress(common.FromHex(tt.origin))
-		salt := common.BytesToHash(common.FromHex(tt.salt))
+		origin := libcommon.BytesToAddress(common.FromHex(tt.origin))
+		salt := libcommon.BytesToHash(common.FromHex(tt.salt))
 		code := common.FromHex(tt.code)
 		codeHash := crypto.Keccak256(code)
 		address := crypto.CreateAddress2(origin, salt, codeHash)
@@ -645,7 +647,7 @@ func TestCreate2Addreses(t *testing.T) {
 			gas, _ := gasCreate2(params.GasTable{}, nil, nil, stack, nil, 0)
 			fmt.Printf("Example %d\n* address `0x%x`\n* salt `0x%x`\n* init_code `0x%x`\n* gas (assuming no mem expansion): `%v`\n* result: `%s`\n\n", i,origin, salt, code, gas, address.String())
 		*/
-		expected := common.BytesToAddress(common.FromHex(tt.expected))
+		expected := libcommon.BytesToAddress(common.FromHex(tt.expected))
 		if !bytes.Equal(expected.Bytes(), address.Bytes()) {
 			t.Errorf("test %d: expected %s, got %s", i, expected.String(), address.String())
 		}

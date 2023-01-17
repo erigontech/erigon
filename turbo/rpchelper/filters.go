@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -20,7 +21,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -368,7 +368,7 @@ func (ff *Filters) UnsubscribePendingTxs(id PendingTxsSubID) bool {
 func (ff *Filters) SubscribeLogs(size int, crit filters.FilterCriteria) (<-chan *types.Log, LogsSubID) {
 	sub := newChanSub[*types.Log](size)
 	id, f := ff.logsSubs.insertLogsFilter(sub)
-	f.addrs = map[common.Address]int{}
+	f.addrs = map[libcommon.Address]int{}
 	if len(crit.Addresses) == 0 {
 		f.allAddrs = 1
 	} else {
@@ -376,7 +376,7 @@ func (ff *Filters) SubscribeLogs(size int, crit filters.FilterCriteria) (<-chan 
 			f.addrs[addr] = 1
 		}
 	}
-	f.topics = map[common.Hash]int{}
+	f.topics = map[libcommon.Hash]int{}
 	if len(crit.Topics) == 0 {
 		f.allTopics = 1
 	} else {

@@ -20,28 +20,30 @@ import (
 	"math/big"
 	"reflect"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
 func TestCheckCompatible(t *testing.T) {
 	type test struct {
-		stored, new *ChainConfig
+		stored, new *chain.Config
 		head        uint64
-		wantErr     *ConfigCompatError
+		wantErr     *chain.ConfigCompatError
 	}
 	tests := []test{
 		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 0, wantErr: nil},
 		{stored: AllProtocolChanges, new: AllProtocolChanges, head: 100, wantErr: nil},
 		{
-			stored:  &ChainConfig{TangerineWhistleBlock: big.NewInt(10)},
-			new:     &ChainConfig{TangerineWhistleBlock: big.NewInt(20)},
+			stored:  &chain.Config{TangerineWhistleBlock: big.NewInt(10)},
+			new:     &chain.Config{TangerineWhistleBlock: big.NewInt(20)},
 			head:    9,
 			wantErr: nil,
 		},
 		{
 			stored: AllProtocolChanges,
-			new:    &ChainConfig{HomesteadBlock: nil},
+			new:    &chain.Config{HomesteadBlock: nil},
 			head:   3,
-			wantErr: &ConfigCompatError{
+			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
 				StoredConfig: big.NewInt(0),
 				NewConfig:    nil,
@@ -50,9 +52,9 @@ func TestCheckCompatible(t *testing.T) {
 		},
 		{
 			stored: AllProtocolChanges,
-			new:    &ChainConfig{HomesteadBlock: big.NewInt(1)},
+			new:    &chain.Config{HomesteadBlock: big.NewInt(1)},
 			head:   3,
-			wantErr: &ConfigCompatError{
+			wantErr: &chain.ConfigCompatError{
 				What:         "Homestead fork block",
 				StoredConfig: big.NewInt(0),
 				NewConfig:    big.NewInt(1),
@@ -60,10 +62,10 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored: &ChainConfig{HomesteadBlock: big.NewInt(30), TangerineWhistleBlock: big.NewInt(10)},
-			new:    &ChainConfig{HomesteadBlock: big.NewInt(25), TangerineWhistleBlock: big.NewInt(20)},
+			stored: &chain.Config{HomesteadBlock: big.NewInt(30), TangerineWhistleBlock: big.NewInt(10)},
+			new:    &chain.Config{HomesteadBlock: big.NewInt(25), TangerineWhistleBlock: big.NewInt(20)},
 			head:   25,
-			wantErr: &ConfigCompatError{
+			wantErr: &chain.ConfigCompatError{
 				What:         "Tangerine Whistle fork block",
 				StoredConfig: big.NewInt(10),
 				NewConfig:    big.NewInt(20),
@@ -71,16 +73,16 @@ func TestCheckCompatible(t *testing.T) {
 			},
 		},
 		{
-			stored:  &ChainConfig{ConstantinopleBlock: big.NewInt(30)},
-			new:     &ChainConfig{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(30)},
+			stored:  &chain.Config{ConstantinopleBlock: big.NewInt(30)},
+			new:     &chain.Config{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(30)},
 			head:    40,
 			wantErr: nil,
 		},
 		{
-			stored: &ChainConfig{ConstantinopleBlock: big.NewInt(30)},
-			new:    &ChainConfig{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(31)},
+			stored: &chain.Config{ConstantinopleBlock: big.NewInt(30)},
+			new:    &chain.Config{ConstantinopleBlock: big.NewInt(30), PetersburgBlock: big.NewInt(31)},
 			head:   40,
-			wantErr: &ConfigCompatError{
+			wantErr: &chain.ConfigCompatError{
 				What:         "Petersburg fork block",
 				StoredConfig: nil,
 				NewConfig:    big.NewInt(31),

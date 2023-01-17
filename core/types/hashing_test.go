@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -16,7 +17,7 @@ func genTransactions(n uint64) Transactions {
 	txs := Transactions{}
 
 	for i := uint64(0); i < n; i++ {
-		tx := NewTransaction(i, common.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), []byte(fmt.Sprintf("hello%d", i)))
+		tx := NewTransaction(i, libcommon.Address{}, uint256.NewInt(1000+i), 10+i, uint256.NewInt(1000+i), []byte(fmt.Sprintf("hello%d", i)))
 		txs = append(txs, tx)
 	}
 
@@ -67,17 +68,17 @@ func checkDeriveSha(t *testing.T, list DerivableList) {
 	}
 }
 
-func hashesEqual(h1, h2 common.Hash) bool {
+func hashesEqual(h1, h2 libcommon.Hash) bool {
 	if len(h1) != len(h2) {
 		return false
 	}
 	return h1.Hex() == h2.Hex()
 }
 
-func legacyDeriveSha(list DerivableList) common.Hash {
+func legacyDeriveSha(list DerivableList) libcommon.Hash {
 	keybuf := new(bytes.Buffer)
 	valbuf := new(bytes.Buffer)
-	trie := trie.NewTestRLPTrie(common.Hash{})
+	trie := trie.NewTestRLPTrie(libcommon.Hash{})
 	for i := 0; i < list.Len(); i++ {
 		keybuf.Reset()
 		valbuf.Reset()

@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
@@ -14,16 +15,16 @@ func Bench3(erigon_url, geth_url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
+	blockhash := libcommon.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 
 	pageSize := 256
 	req_id++
 	template := `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x1", "%s", %d, true, true, true], "id":%d}`
 
-	page := common.Hash{}.Bytes()
+	page := libcommon.Hash{}.Bytes()
 
-	accRangeTG := make(map[common.Address]state.DumpAccount)
+	accRangeTG := make(map[libcommon.Address]state.DumpAccount)
 
 	for len(page) > 0 {
 		encodedKey := base64.StdEncoding.EncodeToString(page)
@@ -43,9 +44,9 @@ func Bench3(erigon_url, geth_url string) {
 		}
 	}
 
-	accRangeGeth := make(map[common.Address]state.DumpAccount)
+	accRangeGeth := make(map[libcommon.Address]state.DumpAccount)
 
-	page = common.Hash{}.Bytes()
+	page = libcommon.Hash{}.Bytes()
 	for len(page) > 0 {
 		encodedKey := base64.StdEncoding.EncodeToString(page)
 		var sr DebugAccountRange
@@ -111,9 +112,9 @@ func Bench3(erigon_url, geth_url string) {
 			return
 		}
 	}
-	to := common.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
-	sm := make(map[common.Hash]storageEntry)
-	start := common.HexToHash("0x5aa12c260b07325d83f0c9170a2c667948d0247cad4ad999cd00148658b0552d")
+	to := libcommon.HexToAddress("0xbb9bc244d798123fde783fcc1c72d3bb8c189413")
+	sm := make(map[libcommon.Hash]storageEntry)
+	start := libcommon.HexToHash("0x5aa12c260b07325d83f0c9170a2c667948d0247cad4ad999cd00148658b0552d")
 
 	req_id++
 	template = `
@@ -138,7 +139,7 @@ func Bench3(erigon_url, geth_url string) {
 		}
 	}
 	fmt.Printf("storageRange: %d\n", len(sm))
-	smg := make(map[common.Hash]storageEntry)
+	smg := make(map[libcommon.Hash]storageEntry)
 	nextKey = &start
 	for nextKey != nil {
 		var srg DebugStorageRange
