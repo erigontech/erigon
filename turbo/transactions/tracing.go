@@ -42,22 +42,6 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
-	if historyV3 {
-		ibs := state.New(reader)
-		if txIndex == 0 && len(block.Transactions()) == 0 {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		if int(txIndex) > block.Transactions().Len() {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		txn := block.Transactions()[txIndex]
-		signer := types.MakeSigner(cfg, block.NumberU64())
-		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.Time()))
-		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
-		txCtx := core.NewEVMTxContext(msg)
-		return msg, blockCtx, txCtx, ibs, reader, nil
-
-	}
 
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)

@@ -188,7 +188,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) er
 	if block.ParentRoot != latestRoot {
 		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
 	}
-	bodyRoot, err := block.Body.HashTreeRoot()
+	bodyRoot, err := block.Body.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of block body: %v", err)
 	}
@@ -242,14 +242,14 @@ func ProcessEth1Data(state *state.BeaconState, body *cltypes.BeaconBody) error {
 	newVotes := append(state.Eth1DataVotes(), body.Eth1Data)
 	state.SetEth1DataVotes(newVotes)
 
-	ethDataHash, err := body.Eth1Data.HashTreeRoot()
+	ethDataHash, err := body.Eth1Data.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
 	}
 	// Count how many times body.Eth1Data appears in the votes by comparing their hashes.
 	numVotes := 0
 	for i := 0; i < len(newVotes); i++ {
-		candidateHash, err := newVotes[i].HashTreeRoot()
+		candidateHash, err := newVotes[i].HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
 		}

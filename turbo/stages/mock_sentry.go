@@ -28,6 +28,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -244,7 +245,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	var agg *libstate.AggregatorV3
 	if cfg.HistoryV3 {
 		dir.MustExist(dirs.SnapHistory)
-		agg, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		agg, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, 16, db)
 		if err != nil {
 			panic(err)
 		}
@@ -254,7 +255,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	if cfg.HistoryV3 {
-		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
+		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
@@ -304,7 +305,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			})
 		}
 		chainID, _ := uint256.FromBig(mock.ChainConfig.ChainID)
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -363,55 +364,39 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
 	mock.Sync = stagedsync.New(
-		stagedsync.DefaultStages(mock.Ctx, prune,
-			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, mock.BlockSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.Engine, mock.HistoryV3, mock.agg),
-			stagedsync.StageHeadersCfg(
-				mock.DB,
-				mock.sentriesClient.Hd,
-				mock.sentriesClient.Bd,
-				*mock.ChainConfig,
-				sendHeaderRequest,
-				propagateNewBlockHashes,
-				penalize,
-				cfg.BatchSize,
-				false,
-				mock.BlockSnapshots,
-				blockReader,
-				dirs.Tmp,
-				mock.Notifications,
-				engineapi.NewForkValidatorMock(1)),
-			stagedsync.StageCumulativeIndexCfg(mock.DB),
-			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig),
-			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, cfg.BatchSize, mock.BlockSnapshots, blockReader, cfg.HistoryV3),
-			stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true),
-			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil),
-			stagedsync.StageExecuteBlocksCfg(
-				mock.DB,
-				prune,
-				cfg.BatchSize,
-				nil,
-				mock.ChainConfig,
-				mock.Engine,
-				&vm.Config{},
-				mock.Notifications.Accumulator,
-				cfg.StateStream,
-				/*stateStream=*/ false,
-				/*exec22=*/ cfg.HistoryV3,
-				dirs,
-				blockReader,
-				mock.sentriesClient.Hd,
-				mock.gspec,
-				ethconfig.Defaults.Sync,
-				mock.agg,
-			),
-			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg),
-			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg),
-			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
-			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
-			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
-			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil),
-			!withPosDownloader),
+		stagedsync.DefaultStages(mock.Ctx, stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, mock.BlockSnapshots, blockRetire, snapshotsDownloader, blockReader, mock.Notifications.Events, mock.Engine, mock.HistoryV3, mock.agg), stagedsync.StageHeadersCfg(
+			mock.DB,
+			mock.sentriesClient.Hd,
+			mock.sentriesClient.Bd,
+			*mock.ChainConfig,
+			sendHeaderRequest,
+			propagateNewBlockHashes,
+			penalize,
+			cfg.BatchSize,
+			false,
+			mock.BlockSnapshots,
+			blockReader,
+			dirs.Tmp,
+			mock.Notifications,
+			engineapi.NewForkValidatorMock(1)), stagedsync.StageCumulativeIndexCfg(mock.DB), stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig), stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockSnapshots, blockReader, cfg.HistoryV3), stagedsync.StageIssuanceCfg(mock.DB, mock.ChainConfig, blockReader, true), stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, nil), stagedsync.StageExecuteBlocksCfg(
+			mock.DB,
+			prune,
+			cfg.BatchSize,
+			nil,
+			mock.ChainConfig,
+			mock.Engine,
+			&vm.Config{},
+			mock.Notifications.Accumulator,
+			cfg.StateStream,
+			/*stateStream=*/ false,
+			/*exec22=*/ cfg.HistoryV3,
+			dirs,
+			blockReader,
+			mock.sentriesClient.Hd,
+			mock.gspec,
+			ethconfig.Defaults.Sync,
+			mock.agg,
+		), stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg), stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, nil, cfg.HistoryV3, mock.agg), stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp), stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp), stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp), stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor), stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, nil), !withPosDownloader),
 		stagedsync.DefaultUnwindOrder,
 		stagedsync.DefaultPruneOrder,
 	)
@@ -648,6 +633,20 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	}
 	if ms.sentriesClient.Hd.IsBadHeader(chain.TopBlock.Hash()) {
 		return fmt.Errorf("block %d %x was invalid", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
+	}
+	if ms.HistoryV3 {
+		if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
+			return err
+		}
+		if err := ms.DB.UpdateAsync(ms.Ctx, func(tx kv.RwTx) error {
+			ms.agg.SetTx(tx)
+			if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }

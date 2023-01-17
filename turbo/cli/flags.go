@@ -41,10 +41,10 @@ var (
 		Usage: "Buffer size for ETL operations.",
 		Value: etl.BufferOptimalSize.String(),
 	}
-	BlockDownloaderWindowFlag = cli.IntFlag{
-		Name:  "blockDownloaderWindow",
-		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: ethconfig.Defaults.Sync.BlockDownloaderWindow,
+	BodyCacheLimitFlag = cli.StringFlag{
+		Name:  "bodies.cache",
+		Usage: "Limit on the cache for block bodies",
+		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
 	}
 
 	PrivateApiAddr = cli.StringFlag{
@@ -232,7 +232,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
-	cfg.Sync.BlockDownloaderWindow = ctx.Int(BlockDownloaderWindowFlag.Name)
+	if ctx.String(BodyCacheLimitFlag.Name) != "" {
+		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
+		if err != nil {
+			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
+		}
+	}
 
 	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
 		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))

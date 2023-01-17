@@ -64,31 +64,33 @@ func getEmptyState() *state.BeaconState {
 }
 
 func getEmptyBlock() *cltypes.SignedBeaconBlock {
-	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
-		Block: &cltypes.BeaconBlockBellatrix{
-			Body: &cltypes.BeaconBodyBellatrix{
+	return &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
+			Body: &cltypes.BeaconBody{
 				Eth1Data:         &cltypes.Eth1Data{},
 				SyncAggregate:    &cltypes.SyncAggregate{},
 				ExecutionPayload: emptyBlock,
+				Version:          clparams.BellatrixVersion,
 			},
 		},
-	})
+	}
 }
 
 func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
-	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
-		Block: &cltypes.BeaconBlockBellatrix{
+	return &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
 			ProposerIndex: 0,
-			Body: &cltypes.BeaconBodyBellatrix{
+			Body: &cltypes.BeaconBody{
 				Eth1Data:         &cltypes.Eth1Data{},
 				Graffiti:         make([]byte, 32),
 				SyncAggregate:    &cltypes.SyncAggregate{},
 				ExecutionPayload: emptyBlock,
+				Version:          clparams.BellatrixVersion,
 			},
 			StateRoot: testStateRoot,
 		},
 		Signature: testSignature,
-	})
+	}
 }
 
 func getTestBeaconState() *state.BeaconState {
