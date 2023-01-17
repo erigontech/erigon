@@ -76,6 +76,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
 	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
+		log.Debug("Body", "blockNum", blockNum)
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			log.Debug("Body already delivered", "blockNum", blockNum)
