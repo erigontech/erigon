@@ -6,13 +6,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState, error) {
+func RetrieveBeaconState(ctx context.Context, uri string) (*state.BeaconState, error) {
 	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
@@ -37,27 +36,11 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*cltypes.BeaconState,
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
-	beaconState := &cltypes.BeaconState{}
+
+	beaconState := &cltypes.BeaconStateBellatrix{}
 	err = beaconState.UnmarshalSSZ(marshaled)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
-	return beaconState, nil
-}
-
-func RetrieveTrustedRoot(tx kv.Tx, ctx context.Context, uri string) ([32]byte, error) {
-	var update *cltypes.LightClientFinalityUpdate
-	var err error
-	if update, err = rawdb.ReadLightClientFinalityUpdate(tx); err != nil {
-		return [32]byte{}, err
-	}
-	if update != nil {
-		return update.FinalizedHeader.HashTreeRoot()
-	}
-
-	bs, err := RetrieveBeaconState(ctx, uri)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	return bs.FinalizedCheckpoint.Root, nil
+	return state.FromBellatrixState(beaconState), nil
 }

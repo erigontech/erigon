@@ -18,13 +18,13 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p-core/network"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
@@ -46,8 +47,10 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	MetadataV2 *cltypes.MetadataV2
-	db         kv.RoDB
+	metadataV2 *cltypes.Metadata
+	handshaker *handshake.HandShaker
+
+	db kv.RoDB
 
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
@@ -78,6 +81,10 @@ func (s *Sentinel) createLocalNode(
 	s.setupENR(localNode)
 
 	return localNode, nil
+}
+
+func (s *Sentinel) SetStatus(status *cltypes.Status) {
+	s.handshaker.SetStatus(status)
 }
 
 func (s *Sentinel) createListener() (*discover.UDPv5, error) {
@@ -124,14 +131,14 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// TODO: Set up proper attestation number
-	s.MetadataV2 = &cltypes.MetadataV2{
+	s.metadataV2 = &cltypes.Metadata{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
-		Syncnets:  0,
+		Syncnets:  new(uint64),
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.MetadataV2).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2).Start()
 
 	net, err := discover.ListenV5(s.ctx, conn, localNode, discCfg)
 	if err != nil {
@@ -163,6 +170,7 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
+	rule handshake.RuleFunc,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
@@ -198,6 +206,8 @@ func New(
 		return nil, err
 	}
 
+	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
+
 	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
@@ -214,9 +224,7 @@ func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
 	return s.subManager.Recv()
 }
 
-func (s *Sentinel) Start(
-// potentially we can put the req/resp handler here as well?
-) error {
+func (s *Sentinel) Start() error {
 	if s.started {
 		log.Warn("[Sentinel] already running")
 	}
@@ -229,7 +237,10 @@ func (s *Sentinel) Start(
 	if err := s.connectToBootnodes(); err != nil {
 		return fmt.Errorf("failed to connect to bootnodes err=%w", err)
 	}
-
+	// Configuring handshake
+	s.host.Network().Notify(&network.NotifyBundle{
+		ConnectedF: s.onConnection,
+	})
 	if !s.cfg.NoDiscovery {
 		go s.listenForPeers()
 	}
@@ -242,20 +253,22 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return len(s.host.Network().Peers()) >= peers.DefaultMaxPeers
+	return s.GetPeersCount() >= peers.DefaultMaxPeers
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	// Check how many peers are subscribed to beacon block
-	var sub *GossipSubscription
-	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(LightClientFinalityUpdateTopic)) {
-			sub = currSub
-		}
-	}
+	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())
 	}
 	return len(sub.topic.ListPeers())
+}
+
+func (s *Sentinel) Host() host.Host {
+	return s.host
+}
+
+func (s *Sentinel) Peers() *peers.Peers {
+	return s.peers
 }

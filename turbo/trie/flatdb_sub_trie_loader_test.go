@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 func TestCreateLoadingPrefixes(t *testing.T) {
 	assert := assert.New(t)
 
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	kAcc1 := common.FromHex("0001cf1ce0664746d39af9f6db99dc3370282f1d9d48df7f804b7e6499558c83")
 	kInc := make([]byte, 8)
 	binary.BigEndian.PutUint64(kInc, uint64(1))
@@ -107,7 +109,7 @@ func TestIsSequence(t *testing.T) {
 		{prev: "1234", next: "5678", expect: false},
 	}
 	for _, tc := range cases {
-		next, _ := dbutils.NextSubtree(common.FromHex(tc.prev))
+		next, _ := kv.NextSubtree(common.FromHex(tc.prev))
 		res := isSequenceOld(next, common.FromHex(tc.next))
 		assert.Equal(tc.expect, res, "%s, %s", tc.prev, tc.next)
 	}

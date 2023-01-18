@@ -9,20 +9,21 @@ import (
 	"io"
 	"sync/atomic"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type RemoteBackend struct {
@@ -60,13 +61,13 @@ func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	return true
 }
 
-func (back *RemoteBackend) Etherbase(ctx context.Context) (common.Address, error) {
+func (back *RemoteBackend) Etherbase(ctx context.Context) (libcommon.Address, error) {
 	res, err := back.remoteEthBackend.Etherbase(ctx, &remote.EtherbaseRequest{})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
-			return common.Address{}, errors.New(s.Message())
+			return libcommon.Address{}, errors.New(s.Message())
 		}
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 
 	return gointerfaces.ConvertH160toAddress(res.Address), nil
@@ -166,31 +167,31 @@ func (back *RemoteBackend) SubscribeLogs(ctx context.Context, onNewLogs func(rep
 	return nil
 }
 
-func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+func (back *RemoteBackend) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
 	return back.blockReader.TxnLookup(ctx, tx, txnHash)
 }
-func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (block *types.Block, senders []common.Address, err error) {
+func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockHeight)
 }
-func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockHeight)
 }
-func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
+func (back *RemoteBackend) BodyRlp(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	return back.blockReader.BodyRlp(ctx, tx, hash, blockHeight)
 }
-func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
+func (back *RemoteBackend) Body(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
 	return back.blockReader.Body(ctx, tx, hash, blockHeight)
 }
-func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.Header, error) {
+func (back *RemoteBackend) Header(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (*types.Header, error) {
 	return back.blockReader.Header(ctx, tx, hash, blockHeight)
 }
 func (back *RemoteBackend) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
 	return back.blockReader.HeaderByNumber(ctx, tx, blockHeight)
 }
-func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+func (back *RemoteBackend) HeaderByHash(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (*types.Header, error) {
 	return back.blockReader.HeaderByHash(ctx, tx, hash)
 }
-func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (common.Hash, error) {
+func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (libcommon.Hash, error) {
 	return back.blockReader.CanonicalHash(ctx, tx, blockHeight)
 }
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {

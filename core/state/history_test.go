@@ -10,26 +10,29 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMutationDeleteTimestamp(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	acc := make([]*accounts.Account, 10)
-	addr := make([]common.Address, 10)
+	addr := make([]libcommon.Address, 10)
 	blockWriter := NewPlainStateWriter(tx, tx, 1)
 	emptyAccount := accounts.NewAccount()
 	for i := range acc {
@@ -46,7 +49,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	i := 0
-	err := changeset.ForEach(tx, kv.AccountChangeSet, nil, func(blockN uint64, k, v []byte) error {
+	err := historyv2.ForEach(tx, kv.AccountChangeSet, nil, func(blockN uint64, k, v []byte) error {
 		i++
 		return nil
 	})
@@ -68,7 +71,7 @@ func TestMutationDeleteTimestamp(t *testing.T) {
 	}
 
 	count := 0
-	err = changeset.ForPrefix(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(1), func(blockN uint64, k, v []byte) error {
+	err = historyv2.ForPrefix(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(1), func(blockN uint64, k, v []byte) error {
 		count++
 		return nil
 	})
@@ -117,9 +120,9 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("incorrect history index")
 		}
 
-		resAccStorage := make(map[common.Hash]uint256.Int)
+		resAccStorage := make(map[libcommon.Hash]uint256.Int)
 		err = tx.ForPrefix(kv.PlainState, dbutils.PlainGenerateStoragePrefix(addr[:], acc.Incarnation), func(k, v []byte) error {
-			resAccStorage[common.BytesToHash(k[length.Addr+8:])] = *uint256.NewInt(0).SetBytes(v)
+			resAccStorage[libcommon.BytesToHash(k[length.Addr+8:])] = *uint256.NewInt(0).SetBytes(v)
 			return nil
 		})
 		if err != nil {
@@ -135,7 +138,7 @@ func TestMutationCommit(t *testing.T) {
 		for k, v := range accHistoryStateStorage[i] {
 			c1, _ := tx.Cursor(kv.StorageHistory)
 			c2, _ := tx.CursorDupSort(kv.StorageChangeSet)
-			res, err := GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
+			res, err := historyv2read.GetAsOf(tx, c1, c2, true /* storage */, dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), acc.Incarnation, k.Bytes()), 1)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -147,8 +150,8 @@ func TestMutationCommit(t *testing.T) {
 		}
 	}
 
-	changeSetInDB := changeset.NewAccountChangeSet()
-	err := changeset.ForPrefix(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(2), func(_ uint64, k, v []byte) error {
+	changeSetInDB := historyv2.NewAccountChangeSet()
+	err := historyv2.ForPrefix(tx, kv.AccountChangeSet, dbutils.EncodeBlockNumber(2), func(_ uint64, k, v []byte) error {
 		if err := changeSetInDB.Add(k, v); err != nil {
 			return err
 		}
@@ -158,7 +161,7 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedChangeSet := changeset.NewAccountChangeSet()
+	expectedChangeSet := historyv2.NewAccountChangeSet()
 	for i := range addrs {
 		// Make ajustments for THIN_HISTORY
 		c := accHistory[i].SelfCopy()
@@ -179,8 +182,8 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal("incorrect changeset")
 	}
 
-	cs := changeset.NewStorageChangeSet()
-	err = changeset.ForPrefix(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(2), func(_ uint64, k, v []byte) error {
+	cs := historyv2.NewStorageChangeSet()
+	err = historyv2.ForPrefix(tx, kv.StorageChangeSet, dbutils.EncodeBlockNumber(2), func(_ uint64, k, v []byte) error {
 		if err2 := cs.Add(k, v); err2 != nil {
 			return err2
 		}
@@ -194,10 +197,10 @@ func TestMutationCommit(t *testing.T) {
 		t.Errorf("Length does not match, got %d, expected %d", cs.Len(), numOfAccounts*numOfStateKeys)
 	}
 
-	expectedChangeSet = changeset.NewStorageChangeSet()
+	expectedChangeSet = historyv2.NewStorageChangeSet()
 	for i, addr := range addrs {
 		for j := 0; j < numOfStateKeys; j++ {
-			key := common.Hash{uint8(i*100 + j)}
+			key := libcommon.Hash{uint8(i*100 + j)}
 			value := uint256.NewInt(uint64(10 + j))
 			if err2 := expectedChangeSet.Add(dbutils.PlainGenerateCompositeStorageKey(addr.Bytes(), accHistory[i].Incarnation, key.Bytes()), value.Bytes()); err2 != nil {
 				t.Fatal(err2)
@@ -209,29 +212,29 @@ func TestMutationCommit(t *testing.T) {
 	assert.Equal(t, cs, expectedChangeSet)
 }
 
-func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainStateWriter, numOfAccounts, numOfStateKeys int) ([]common.Address, []*accounts.Account, []map[common.Hash]uint256.Int, []*accounts.Account, []map[common.Hash]uint256.Int) {
+func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainStateWriter, numOfAccounts, numOfStateKeys int) ([]libcommon.Address, []*accounts.Account, []map[libcommon.Hash]uint256.Int, []*accounts.Account, []map[libcommon.Hash]uint256.Int) {
 	t.Helper()
 
 	accHistory := make([]*accounts.Account, numOfAccounts)
 	accState := make([]*accounts.Account, numOfAccounts)
-	accStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
-	accHistoryStateStorage := make([]map[common.Hash]uint256.Int, numOfAccounts)
-	addrs := make([]common.Address, numOfAccounts)
+	accStateStorage := make([]map[libcommon.Hash]uint256.Int, numOfAccounts)
+	accHistoryStateStorage := make([]map[libcommon.Hash]uint256.Int, numOfAccounts)
+	addrs := make([]libcommon.Address, numOfAccounts)
 	for i := range accHistory {
 		accHistory[i], addrs[i] = randomAccount(t)
 		accHistory[i].Balance = *uint256.NewInt(100)
-		accHistory[i].CodeHash = common.Hash{uint8(10 + i)}
-		accHistory[i].Root = common.Hash{uint8(10 + i)}
+		accHistory[i].CodeHash = libcommon.Hash{uint8(10 + i)}
+		accHistory[i].Root = libcommon.Hash{uint8(10 + i)}
 		accHistory[i].Incarnation = uint64(i + 1)
 
 		accState[i] = accHistory[i].SelfCopy()
 		accState[i].Nonce++
 		accState[i].Balance = *uint256.NewInt(200)
 
-		accStateStorage[i] = make(map[common.Hash]uint256.Int)
-		accHistoryStateStorage[i] = make(map[common.Hash]uint256.Int)
+		accStateStorage[i] = make(map[libcommon.Hash]uint256.Int)
+		accHistoryStateStorage[i] = make(map[libcommon.Hash]uint256.Int)
 		for j := 0; j < numOfStateKeys; j++ {
-			key := common.Hash{uint8(i*100 + j)}
+			key := libcommon.Hash{uint8(i*100 + j)}
 			newValue := uint256.NewInt(uint64(j))
 			if !newValue.IsZero() {
 				// Empty value is not considered to be present
@@ -257,7 +260,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, blockWriter *PlainState
 	return addrs, accState, accStateStorage, accHistory, accHistoryStateStorage
 }
 
-func randomAccount(t *testing.T) (*accounts.Account, common.Address) {
+func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -295,25 +298,25 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
 	stateVal := uint256.NewInt(0).SetBytes([]byte("state"))
 	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	key := common.Hash{123}
+	addrs := make([]libcommon.Address, numOfAccounts)
+	key := libcommon.Hash{123}
 	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
+		addrs[i] = libcommon.Address{i + 1}
 	}
 
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block4Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block4Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block6Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block6Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
+	withoutInc := func(addr libcommon.Address, keyHash libcommon.Hash) []byte {
 		expectedKey := make([]byte, length.Hash+length.Addr)
 		copy(expectedKey[:length.Addr], addr.Bytes())
 		copy(expectedKey[length.Addr:], keyHash.Bytes())
@@ -323,21 +326,21 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 3), []storageData{
 		{
 			addrs[0],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			emptyVal,
 			block3Val,
 		},
 		{
 			addrs[2],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			emptyVal,
 			stateVal,
 		},
 		{
 			addrs[3],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			emptyVal,
 			block3Val,
@@ -347,33 +350,33 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 5), []storageData{
 		{
 			addrs[0],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			block3Val,
 			stateVal,
 		},
 		{
 			addrs[1],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			emptyVal,
 			stateVal,
 		},
 		{
 			addrs[3],
-			changeset.DefaultIncarnation,
+			historyv2read.DefaultIncarnation,
 			key,
 			block3Val,
 			emptyVal,
 		},
 	})
 
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
 	for _, addr := range addrs {
-		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -385,11 +388,11 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block4 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -400,7 +403,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		}
 	}
 
-	block4Expected.Changes = []changeset.Change{
+	block4Expected.Changes = []historyv2.Change{
 		{
 			Key:   withoutInc(addrs[0], key),
 			Value: block3Val.Bytes(),
@@ -416,11 +419,11 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block4, block4Expected)
 
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block6 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 	for _, addr := range addrs {
-		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -431,7 +434,7 @@ func TestWalkAsOfStatePlain(t *testing.T) {
 		}
 	}
 
-	block6Expected.Changes = []changeset.Change{
+	block6Expected.Changes = []historyv2.Change{
 		{
 			Key:   withoutInc(addrs[0], key),
 			Value: stateVal.Bytes(),
@@ -455,26 +458,26 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	block3Val := uint256.NewInt(0).SetBytes([]byte("block 3"))
 	stateVal := uint256.NewInt(0).SetBytes([]byte("state"))
 
-	addr1 := common.Address{1}
-	addr2 := common.Address{2}
+	addr1 := libcommon.Address{1}
+	addr2 := libcommon.Address{2}
 
-	key1 := common.Hash{1}
-	key2 := common.Hash{2}
-	key3 := common.Hash{3}
+	key1 := libcommon.Hash{1}
+	key2 := libcommon.Hash{2}
+	key3 := libcommon.Hash{3}
 
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block4Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block4Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block6Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block6Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	withoutInc := func(addr common.Address, keyHash common.Hash) []byte {
+	withoutInc := func(addr libcommon.Address, keyHash libcommon.Hash) []byte {
 		expectedKey := make([]byte, length.Hash+length.Addr)
 		copy(expectedKey[:length.Addr], addr.Bytes())
 		copy(expectedKey[length.Addr:], keyHash.Bytes())
@@ -484,28 +487,28 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 3), []storageData{
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key1,
 			oldVal: emptyVal,
 			newVal: block3Val,
 		},
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key2,
 			oldVal: emptyVal,
 			newVal: block3Val,
 		},
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key3,
 			oldVal: emptyVal,
 			newVal: block3Val,
 		},
 		{
 			addr:   addr2,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key3,
 			oldVal: emptyVal,
 			newVal: block3Val,
@@ -515,43 +518,43 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	writeStorageBlockData(t, NewPlainStateWriter(tx, tx, 5), []storageData{
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key1,
 			oldVal: block3Val,
 			newVal: stateVal,
 		},
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key2,
 			oldVal: block3Val,
 			newVal: stateVal,
 		},
 		{
 			addr:   addr1,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key3,
 			oldVal: block3Val,
 			newVal: emptyVal,
 		},
 		{
 			addr:   addr2,
-			inc:    changeset.DefaultIncarnation,
+			inc:    historyv2read.DefaultIncarnation,
 			key:    key3,
 			oldVal: block3Val,
 			newVal: stateVal,
 		},
 	})
 
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
 	//walk and collect walkAsOf result
 	startKey := make([]byte, 60)
 	copy(startKey[:length.Addr], addr1.Bytes())
 
-	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 2, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err := block2.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -562,10 +565,10 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block4 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
-	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -575,7 +578,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block4Expected.Changes = []changeset.Change{
+	block4Expected.Changes = []historyv2.Change{
 		{
 			Key:   withoutInc(addr1, key1),
 			Value: block3Val.Bytes(),
@@ -592,8 +595,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block4, block4Expected)
 
 	block4.Changes = block4.Changes[:0]
-	for _, addr := range []common.Address{addr1, addr2} {
-		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	for _, addr := range []libcommon.Address{addr1, addr2} {
+		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 4, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err := block4.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -604,16 +607,16 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		}
 	}
 
-	block4Expected.Changes = append(block4Expected.Changes, changeset.Change{
+	block4Expected.Changes = append(block4Expected.Changes, historyv2.Change{
 		Key:   withoutInc(addr2, key3),
 		Value: block3Val.Bytes(),
 	})
 	assertChangesEquals(t, block4, block4Expected)
 
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block6 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
-	if err := WalkAsOfStorage(tx, addr1, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfStorage(tx, addr1, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 		err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
@@ -623,7 +626,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block6Expected.Changes = []changeset.Change{
+	block6Expected.Changes = []historyv2.Change{
 		{
 			Key:   withoutInc(addr1, key1),
 			Value: stateVal.Bytes(),
@@ -636,8 +639,8 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 	assertChangesEquals(t, block6, block6Expected)
 
 	block6.Changes = block6.Changes[:0]
-	for _, addr := range []common.Address{addr1, addr2} {
-		if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+	for _, addr := range []libcommon.Address{addr1, addr2} {
+		if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, 6, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 			err := block6.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v))
 			if err != nil {
 				t.Fatal(err)
@@ -647,7 +650,7 @@ func TestWalkAsOfUsingFixedBytesStatePlain(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	block6Expected.Changes = append(block6Expected.Changes, changeset.Change{
+	block6Expected.Changes = append(block6Expected.Changes, historyv2.Change{
 		Key:   withoutInc(addr2, key3),
 		Value: stateVal.Bytes(),
 	})
@@ -674,20 +677,20 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	stateValAcc.EncodeForStorage(stateVal)
 
 	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
+	addrs := make([]libcommon.Address, numOfAccounts)
+	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
+		addrs[i] = libcommon.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
 
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block2Expected := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block2Expected := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
 	writeBlockData(t, NewPlainStateWriter(tx, tx, 3), []accData{
@@ -726,7 +729,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	})
 
-	if err := WalkAsOfAccounts(tx, common.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 2, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -737,12 +740,12 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block2, block2Expected)
 
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block4 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block4Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
+	block4Expected := &historyv2.ChangeSet{
+		Changes: []historyv2.Change{
 			{
 				Key:   addrs[0].Bytes(),
 				Value: block3Val,
@@ -758,7 +761,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	if err := WalkAsOfAccounts(tx, common.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 4, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -769,12 +772,12 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 	}
 	assertChangesEquals(t, block4, block4Expected)
 
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
+	block6 := &historyv2.ChangeSet{
+		Changes: make([]historyv2.Change, 0),
 	}
 
-	block6Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
+	block6Expected := &historyv2.ChangeSet{
+		Changes: []historyv2.Change{
 			{
 				Key:   addrs[0].Bytes(),
 				Value: stateVal,
@@ -790,7 +793,7 @@ func TestWalkAsOfAccountPlain(t *testing.T) {
 		},
 	}
 
-	if err := WalkAsOfAccounts(tx, common.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
+	if err := WalkAsOfAccounts(tx, libcommon.Address{}, 6, func(k []byte, v []byte) (b bool, e error) {
 		innerErr := block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if innerErr != nil {
 			t.Fatal(innerErr)
@@ -822,10 +825,10 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	stateValAcc.EncodeForStorage(stateVal)
 
 	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
+	addrs := make([]libcommon.Address, numOfAccounts)
+	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
+		addrs[i] = libcommon.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
@@ -915,11 +918,11 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 	})
 
 	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
-		obtained := &changeset.ChangeSet{
-			Changes: make([]changeset.Change, 0),
+		obtained := &historyv2.ChangeSet{
+			Changes: make([]historyv2.Change, 0),
 		}
 
-		if err := WalkAsOfAccounts(tx, common.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
+		if err := WalkAsOfAccounts(tx, libcommon.Address{}, blockNum, func(k []byte, v []byte) (b bool, e error) {
 			innerErr := obtained.Add(common.CopyBytes(k), common.CopyBytes(v))
 			if innerErr != nil {
 				t.Fatal(innerErr)
@@ -933,8 +936,8 @@ func TestWalkAsOfAccountPlain_WithChunks(t *testing.T) {
 		acc.Nonce = blockNum - 1
 		accBytes := make([]byte, acc.EncodingLengthForStorage())
 		acc.EncodeForStorage(accBytes)
-		expected := &changeset.ChangeSet{
-			Changes: []changeset.Change{
+		expected := &historyv2.ChangeSet{
+			Changes: []historyv2.Change{
 				{
 					Key:   addrs[0].Bytes(),
 					Value: accBytes,
@@ -957,14 +960,14 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	numOfAccounts := uint8(4)
-	addrs := make([]common.Address, numOfAccounts)
-	addrHashes := make([]common.Hash, numOfAccounts)
+	addrs := make([]libcommon.Address, numOfAccounts)
+	addrHashes := make([]libcommon.Hash, numOfAccounts)
 	for i := uint8(0); i < numOfAccounts; i++ {
-		addrs[i] = common.Address{i + 1}
+		addrs[i] = libcommon.Address{i + 1}
 		addrHash, _ := common.HashData(addrs[i].Bytes())
 		addrHashes[i] = addrHash
 	}
-	key := common.Hash{123}
+	key := libcommon.Hash{123}
 	emptyVal := uint256.NewInt(0)
 
 	val := uint256.NewInt(0).SetBytes([]byte("block 1"))
@@ -1048,12 +1051,12 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 	})
 
 	for _, blockNum := range []uint64{5, 100, 1000, 1050} {
-		obtained := &changeset.ChangeSet{
-			Changes: make([]changeset.Change, 0),
+		obtained := &historyv2.ChangeSet{
+			Changes: make([]historyv2.Change, 0),
 		}
 
 		for _, addr := range addrs {
-			if err := WalkAsOfStorage(tx, addr, changeset.DefaultIncarnation, common.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
+			if err := WalkAsOfStorage(tx, addr, historyv2read.DefaultIncarnation, libcommon.Hash{}, blockNum, func(kAddr, kLoc []byte, v []byte) (b bool, e error) {
 				if innerErr := obtained.Add(append(common.CopyBytes(kAddr), kLoc...), common.CopyBytes(v)); innerErr != nil {
 					t.Fatal(innerErr)
 				}
@@ -1063,8 +1066,8 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 			}
 		}
 		valBytes := uint256.NewInt(0).SetBytes([]byte("block " + strconv.FormatUint(blockNum-1, 10))).Bytes()
-		expected := &changeset.ChangeSet{
-			Changes: []changeset.Change{
+		expected := &historyv2.ChangeSet{
+			Changes: []historyv2.Change{
 				{
 					Key:   append(addrs[0].Bytes(), key.Bytes()...),
 					Value: valBytes,
@@ -1084,7 +1087,7 @@ func TestWalkAsOfStoragePlain_WithChunks(t *testing.T) {
 }
 
 type accData struct {
-	addr   common.Address
+	addr   libcommon.Address
 	oldVal *accounts.Account
 	newVal *accounts.Account
 }
@@ -1111,9 +1114,9 @@ func writeBlockData(t *testing.T, blockWriter *PlainStateWriter, data []accData)
 }
 
 type storageData struct {
-	addr   common.Address
+	addr   libcommon.Address
 	inc    uint64
-	key    common.Hash
+	key    libcommon.Hash
 	oldVal *uint256.Int
 	newVal *uint256.Int
 }
@@ -1133,15 +1136,13 @@ func writeStorageBlockData(t *testing.T, blockWriter *PlainStateWriter, data []s
 		t.Fatal(err)
 	}
 }
-func assertChangesEquals(t *testing.T, changesObtained, changesExpected *changeset.ChangeSet) {
+func assertChangesEquals(t *testing.T, changesObtained, changesExpected *historyv2.ChangeSet) {
 	t.Helper()
 	sort.Sort(changesObtained)
 	sort.Sort(changesExpected)
 	if !reflect.DeepEqual(changesObtained, changesExpected) {
-		fmt.Println("expected:")
-		fmt.Println(changesExpected.String())
-		fmt.Println("obtained:")
-		fmt.Println(changesObtained.String())
+		fmt.Printf("expected: %+v", changesExpected)
+		fmt.Printf("obtained: %+v", changesObtained)
 		t.Fatal("block result is incorrect")
 	}
 }

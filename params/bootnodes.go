@@ -17,7 +17,8 @@
 package params
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -40,15 +41,6 @@ var MainnetBootnodes = []string{
 var SepoliaBootnodes = []string{
 	"enode://9246d00bc8fd1742e5ad2428b80fc4dc45d786283e05ef6edbd9002cbc335d40998444732fbe921cb88e1d2c73d1b1de53bae6a2237996e9bfe14f871baf7066@18.168.182.86:30303",
 	"enode://ec66ddcf1a974950bd4c782789a7e04f8aa7110a72569b6e65fcd51e937e74eed303b1ea734e4d19cfaec9fbff9b6ee65bf31dcb50ba79acce9dd63a6aca61c7@52.14.151.177:30303",
-}
-
-// RopstenBootnodes are the enode URLs of the P2P bootstrap nodes running on the
-// Ropsten test network.
-var RopstenBootnodes = []string{
-	"enode://30b7ab30a01c124a6cceca36863ece12c4f5fa68e3ba9b0b51407ccc002eeed3b3102d20a88f1c1d3c3154e2449317b8ef95090e77b312d5cc39354f86d5d606@52.176.7.10:30303",    // US-Azure geth
-	"enode://865a63255b3bb68023b6bffd5095118fcc13e79dcf014fe4e47e065c350c7cc72af2e53eff895f11ba1bbb6a2b33271c1116ee870f266618eadfc2e78aa7349c@52.176.100.77:30303",  // US-Azure parity
-	"enode://6332792c4a00e3e4ee0926ed89e0d27ef985424d97b6a45bf0f23e51f0dcb5e66b875777506458aea7af6f9e4ffb69f43f3778ee73c81ed9d34c51c4b16b0b0f@52.232.243.152:30303", // Parity
-	"enode://94c15d1b9e2fe7ce56e458b9a3b672ef11894ddedd0c6f247e0f1d3487f52b66208fb4aeb8179fce6e3a749ea93ed147c37976d67af557508d199d9594c35f09@192.81.208.223:30303", // @gpip
 }
 
 // RinkebyBootnodes are the enode URLs of the P2P bootstrap nodes running on the
@@ -80,6 +72,24 @@ var BscBootnodes = []string{
 	"enode://1cc4534b14cfe351ab740a1418ab944a234ca2f702915eadb7e558a02010cb7c5a8c295a3b56bcefa7701c07752acd5539cb13df2aab8ae2d98934d712611443@52.71.43.172:30311",
 	"enode://28b1d16562dac280dacaaf45d54516b85bc6c994252a9825c5cc4e080d3e53446d05f63ba495ea7d44d6c316b54cd92b245c5c328c37da24605c4a93a0d099c4@34.246.65.14:30311",
 	"enode://5a7b996048d1b0a07683a949662c87c09b55247ce774aeee10bb886892e586e3c604564393292e38ef43c023ee9981e1f8b335766ec4f0f256e57f8640b079d5@35.73.137.11:30311",
+}
+var SepoliaStaticPeers = []string{
+	// from https://github.com/ledgerwatch/erigon/issues/6134#issuecomment-1354923418
+	"enode://8ae4559db1b1e160be8cc46018d7db123ed6d03fbbfe481da5ec05f71f0aa4d5f4b02ad059127096aa994568706a0d02933984083b87c5e1e3de2b7692444d37@35.161.233.158:46855",
+	"enode://d0b3b290422f35ec3e68356f3a4cdf9c661f71a868110670e31441a5021d7abd0440ae8dfb9360aafdd0198f177863361e3a7a7eb5e1a3e26575bf1ac3ef4ab3@162.19.136.65:48264",
+	"enode://d64624bda3cdb65d542c90757a4a661cfe9dddf8328bdb1ea97a8d70fad287c360f0101c492d8fd6ab30d79160a3bf148cacfd68f5d2e47eab0b709516419304@51.195.63.10:30040",
+	"enode://c7df835939e027325c6bba926220fae5912a33c83d96b3eef8ef445c98083f3191788581c9a0e8f74cadb0b13229b847f5c1ebd315b22bcf11faf6468020eb48@54.163.51.157:30303",
+	"enode://da0609bad3afcab9b93175a41a2d621d07aa7ff6c134a00792d4541f0ce8d30d8f3c51bb37a47573508a0bf18865b04066af2a661edf1d3a3d8d133fc1031aa0@88.151.101.14:45192",
+	"enode://7a4534d392c59369eae6befa56ac670476d9edc16597cf53c92bbefa6e741b6b0b9e6822cab12afb09123e03ca1131026fbef145adec429fe2e50182dfb650a5@94.130.18.108:31312",
+	"enode://db6fa13b63a885440de581ee3fc8df9c6a590326b39fc5ccba7991707ee0cebac306211f7eca5270a350201a3132511f2338481edd81f3dc819c2a1c60419cf2@65.21.89.157:30303",
+	"enode://fcf03e9404cace34c60e4eed374ef9a779471014319b3346352fbc2f992a399af6517486e8e65a4ab55f4645fe55420bbea1cddc13a4af4df63b0f731915c6a6@13.125.238.49:46173",
+	"enode://8b973816278fdd56966709e4794c7ccce1f256eaa9165a6b013b991a9bdf3886a8f2d23af50ee723a5614a9fe9d197252b803b4455a87ab2468e128f7b06e0ca@172.104.107.145:30303",
+	"enode://5a1fb15f826a213d3ef4adb9be47ab58b2240ea05df0d760a244f04762b0847dcb08276b1284f726c22eea30fce0c601cf121b81bac0c151f1b3b4ad00d1482a@34.159.55.147:51262",
+	"enode://560928dd14819f88113586726e452b16bbc694ed4144ddadd6290053e7f3fc66bfad13add6889f7d8f37e0c21ccbb6948eb8899c8b30743f4b45a3081f1efed8@34.138.254.5:29888",
+	"enode://69a13b575b8c5278431409e9f7db36e7218667ae286bfb65a72dfec9201b2c5bbbe2797a1babbdf17a7bf7ca68fa3fbe1554612637eb1b2425fa975e1bccb54c@35.223.41.3:30303",
+	"enode://66158b31eecff939f220b291d2b448edbfe94f1d4c992d9395b5d476e55e54b5abd11d3ee44daf1e18ee27b910ef99cdf6f19775eb4820ebe4f77d7aa948e3b6@51.195.63.10:55198",
+	"enode://bf94acbd51170bf075cacb9f149b21ff46354d659ab434a0d40688f776e1e1556bc62be2dc2867ba513844268c0dc8240099a6b60efe1713fbc25da7fdeb6ff1@3.82.105.139:30303",
+	"enode://41329e5ceb51cdddbe6a475db00b682505768b71ff8ee37d2d3500ca1b78918f9fad57d6006dd9f79cd418437dbcf87ec2fd58d60710f925cb17da05a51197cf@65.21.34.60:30303",
 }
 
 var BscStaticPeers = []string{
@@ -183,8 +193,6 @@ var SokolBootnodes = []string{
 	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
 }
 
-var FermionBootnodes = []string{}
-
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QOtcP9X1FbIMOe17QNMKqDxCpm14jcX5tiOE4_TyMrFqbmhPZHK_ZPG2Gxb1GE2xdtodOfx9-cgvNtxnRyHEmC0ghGV0aDKQ9aX9QgAAAAD__________4JpZIJ2NIJpcIQDE8KdiXNlY3AyNTZrMaEDhpehBDbZjM_L9ek699Y7vhUJ-eAdMyQW_Fil522Y0fODdGNwgiMog3VkcIIjKA",
@@ -214,14 +222,14 @@ var BorMainnetBootnodes = []string{
 }
 
 var GnosisBootnodes = []string{
-	"enode://172fd36d5ff1bf9db202e0646c90719cec55507a1fa231ce955f6882d2a9295e65841c885d94d23a020347e3169889cef0718eba5a5f5f58dd185f3d5fa0e9b7@147.28.151.154:30303",
-	"enode://ee4eb9844cbd8f684a734b839b4931e37124358cb17c632e7d5a44fd9ce6d457c4a126a914ea1366670d186b9236820c1e9b2cb2d3584eaf6c540fc10d77f00d@147.28.151.146:30303",
-	"enode://86f5849a24b158cef9c0f9b03554c918cd20f9e3397b63ae2744d6392a28beb9e0373299cfc4446d9f8b97c1598bc161fe7c6b8e84929f5dec8ea6865e9e7414@145.40.69.162:30303",
-	"enode://b6ba2a508682143d3159f36b9ce96cf62c711c2e9d47763fe846602a62acb15dc20112fac40c488ce42ce2c9ad28635255a9e47688c1a8f0611b5a38706fd771@147.28.147.242:30303",
-	"enode://389a625160876776946bfea5a6ce4f4c761bd2062cf8e45e510da77595399ee50a802060868d9bf4580431fc2248cadc9ce61826b3513e090bd1cdd4ce11a9d8@161.97.172.191:30303",
-	"enode://540a0bc258ba93e6fafc238f49eca0a2032b5d40b79c077dc9b9a304fd636af4167b638eb0f80aa455f5da1cf49b76c881f651ed301a1e28d6855a8a3fbe21a0@167.71.174.1:30303",
-	"enode://4175e9ffd9ac9819c9c596a60b7748cc1c1846cf7e8db47ee97f8aa57e42e8cb3dad4201726498d34af94505b2c1429f9d3a508594c521080e8cd1a3fa24a3d5@37.120.245.155:30303",
-	"enode://22e442bf7b7fa9bb5960344ef5aa907b920a931bce83e14620b0378318b7eb73753f7245f0a8252590a71ad9568bcfbb9e5f03bd88ab3feb9c1096227bb8704a@168.119.136.44:30303",
+	"enode://6765fff89db92aa8d923e28c438af626c8ae95a43093cdccbd6f550a7b6ce6ab5d1a3dc60dd79af3e6d2c2e6731bae629f0e54446a0d9da408c4eca7ebcd8485@3.75.159.31:30303",
+	"enode://9a7c98e8ee8cdd3199db68092b48868847d4743a471b26afc2ff878bafaa829ed43ee405f9aff58ae13fce53b898f7c2e3c30cb80af8eb111682c3c13f686dbb@18.198.130.54:30303",
+	"enode://2c4307831914c237801993eac4f9596d8b2f78e1e76830419b64cb23f0933e52cb1e2bb3009cb4af76454bb5bc296135b36869fd6c13e2c2e536a0780e60fe82@3.64.242.196:30303",
+	"enode://074f68e1a7df5b0859314ff721d55b59d9690e93249c941660609a29b302f02864df4f93ee48884f7ede57dc7f7646379d017a43c9745e34baff049749896b50@3.126.169.151:30303",
+	"enode://d239697375d7586c7ea1de790401c310b0b1d389326849fa3b7c7005833c7a6b9020e49dfb3b61abfa39135237ffc4ff219cb84ca7653069e8548497527aa432@107.22.4.120:30303",
+	"enode://d5852bf415d89b756faa809f4ff3f8beb661dc7d60cfb4a5542f9a5fcdf41e1ed0708a210db64b8c7ca32426e04ef0a50da58974124fdf562a8510314d11e28c@3.26.206.142:30303",
+	"enode://01d372392bb22dd8a91f8b10b6bbb8d80d2dbe98d695801e0df9e4bd4825781df84bba88361f24d1b6580a61313f64e6cec82e8d842ad5f1b3d7cf8d6d132da7@15.152.45.82:30303",
+	"enode://aee88e803b8e54925081957965b2527961cd90f4d6d14664884580b429da44729678a1258a8b49a42d1582c9c7c5ded05733622f7ab442ad9c6f655545a5ecdd@54.207.220.169:30303",
 }
 
 var ChiadoBootnodes = []string{
@@ -237,13 +245,11 @@ const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUD
 // KnownDNSNetwork returns the address of a public DNS-based node list for the given
 // genesis hash and protocol. See https://github.com/ethereum/discv4-dns-lists for more
 // information.
-func KnownDNSNetwork(genesis common.Hash, protocol string) string {
+func KnownDNSNetwork(genesis libcommon.Hash, protocol string) string {
 	var net string
 	switch genesis {
 	case MainnetGenesisHash:
 		net = "mainnet"
-	case RopstenGenesisHash:
-		net = "ropsten"
 	case RinkebyGenesisHash:
 		net = "rinkeby"
 	case GoerliGenesisHash:
@@ -260,8 +266,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return MainnetBootnodes
 	case networkname.SepoliaChainName:
 		return SepoliaBootnodes
-	case networkname.RopstenChainName:
-		return RopstenBootnodes
 	case networkname.RinkebyChainName:
 		return RinkebyBootnodes
 	case networkname.GoerliChainName:
@@ -274,8 +278,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return RialtoBootnodes
 	case networkname.SokolChainName:
 		return SokolBootnodes
-	case networkname.FermionChainName:
-		return FermionBootnodes
 	case networkname.MumbaiChainName:
 		return MumbaiBootnodes
 	case networkname.BorMainnetChainName:
@@ -297,6 +299,8 @@ func StaticPeerURLsOfChain(chain string) []string {
 		return ChapelStaticPeers
 	case networkname.RialtoChainName:
 		return RialtoStaticPeers
+	case networkname.SepoliaChainName:
+		return SepoliaStaticPeers
 	default:
 		return []string{}
 	}

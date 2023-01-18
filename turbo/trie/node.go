@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"io"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -161,8 +162,8 @@ func resetRefs(nd node) {
 // nodeRef might contain node's RLP or hash thereof.
 // Used instead of []byte in order to reduce GC churn.
 type nodeRef struct {
-	data common.Hash // cached RLP of the node or hash thereof
-	len  byte        // length of the data (0 indicates invalid data)
+	data libcommon.Hash // cached RLP of the node or hash thereof
+	len  byte           // length of the data (0 indicates invalid data)
 }
 
 func (n hashNode) reference() []byte      { return n.hash }

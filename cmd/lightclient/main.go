@@ -24,11 +24,14 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 )
@@ -63,6 +66,15 @@ func runLightClientNode(cliCtx *cli.Context) error {
 			return err
 		}
 	}
+	state, err := core.RetrieveBeaconState(ctx, cfg.CheckpointUri)
+	if err != nil {
+		return err
+	}
+
+	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
+	if err != nil {
+		return err
+	}
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        cfg.Addr,
@@ -72,7 +84,13 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		NetworkConfig: cfg.NetworkCfg,
 		BeaconConfig:  cfg.BeaconCfg,
 		NoDiscovery:   cfg.NoDiscovery,
-	}, db, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil)
+	}, db, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+		ForkDigest:     forkDigest,
+		FinalizedRoot:  state.FinalizedCheckpoint().Root,
+		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
+		HeadSlot:       state.FinalizedCheckpoint().Epoch * 32,
+		HeadRoot:       state.FinalizedCheckpoint().Root,
+	}, handshake.LightClientRule)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
@@ -82,10 +100,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	finalizedRoot, err := core.RetrieveTrustedRoot(tx, ctx, cfg.CheckpointUri)
-	if err != nil {
-		return err
-	}
+
 	tx.Rollback()
 
 	if err != nil {
@@ -96,7 +111,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 	}
-	if err := lc.BootstrapCheckpoint(ctx, finalizedRoot); err != nil {
+	if err := lc.BootstrapCheckpoint(ctx, state.FinalizedCheckpoint().Root); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
 		return err
 	}

@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
@@ -98,7 +100,7 @@ func (b Bloom) MarshalText() ([]byte, error) {
 
 // UnmarshalText b as a hex string with 0x prefix.
 func (b *Bloom) UnmarshalText(input []byte) error {
-	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
+	return hexutility.UnmarshalFixedText("Bloom", input, b[:])
 }
 
 func CreateBloom(receipts Receipts) Bloom {

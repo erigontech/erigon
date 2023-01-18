@@ -26,12 +26,14 @@ import (
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/common"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
@@ -60,7 +62,7 @@ func constructBodyFreeRequest(t string) *sentinelrpc.RequestData {
 	}
 }
 
-func constructRequest(t string, reqBody cltypes.ObjectSSZ) (*sentinelrpc.RequestData, error) {
+func constructRequest(t string, reqBody ssz_utils.ObjectSSZ) (*sentinelrpc.RequestData, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
 		return nil, fmt.Errorf("unable to encode request body: %v", err)
@@ -87,7 +89,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NetworkConfig: cfg.NetworkCfg,
 		BeaconConfig:  cfg.BeaconCfg,
 		NoDiscovery:   cfg.NoDiscovery,
-	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil)
+	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, handshake.NoRule)
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err
@@ -181,7 +183,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	copy(roots[0][:], rawRoot1)
 
 	var blocksByRootReq cltypes.BeaconBlocksByRootRequest = roots
-	req, err := constructRequest(handlers.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
+	req, err := constructRequest(communication.BeaconBlocksByRootProtocolV2, &blocksByRootReq)
 	if err != nil {
 		log.Error("[Sentinel] could not construct request", "err", err)
 		return err
@@ -191,7 +193,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 }
 
 func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
-	subscription, err := s.SubscribeGossip(ctx, &sentinelrpc.EmptyRequest{})
+	subscription, err := s.SubscribeGossip(ctx, &sentinelrpc.EmptyMessage{})
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return
@@ -215,7 +217,7 @@ func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
 
 // Debug function to recieve test packets on the req/resp domain.
 func sendRequest(ctx context.Context, s sentinelrpc.SentinelClient, req *sentinelrpc.RequestData) {
-	newReqTicker := time.NewTicker(1000 * time.Millisecond)
+	newReqTicker := time.NewTicker(100 * time.Millisecond)
 	for {
 		select {
 		case <-ctx.Done():

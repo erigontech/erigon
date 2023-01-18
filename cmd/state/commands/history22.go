@@ -11,13 +11,16 @@ import (
 	"syscall"
 	"time"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -26,11 +29,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 func init() {
@@ -176,7 +176,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 			readWrapper.SetTrace(blockNum == uint64(traceBlock))
 		}
 		writeWrapper := state.NewNoopWriter()
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, historyTx, hash, number)
 			if err != nil {
 				panic(err)
@@ -220,14 +220,14 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReader23, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryReaderV4, ww state.StateWriter, chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	hw.SetTxNum(txNum)
 	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0

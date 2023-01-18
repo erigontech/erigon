@@ -1,8 +1,8 @@
 package cltypes
 
 import (
-	ssz "github.com/ferranbt/fastssz"
 	"github.com/pkg/errors"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 const (

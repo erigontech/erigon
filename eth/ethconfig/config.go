@@ -27,10 +27,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -42,7 +44,7 @@ import (
 
 // AggregationStep number of transactions in smallest static file
 const HistoryV3AggregationStep = 3_125_000 // 100M / 32
-//const HistoryV3AggregationStep = 3_125_000 / 32 // 100M / 32
+//const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gasprice.Config{
@@ -71,7 +73,7 @@ var Defaults = Config{
 		UseSnapshots:               false,
 		ExecWorkerCount:            2,
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
-		BlockDownloaderWindow:      32768,
+		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 30,
 	},
 	Ethash: ethash.Config{
@@ -181,7 +183,7 @@ type Config struct {
 
 	ImportMode bool
 
-	BadBlockHash common.Hash // hash of the block marked as bad
+	BadBlockHash libcommon.Hash // hash of the block marked as bad
 
 	Snapshot   Snapshot
 	Downloader *downloadercfg.Cfg
@@ -193,7 +195,7 @@ type Config struct {
 	ExternalSnapshotDownloaderAddr string
 
 	// Whitelist of required block number -> hash values to accept
-	Whitelist map[uint64]common.Hash `toml:"-"`
+	Whitelist map[uint64]libcommon.Hash `toml:"-"`
 
 	// Mining options
 	Miner params.MiningConfig
@@ -202,9 +204,9 @@ type Config struct {
 	Ethash ethash.Config
 
 	Clique params.ConsensusSnapshotConfig
-	Aura   params.AuRaConfig
-	Parlia params.ParliaConfig
-	Bor    params.BorConfig
+	Aura   chain.AuRaConfig
+	Parlia chain.ParliaConfig
+	Bor    chain.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool core.TxPoolConfig
@@ -235,18 +237,15 @@ type Config struct {
 	WithoutHeimdall bool
 	// Ethstats service
 	Ethstats string
-	// ConsenSUS layer
-	CL                          bool
+	// Consensus layer
+	ExternalCL                  bool
 	LightClientDiscoveryAddr    string
 	LightClientDiscoveryPort    uint64
 	LightClientDiscoveryTCPPort uint64
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	// FORK_NEXT_VALUE (see EIP-3675) block override
-	OverrideMergeNetsplitBlock *big.Int `toml:",omitempty"`
-
-	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
+	OverrideShanghaiTime *big.Int `toml:",omitempty"`
 }
 
 type Sync struct {
@@ -256,7 +255,7 @@ type Sync struct {
 	ExecWorkerCount  int
 	ReconWorkerCount int
 
-	BlockDownloaderWindow      int
+	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
 }
 
@@ -265,7 +264,6 @@ var ChainsWithSnapshots = map[string]struct{}{
 	networkname.MainnetChainName:    {},
 	networkname.BSCChainName:        {},
 	networkname.GoerliChainName:     {},
-	networkname.RopstenChainName:    {},
 	networkname.MumbaiChainName:     {},
 	networkname.BorMainnetChainName: {},
 	networkname.GnosisChainName:     {},

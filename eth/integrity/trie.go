@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math/bits"
 	"time"
@@ -66,7 +67,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			case <-quit:
 				return
 			case <-logEvery.C:
-				log.Info("trie account integrity", "key", fmt.Sprintf("%x", k))
+				log.Info("trie account integrity", "key", hex.EncodeToString(k))
 			}
 
 			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)
@@ -180,7 +181,7 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			case <-quit:
 				return
 			case <-logEvery.C:
-				log.Info("trie storage integrity", "key", fmt.Sprintf("%x", k))
+				log.Info("trie storage integrity", "key", hex.EncodeToString(k))
 			}
 
 			hasState, hasTree, hasHash, hashes, _ := trie.UnmarshalTrieNode(v)

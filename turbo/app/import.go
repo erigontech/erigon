@@ -64,6 +64,10 @@ func importChain(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	err = ethereum.Init(stack, ethCfg)
+	if err != nil {
+		return err
+	}
 
 	if err := ImportChain(ethereum, ethereum.ChainDB(), ctx.Args().First()); err != nil {
 		return err
@@ -203,16 +207,15 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block) []*types.Block {
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 	sentryControlServer := ethereum.SentryControlServer()
 	initialCycle := false
-	highestSeenHeader := chain.TopBlock.NumberU64()
 
 	for _, b := range chain.Blocks {
 		sentryControlServer.Hd.AddMinedHeader(b.Header())
-		sentryControlServer.Bd.AddMinedBlock(b)
+		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
 	}
 
 	sentryControlServer.Hd.MarkAllVerified()
 
-	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), highestSeenHeader, ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead, nil)
+	_, err := stages.StageLoopStep(ethereum.SentryCtx(), ethereum.ChainConfig(), ethereum.ChainDB(), ethereum.StagedSync(), ethereum.Notifications(), initialCycle, sentryControlServer.UpdateHead)
 	if err != nil {
 		return err
 	}

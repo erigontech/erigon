@@ -27,6 +27,8 @@ import (
 	"strings"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -324,7 +326,7 @@ func ExampleJSON() {
 	if err != nil {
 		panic(err)
 	}
-	out, err := abi.Pack("isBar", common.HexToAddress("01"))
+	out, err := abi.Pack("isBar", libcommon.HexToAddress("01"))
 	if err != nil {
 		panic(err)
 	}
@@ -742,7 +744,7 @@ func TestUnpackEvent(t *testing.T) {
 	}
 
 	type ReceivedEvent struct {
-		Sender common.Address
+		Sender libcommon.Address
 		Amount *big.Int
 		Memo   []byte
 	}
@@ -754,7 +756,7 @@ func TestUnpackEvent(t *testing.T) {
 	}
 
 	type ReceivedAddrEvent struct {
-		Sender common.Address
+		Sender libcommon.Address
 	}
 	var receivedAddrEv ReceivedAddrEvent
 	err = abi.UnpackIntoInterface(&receivedAddrEv, "receivedAddr", data)
@@ -781,7 +783,7 @@ func TestUnpackEventIntoMap(t *testing.T) {
 
 	receivedMap := map[string]interface{}{}
 	expectedReceivedMap := map[string]interface{}{
-		"sender": common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2"),
+		"sender": libcommon.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2"),
 		"amount": big.NewInt(1),
 		"memo":   []byte{88},
 	}
@@ -925,7 +927,7 @@ func TestUnpackIntoMapNamingConflict(t *testing.T) {
 		t.Errorf("len(data) is %d, want a non-multiple of 32", len(data))
 	}
 	expectedReceivedMap := map[string]interface{}{
-		"sender": common.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2"),
+		"sender": libcommon.HexToAddress("0x376c47978271565f56DEB45495afa69E59c16Ab2"),
 		"amount": big.NewInt(1),
 		"memo":   []byte{88},
 	}

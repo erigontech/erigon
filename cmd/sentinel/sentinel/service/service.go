@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"time"
 
-	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
@@ -27,7 +31,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel) *Sentin
 	}
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyRequest, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -52,15 +56,59 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyRequest, stream sen
 }
 
 func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.RequestData) (*sentinelrpc.ResponseData, error) {
-	// Send the request and get the data if we get an answer.
-	respData, foundErrReq, err := s.sentinel.SendRequestRaw(req.Data, req.Topic)
-	return &sentinelrpc.ResponseData{
-		Data:  respData,
-		Error: foundErrReq,
-	}, err
+	retryReqInterval := time.NewTicker(20 * time.Millisecond)
+	defer retryReqInterval.Stop()
+	doneCh := make(chan *sentinelrpc.ResponseData)
+	// Try finding the data to our peers
+	for {
+		select {
+		case <-s.ctx.Done():
+			return nil, fmt.Errorf("interrupted")
+		case <-retryReqInterval.C:
+			// Spawn new thread for request
+			pid, err := s.sentinel.RandomPeer(req.Topic)
+			if err != nil {
+				// Wait a bit to not exhaust CPU and skip.
+				continue
+			}
+			log.Debug("Sent request", "pid", pid)
+			s.sentinel.Peers().PeerDoRequest(pid)
+			go func() {
+				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
+				s.sentinel.Peers().PeerFinishRequest(pid)
+				if err != nil {
+					s.sentinel.Peers().Penalize(pid)
+					return
+				} else if isError {
+					s.sentinel.Peers().DisconnectPeer(pid)
+				}
+				select {
+				case doneCh <- &sentinelrpc.ResponseData{
+					Data:  data,
+					Error: isError,
+				}:
+				default:
+				}
+			}()
+		case resp := <-doneCh:
+			return resp, nil
+		}
+	}
 }
 
-func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyRequest) (*sentinelrpc.PeerCount, error) {
+func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
+	// Send the request and get the data if we get an answer.
+	s.sentinel.SetStatus(&cltypes.Status{
+		ForkDigest:     utils.Uint32ToBytes4(req.ForkDigest),
+		FinalizedRoot:  gointerfaces.ConvertH256ToHash(req.FinalizedRoot),
+		HeadRoot:       gointerfaces.ConvertH256ToHash(req.HeadRoot),
+		FinalizedEpoch: req.FinalizedEpoch,
+		HeadSlot:       req.HeadSlot,
+	})
+	return &sentinelrpc.EmptyMessage{}, nil
+}
+
+func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
 		Amount: uint64(s.sentinel.GetPeersCount()),
@@ -85,14 +133,14 @@ func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) er
 		log.Warn("[Sentinel Gossip] Error Forwarding Packet", "err", err)
 	}
 	// Compute data
-	u := pkt.Packet.(ssz.Marshaler)
+	u := pkt.Packet.(ssz_utils.Marshaler)
 	var data []byte
 	// Make data
 	if data, err = u.MarshalSSZ(); err != nil {
 		return err
 	}
 	switch pkt.Packet.(type) {
-	case *cltypes.SignedBeaconBlockBellatrix:
+	case *cltypes.SignedBeaconBlock:
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data)
 	case *cltypes.SignedAggregateAndProof:
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data)

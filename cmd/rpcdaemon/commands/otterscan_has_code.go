@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
-func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return false, fmt.Errorf("hasCode cannot open tx: %w", err)
@@ -21,8 +23,12 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address common.Address
 	if err != nil {
 		return false, err
 	}
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return false, err
+	}
 
-	reader := adapter.NewStateReader(tx, blockNumber)
+	reader := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return false, err

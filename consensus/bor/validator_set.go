@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -230,7 +230,7 @@ func (vals *ValidatorSet) HasAddress(address []byte) bool {
 
 // GetByAddress returns an index of the validator with address and validator
 // itself if found. Otherwise, -1 and nil are returned.
-func (vals *ValidatorSet) GetByAddress(address common.Address) (index int, val *Validator) {
+func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *Validator) {
 	idx := sort.Search(len(vals.Validators), func(i int) bool {
 		return bytes.Compare(address.Bytes(), vals.Validators[i].Address.Bytes()) <= 0
 	})
@@ -343,7 +343,7 @@ func processChanges(origChanges []*Validator) (updates, removals []*Validator, e
 
 	removals = make([]*Validator, 0, len(changes))
 	updates = make([]*Validator, 0, len(changes))
-	var prevAddr common.Address
+	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
 	for _, valUpdate := range changes {

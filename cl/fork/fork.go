@@ -14,15 +14,17 @@
 package fork
 
 import (
+	"encoding/binary"
 	"errors"
 	"math"
 	"sort"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func ComputeForkDigest(
@@ -32,7 +34,7 @@ func ComputeForkDigest(
 	if genesisConfig.GenesisTime == 0 {
 		return [4]byte{}, errors.New("genesis time is not set")
 	}
-	if genesisConfig.GenesisValidatorRoot == (common.Hash{}) {
+	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
 		return [4]byte{}, errors.New("genesis validators root is not set")
 	}
 
@@ -47,7 +49,7 @@ func ComputeForkDigest(
 		break
 	}
 
-	return computeForkDigest(currentForkVersion, genesisConfig.GenesisValidatorRoot)
+	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
 type fork struct {
@@ -65,16 +67,10 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 	return
 }
 
-func computeForkDigest(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
-	data := cltypes.ForkData{
-		CurrentVersion:        currentVersion,
-		GenesisValidatorsRoot: genesisValidatorsRoot,
-	}
-	var dataRoot [32]byte
-	dataRoot, err = data.HashTreeRoot()
-	if err != nil {
-		return
-	}
+func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
+	var currentVersion32 libcommon.Hash
+	copy(currentVersion32[:], currentVersion[:])
+	dataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	// copy first four bytes to output
 	copy(digest[:], dataRoot[:4])
 	return
@@ -106,12 +102,12 @@ func ComputeForkId(
 		nextForkVersion = fork.version
 	}
 
-	enrForkID := cltypes.ENRForkID{
-		CurrentForkDigest: digest,
-		NextForkVersion:   nextForkVersion,
-		NextForkEpoch:     nextForkEpoch,
-	}
-	return enrForkID.MarshalSSZ()
+	enrForkId := make([]byte, 16)
+	copy(enrForkId, digest[:])
+	copy(enrForkId[4:], nextForkVersion[:])
+	binary.BigEndian.PutUint64(enrForkId[8:], nextForkEpoch)
+
+	return enrForkId, nil
 }
 
 func GetLastFork(
@@ -134,28 +130,21 @@ func GetLastFork(
 func ComputeDomain(
 	domainType []byte,
 	currentVersion [4]byte,
-	genesisConfig *clparams.GenesisConfig,
+	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
-	forkDataRoot, err := (&cltypes.ForkData{
-		CurrentVersion:        currentVersion,
-		GenesisValidatorsRoot: genesisConfig.GenesisValidatorRoot,
-	}).HashTreeRoot()
-	if err != nil {
-		return nil, err
-	}
+	var currentVersion32 libcommon.Hash
+	copy(currentVersion32[:], currentVersion[:])
+	forkDataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
 }
 
 func ComputeSigningRoot(
-	obj cltypes.ObjectSSZ,
+	obj ssz_utils.HashableSSZ,
 	domain []byte,
 ) ([32]byte, error) {
 	objRoot, err := obj.HashTreeRoot()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return (&cltypes.SigningData{
-		Root:   objRoot,
-		Domain: domain,
-	}).HashTreeRoot()
+	return utils.Keccak256(objRoot[:], domain), nil
 }

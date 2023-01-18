@@ -7,7 +7,8 @@ import (
 	"os/exec"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/visual"
@@ -194,7 +195,7 @@ func prefixGroups4() {
 	}
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	tr := trie.New(common.Hash{})
+	tr := trie.New(libcommon.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
@@ -233,7 +234,7 @@ func prefixGroups5() {
 	}
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	tr := trie.New(common.Hash{})
+	tr := trie.New(libcommon.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
 	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
@@ -275,7 +276,7 @@ func prefixGroups6() {
 	}
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	tr := trie.New(common.Hash{})
+	tr := trie.New(libcommon.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
 	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
@@ -318,7 +319,7 @@ func prefixGroups7() {
 	}
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	tr := trie.New(common.Hash{})
+	tr := trie.New(libcommon.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
 	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
@@ -363,7 +364,7 @@ func prefixGroups8() {
 	}
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	tr := trie.New(common.Hash{})
+	tr := trie.New(libcommon.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
 	var folds [][]byte
 	for i, key := range keys {

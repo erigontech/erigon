@@ -8,18 +8,19 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/turbo/stages"
 
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/tests/contracts"
 )
 
@@ -27,7 +28,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
@@ -96,7 +97,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
@@ -161,7 +162,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
@@ -223,7 +224,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
@@ -285,7 +286,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	data := getGenesis(big.NewInt(3000))
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
 		0: {
@@ -347,9 +348,9 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
-	var contractAddress common.Address
+	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
@@ -429,9 +430,9 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
-	var contractAddress common.Address
+	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
@@ -509,9 +510,9 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
-	var contractAddress common.Address
+	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
@@ -598,9 +599,9 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	data := getGenesis()
 	from := data.addresses[0]
 	fromKey := data.keys[0]
-	to := common.Address{1}
+	to := libcommon.Address{1}
 
-	var contractAddress common.Address
+	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
 	m, chain, err := genBlocks(t, data.genesisSpec, map[int]tx{
@@ -683,7 +684,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 type initialData struct {
 	keys         []*ecdsa.PrivateKey
-	addresses    []common.Address
+	addresses    []libcommon.Address
 	transactOpts []*bind.TransactOpts
 	genesisSpec  *core.Genesis
 }
@@ -699,7 +700,7 @@ func getGenesis(funds ...*big.Int) initialData {
 	keys[1], _ = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	keys[2], _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 
-	addresses := make([]common.Address, 0, len(keys))
+	addresses := make([]libcommon.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
 	allocs := core.GenesisAlloc{}
 	for _, key := range keys {
@@ -719,7 +720,7 @@ func getGenesis(funds ...*big.Int) initialData {
 		addresses:    addresses,
 		transactOpts: transactOpts,
 		genesisSpec: &core.Genesis{
-			Config: &params.ChainConfig{
+			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
@@ -779,13 +780,13 @@ func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockS
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool)
 
-func getBlockTx(from common.Address, to common.Address, amount *uint256.Int) blockTx {
+func getBlockTx(from libcommon.Address, to libcommon.Address, amount *uint256.Int) blockTx {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (types.Transaction, bool) {
 		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(uint256.Int), nil), false
 	}
 }
 
-func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Testcontract) blockTx {
+func getBlockDeployTestContractTx(transactOpts *bind.TransactOpts, contractAddress *libcommon.Address, eipContract *contracts.Testcontract) blockTx {
 	return func(_ *core.BlockGen, backend bind.ContractBackend) (types.Transaction, bool) {
 		contractAddressRes, tx, eipContractRes, err := contracts.DeployTestcontract(transactOpts, backend)
 		if err != nil {

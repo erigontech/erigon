@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -61,7 +62,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, nil
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +70,10 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(result.ReturnData) > api.ReturnDataLimit {
+		return nil, fmt.Errorf("call retuned result on length %d exceeding limit %d", len(result.ReturnData), api.ReturnDataLimit)
 	}
 
 	// If the result contains a revert reason, try to unpack and return it.
@@ -124,7 +129,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
-		args.From = new(common.Address)
+		args.From = new(libcommon.Address)
 	}
 
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
@@ -233,7 +238,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find latest block in cache or db")
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, api.historyV3(dbtx), api._agg)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, api.historyV3(dbtx), api._agg, chainConfig.ChainName)
 	if err != nil {
 		return 0, err
 	}
@@ -297,12 +302,12 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 }
 
 // GetProof not implemented
-func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
 	var stub interface{}
 	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
 }
 
-func (api *APIImpl) tryBlockFromLru(hash common.Hash) *types.Block {
+func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 	var block *types.Block
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
@@ -361,7 +366,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._agg, api.historyV3(tx))
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._agg, api.historyV3(tx), chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}
@@ -372,7 +377,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	// lists and we'll need to reestimate every time
 	nogas := args.Gas == nil
 
-	var to common.Address
+	var to libcommon.Address
 	if args.To != nil {
 		to = *args.To
 	} else {
@@ -394,11 +399,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	}
 
 	if args.From == nil {
-		args.From = &common.Address{}
+		args.From = &libcommon.Address{}
 	}
 
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber))
+	precompiles := vm.ActivePrecompiles(chainConfig.Rules(blockNumber, header.Time))
 
 	// Create an initial tracer
 	prevTracer := logger.NewAccessListTracer(nil, *args.From, to, precompiles)
@@ -436,7 +441,8 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, *args.From, to, precompiles)
 		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		blockCtx, txCtx := transactions.GetEvmContext(engine, msg, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
+		blockCtx := transactions.NewEVMBlockContext(engine, header, bNrOrHash.RequireCanonical, tx, api._blockReader)
+		txCtx := core.NewEVMTxContext(msg)
 
 		evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, config)
 		gp := new(core.GasPool).AddGas(msg.Gas())
@@ -461,7 +467,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 // to address is warm already, so we can save by adding it to the access list
 // only if we are adding a lot of its storage slots as well
-func optimizeToInAccessList(accessList *accessListResult, to common.Address) {
+func optimizeToInAccessList(accessList *accessListResult, to libcommon.Address) {
 	indexToRemove := -1
 
 	for i := 0; i < len(*accessList.Accesslist); i++ {

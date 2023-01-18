@@ -17,21 +17,21 @@ import (
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/aggregator"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/services"
+
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -86,7 +86,7 @@ var erigon2Cmd = &cobra.Command{
 	},
 }
 
-func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.Logger) error {
+func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -179,7 +179,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		if err = w.Reset(0, rwTx); err != nil {
 			return err
 		}
-		if err = genesisIbs.CommitBlock(&params.Rules{}, &WriterWrapper{w: w}); err != nil {
+		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper{w: w}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 		if err = w.FinishTx(0, false); err != nil {
@@ -238,7 +238,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 	} else {
 		blockReader = snapshotsync.NewBlockReader()
 	}
-	engine := initConsensusEngine(chainConfig, logger, allSnapshots)
+	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {
 		blockNum++
@@ -271,7 +271,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *params.ChainConfig, logger log.
 		r := agg.MakeStateReader(blockNum, rwTx)
 		readWrapper := &ReaderWrapper{r: r, blockNum: blockNum}
 		writeWrapper := &WriterWrapper{w: w, blockNum: blockNum}
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			h, err := blockReader.Header(ctx, historyTx, hash, number)
 			if err != nil {
 				panic(err)
@@ -396,7 +396,7 @@ func (s *stat) delta(aStats aggregator.FilesStats, blockNum uint64) *stat {
 	return s
 }
 
-func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *params.ChainConfig, engine consensus.Engine, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWrapper, chainConfig *chain2.Config, engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
@@ -405,7 +405,7 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
-	rules := chainConfig.Rules(block.NumberU64())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 
 	for i, tx := range block.Transactions() {
@@ -464,7 +464,7 @@ func bytesToUint64(buf []byte) (x uint64) {
 	return
 }
 
-func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (rw *ReaderWrapper) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.r.ReadAccountData(address.Bytes(), false /* trace */)
 	if err != nil {
 		return nil, err
@@ -502,7 +502,7 @@ func (rw *ReaderWrapper) ReadAccountData(address common.Address) (*accounts.Acco
 	return &a, nil
 }
 
-func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (rw *ReaderWrapper) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	trace := false
 	enc, err := rw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), trace)
 	if err != nil {
@@ -514,19 +514,19 @@ func (rw *ReaderWrapper) ReadAccountStorage(address common.Address, incarnation 
 	return enc, nil
 }
 
-func (rw *ReaderWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (rw *ReaderWrapper) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return rw.r.ReadAccountCode(address.Bytes(), false /* trace */)
 }
 
-func (rw *ReaderWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (rw *ReaderWrapper) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return rw.r.ReadAccountCodeSize(address.Bytes(), false /* trace */)
 }
 
-func (rw *ReaderWrapper) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (rw *ReaderWrapper) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
-func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (ww *WriterWrapper) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	var l int
 	l++
 	if account.Nonce > 0 {
@@ -595,21 +595,21 @@ func (ww *WriterWrapper) UpdateAccountData(address common.Address, original, acc
 	return nil
 }
 
-func (ww *WriterWrapper) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (ww *WriterWrapper) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code, false /* trace */); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (ww *WriterWrapper) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := ww.w.DeleteAccount(address.Bytes(), false /* trace */); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (ww *WriterWrapper) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	trace := false
 	if trace {
 		fmt.Printf("block %d, WriteAccountStorage %x %x, original %s, value %s\n", ww.blockNum, address, *key, original, value)
@@ -620,32 +620,27 @@ func (ww *WriterWrapper) WriteAccountStorage(address common.Address, incarnation
 	return nil
 }
 
-func (ww *WriterWrapper) CreateContract(address common.Address) error {
+func (ww *WriterWrapper) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func initConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+	l := log.New()
 	config := ethconfig.Defaults
 
-	switch {
-	case chainConfig.Clique != nil:
-		c := params.CliqueSnapshot
-		c.DBPath = filepath.Join(datadirCli, "clique", "db")
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, c, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
-	case chainConfig.Aura != nil:
-		consensusConfig := &params.AuRaConfig{DBPath: filepath.Join(datadirCli, "aura")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
-	case chainConfig.Parlia != nil:
-		// Apply special hacks for BSC params
-		params.ApplyBinanceSmartChainParams()
-		consensusConfig := &params.ParliaConfig{DBPath: filepath.Join(datadirCli, "parlia")}
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, "", true, datadirCli, snapshots, true /* readonly */)
-	case chainConfig.Bor != nil:
-		consensusConfig := &config.Bor
-		engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, false, datadirCli, snapshots, true /* readonly */)
-	default: //ethash
-		engine = ethash.NewFaker()
-	}
+	var consensusConfig interface{}
 
-	return
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if cc.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
+	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
 }

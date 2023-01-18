@@ -23,7 +23,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -32,7 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 )
 
 func TestDefaults(t *testing.T) {
@@ -105,7 +108,7 @@ func TestExecute(t *testing.T) {
 func TestCall(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 	state := state.New(state.NewDbStateReader(tx))
-	address := common.HexToAddress("0x0a")
+	address := libcommon.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
 		byte(vm.PUSH1), 0,
@@ -161,9 +164,9 @@ func BenchmarkCall(b *testing.B) {
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	_, tx := memdb.NewTestTx(bench)
 	var (
-		statedb  = state.New(state.NewPlainState(tx, 1))
-		sender   = common.BytesToAddress([]byte("sender"))
-		receiver = common.BytesToAddress([]byte("receiver"))
+		statedb  = state.New(state.NewPlainState(tx, 1, nil))
+		sender   = libcommon.BytesToAddress([]byte("sender"))
+		receiver = libcommon.BytesToAddress([]byte("receiver"))
 	)
 
 	statedb.CreateAccount(sender, true)
@@ -174,9 +177,9 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		GasLimit:    10000000,
 		Difficulty:  big.NewInt(0x200000),
 		Time:        new(big.Int).SetUint64(0),
-		Coinbase:    common.Address{},
+		Coinbase:    libcommon.Address{},
 		BlockNumber: new(big.Int).SetUint64(1),
-		ChainConfig: &params.ChainConfig{
+		ChainConfig: &chain.Config{
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        new(big.Int),
 			ByzantiumBlock:        new(big.Int),
@@ -213,9 +216,9 @@ func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
 }
 
-func fakeHeader(n uint64, parentHash common.Hash) *types.Header {
+func fakeHeader(n uint64, parentHash libcommon.Hash) *types.Header {
 	header := types.Header{
-		Coinbase:   common.HexToAddress("0x00000000000000000000000000000000deadbeef"),
+		Coinbase:   libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef"),
 		Number:     big.NewInt(int64(n)),
 		ParentHash: parentHash,
 		Time:       1000,
@@ -237,13 +240,13 @@ func (d *dummyChain) Engine() consensus.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
+func (d *dummyChain) GetHeader(h libcommon.Hash, n uint64) *types.Header {
 	d.counter++
-	parentHash := common.Hash{}
+	parentHash := libcommon.Hash{}
 	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
 	copy(parentHash[:], s)
 
-	//parentHash := common.Hash{byte(n - 1)}
+	//parentHash := libcommon.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
 	return fakeHeader(n, parentHash)
 }
@@ -253,7 +256,7 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) *types.Header {
 func TestBlockhash(t *testing.T) {
 	// Current head
 	n := uint64(1000)
-	parentHash := common.Hash{}
+	parentHash := libcommon.Hash{}
 	s := common.LeftPadBytes(big.NewInt(int64(n-1)).Bytes(), 32)
 	copy(parentHash[:], s)
 	header := fakeHeader(n, parentHash)
@@ -329,20 +332,20 @@ func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := memdb.NewTestTx(b)
-	cfg.State = state.New(state.NewPlainState(tx, 1))
+	cfg.State = state.New(state.NewPlainState(tx, 1, nil))
 	cfg.GasLimit = gas
 	var (
-		destination = common.BytesToAddress([]byte("contract"))
+		destination = libcommon.BytesToAddress([]byte("contract"))
 		vmenv       = NewEnv(cfg)
 		sender      = vm.AccountRef(cfg.Origin)
 	)
 	cfg.State.CreateAccount(destination, true)
-	eoa := common.HexToAddress("E0")
+	eoa := libcommon.HexToAddress("E0")
 	{
 		cfg.State.CreateAccount(eoa, true)
 		cfg.State.SetNonce(eoa, 100)
 	}
-	reverting := common.HexToAddress("EE")
+	reverting := libcommon.HexToAddress("EE")
 	{
 		cfg.State.CreateAccount(reverting, true)
 		cfg.State.SetCode(reverting, []byte{
@@ -507,7 +510,7 @@ func TestEip2929Cases(t *testing.T) {
 		Execute(code, nil, &Config{
 			EVMConfig: vm.Config{
 				Debug:     true,
-				Tracer:    vm.NewMarkdownLogger(nil, os.Stdout),
+				Tracer:    logger.NewMarkdownLogger(nil, os.Stdout),
 				ExtraEips: []int{2929},
 			},
 		}, 0)

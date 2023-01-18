@@ -6,27 +6,28 @@ import (
 	"encoding/json"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config   *params.BorConfig // Consensus engine parameters to fine tune behavior
-	sigcache *lru.ARCCache     // Cache of recent block signatures to speed up ecrecover
+	config   *chain.BorConfig // Consensus engine parameters to fine tune behavior
+	sigcache *lru.ARCCache    // Cache of recent block signatures to speed up ecrecover
 
-	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
-	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
-	ValidatorSet *ValidatorSet             `json:"validatorSet"` // Validator set at this moment
-	Recents      map[uint64]common.Address `json:"recents"`      // Set of recent signers for spam protections
+	Number       uint64                       `json:"number"`       // Block number where the snapshot was created
+	Hash         libcommon.Hash               `json:"hash"`         // Block hash where the snapshot was created
+	ValidatorSet *ValidatorSet                `json:"validatorSet"` // Validator set at this moment
+	Recents      map[uint64]libcommon.Address `json:"recents"`      // Set of recent signers for spam protections
 }
 
 const BorSeparate = "BorSeparate"
 
 // signersAscending implements the sort interface to allow sorting a list of addresses
-// type signersAscending []common.Address
+// type signersAscending []libcommon.Address
 
 // func (s signersAscending) Len() int           { return len(s) }
 // func (s signersAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
@@ -36,10 +37,10 @@ const BorSeparate = "BorSeparate"
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
 func newSnapshot(
-	config *params.BorConfig,
+	config *chain.BorConfig,
 	sigcache *lru.ARCCache,
 	number uint64,
-	hash common.Hash,
+	hash libcommon.Hash,
 	validators []*Validator,
 ) *Snapshot {
 	snap := &Snapshot{
@@ -48,13 +49,13 @@ func newSnapshot(
 		Number:       number,
 		Hash:         hash,
 		ValidatorSet: NewValidatorSet(validators),
-		Recents:      make(map[uint64]common.Address),
+		Recents:      make(map[uint64]libcommon.Address),
 	}
 	return snap
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -99,7 +100,7 @@ func (s *Snapshot) copy() *Snapshot {
 		Number:       s.Number,
 		Hash:         s.Hash,
 		ValidatorSet: s.ValidatorSet.Copy(),
-		Recents:      make(map[uint64]common.Address),
+		Recents:      make(map[uint64]libcommon.Address),
 	}
 	for block, signer := range s.Recents {
 		cpy.Recents[block] = signer
@@ -173,7 +174,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 }
 
 // GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
-func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error) {
+func (s *Snapshot) GetSignerSuccessionNumber(signer libcommon.Address) (int, error) {
 	validators := s.ValidatorSet.Validators
 	proposer := s.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
@@ -195,8 +196,8 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error)
 }
 
 // signers retrieves the list of authorized signers in ascending order.
-func (s *Snapshot) signers() []common.Address {
-	sigs := make([]common.Address, 0, len(s.ValidatorSet.Validators))
+func (s *Snapshot) signers() []libcommon.Address {
+	sigs := make([]libcommon.Address, 0, len(s.ValidatorSet.Validators))
 	for _, sig := range s.ValidatorSet.Validators {
 		sigs = append(sigs, sig.Address)
 	}
@@ -204,9 +205,9 @@ func (s *Snapshot) signers() []common.Address {
 }
 
 // Difficulty returns the difficulty for a particular signer at the current snapshot number
-func (s *Snapshot) Difficulty(signer common.Address) uint64 {
+func (s *Snapshot) Difficulty(signer libcommon.Address) uint64 {
 	// if signer is empty
-	if bytes.Equal(signer.Bytes(), common.Address{}.Bytes()) {
+	if bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
 		return 1
 	}
 

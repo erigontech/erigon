@@ -23,24 +23,25 @@ import (
 	"math/big"
 	"reflect"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
 // MakeTopics converts a filter query argument list into a filter topic set.
-func MakeTopics(query ...[]interface{}) ([][]common.Hash, error) {
-	topics := make([][]common.Hash, len(query))
+func MakeTopics(query ...[]interface{}) ([][]libcommon.Hash, error) {
+	topics := make([][]libcommon.Hash, len(query))
 	for i, filter := range query {
 		for _, rule := range filter {
-			var topic common.Hash
+			var topic libcommon.Hash
 
 			// Try to generate the topic based on simple types
 			switch rule := rule.(type) {
-			case common.Hash:
+			case libcommon.Hash:
 				copy(topic[:], rule[:])
-			case common.Address:
-				copy(topic[length.Hash-common.AddressLength:], rule[:])
+			case libcommon.Address:
+				copy(topic[length.Hash-length.Addr:], rule[:])
 			case *big.Int:
 				blob := rule.Bytes()
 				copy(topic[length.Hash-len(blob):], blob)
@@ -113,7 +114,7 @@ func genIntType(rule int64, size uint) []byte {
 }
 
 // ParseTopics converts the indexed topic fields into actual log field values.
-func ParseTopics(out interface{}, fields Arguments, topics []common.Hash) error {
+func ParseTopics(out interface{}, fields Arguments, topics []libcommon.Hash) error {
 	return parseTopicWithSetter(fields, topics,
 		func(arg Argument, reconstr interface{}) {
 			field := reflect.ValueOf(out).Elem().FieldByName(ToCamelCase(arg.Name))
@@ -122,7 +123,7 @@ func ParseTopics(out interface{}, fields Arguments, topics []common.Hash) error 
 }
 
 // ParseTopicsIntoMap converts the indexed topic field-value pairs into map key-value pairs.
-func ParseTopicsIntoMap(out map[string]interface{}, fields Arguments, topics []common.Hash) error {
+func ParseTopicsIntoMap(out map[string]interface{}, fields Arguments, topics []libcommon.Hash) error {
 	return parseTopicWithSetter(fields, topics,
 		func(arg Argument, reconstr interface{}) {
 			out[arg.Name] = reconstr
@@ -134,7 +135,7 @@ func ParseTopicsIntoMap(out map[string]interface{}, fields Arguments, topics []c
 //
 // Note, dynamic types cannot be reconstructed since they get mapped to Keccak256
 // hashes as the topic value!
-func parseTopicWithSetter(fields Arguments, topics []common.Hash, setter func(Argument, interface{})) error {
+func parseTopicWithSetter(fields Arguments, topics []libcommon.Hash, setter func(Argument, interface{})) error {
 	// Sanity check that the fields and topics match up
 	if len(fields) != len(topics) {
 		return errors.New("topic/field count mismatch")

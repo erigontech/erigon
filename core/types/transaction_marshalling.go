@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/hexutil"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/valyala/fastjson"
+
+	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -16,24 +17,24 @@ type txJSON struct {
 	Type hexutil.Uint64 `json:"type"`
 
 	// Common transaction fields:
-	Nonce    *hexutil.Uint64 `json:"nonce"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	FeeCap   *hexutil.Big    `json:"maxFeePerGas"`
-	Tip      *hexutil.Big    `json:"maxPriorityFeePerGas"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"input"`
-	V        *hexutil.Big    `json:"v"`
-	R        *hexutil.Big    `json:"r"`
-	S        *hexutil.Big    `json:"s"`
-	To       *common.Address `json:"to"`
+	Nonce    *hexutil.Uint64    `json:"nonce"`
+	GasPrice *hexutil.Big       `json:"gasPrice"`
+	FeeCap   *hexutil.Big       `json:"maxFeePerGas"`
+	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
+	Gas      *hexutil.Uint64    `json:"gas"`
+	Value    *hexutil.Big       `json:"value"`
+	Data     *hexutil.Bytes     `json:"input"`
+	V        *hexutil.Big       `json:"v"`
+	R        *hexutil.Big       `json:"r"`
+	S        *hexutil.Big       `json:"s"`
+	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
 	// Only used for encoding:
-	Hash common.Hash `json:"hash"`
+	Hash libcommon.Hash `json:"hash"`
 }
 
 func (tx LegacyTx) MarshalJSON() ([]byte, error) {

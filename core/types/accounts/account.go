@@ -7,7 +7,8 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -19,8 +20,8 @@ type Account struct {
 	Initialised bool
 	Nonce       uint64
 	Balance     uint256.Int
-	Root        common.Hash // merkle root of the storage trie
-	CodeHash    common.Hash // hash of the bytecode
+	Root        libcommon.Hash // merkle root of the storage trie
+	CodeHash    libcommon.Hash // hash of the bytecode
 	Incarnation uint64
 }
 
@@ -34,7 +35,7 @@ const (
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
-var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+var emptyRoot = libcommon.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 // NewAccount creates a new account w/o code nor storage.
 func NewAccount() Account {
@@ -586,12 +587,12 @@ func (a *Account) IsEmptyCodeHash() bool {
 	return IsEmptyCodeHash(a.CodeHash)
 }
 
-func IsEmptyCodeHash(codeHash common.Hash) bool {
-	return codeHash == emptyCodeHash || codeHash == (common.Hash{})
+func IsEmptyCodeHash(codeHash libcommon.Hash) bool {
+	return codeHash == emptyCodeHash || codeHash == (libcommon.Hash{})
 }
 
 func (a *Account) IsEmptyRoot() bool {
-	return a.Root == emptyRoot || a.Root == common.Hash{}
+	return a.Root == emptyRoot || a.Root == libcommon.Hash{}
 }
 
 func (a *Account) GetIncarnation() uint64 {
@@ -609,8 +610,18 @@ func (a *Account) Equals(acc *Account) bool {
 		a.Incarnation == acc.Incarnation
 }
 
-// Deserialise2 - method to deserialize accounts in Erigon22 history
-func Deserialise2(a *Account, enc []byte) error {
+func ConvertV3toV2(v []byte) ([]byte, error) {
+	var a Account
+	if err := DeserialiseV3(&a, v); err != nil {
+		return nil, fmt.Errorf("ConvertV3toV2(%x): %w", v, err)
+	}
+	v = make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(v)
+	return v, nil
+}
+
+// DeserialiseV3 - method to deserialize accounts in Erigon22 history
+func DeserialiseV3(a *Account, enc []byte) error {
 	a.Reset()
 	pos := 0
 	nonceBytes := int(enc[pos])
@@ -642,7 +653,7 @@ func Deserialise2(a *Account, enc []byte) error {
 	return nil
 }
 
-func Serialise2(a *Account) []byte {
+func SerialiseV3(a *Account) []byte {
 	var l int
 	l++
 	if a.Nonce > 0 {

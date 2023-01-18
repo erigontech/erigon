@@ -16,16 +16,16 @@ var (
 	Mainnet    = fromToml(snapshothashes.Mainnet)
 	Goerli     = fromToml(snapshothashes.Goerli)
 	Bsc        = fromToml(snapshothashes.Bsc)
-	Ropsten    = fromToml(snapshothashes.Ropsten)
 	Mumbai     = fromToml(snapshothashes.Mumbai)
 	BorMainnet = fromToml(snapshothashes.BorMainnet)
+	Gnosis     = fromToml(snapshothashes.Gnosis)
 
 	MainnetHistory    = fromToml(snapshothashes.MainnetHistory)
 	GoerliHistory     = fromToml(snapshothashes.GoerliHistory)
 	BscHistory        = fromToml(snapshothashes.BscHistory)
-	RopstenHistory    = fromToml(snapshothashes.RopstenHistory)
 	MumbaiHistory     = fromToml(snapshothashes.MumbaiHistory)
 	BorMainnetHistory = fromToml(snapshothashes.BorMainnetHistory)
+	GnosisHistory     = fromToml(snapshothashes.GnosisHistory)
 )
 
 type PreverifiedItem struct {
@@ -55,9 +55,9 @@ var (
 	MainnetChainSnapshotCfg    = newCfg(Mainnet, MainnetHistory)
 	GoerliChainSnapshotCfg     = newCfg(Goerli, GoerliHistory)
 	BscChainSnapshotCfg        = newCfg(Bsc, BscHistory)
-	RopstenChainSnapshotCfg    = newCfg(Ropsten, RopstenHistory)
 	MumbaiChainSnapshotCfg     = newCfg(Mumbai, MumbaiHistory)
 	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, BorMainnetHistory)
+	GnosisChainSnapshotCfg     = newCfg(Gnosis, GnosisHistory)
 )
 
 func newCfg(preverified, preverifiedHistory Preverified) *Cfg {
@@ -104,9 +104,9 @@ var KnownCfgs = map[string]*Cfg{
 	networkname.MainnetChainName:    MainnetChainSnapshotCfg,
 	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
 	networkname.BSCChainName:        BscChainSnapshotCfg,
-	networkname.RopstenChainName:    RopstenChainSnapshotCfg,
 	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
 	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
+	networkname.GnosisChainName:     GnosisChainSnapshotCfg,
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty

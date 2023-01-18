@@ -3,29 +3,34 @@ package calltracer
 import (
 	"encoding/binary"
 	"sort"
-	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
 type CallTracer struct {
-	froms map[common.Address]struct{}
-	tos   map[common.Address]bool // address -> isCreated
+	froms map[libcommon.Address]struct{}
+	tos   map[libcommon.Address]bool // address -> isCreated
 }
 
 func NewCallTracer() *CallTracer {
 	return &CallTracer{
-		froms: make(map[common.Address]struct{}),
-		tos:   make(map[common.Address]bool),
+		froms: make(map[libcommon.Address]struct{}),
+		tos:   make(map[libcommon.Address]bool),
 	}
 }
 
-func (ct *CallTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, to common.Address, precompile bool, create bool, callType vm.CallType, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
+func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
+
+// CaptureStart and CaptureEnter also capture SELFDESTRUCT opcode invocations
+func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address, create bool, code []byte) {
 	ct.froms[from] = struct{}{}
 
 	created, ok := ct.tos[to]
@@ -39,21 +44,20 @@ func (ct *CallTracer) CaptureStart(env *vm.EVM, depth int, from common.Address, 
 		}
 	}
 }
-func (ct *CallTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+
+func (ct *CallTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ct.captureStartOrEnter(from, to, create, code)
 }
-func (ct *CallTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	ct.captureStartOrEnter(from, to, create, code)
 }
-func (ct *CallTracer) CaptureEnd(depth int, output []byte, startGas, endGas uint64, t time.Duration, err error) {
+func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 }
-func (ct *CallTracer) CaptureSelfDestruct(from common.Address, to common.Address, value *uint256.Int) {
-	ct.froms[from] = struct{}{}
-	ct.tos[to] = false
+func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (ct *CallTracer) CaptureAccountRead(account common.Address) error {
-	return nil
+func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
-func (ct *CallTracer) CaptureAccountWrite(account common.Address) error {
-	return nil
+func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
 func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {
@@ -75,7 +79,7 @@ func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmCo
 	// List may contain duplicates
 	var blockNumEnc [8]byte
 	binary.BigEndian.PutUint64(blockNumEnc[:], block.Number().Uint64())
-	var prev common.Address
+	var prev libcommon.Address
 	for j, addr := range list {
 		if j > 0 && prev == addr {
 			continue

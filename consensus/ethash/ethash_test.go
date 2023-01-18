@@ -21,7 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -51,7 +52,7 @@ func TestRemoteSealer(t *testing.T) {
 		t.Error("expect to return a mining work has same hash")
 	}
 
-	if res := api.SubmitWork(types.BlockNonce{}, sealhash, common.Hash{}); res {
+	if res := api.SubmitWork(types.BlockNonce{}, sealhash, libcommon.Hash{}); res {
 		t.Error("expect to return false when submit a fake solution")
 	}
 	// Push new block with same block number to replace the original one.
@@ -71,7 +72,7 @@ func TestHashRate(t *testing.T) {
 	var (
 		hashrate = []hexutil.Uint64{100, 200, 300}
 		expect   uint64
-		ids      = []common.Hash{common.HexToHash("a"), common.HexToHash("b"), common.HexToHash("c")}
+		ids      = []libcommon.Hash{libcommon.HexToHash("a"), libcommon.HexToHash("b"), libcommon.HexToHash("c")}
 	)
 	ethash := NewTester(nil, false)
 	defer ethash.Close()
@@ -102,7 +103,7 @@ func TestClosedRemoteSealer(t *testing.T) {
 		t.Error("expect to return an error to indicate ethash is stopped")
 	}
 
-	if res := api.SubmitHashRate(hexutil.Uint64(100), common.HexToHash("a")); res {
+	if res := api.SubmitHashRate(hexutil.Uint64(100), libcommon.HexToHash("a")); res {
 		t.Error("expect to return false when submit hashrate to a stopped ethash")
 	}
 }

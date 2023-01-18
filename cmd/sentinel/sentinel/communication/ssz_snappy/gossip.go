@@ -16,10 +16,11 @@ package ssz_snappy
 import (
 	"context"
 
-	ssz "github.com/ferranbt/fastssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 type GossipCodec struct {
@@ -38,7 +39,7 @@ func NewGossipCodec(
 }
 
 // decode into packet p, then return the packet context
-func (d *GossipCodec) Decode(ctx context.Context, p communication.Packet) (sctx *communication.GossipContext, err error) {
+func (d *GossipCodec) Decode(ctx context.Context, p clonable.Clonable) (sctx *communication.GossipContext, err error) {
 	msg, err := d.sub.Next(ctx)
 	if err != nil {
 		return nil, err
@@ -47,7 +48,7 @@ func (d *GossipCodec) Decode(ctx context.Context, p communication.Packet) (sctx 
 	return
 }
 
-func (d *GossipCodec) WritePacket(ctx context.Context, p communication.Packet) error {
+func (d *GossipCodec) WritePacket(ctx context.Context, p clonable.Clonable) error {
 	if val, ok := p.(ssz.Marshaler); ok {
 		ans, err := utils.EncodeSSZSnappy(val)
 		if err != nil {
@@ -59,7 +60,7 @@ func (d *GossipCodec) WritePacket(ctx context.Context, p communication.Packet) e
 	return nil
 }
 
-func (d *GossipCodec) readPacket(msg *pubsub.Message, p communication.Packet) (*communication.GossipContext, error) {
+func (d *GossipCodec) readPacket(msg *pubsub.Message, p clonable.Clonable) (*communication.GossipContext, error) {
 	// read the next message
 	c := &communication.GossipContext{
 		Packet: p,
@@ -73,7 +74,7 @@ func (d *GossipCodec) readPacket(msg *pubsub.Message, p communication.Packet) (*
 	return c, d.decodeData(p, msg.Data)
 }
 
-func (d *GossipCodec) decodeData(p communication.Packet, data []byte) error {
+func (d *GossipCodec) decodeData(p clonable.Clonable, data []byte) error {
 	var val ssz.Unmarshaler
 	var ok bool
 	if val, ok = p.(ssz.Unmarshaler); !ok {

@@ -56,8 +56,6 @@ func NewNodConfigUrfave(ctx *cli.Context) *nodecfg.Config {
 	switch chain {
 	case networkname.SepoliaChainName:
 		log.Info("Starting Erigon on Sepolia testnet...")
-	case networkname.RopstenChainName:
-		log.Info("Starting Erigon on Ropsten testnet...")
 	case networkname.RinkebyChainName:
 		log.Info("Starting Erigon on Rinkeby testnet...")
 	case networkname.GoerliChainName:
@@ -113,6 +111,10 @@ func New(
 	}
 
 	ethereum, err := eth.New(node, ethConfig, logger)
+	if err != nil {
+		return nil, err
+	}
+	err = ethereum.Init(node, ethConfig)
 	if err != nil {
 		return nil, err
 	}

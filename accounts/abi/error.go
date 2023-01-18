@@ -23,7 +23,8 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -37,7 +38,7 @@ type Error struct {
 	Sig string
 	// ID returns the canonical representation of the event's signature used by the
 	// abi definition to identify event names and types.
-	ID common.Hash
+	ID libcommon.Hash
 }
 
 func NewError(name string, inputs Arguments) Error {
@@ -64,7 +65,7 @@ func NewError(name string, inputs Arguments) Error {
 
 	str := fmt.Sprintf("error %v(%v)", name, strings.Join(names, ", "))
 	sig := fmt.Sprintf("%v(%v)", name, strings.Join(types, ","))
-	id := common.BytesToHash(crypto.Keccak256([]byte(sig)))
+	id := libcommon.BytesToHash(crypto.Keccak256([]byte(sig)))
 
 	return Error{
 		Name:   name,

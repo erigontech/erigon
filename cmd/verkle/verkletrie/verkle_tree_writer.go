@@ -8,13 +8,15 @@ import (
 	"github.com/anacrolix/sync"
 	"github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func identityFuncForVerkleTree(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
@@ -183,9 +185,9 @@ func (v *VerkleTreeWriter) WriteContractCodeChunks(codeKeys [][]byte, chunks [][
 	return nil
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
+func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (libcommon.Hash, error) {
 	if err := v.db.ClearBucket(kv.VerkleTrie); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 
 	verkleCollector := etl.NewCollector(kv.VerkleTrie, v.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
@@ -217,12 +219,12 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 		}
 		return next(k, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 
 	// Flush the rest all at once
 	if err := collectVerkleNode(v.collector, root, logInterval, nil); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 
 	log.Info("Started Verkle Tree Flushing")
@@ -232,17 +234,17 @@ func (v *VerkleTreeWriter) CommitVerkleTreeFromScratch() (common.Hash, error) {
 		}})
 }
 
-func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, error) {
+func (v *VerkleTreeWriter) CommitVerkleTree(root libcommon.Hash) (libcommon.Hash, error) {
 	resolverFunc := func(root []byte) ([]byte, error) {
 		return v.db.GetOne(kv.VerkleTrie, root)
 	}
 
 	var rootNode verkle.VerkleNode
 	var err error
-	if root != (common.Hash{}) {
+	if root != (libcommon.Hash{}) {
 		rootNode, err = rawdb.ReadVerkleNode(v.db, root)
 		if err != nil {
-			return common.Hash{}, err
+			return libcommon.Hash{}, err
 		}
 	} else {
 		return v.CommitVerkleTreeFromScratch() // TODO(Giulio2002): ETL is buggy, go fix it >:(.
@@ -269,10 +271,10 @@ func (v *VerkleTreeWriter) CommitVerkleTree(root common.Hash) (common.Hash, erro
 		}
 		return next(key, nil, nil)
 	}, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
-		return common.Hash{}, err
+		return libcommon.Hash{}, err
 	}
 	commitment := rootNode.Commitment().Bytes()
-	return common.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
+	return libcommon.BytesToHash(commitment[:]), flushVerkleNode(v.db, rootNode, logInterval, nil)
 }
 
 func (v *VerkleTreeWriter) Close() {

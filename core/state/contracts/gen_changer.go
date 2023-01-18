@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -33,15 +35,15 @@ const ChangerABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":
 var ChangerBin = "0x6080604052348015600f57600080fd5b50607e8061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c80632ee79ded14602d575b600080fd5b60336035565b005b600160008190556002908190556003905556fea264697066735822122055759a7d66bd94e58f9e8393e991422147044bd5fddc39451c4ef60edbcfa29264736f6c63430007020033"
 
 // DeployChanger deploys a new Ethereum contract, binding an instance of Changer to it.
-func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, types.Transaction, *Changer, error) {
+func DeployChanger(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Changer, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChangerABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(ChangerBin), backend)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 	return address, tx, &Changer{ChangerCaller: ChangerCaller{contract: contract}, ChangerTransactor: ChangerTransactor{contract: contract}, ChangerFilterer: ChangerFilterer{contract: contract}}, nil
 }
@@ -106,7 +108,7 @@ type ChangerTransactorRaw struct {
 }
 
 // NewChanger creates a new instance of Changer, bound to a specific deployed contract.
-func NewChanger(address common.Address, backend bind.ContractBackend) (*Changer, error) {
+func NewChanger(address libcommon.Address, backend bind.ContractBackend) (*Changer, error) {
 	contract, err := bindChanger(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func NewChanger(address common.Address, backend bind.ContractBackend) (*Changer,
 }
 
 // NewChangerCaller creates a new read-only instance of Changer, bound to a specific deployed contract.
-func NewChangerCaller(address common.Address, caller bind.ContractCaller) (*ChangerCaller, error) {
+func NewChangerCaller(address libcommon.Address, caller bind.ContractCaller) (*ChangerCaller, error) {
 	contract, err := bindChanger(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func NewChangerCaller(address common.Address, caller bind.ContractCaller) (*Chan
 }
 
 // NewChangerTransactor creates a new write-only instance of Changer, bound to a specific deployed contract.
-func NewChangerTransactor(address common.Address, transactor bind.ContractTransactor) (*ChangerTransactor, error) {
+func NewChangerTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*ChangerTransactor, error) {
 	contract, err := bindChanger(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +135,7 @@ func NewChangerTransactor(address common.Address, transactor bind.ContractTransa
 }
 
 // NewChangerFilterer creates a new log filterer instance of Changer, bound to a specific deployed contract.
-func NewChangerFilterer(address common.Address, filterer bind.ContractFilterer) (*ChangerFilterer, error) {
+func NewChangerFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*ChangerFilterer, error) {
 	contract, err := bindChanger(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func NewChangerFilterer(address common.Address, filterer bind.ContractFilterer) 
 }
 
 // bindChanger binds a generic wrapper to an already deployed contract.
-func bindChanger(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindChanger(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(ChangerABI))
 	if err != nil {
 		return nil, err

@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -15,13 +16,13 @@ var _ = (*logMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (l ErigonLog) MarshalJSON() ([]byte, error) {
 	type ErigonLog struct {
-		Address     common.Address `json:"address" gencodec:"required"`
-		Topics      []common.Hash  `json:"topics" gencodec:"required"`
+		Address     libcommon.Address `json:"address" gencodec:"required"`
+		Topics      []libcommon.Hash  `json:"topics" gencodec:"required"`
 		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber hexutil.Uint64 `json:"blockNumber"`
-		TxHash      common.Hash    `json:"transactionHash" gencodec:"required"`
+		TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   common.Hash    `json:"blockHash"`
+		BlockHash   libcommon.Hash    `json:"blockHash"`
 		Index       hexutil.Uint   `json:"logIndex"`
 		Removed     bool           `json:"removed"`
 		Timestamp   hexutil.Uint64 `json:"timestamp"`
@@ -45,13 +46,13 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type ErigonLog struct {
-		Address     *common.Address `json:"address" gencodec:"required"`
-		Topics      []common.Hash   `json:"topics" gencodec:"required"`
+		Address     *libcommon.Address `json:"address" gencodec:"required"`
+		Topics      []libcommon.Hash   `json:"topics" gencodec:"required"`
 		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
 		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash" gencodec:"required"`
+		TxHash      *libcommon.Hash    `json:"transactionHash" gencodec:"required"`
 		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
+		BlockHash   *libcommon.Hash    `json:"blockHash"`
 		Index       *hexutil.Uint   `json:"logIndex"`
 		Removed     *bool           `json:"removed"`
 		Timestamp   *hexutil.Uint64 `json:"timestamp"`
