@@ -77,7 +77,6 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
-	log.Info("GetLogs", "crit", fmt.Sprintf("%+v", crit))
 	var begin, end uint64
 	logs := types.Logs{}
 
@@ -144,7 +143,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
-	log.Info("After applying filters", "crit", fmt.Sprintf("%+v", crit), "begin", begin, "end", end, "blocks", fmt.Sprintf("%d", blockNumbers.ToArray()))
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
