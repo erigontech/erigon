@@ -822,7 +822,7 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		txMaxSize = 4 * txSlotSize // 128KB
 	)
 	if len(serializedTxn) > txMaxSize {
-		return fmt.Errorf(RLPTooLong.String())
+		return types.ErrRlpTooBig
 	}
 	return nil
 }
