@@ -205,7 +205,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(22): CurrentSyncCommitte
 	if b.isLeafDirty(CurrentSyncCommitteeLeafIndex) {
-		committeeRoot, err := b.currentSyncCommittee.HashTreeRoot()
+		committeeRoot, err := b.currentSyncCommittee.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(23): NextSyncCommitte
 	if b.isLeafDirty(NextSyncCommitteeLeafIndex) {
-		committeeRoot, err := b.nextSyncCommittee.HashTreeRoot()
+		committeeRoot, err := b.nextSyncCommittee.HashSSZ()
 		if err != nil {
 			return err
 		}
