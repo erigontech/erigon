@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -55,7 +54,6 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash libcommon.Hash) (
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
-	log.Info("GetLogs", "crit", fmt.Sprintf("%+v", crit))
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
 
@@ -107,7 +105,6 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
-	log.Info("After applying filters", "crit", fmt.Sprintf("%+v", crit), "begin", begin, "end", end, "blocks", fmt.Sprintf("%d", blockNumbers.ToArray()))
 	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
