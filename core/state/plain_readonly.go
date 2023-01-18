@@ -110,18 +110,9 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	var accData []byte
-	var err error
-	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, s.txNr)
-		if err != nil {
-			return err
-		}
-	} else {
-		accData, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
-		if err != nil {
-			return err
-		}
+	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+	if err != nil {
+		return err
 	}
 
 	var acc accounts.Account
