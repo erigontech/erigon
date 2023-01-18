@@ -13,7 +13,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Getting Started](#getting-started)
     + [Logging](#logging)
     + [Testnets](#testnets)
-    + [Block Production](#block-production-pow-mining-or-pos-validator)
+    + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
@@ -172,7 +172,7 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Block Production (PoW Mining or PoS Validator)
+### Block Production (PoW Miner or PoS Validator)
 
 **Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
 
