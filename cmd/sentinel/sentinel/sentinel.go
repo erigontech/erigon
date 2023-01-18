@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -220,7 +219,7 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
+func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
 	return s.subManager.Recv()
 }
 

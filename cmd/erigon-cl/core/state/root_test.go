@@ -22,10 +22,6 @@ func getTestBeaconState() *cltypes.BeaconStateBellatrix {
 		NextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
-		LatestExecutionPayloadHeader: &types.Header{
-			Bloom:   types.Bloom{},
-			BaseFee: big.NewInt(0),
-		},
 		LatestBlockHeader: &cltypes.BeaconBlockHeader{
 			Root: [32]byte{},
 		},
@@ -34,6 +30,11 @@ func getTestBeaconState() *cltypes.BeaconStateBellatrix {
 		PreviousJustifiedCheckpoint: &cltypes.Checkpoint{},
 		CurrentJustifiedCheckpoint:  &cltypes.Checkpoint{},
 		FinalizedCheckpoint:         &cltypes.Checkpoint{},
+		LatestExecutionPayloadHeader: &types.Header{
+			BaseFee: big.NewInt(0),
+			Number:  big.NewInt(0),
+			Bloom:   types.Bloom{},
+		},
 	}
 }
 

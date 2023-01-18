@@ -63,7 +63,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 			!update.NextSyncCommitee.Equal(l.store.nextSyncCommittee) {
 			return false, fmt.Errorf("mismatching sync committee")
 		}
-		syncRoot, err := update.NextSyncCommitee.HashTreeRoot()
+		syncRoot, err := update.NextSyncCommitee.HashSSZ()
 		if err != nil {
 			return false, err
 		}
