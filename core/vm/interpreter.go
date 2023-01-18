@@ -19,7 +19,6 @@ package vm
 import (
 	"hash"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
@@ -83,21 +82,6 @@ type keccakState interface {
 type EVMInterpreter struct {
 	*VM
 	jt *JumpTable // EVM instruction table
-}
-
-type VMInterpreter interface {
-	VMInterface
-	Cancelled() bool
-	IncrementDepth()
-	DecrementDepth()
-	Depth() int
-	SetCallGasTemp(gas uint64)
-	CallGasTemp() uint64
-	StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
-	DelegateCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
-	CallCode(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int) (ret []byte, leftOverGas uint64, err error)
-	Create(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
-	Create2(caller ContractRef, code []byte, gas uint64, endowment *uint256.Int, salt *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
 }
 
 // structcheck doesn't see embedding
