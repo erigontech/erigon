@@ -27,7 +27,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -725,7 +724,7 @@ func deleteBody(db kv.Deleter, hash libcommon.Hash, number uint64) {
 }
 
 // MakeBodiesCanonical - move all txs of non-canonical blocks from NonCanonicalTxs table to EthTx table
-func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, cb func(blockNum, lastTxnNum uint64) error) error {
+func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix string, logEvery *time.Ticker, transactionsV3 bool, cb func(blockNum, lastTxnNum uint64) error) error {
 	for blockNum := from; ; blockNum++ {
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -752,8 +751,15 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		i := uint64(0)
 		if err := tx.ForAmount(kv.NonCanonicalTxs, hexutility.EncodeTs(bodyForStorage.BaseTxId+1), bodyForStorage.TxAmount-2, func(k, v []byte) error {
 			id := newBaseId + 1 + i
-			if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
-				return err
+			if transactionsV3 {
+				key := append(hexutility.EncodeTs(id), h.Bytes()...)
+				if err := tx.Put(kv.EthTxV2, key, v); err != nil {
+					return err
+				}
+			} else {
+				if err := tx.Put(kv.EthTx, hexutility.EncodeTs(id), v); err != nil {
+					return err
+				}
 			}
 			if err := tx.Delete(kv.NonCanonicalTxs, k); err != nil {
 				return err
