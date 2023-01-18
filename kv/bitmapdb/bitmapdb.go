@@ -202,7 +202,6 @@ func Get(db kv.Tx, bucket string, key []byte, from, to uint32) (*roaring.Bitmap,
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint32(k[len(k)-4:]) >= to {
-			bm.RemoveRange(uint64(to), uint64(bm.Maximum()))
 			break
 		}
 	}
@@ -360,7 +359,6 @@ func Get64(db kv.Tx, bucket string, key []byte, from, to uint64) (*roaring64.Bit
 		}
 		chunks = append(chunks, bm)
 		if binary.BigEndian.Uint64(k[len(k)-8:]) >= to {
-			bm.RemoveRange(to, bm.Maximum())
 			break
 		}
 	}
