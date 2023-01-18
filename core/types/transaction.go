@@ -446,16 +446,20 @@ func (t *TransactionsFixedOrder) Peek() Transaction {
 
 // Shift replaces the current best head with the next one from the same account.
 func (t *TransactionsFixedOrder) Shift() {
-	t.Transactions = t.Transactions[1:]
-	t.Transactions[0] = nil // avoid memory leak
+	old := t.Transactions
+	x := old[1:]
+	old[0] = nil // avoid memory leak
+	t.Transactions = x
 }
 
 // Pop removes the best transaction, *not* replacing it with the next one from
 // the same account. This should be used when a transaction cannot be executed
 // and hence all subsequent ones should be discarded from the same account.
 func (t *TransactionsFixedOrder) Pop() {
-	t.Transactions = t.Transactions[1:]
-	t.Transactions[0] = nil // avoid memory leak
+	old := t.Transactions
+	x := old[1:]
+	old[0] = nil // avoid memory leak
+	t.Transactions = x
 }
 
 // Message is a fully derived transaction and implements core.Message
