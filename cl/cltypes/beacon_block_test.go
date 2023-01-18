@@ -116,6 +116,11 @@ func TestBellatrixBlock(t *testing.T) {
 	hash2, err := block2.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), bellatrixHash)
+	// encode/decode for storage
+	storageEncoded, err := block2.EncodeForStorage()
+	require.NoError(t, err)
+	_, _, _, _, err = cltypes.DecodeBeaconBlockForStorage(storageEncoded)
+	require.NoError(t, err)
 }
 
 func TestAltairBlock(t *testing.T) {
@@ -132,6 +137,11 @@ func TestAltairBlock(t *testing.T) {
 	hash2, err := block2.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), altairHash)
+	// encode/decode for storage
+	storageEncoded, err := block2.EncodeForStorage()
+	require.NoError(t, err)
+	_, _, _, _, err = cltypes.DecodeBeaconBlockForStorage(storageEncoded)
+	require.NoError(t, err)
 }
 
 func TestPhase0Block(t *testing.T) {
@@ -148,4 +158,9 @@ func TestPhase0Block(t *testing.T) {
 	hash2, err := block2.HashTreeRoot()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), phase0Hash)
+	// encode/decode for storage
+	storageEncoded, err := block2.EncodeForStorage()
+	require.NoError(t, err)
+	_, _, _, _, err = cltypes.DecodeBeaconBlockForStorage(storageEncoded)
+	require.NoError(t, err)
 }
