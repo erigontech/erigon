@@ -54,6 +54,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash libcommon.Hash) (
 
 // GetLogs implements erigon_getLogs. Returns an array of logs matching a given filter object.
 func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.ErigonLogs, error) {
+	fmt.Printf("GetLogs %+v\n", crit)
 	var begin, end uint64
 	erigonLogs := types.ErigonLogs{}
 
