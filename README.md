@@ -13,7 +13,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Getting Started](#getting-started)
     + [Logging](#logging)
     + [Testnets](#testnets)
-    + [Mining](#mining)
+    + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
@@ -52,6 +52,8 @@ System Requirements
   see `--prune*` flags): 400Gb (April 2022).
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
+
+* Gnosis Chain Archive: 370GB (January 2023).
 
 * BSC Archive: 7TB. BSC Full: 1TB.
 
@@ -95,12 +97,13 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase
+Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `bsc`. Other networks now have default `--snapshots=false`. Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, and `--chain=mumbai` for Polygon Mumbai.
+For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
@@ -169,9 +172,9 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Mining
+### Block Production (PoW Miner or PoS Validator)
 
-**Disclaimer: Not supported/tested for Polygon Network (In Progress)**
+**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
 
 Support only remote-miners.
 
@@ -188,7 +191,7 @@ Support only remote-miners.
     + eth_newFilter
     + websocket Logs
 
-<code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
 ### Windows
 
