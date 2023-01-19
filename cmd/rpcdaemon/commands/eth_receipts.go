@@ -518,7 +518,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uin
 		defer bitmapdb.ReturnToPool64(bitmapForORing)
 
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), -1)
 			if err != nil {
 				return nil, err
 			}
@@ -552,7 +552,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint
 		}
 	}()
 	for idx, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), -1)
 		if err != nil {
 			return nil, err
 		}
