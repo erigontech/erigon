@@ -148,21 +148,6 @@ func (evm *EVM) Cancelled() bool {
 	return atomic.LoadInt32(&evm.abort) == 1
 }
 
-// Depth returns the current call stack depth
-func (evm *EVM) Depth() int {
-	return evm.depth
-}
-
-// IncrementDepth increments the call stack depth
-func (evm *EVM) IncrementDepth() {
-	evm.depth++
-}
-
-// DecrementDepth decrements the call stack depth
-func (evm *EVM) DecrementDepth() {
-	evm.depth--
-}
-
 // CallGasTemp returns the callGasTemp for the EVM
 func (evm *EVM) CallGasTemp() uint64 {
 	return evm.callGasTemp
