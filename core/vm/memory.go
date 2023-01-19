@@ -61,10 +61,21 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 	val.WriteToSlice(m.store[offset:])
 }
 
+var zeroes = make([]byte, 4096)
+
 // Resize resizes the memory to size
 func (m *Memory) Resize(size uint64) {
 	if uint64(m.Len()) < size {
 		m.store = append(m.store, make([]byte, size-uint64(m.Len()))...)
+	}
+}
+func (m *Memory) Resize2(size uint64) {
+	if uint64(m.Len()) < size {
+		if size-uint64(m.Len()) < uint64(len(zeroes)) {
+			m.store = append(m.store, zeroes[:size-uint64(m.Len())]...)
+		} else {
+			m.store = append(m.store, make([]byte, size-uint64(m.Len()))...)
+		}
 	}
 }
 
