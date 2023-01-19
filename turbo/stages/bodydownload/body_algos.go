@@ -399,12 +399,14 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	size := body.EncodingSize()
 	if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: key}); ok {
-		bd.bodyCacheSize -= item.payloadSize // It will be replace, so subtracting
+		bd.bodyCacheSize -= item.payloadSize // It will be replaced, so subtracting
 	}
 	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
+	log.Debug("Added", "blockNum", key)
 	for bd.bodyCacheSize > bd.bodyCacheLimit {
 		item, _ := bd.bodyCache.DeleteMax()
+		log.Debug("Removed", "max", item.blockNum, "bodyCacheSize", bd.bodyCacheSize, "payloadSize", item.payloadSize)
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)
 	}
