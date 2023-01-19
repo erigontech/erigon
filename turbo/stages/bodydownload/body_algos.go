@@ -296,7 +296,6 @@ Loop:
 				undelivered++
 				continue
 			}
-			log.Debug("Delivered", "blockNum", blockNum, "peer", fmt.Sprintf("%x", delivery.peerID)[:8])
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
@@ -398,10 +397,8 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
-	log.Debug("Added", "blockNum", key)
 	for bd.bodyCacheSize > bd.bodyCacheLimit {
 		item, _ := bd.bodyCache.DeleteMax()
-		log.Debug("Removed", "max", item.blockNum, "bodyCacheSize", bd.bodyCacheSize, "payloadSize", item.payloadSize)
 		bd.bodyCacheSize -= item.payloadSize
 		delete(bd.requests, item.blockNum)
 	}
