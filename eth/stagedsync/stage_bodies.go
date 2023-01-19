@@ -200,7 +200,7 @@ func BodiesForward(
 		write := true
 		for i := uint64(0); i < toProcess; i++ {
 			nextBlock := requestedLow + i
-			rawBody := cfg.bd.GetBodyFromCache(nextBlock)
+			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
 			if rawBody == nil {
 				log.Debug("Body was nil when reading from cache", "block", nextBlock)
 				cfg.bd.NotDelivered(nextBlock)
@@ -209,6 +209,7 @@ func BodiesForward(
 			if !write {
 				continue
 			}
+			cfg.bd.NotDelivered(nextBlock)
 			header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
 			if err != nil {
 				return false, err
