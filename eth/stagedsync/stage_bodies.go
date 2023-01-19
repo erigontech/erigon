@@ -245,10 +245,13 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
-		}
-
-		if !quiet && toProcess > 0 {
-			logWritingBodies(logPrefix, bodyProgress, headerProgress)
+			if !quiet {
+				select {
+				case <-logEvery.C:
+					logWritingBodies(logPrefix, bodyProgress, headerProgress)
+				default:
+				}
+			}
 		}
 
 		d5 += time.Since(start)
