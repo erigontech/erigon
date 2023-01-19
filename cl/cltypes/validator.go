@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
@@ -9,7 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
-const DepositProofLength = 33
+const (
+	DepositProofLength = 33
+	SyncCommitteeSize  = 512
+)
 
 type DepositData struct {
 	PubKey                [48]byte
@@ -19,13 +24,13 @@ type DepositData struct {
 	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
-func (d *DepositData) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, d.SizeSSZ())
-	copy(buf, d.PubKey[:])
-	copy(buf[48:], d.WithdrawalCredentials[:])
-	ssz_utils.MarshalUint64SSZ(buf[80:], d.Amount)
-	copy(buf[88:], d.Signature[:])
-	return buf, nil
+func (d *DepositData) EncodeSSZ(dst []byte) []byte {
+	buf := dst
+	buf = append(buf, d.PubKey[:]...)
+	buf = append(buf, d.WithdrawalCredentials[:]...)
+	buf = append(buf, ssz_utils.Uint64SSZ(d.Amount)...)
+	buf = append(buf, d.Signature[:]...)
+	return buf
 }
 
 func (d *DepositData) UnmarshalSSZ(buf []byte) error {
@@ -60,22 +65,18 @@ func (d *DepositData) HashTreeRoot() ([32]byte, error) {
 
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof [][]byte
+	Proof [][]byte // 33 X 32 size.
 	Data  *DepositData
 }
 
-func (d *Deposit) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, d.SizeSSZ())
-	for i, proofSeg := range d.Proof {
-		copy(buf[i*32:], proofSeg)
-	}
+func (d *Deposit) EncodeSSZ(dst []byte) []byte {
 
-	dataEnc, err := d.Data.MarshalSSZ()
-	if err != nil {
-		return nil, err
+	buf := dst
+	for _, proofSeg := range d.Proof {
+		buf = append(buf, proofSeg...)
 	}
-	copy(buf[33*32:], dataEnc)
-	return buf, nil
+	buf = d.Data.EncodeSSZ(buf)
+	return buf
 }
 
 func (d *Deposit) UnmarshalSSZ(buf []byte) error {
@@ -90,7 +91,11 @@ func (d *Deposit) UnmarshalSSZ(buf []byte) error {
 	return d.Data.UnmarshalSSZ(buf[33*32:])
 }
 
-func (d *Deposit) SizeSSZ() int {
+func (d *Deposit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return d.UnmarshalSSZ(buf)
+}
+
+func (d *Deposit) EncodingSizeSSZ() int {
 	return 1240
 }
 
@@ -118,14 +123,11 @@ type VoluntaryExit struct {
 	ValidatorIndex uint64
 }
 
-func (e *VoluntaryExit) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, e.SizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, e.Epoch)
-	ssz_utils.MarshalUint64SSZ(buf[8:], e.ValidatorIndex)
-	return buf, nil
+func (e *VoluntaryExit) EncodeSSZ(buf []byte) []byte {
+	return append(buf, append(ssz_utils.Uint64SSZ(e.Epoch), ssz_utils.Uint64SSZ(e.ValidatorIndex)...)...)
 }
 
-func (e *VoluntaryExit) UnmarshalSSZ(buf []byte) error {
+func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
 	e.Epoch = ssz_utils.UnmarshalUint64SSZ(buf)
 	e.ValidatorIndex = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	return nil
@@ -146,12 +148,9 @@ type SignedVoluntaryExit struct {
 	Signature    [96]byte
 }
 
-func (e *SignedVoluntaryExit) MarshalSSZ() ([]byte, error) {
-	marshalledExit, err := e.VolunaryExit.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return append(marshalledExit, e.Signature[:]...), nil
+func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
+	buf := e.VolunaryExit.EncodeSSZ(dst)
+	return append(buf, e.Signature[:]...)
 }
 
 func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
@@ -159,11 +158,15 @@ func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
 
-	if err := e.VolunaryExit.UnmarshalSSZ(buf); err != nil {
+	if err := e.VolunaryExit.DecodeSSZ(buf); err != nil {
 		return err
 	}
 	copy(e.Signature[:], buf[16:])
 	return nil
+}
+
+func (e *SignedVoluntaryExit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
+	return e.UnmarshalSSZ(buf)
 }
 
 func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
@@ -178,6 +181,76 @@ func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
 	return utils.Keccak256(exitRoot[:], sigRoot[:]), nil
 }
 
-func (e *SignedVoluntaryExit) SizeSSZ() int {
+func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
 	return 96 + e.VolunaryExit.SizeSSZ()
+}
+
+/*
+ * Sync committe public keys and their aggregate public keys, we use array of pubKeys.
+ */
+type SyncCommittee struct {
+	PubKeys            [][48]byte `ssz-size:"512,48"`
+	AggregatePublicKey [48]byte   `ssz-size:"48"`
+}
+
+// MarshalSSZTo ssz marshals the SyncCommittee object to a target array
+func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
+
+	if len(s.PubKeys) != SyncCommitteeSize {
+		return nil, fmt.Errorf("wrong sync committee size")
+	}
+	for _, key := range s.PubKeys {
+		dst = append(dst, key[:]...)
+	}
+	dst = append(dst, s.AggregatePublicKey[:]...)
+
+	return dst, nil
+}
+
+// UnmarshalSSZ ssz unmarshals the SyncCommittee object
+func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
+	if len(buf) < 24624 {
+		return ssz_utils.ErrLowBufferSize
+	}
+
+	s.PubKeys = make([][48]byte, SyncCommitteeSize)
+	for i := range s.PubKeys {
+		copy(s.PubKeys[i][:], buf[i*48:(i*48)+48])
+	}
+	copy(s.AggregatePublicKey[:], buf[24576:])
+
+	return nil
+}
+
+// SizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
+func (s *SyncCommittee) SizeSSZ() (size int) {
+	size = 24624
+	return
+}
+
+// HashTreeRootWith ssz hashes the SyncCommittee object with a hasher
+func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
+	// Compute the sync committee leaf
+	pubKeysLeaves := make([][32]byte, SyncCommitteeSize)
+	if len(s.PubKeys) != SyncCommitteeSize {
+		return [32]byte{}, fmt.Errorf("wrong sync committee size")
+	}
+	var err error
+	for i, key := range s.PubKeys {
+		pubKeysLeaves[i], err = merkle_tree.PublicKeyRoot(key)
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	pubKeyLeaf, err := merkle_tree.ArraysRoot(pubKeysLeaves, SyncCommitteeSize)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	aggregatePublicKeyRoot, err := merkle_tree.PublicKeyRoot(s.AggregatePublicKey)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	return merkle_tree.ArraysRoot([][32]byte{pubKeyLeaf, aggregatePublicKeyRoot}, 2)
 }

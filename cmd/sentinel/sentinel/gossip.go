@@ -17,10 +17,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -30,10 +29,9 @@ import (
 type GossipSubscription struct {
 	gossip_topic GossipTopic
 	host         peer.ID
-	ch           chan *communication.GossipContext
+	ch           chan *pubsub.Message
 	ctx          context.Context
 
-	p     communication.GossipCodec
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
 
@@ -50,10 +48,9 @@ func (sub *GossipSubscription) Listen() (err error) {
 			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)
 			return
 		}
-		sub.p = sub.gossip_topic.Codec(sub.sub, sub.topic)
 		var sctx context.Context
 		sctx, sub.cf = context.WithCancel(sub.ctx)
-		go sub.run(sctx)
+		go sub.run(sctx, sub.sub, sub.sub.Topic())
 	})
 	return nil
 }
@@ -78,13 +75,13 @@ func (s *GossipSubscription) Close() {
 
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
-func (s *GossipSubscription) run(ctx context.Context) {
+func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topic string) {
 	for {
-		s.do(ctx)
+		s.do(ctx, sub, topic)
 	}
 }
 
-func (s *GossipSubscription) do(ctx context.Context) {
+func (s *GossipSubscription) do(ctx context.Context, sub *pubsub.Subscription, topic string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
@@ -94,18 +91,20 @@ func (s *GossipSubscription) do(ctx context.Context) {
 	case <-ctx.Done():
 		return
 	default:
-		val := s.gossip_topic.Typ.Clone()
-		pctx, err := s.p.Decode(ctx, val)
+		msg, err := sub.Next(ctx)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				return
 			}
-			log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", pctx.Topic, "pkt", reflect.TypeOf(val))
+			log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", topic)
 			return
 		}
-		if pctx.Msg.GetFrom() == s.host {
+		if msg.GetFrom() == s.host {
 			return
 		}
-		s.ch <- pctx
+		if err := s.topic.Publish(ctx, common.CopyBytes(msg.Data)); err != nil {
+			return
+		}
+		s.ch <- msg
 	}
 }

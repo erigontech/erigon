@@ -24,7 +24,7 @@ func nullStage(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u
 	return nil
 }
 func ExecutionStages(ctx context.Context, sm prune.Mode, snapshots stagedsync.SnapshotsCfg, headers stagedsync.HeadersCfg, cumulativeIndex stagedsync.CumulativeIndexCfg, blockHashCfg stagedsync.BlockHashesCfg, bodies stagedsync.BodiesCfg, issuance stagedsync.IssuanceCfg, senders stagedsync.SendersCfg, exec stagedsync.ExecuteBlockCfg, hashState stagedsync.HashStateCfg, trieCfg stagedsync.TrieCfg, history stagedsync.HistoryCfg, logIndex stagedsync.LogIndexCfg, callTraces stagedsync.CallTracesCfg, txLookup stagedsync.TxLookupCfg, finish stagedsync.FinishCfg, test bool) []*stagedsync.Stage {
-	defaultStages := stagedsync.DefaultStages(ctx, sm, snapshots, headers, cumulativeIndex, blockHashCfg, bodies, issuance, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, finish, test)
+	defaultStages := stagedsync.DefaultStages(ctx, snapshots, headers, cumulativeIndex, blockHashCfg, bodies, issuance, senders, exec, hashState, trieCfg, history, logIndex, callTraces, txLookup, finish, test)
 	// Remove body/headers stages
 	defaultStages[1].Forward = nullStage
 	defaultStages[4].Forward = nullStage

@@ -43,12 +43,12 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 	}
 }
 
-func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatrix) error {
+func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error {
 	if l.execution == nil {
 		return nil
 	}
 	// If we recently imported the beacon block, skip.
-	bcRoot, err := beaconBlock.HashTreeRoot()
+	bcRoot, err := beaconBlock.HashSSZ()
 	if err != nil {
 		return err
 	}

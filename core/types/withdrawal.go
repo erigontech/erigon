@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
@@ -39,7 +38,7 @@ type Withdrawal struct {
 	Index     uint64            `json:"index"`          // monotonically increasing identifier issued by consensus layer
 	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
-	Amount    uint256.Int       `json:"amount"`         // value of withdrawal in wei
+	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -49,7 +48,7 @@ func (obj *Withdrawal) EncodingSize() int {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(obj.Validator)
 	encodingSize++
-	encodingSize += rlp.Uint256LenExcludingHead(&obj.Amount)
+	encodingSize += rlp.IntLenExcludingHead(obj.Amount)
 	return encodingSize
 }
 
@@ -76,7 +75,7 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 		return err
 	}
 
-	return obj.Amount.EncodeRLP(w)
+	return rlp.EncodeInt(obj.Amount, w, b[:])
 }
 
 func (obj *Withdrawal) EncodeSSZ() []byte {
@@ -84,8 +83,7 @@ func (obj *Withdrawal) EncodeSSZ() []byte {
 	ssz_utils.MarshalUint64SSZ(buf, obj.Index)
 	ssz_utils.MarshalUint64SSZ(buf[8:], obj.Validator)
 	copy(buf[16:], obj.Address[:])
-	// Supports only GWEI format.
-	ssz_utils.MarshalUint64SSZ(buf[36:], obj.Amount.Uint64())
+	ssz_utils.MarshalUint64SSZ(buf[36:], obj.Amount)
 	return buf
 }
 
@@ -96,7 +94,7 @@ func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
 	obj.Index = ssz_utils.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	copy(obj.Address[:], buf[16:])
-	obj.Amount = *uint256.NewInt(ssz_utils.UnmarshalUint64SSZ(buf[36:]))
+	obj.Amount = ssz_utils.UnmarshalUint64SSZ(buf[36:])
 	return nil
 }
 
@@ -112,7 +110,7 @@ func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporar
 		merkle_tree.Uint64Root(obj.Index),
 		merkle_tree.Uint64Root(obj.Validator),
 		addressLeaf,
-		merkle_tree.Uint64Root(obj.Amount.Uint64()),
+		merkle_tree.Uint64Root(obj.Amount),
 	}, 4)
 }
 
@@ -138,10 +136,9 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	}
 	copy(obj.Address[:], b)
 
-	if b, err = s.Uint256Bytes(); err != nil {
+	if obj.Amount, err = s.Uint(); err != nil {
 		return fmt.Errorf("read Amount: %w", err)
 	}
-	obj.Amount.SetBytes(b)
 
 	return s.ListEnd()
 }
@@ -150,7 +147,7 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 type withdrawalMarshaling struct {
 	Index     hexutil.Uint64
 	Validator hexutil.Uint64
-	Amount    *hexutil.Big
+	Amount    hexutil.Uint64
 }
 
 // Withdrawals implements DerivableList for withdrawals.

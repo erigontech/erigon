@@ -86,7 +86,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(8): Eth1Data
 	if b.isLeafDirty(Eth1DataLeafIndex) {
-		dataRoot, err := b.eth1Data.HashTreeRoot()
+		dataRoot, err := b.eth1Data.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -169,7 +169,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(18): PreviousJustifiedCheckpoint
 	if b.isLeafDirty(PreviousJustifiedCheckpointLeafIndex) {
-		checkpointRoot, err := b.previousJustifiedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.previousJustifiedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -178,7 +178,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(19): CurrentJustifiedCheckpoint
 	if b.isLeafDirty(CurrentJustifiedCheckpointLeafIndex) {
-		checkpointRoot, err := b.currentJustifiedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.currentJustifiedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -187,7 +187,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(20): FinalizedCheckpoint
 	if b.isLeafDirty(FinalizedCheckpointLeafIndex) {
-		checkpointRoot, err := b.finalizedCheckpoint.HashTreeRoot()
+		checkpointRoot, err := b.finalizedCheckpoint.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -205,7 +205,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(22): CurrentSyncCommitte
 	if b.isLeafDirty(CurrentSyncCommitteeLeafIndex) {
-		committeeRoot, err := b.currentSyncCommittee.HashTreeRoot()
+		committeeRoot, err := b.currentSyncCommittee.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -214,7 +214,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(23): NextSyncCommitte
 	if b.isLeafDirty(NextSyncCommitteeLeafIndex) {
-		committeeRoot, err := b.nextSyncCommittee.HashTreeRoot()
+		committeeRoot, err := b.nextSyncCommittee.HashSSZ()
 		if err != nil {
 			return err
 		}
