@@ -137,17 +137,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 					(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
 					// Perhaps we already have this block
 					block := rawdb.ReadBlock(tx, hash, blockNum)
-					if block == nil {
-						var tripleHash TripleHash
-						copy(tripleHash[:], header.UncleHash.Bytes())
-						copy(tripleHash[length.Hash:], header.TxHash.Bytes())
-						if header.WithdrawalsHash != nil {
-							copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
-						} else {
-							copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
-						}
-						bd.requestedMap[tripleHash] = blockNum
-					} else {
+					if block != nil {
 						bd.addBodyToCache(blockNum, block.RawBody())
 						request = false
 					}
@@ -159,6 +149,15 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 
 		if request {
+			var tripleHash TripleHash
+			copy(tripleHash[:], header.UncleHash.Bytes())
+			copy(tripleHash[length.Hash:], header.TxHash.Bytes())
+			if header.WithdrawalsHash != nil {
+				copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
+			} else {
+				copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
+			}
+			bd.requestedMap[tripleHash] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
