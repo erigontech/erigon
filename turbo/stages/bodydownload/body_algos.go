@@ -297,6 +297,7 @@ Loop:
 				undelivered++
 				continue
 			}
+			log.Debug("Delivered", "blockNum", blockNum, "peer", fmt.Sprintf("%x", delivery.peerID)[:8])
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
@@ -406,10 +407,16 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64) *types.RawBody {
-	if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
-		bd.bodyCacheSize -= item.payloadSize
-		return item.rawBody
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
+	if delete {
+		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+			bd.bodyCacheSize -= item.payloadSize
+			return item.rawBody
+		}
+	} else {
+		if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
+			return item.rawBody
+		}
 	}
 	return nil
 }
