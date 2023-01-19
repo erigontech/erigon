@@ -354,6 +354,7 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 		AuRaStep:   g.AuRaStep,
 		AuRaSeal:   g.AuRaSeal,
 	}
+	t := new(big.Int).SetUint64(g.Timestamp)
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
 	}
@@ -368,16 +369,16 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				head.BaseFee = new(big.Int).SetUint64(params.InitialBaseFee)
 			}
 		}
-		if g.Config.IsShanghai(g.Timestamp) {
+		if g.Config.IsShanghai(t) {
 			head.WithdrawalsHash = &types.EmptyRootHash
 		}
-		if g.Config.IsSharding(g.Timestamp) {
+		if g.Config.IsSharding(t) {
 			head.SetExcessDataGas(g.ExcessDataGas)
 		}
 	}
 
 	var withdrawals []*types.Withdrawal
-	if g.Config != nil && (g.Config.IsShanghai(g.Timestamp)) {
+	if g.Config != nil && (g.Config.IsShanghai(t)) {
 		withdrawals = []*types.Withdrawal{}
 	}
 

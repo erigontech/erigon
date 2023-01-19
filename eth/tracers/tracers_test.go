@@ -95,7 +95,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	}
 
 	_, tx := memdb.NewTestTx(t)
-	rules := params.AllProtocolChanges.Rules(context.BlockNumber, context.Time)
+	rules := params.AllProtocolChanges.Rules(context.BlockNumber, new(big.Int).SetUint64(context.Time))
 	statedb, _ := tests.MakePreState(rules, tx, alloc, context.BlockNumber)
 
 	// Create the tracer, the EVM environment and run it

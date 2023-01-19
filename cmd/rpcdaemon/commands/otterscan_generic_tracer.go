@@ -38,7 +38,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 	ibs := state.New(cachedReader)
-	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
+	signer := types.MakeSigner(chainConfig, blockNum, block.TimeBig())
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
@@ -50,7 +50,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	engine := api.engine()
 
 	header := block.Header()
-	rules := chainConfig.Rules(block.NumberU64(), header.Time)
+	rules := chainConfig.Rules(block.NumberU64(), header.TimeBig())
 
 	var excessDataGas *big.Int
 	// Get the last block header

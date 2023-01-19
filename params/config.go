@@ -193,7 +193,7 @@ var (
 		Aura:                  &AuRaConfig{},
 	}
 
-	TestRules = TestChainConfig.Rules(0, 0)
+	TestRules = TestChainConfig.Rules(0, new(big.Int))
 )
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -232,10 +232,9 @@ type ChainConfig struct {
 	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
-
-	ShanghaiTime     *big.Int `json:"shanghaiTime,omitempty"`     // Shanghai switch time (nil = no fork, 0 = already activated)
-	CancunTime       *big.Int `json:"cancunTime,omitempty"`       // Cancun switch time (nil = no fork, 0 = already activated)
-	ShardingForkTime *uint64  `json:"shardingForkTime,omitempty"` // Mini-Danksharding switch block (nil = no fork, 0 = already activated)
+	CancunTime                    *big.Int `json:"cancunTime,omitempty"`                    // Cancun switch time (nil = no fork, 0 = already activated)
+	ShanghaiTime                  *big.Int `json:"shanghaiTime,omitempty"`                  // Shanghai switch time (nil = no fork, 0 = already activated)
+	ShardingForkTime              *big.Int `json:"shardingForkTime,omitempty"`              // Mini-Danksharding switch block (nil = no fork, 0 = already activated)
 
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
@@ -615,11 +614,6 @@ func (c *ChainConfig) IsGrayGlacier(num uint64) bool {
 	return isForked(c.GrayGlacierBlock, num)
 }
 
-// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *ChainConfig) IsShanghai(time uint64) bool {
-	return isForked(c.ShanghaiTime, time)
-}
-
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *ChainConfig) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -629,12 +623,14 @@ func (c *ChainConfig) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
 
+// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
+func (c *ChainConfig) IsShanghai(time *big.Int) bool {
+	return isTimestampForked(c.ShardingForkTime, time)
+}
+
 // IsSharding returns whether num is either equal to the fork block that activates proto-danksharding (EIP-4844)
-func (c *ChainConfig) IsSharding(time uint64) bool {
-	if c.ShardingForkTime == nil {
-		return false
-	}
-	return *c.ShardingForkTime <= time
+func (c *ChainConfig) IsSharding(time *big.Int) bool {
+	return isTimestampForked(c.ShardingForkTime, time)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -662,9 +658,10 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		return nil
 	}
 	type fork struct {
-		name     string
-		block    *big.Int
-		optional bool // if true, the fork may be nil and next fork is still allowed
+		name      string
+		block     *big.Int
+		timestamp *big.Int // forks after the merge are scheduled using timestamps
+		optional  bool     // if true, the fork may be nil and next fork is still allowed
 	}
 	var lastFork fork
 	for _, cur := range []fork{
@@ -684,9 +681,9 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, optional: true},
-		// {name: "shanghaiBlock", block: c.ShanghaiTime, optional: true},
 		{name: "cancunBlock", block: c.CancunTime, optional: true},
-		// {name: "shardingForkBlock", block: new(big.Int).SetUint64(*c.ShardingForkTime), optional: true},
+		{name: "shanghaiTime", timestamp: c.ShanghaiTime},
+		{name: "shardingForkTime", timestamp: c.ShardingForkTime},
 	} {
 		if lastFork.name != "" {
 			// Next one must be higher number
@@ -763,15 +760,15 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, head uint64) *ConfigC
 	if isForkIncompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
 	}
-	// if isForkIncompatible(c.ShanghaiBlock, newcfg.ShanghaiBlock, head) {
-	// 	return newCompatError("Shanghai fork block", c.ShanghaiBlock, newcfg.ShanghaiBlock)
-	// }
 	if isForkIncompatible(c.CancunTime, newcfg.CancunTime, head) {
 		return newCompatError("Cancun fork block", c.CancunTime, newcfg.CancunTime)
 	}
-	// if isForkIncompatible(c.ShardingForkBlock, newcfg.ShardingForkBlock, head) {
-	// 	return newCompatError("Mini-Danksharding fork block", c.ShardingForkBlock, newcfg.ShardingForkBlock)
-	// }
+	if isForkIncompatible(c.ShanghaiTime, newcfg.ShanghaiTime, head) {
+		return newCompatError("Shanghai fork block", c.ShanghaiTime, newcfg.ShanghaiTime)
+	}
+	if isForkIncompatible(c.ShardingForkTime, newcfg.ShardingForkTime, head) {
+		return newCompatError("Mini-Danksharding fork block", c.ShardingForkTime, newcfg.ShardingForkTime)
+	}
 
 	// Parlia forks
 	if isForkIncompatible(c.RamanujanBlock, newcfg.RamanujanBlock, head) {
@@ -825,6 +822,16 @@ func configNumEqual(x, y *big.Int) bool {
 	return x.Cmp(y) == 0
 }
 
+// isTimestampForked returns whether a fork scheduled at timestamp s is active
+// at the given head timestamp. Whilst this method is the same as isBlockForked,
+// they are explicitly separate for clearer reading.
+func isTimestampForked(s, head *big.Int) bool {
+	if s == nil || head == nil {
+		return false
+	}
+	return s.Cmp(head) <= 0
+}
+
 // ConfigCompatError is raised if the locally-stored blockchain is initialised with a
 // ChainConfig that would alter the past.
 type ConfigCompatError struct {
@@ -873,7 +880,7 @@ type Rules struct {
 }
 
 // Rules ensures c's ChainID is not nil.
-func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
+func (c *ChainConfig) Rules(num uint64, timestamp *big.Int) *Rules {
 	chainID := c.ChainID
 	if chainID == nil {
 		chainID = new(big.Int)
@@ -890,9 +897,9 @@ func (c *ChainConfig) Rules(num uint64, time uint64) *Rules {
 		IsIstanbul:            c.IsIstanbul(num),
 		IsBerlin:              c.IsBerlin(num),
 		IsLondon:              c.IsLondon(num),
-		IsShanghai:            c.IsShanghai(time),
+		IsShanghai:            c.IsShanghai(timestamp),
 		IsCancun:              c.IsCancun(num),
-		IsSharding:            c.IsSharding(time),
+		IsSharding:            c.IsSharding(timestamp),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),

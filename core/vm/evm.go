@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"math/big"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -108,7 +109,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 		intraBlockState: state,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
-		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Time),
+		chainRules:      chainConfig.Rules(blockCtx.BlockNumber, new(big.Int).SetUint64(blockCtx.Time)),
 	}
 
 	evm.interpreter = NewEVMInterpreter(evm, vmConfig)

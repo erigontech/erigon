@@ -71,7 +71,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		// temp solution to catch bugs
 		panic(fmt.Sprintf("send_transaction.go::SendRawTransaction -> ReadBlockByNumber: Could not read block by number: block number# %d", *blockNum))
 	}
-	signer := types.MakeSigner(cc, *blockNum, block.Time())
+	signer := types.MakeSigner(cc, *blockNum, block.TimeBig())
 	from, err := txn.Sender(*signer)
 	if err != nil {
 		return common.Hash{}, err

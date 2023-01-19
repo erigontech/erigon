@@ -216,8 +216,9 @@ func Main(ctx *cli.Context) error {
 	} else {
 		txsWithKeys = inputData.Txs
 	}
+	timestamp := new(big.Int).SetUint64(prestate.Env.Timestamp)
 	// We may have to sign the transactions.
-	signer := types.MakeSigner(chainConfig, prestate.Env.Number, prestate.Env.Timestamp)
+	signer := types.MakeSigner(chainConfig, prestate.Env.Number, timestamp)
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
 		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
@@ -236,7 +237,7 @@ func Main(ctx *cli.Context) error {
 		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chain rules"))
 	}
 
-	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
+	if chainConfig.IsShanghai(timestamp) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
 	}
 
@@ -287,7 +288,8 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
+	// TODO: make sure chainConfig.Rules(0, new(big.Int)) is correct
+	reader, writer := MakePreState(chainConfig.Rules(0, new(big.Int)), tx, prestate.Pre)
 	engine := ethash.NewFaker()
 
 	result, err := core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHash, engine, block, reader, writer, nil, nil, getTracer)

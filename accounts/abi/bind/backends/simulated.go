@@ -699,7 +699,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	}
 
 	// Check transaction validity.
-	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time()) // or block.Time()?
+	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.TimeBig()) // or block.Time()?
 	sender, senderErr := tx.Sender(*signer)
 	if senderErr != nil {
 		return fmt.Errorf("invalid transaction: %w", senderErr)

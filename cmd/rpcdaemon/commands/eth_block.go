@@ -110,9 +110,9 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Difficulty: parent.Difficulty,
 		Coinbase:   coinbase,
 	}
-
-	signer := types.MakeSigner(chainConfig, blockNumber, timestamp) // TODO: see if timestamp is correct arg here?
-	rules := chainConfig.Rules(blockNumber, timestamp)
+	t := new(big.Int).SetUint64(timestamp)
+	signer := types.MakeSigner(chainConfig, blockNumber, t) // TODO: see if t is correct arg here?
+	rules := chainConfig.Rules(blockNumber, t)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err

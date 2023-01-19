@@ -94,7 +94,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			// Configure a blockchain with the given prestate
 			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), new(big.Int).SetUint64(uint64(test.Context.Time)))
 				origin, _ = signer.Sender(tx)
 				txContext = evmtypes.TxContext{
 					Origin:   origin,
@@ -110,7 +110,7 @@ func testPrestateDiffTracer(tracerName string, dirPath string, t *testing.T) {
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
 				_, dbTx    = memdb.NewTestTx(t)
-				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, new(big.Int).SetUint64(context.Time))
 				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, context.BlockNumber)
 			)
 			if test.Genesis.BaseFee != nil {

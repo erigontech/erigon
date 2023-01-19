@@ -88,7 +88,7 @@ func validateAndFillMaxStack(jt *JumpTable) {
 }
 
 func newShardingInstructionSet() JumpTable {
-	instructionSet := newLondonInstructionSet()
+	instructionSet := newShanghaiInstructionSet()
 	enableSharding(&instructionSet)
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet

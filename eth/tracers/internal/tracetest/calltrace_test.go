@@ -129,7 +129,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			}
 			// Configure a blockchain with the given prestate
 			var (
-				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
+				signer    = types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), new(big.Int).SetUint64(uint64(test.Context.Time)))
 				origin, _ = signer.Sender(tx)
 				txContext = evmtypes.TxContext{
 					Origin:   origin,
@@ -145,7 +145,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 					GasLimit:    uint64(test.Context.GasLimit),
 				}
 				_, dbTx    = memdb.NewTestTx(t)
-				rules      = test.Genesis.Config.Rules(context.BlockNumber, context.Time)
+				rules      = test.Genesis.Config.Rules(context.BlockNumber, new(big.Int).SetUint64(context.Time))
 				statedb, _ = tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			)
 			if test.Genesis.BaseFee != nil {
@@ -230,7 +230,7 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 	if err != nil {
 		b.Fatalf("failed to parse testcase input: %v", err)
 	}
-	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), 0)
+	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), new(big.Int))
 	rules := &params.Rules{}
 	msg, err := tx.AsMessage(*signer, nil, rules)
 	if err != nil {
@@ -322,7 +322,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 			Balance: big.NewInt(500000000000000),
 		},
 	}
-	rules := params.MainnetChainConfig.Rules(context.BlockNumber, context.Time)
+	rules := params.MainnetChainConfig.Rules(context.BlockNumber, new(big.Int).SetUint64(context.Time))
 	_, dbTx := memdb.NewTestTx(t)
 	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
 	// Create the tracer, the EVM environment and run it

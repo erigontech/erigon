@@ -695,7 +695,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 		misc.ApplyDAOHardFork(ibs)
 	}
 	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
+	rules := chainConfig.Rules(block.NumberU64(), block.TimeBig())
 
 	var excessDataGas *big.Int
 	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)

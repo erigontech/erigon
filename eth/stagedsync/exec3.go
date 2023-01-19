@@ -498,7 +498,7 @@ Loop:
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
-		signer := *types.MakeSigner(chainConfig, blockNum, b.Time())
+		signer := *types.MakeSigner(chainConfig, blockNum, b.TimeBig())
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -545,7 +545,7 @@ Loop:
 				}
 			}()
 		}
-		rules := chainConfig.Rules(blockNum, b.Time())
+		rules := chainConfig.Rules(blockNum, b.TimeBig())
 		var gasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			select {
@@ -997,7 +997,7 @@ func reconstituteStep(last bool,
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, bn)
-		signer := *types.MakeSigner(chainConfig, bn, b.Time())
+		signer := *types.MakeSigner(chainConfig, bn, b.TimeBig())
 
 		f := core.GetHashFn(header, getHeaderFunc)
 		getHashFnMute := &sync.Mutex{}
@@ -1014,7 +1014,7 @@ func reconstituteStep(last bool,
 		}
 
 		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, excessDataGas)
-		rules := chainConfig.Rules(bn, b.Time())
+		rules := chainConfig.Rules(bn, b.TimeBig())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 			if bitmap.Contains(inputTxNum) {

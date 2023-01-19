@@ -61,7 +61,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 	ibs := state.New(cachedReader)
-	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
+	signer := types.MakeSigner(chainConfig, blockNum, block.TimeBig())
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
@@ -74,7 +74,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 
 	blockReceipts := rawdb.ReadReceipts(dbtx, block, senders)
 	header := block.Header()
-	rules := chainConfig.Rules(block.NumberU64(), header.Time)
+	rules := chainConfig.Rules(block.NumberU64(), header.TimeBig())
 	found := false
 
 	var excessDataGas *big.Int

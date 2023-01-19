@@ -644,7 +644,7 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 	}
 
 	// If pre-Shanghai and there are withdrawals, we should error
-	if reqWithdrawals != nil && !s.config.IsShanghai(payloadAttributes.Timestamp) {
+	if reqWithdrawals != nil && !s.config.IsShanghai(new(big.Int).SetUint64(payloadAttributes.Timestamp)) {
 		return &remote.EngineForkChoiceUpdatedReply{
 			PayloadStatus: &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_INVALID,

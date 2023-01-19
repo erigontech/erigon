@@ -245,7 +245,7 @@ func (t *jsTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Addr
 	t.ctx["value"] = valueBig
 	t.ctx["block"] = t.vm.ToValue(env.Context().BlockNumber)
 	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	rules := env.ChainConfig().Rules(env.Context().BlockNumber, new(big.Int).SetUint64(env.Context().Time))
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

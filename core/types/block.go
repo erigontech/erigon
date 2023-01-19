@@ -115,6 +115,11 @@ func bitsToBytes(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
 }
 
+// TimeBig returns the header's time field as a big int.
+func (h *Header) TimeBig() *big.Int {
+	return new(big.Int).SetUint64(h.Time)
+}
+
 // SetExcessDataGas sets the excess_data_gas field in the header
 func (h *Header) SetExcessDataGas(v *big.Int) {
 	h.ExcessDataGas = new(big.Int)
@@ -1607,6 +1612,9 @@ func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
 func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
 func (b *Block) Time() uint64         { return b.header.Time }
 
+// TimeBig returns the header's time field as a big int.
+func (b *Block) TimeBig() *big.Int { return new(big.Int).SetUint64(b.header.Time) }
+
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }
 func (b *Block) Nonce() BlockNonce        { return b.header.Nonce }
@@ -1642,7 +1650,7 @@ func (b *Block) HeaderNoCopy() *Header { return b.header }
 // Body returns the non-header content of the block.
 func (b *Block) Body() *Body {
 	bd := &Body{Transactions: b.transactions, Uncles: b.uncles, Withdrawals: b.withdrawals}
-	bd.SendersFromTxs() // is this required?
+	bd.SendersFromTxs() //
 	return bd
 }
 func (b *Block) SendersToTxs(senders []common.Address) {

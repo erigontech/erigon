@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -33,7 +34,7 @@ func TestSenders(t *testing.T) {
 	}
 
 	// prepare tx so it works with our test
-	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer1 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), new(big.Int))
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("01"), 1, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{
@@ -62,7 +63,7 @@ func TestSenders(t *testing.T) {
 	}))
 	require.NoError(rawdb.WriteCanonicalHash(tx, common.HexToHash("01"), 1))
 
-	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), 0)
+	signer2 := types.MakeSigner(params.TestChainConfig, params.TestChainConfig.BerlinBlock.Uint64(), new(big.Int))
 	require.NoError(rawdb.WriteBody(tx, common.HexToHash("02"), 2, &types.Body{
 		Transactions: []types.Transaction{
 			mustSign(&types.AccessListTx{

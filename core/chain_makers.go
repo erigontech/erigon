@@ -343,7 +343,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			gen(i, b)
 		}
 		if b.engine != nil {
-			shanghai := config.IsShanghai(b.header.Time)
+			shanghai := config.IsShanghai(b.header.TimeBig())
 			if shanghai && b.withdrawals == nil {
 				// need to make empty list to denote non-nil, but empty withdrawals to calc withdrawals hash
 				b.withdrawals = make([]*types.Withdrawal, 0)
@@ -355,7 +355,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), plainStateWriter); err != nil {
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.TimeBig()), plainStateWriter); err != nil {
 				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
 			}
 

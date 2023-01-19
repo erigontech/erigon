@@ -271,8 +271,9 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute data fee for eip-4844 data blobs if any
 	dgval := new(big.Int)
+	timestamp := new(big.Int).SetUint64(st.evm.Context().Time)
 	var dataGasUsed uint64
-	if st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
+	if st.evm.ChainConfig().IsSharding(timestamp) {
 		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil. Time: %v", ErrInternalFailure, st.evm.Context().Time)
@@ -366,7 +367,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
+	timestamp := new(big.Int).SetUint64(st.evm.Context().Time)
+	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(timestamp) {
 		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
 		if dataGasPrice.Cmp(st.msg.MaxFeePerDataGas().ToBig()) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",

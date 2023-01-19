@@ -224,7 +224,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		if err != nil {
 			return nil, common.Hash{}, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, new(big.Int)), baseFee, config.Rules(0, new(big.Int)))
 		if err != nil {
 			return nil, common.Hash{}, err
 		}

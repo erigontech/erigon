@@ -292,7 +292,7 @@ func (c *Clique) verifySeal(chain consensus.ChainHeaderReader, header *types.Hea
 }
 
 func (c *Clique) verifyShanghai(chain consensus.ChainHeaderReader, header *types.Header) error {
-	shanghai := chain.Config().IsShanghai(header.Time)
+	shanghai := chain.Config().IsShanghai(header.TimeBig())
 	if shanghai && header.WithdrawalsHash == nil {
 		return fmt.Errorf("missing withdrawalsHash")
 	}
@@ -305,7 +305,7 @@ func (c *Clique) verifyShanghai(chain consensus.ChainHeaderReader, header *types
 
 func (c *Clique) verifySharding(chain consensus.ChainHeaderReader, header, parent *types.Header) error {
 
-	if chain.Config().IsSharding(header.Time) {
+	if chain.Config().IsSharding(header.TimeBig()) {
 		// Verify the header's EIP-4844 attributes.
 		if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
 			return err

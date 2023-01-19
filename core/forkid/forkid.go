@@ -74,13 +74,12 @@ func NewIDFromForks(heightForks, timeForks []uint64, genesis common.Hash, headHe
 	}
 	var next uint64
 	for _, fork := range timeForks {
-		if headTime >= fork {
-			// Fork passed, checksum the previous hash and the fork time
+		if headTime <= fork {
+			// Fork already passed, checksum the previous hash and fork timestamp
 			hash = checksumUpdate(hash, fork)
 			continue
 		}
-		next = fork
-		break
+		return ID{Hash: checksumToBytes(hash), Next: fork}
 	}
 	return ID{Hash: checksumToBytes(hash), Next: next}
 }
@@ -221,12 +220,10 @@ func GatherForks(config *params.ChainConfig) (heightForks []uint64, timeForks []
 	for i := 0; i < kind.NumField(); i++ {
 		// Fetch the next field and skip non-fork rules
 		field := kind.Field(i)
-		time := false
-		if !strings.HasSuffix(field.Name, "Block") {
-			if !strings.HasSuffix(field.Name, "Time") {
-				continue
-			}
-			time = true
+
+		time := strings.HasSuffix(field.Name, "Time")
+		if !time && !strings.HasSuffix(field.Name, "Block") {
+			continue
 		}
 		if field.Type != reflect.TypeOf(new(big.Int)) {
 			continue

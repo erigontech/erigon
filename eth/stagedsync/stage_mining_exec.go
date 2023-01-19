@@ -369,7 +369,7 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	header := current.Header
 	tcount := 0
 	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed) // TODO see how much dataGas is needed here
-	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), 0)
+	signer := types.MakeSigner(&chainConfig, header.Number.Uint64(), new(big.Int))
 
 	var coalescedLogs types.Logs
 	noop := state.NewNoopWriter()

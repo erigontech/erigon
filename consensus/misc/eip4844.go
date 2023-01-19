@@ -79,7 +79,7 @@ func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
 }
 
 func HeaderSetExcessDataGas(chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions) {
-	if chain.Config().IsSharding(header.Time) {
+	if chain.Config().IsSharding(header.TimeBig()) {
 		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
 			header.SetExcessDataGas(CalcExcessDataGas(parent.ExcessDataGas, CountBlobs(txs)))
 		} else {

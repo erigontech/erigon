@@ -488,8 +488,8 @@ func (e *intraBlockExec) changeBlock(header *types.Header, excessDataGas *big.In
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
-	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time) // TODO: make sure `header.Time` is right arg
+	e.rules = e.chainConfig.Rules(e.blockNum, header.TimeBig())
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.TimeBig()) // TODO: make sure `header.Time` is right arg
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 

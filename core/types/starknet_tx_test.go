@@ -26,7 +26,7 @@ func TestStarknetTxDecodeRLP(t *testing.T) {
 	privateKey, _ := crypto.HexToECDSA(generatePrivateKey(t))
 
 	signature, _ := crypto.Sign(sha3.New256().Sum(nil), privateKey)
-	signer := MakeSigner(chainConfig, 1, 0)
+	signer := MakeSigner(chainConfig, 1, new(big.Int))
 
 	cases := []struct {
 		name string
