@@ -199,6 +199,13 @@ func BodiesForward(
 
 		write := true
 		for i := uint64(0); i < toProcess; i++ {
+			if !quiet {
+				select {
+				case <-logEvery.C:
+					logWritingBodies(logPrefix, bodyProgress, headerProgress)
+				default:
+				}
+			}
 			nextBlock := requestedLow + i
 			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
 			if rawBody == nil {
@@ -245,13 +252,6 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
-			if !quiet {
-				select {
-				case <-logEvery.C:
-					logWritingBodies(logPrefix, bodyProgress, headerProgress)
-				default:
-				}
-			}
 		}
 
 		d5 += time.Since(start)
