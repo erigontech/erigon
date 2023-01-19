@@ -209,6 +209,7 @@ func BodiesForward(
 			if !write {
 				continue
 			}
+			cfg.bd.NotDelivered(nextBlock)
 			header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
 			if err != nil {
 				return false, err
