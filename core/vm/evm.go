@@ -353,10 +353,10 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			// If the initcode is EOF, verify it is well-formed.
 			var c Container
 			if err := c.UnmarshalBinary(codeAndHash.code); err != nil {
-				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 			}
 			if err := c.ValidateCode(evm.config.JumpTableEOF); err != nil {
-				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOF, err)
+				return nil, libcommon.Address{}, gas, fmt.Errorf("%w: %v", ErrInvalidEOFInitcode, err)
 			}
 			contract.Container = &c
 		} else if fromEOF {
