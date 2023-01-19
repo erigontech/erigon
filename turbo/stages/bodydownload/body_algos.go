@@ -75,11 +75,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
-		// Check if we reached the highest allowed request block number, and turn back
-		if blockNum >= bd.maxProgress {
-			break // Avoid tight loop
-		}
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
@@ -172,11 +168,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		for _, num := range blockNums {
-			bd.requests[num] = bodyReq
-		}
 	}
-
 	return bodyReq, nil
 }
 
@@ -210,6 +202,12 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {
+	if len(bodyReq.BlockNums) > 0 {
+		log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
+	}
+	for _, num := range bodyReq.BlockNums {
+		bd.requests[num] = bodyReq
+	}
 	bodyReq.waitUntil = timeWithTimeout
 	bodyReq.peerID = peer
 }
@@ -343,6 +341,10 @@ func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
 }
 
+func (bd *BodyDownload) NotDelivered(blockNum uint64) {
+	bd.delivered.Remove(blockNum)
+}
+
 func (bd *BodyDownload) GetPenaltyPeers() [][64]byte {
 	peers := make([][64]byte, len(bd.peerMap))
 	i := 0
@@ -406,6 +408,7 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 
 func (bd *BodyDownload) GetBodyFromCache(blockNum uint64) *types.RawBody {
 	if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+		bd.bodyCacheSize -= item.payloadSize
 		return item.rawBody
 	}
 	return nil

@@ -18,7 +18,6 @@ package vm
 
 import (
 	"hash"
-	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -93,7 +92,7 @@ type EVMInterpreter struct {
 //
 //nolint:structcheck
 type VM struct {
-	evm *EVM
+	evm VMInterpreter
 	cfg Config
 
 	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
@@ -115,7 +114,7 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
-func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
+func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
 	case evm.ChainRules().IsCancun:
@@ -231,7 +230,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	steps := 0
 	for {
 		steps++
-		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
+		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
 		if in.cfg.Debug {
