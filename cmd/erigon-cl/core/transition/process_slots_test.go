@@ -59,6 +59,7 @@ func getEmptyState() *state.BeaconState {
 			BaseFee: big.NewInt(0),
 			Number:  big.NewInt(0),
 		},
+		JustificationBits: []byte{0},
 	}
 	return state.FromBellatrixState(bellatrixState)
 }

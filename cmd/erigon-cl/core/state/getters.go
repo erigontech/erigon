@@ -31,15 +31,15 @@ func (b *BeaconState) LatestBlockHeader() *cltypes.BeaconBlockHeader {
 	return b.latestBlockHeader
 }
 
-func (b *BeaconState) BlockRoots() [][32]byte {
+func (b *BeaconState) BlockRoots() [blockRootsLength]libcommon.Hash {
 	return b.blockRoots
 }
 
-func (b *BeaconState) StateRoots() [][32]byte {
+func (b *BeaconState) StateRoots() [stateRootsLength]libcommon.Hash {
 	return b.stateRoots
 }
 
-func (b *BeaconState) HistoricalRoots() [][32]byte {
+func (b *BeaconState) HistoricalRoots() []libcommon.Hash {
 	return b.historicalRoots
 }
 
@@ -67,12 +67,16 @@ func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
 
-func (b *BeaconState) RandaoMixes() [][32]byte {
+func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
 	return b.randaoMixes
 }
 
-func (b *BeaconState) Slashings() []uint64 {
+func (b *BeaconState) Slashings() [slashingsLength]uint64 {
 	return b.slashings
+}
+
+func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
+	return b.slashings[pos]
 }
 
 func (b *BeaconState) PreviousEpochParticipation() []byte {
@@ -83,7 +87,7 @@ func (b *BeaconState) CurrentEpochParticipation() []byte {
 	return b.currentEpochParticipation
 }
 
-func (b *BeaconState) JustificationBits() []byte {
+func (b *BeaconState) JustificationBits() byte {
 	return b.justificationBits
 }
 
@@ -121,19 +125,19 @@ func (b *BeaconState) GetStateSSZObject() ssz_utils.ObjectSSZ {
 			Slot:                         b.slot,
 			Fork:                         b.fork,
 			LatestBlockHeader:            b.latestBlockHeader,
-			BlockRoots:                   b.blockRoots,
-			StateRoots:                   b.stateRoots,
-			HistoricalRoots:              b.historicalRoots,
+			BlockRoots:                   preparateRootsForHashing(b.blockRoots[:]),
+			StateRoots:                   preparateRootsForHashing(b.stateRoots[:]),
+			HistoricalRoots:              preparateRootsForHashing(b.historicalRoots),
 			Eth1Data:                     b.eth1Data,
 			Eth1DataVotes:                b.eth1DataVotes,
 			Eth1DepositIndex:             b.eth1DepositIndex,
 			Validators:                   b.validators,
 			Balances:                     b.balances,
-			RandaoMixes:                  b.randaoMixes,
-			Slashings:                    b.slashings,
+			RandaoMixes:                  preparateRootsForHashing(b.randaoMixes[:]),
+			Slashings:                    b.slashings[:],
 			PreviousEpochParticipation:   b.previousEpochParticipation,
 			CurrentEpochParticipation:    b.currentEpochParticipation,
-			JustificationBits:            b.justificationBits,
+			JustificationBits:            []byte{b.justificationBits},
 			FinalizedCheckpoint:          b.finalizedCheckpoint,
 			CurrentJustifiedCheckpoint:   b.currentJustifiedCheckpoint,
 			PreviousJustifiedCheckpoint:  b.previousJustifiedCheckpoint,
