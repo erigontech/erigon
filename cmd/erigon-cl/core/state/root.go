@@ -41,7 +41,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(3): Fork
 	if b.isLeafDirty(ForkLeafIndex) {
-		forkRoot, err := b.fork.HashTreeRoot()
+		forkRoot, err := b.fork.HashSSZ()
 		if err != nil {
 			return err
 		}

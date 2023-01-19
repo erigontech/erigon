@@ -44,7 +44,7 @@ func ValidatorsVectorRoot(validators []*cltypes.Validator) ([32]byte, error) {
 	vectorizedValidatorsRoot := make([][32]byte, len(validators))
 	// Vectorize ETH1 Data first of all
 	for i, validator := range validators {
-		vectorizedValidatorsRoot[i], err = validator.HashTreeRoot()
+		vectorizedValidatorsRoot[i], err = validator.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}
