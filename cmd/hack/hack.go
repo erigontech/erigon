@@ -1284,11 +1284,11 @@ func iterate(filename string, prefix string) error {
 		if bytes.HasPrefix(key, pBytes) {
 			val, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(val)
-			efIt := ef.Iterator()
+			efIt := ef.Iterator(0)
 			fmt.Printf("[%x] =>", key)
 			cnt := 0
 			for efIt.HasNext() {
-				txNum := efIt.Next()
+				txNum, _ := efIt.Next()
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				offset := r.Lookup2(txKey[:], key)
