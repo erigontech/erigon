@@ -327,14 +327,10 @@ Loop:
 // requestedLow minimum value.
 // the requestedLow count is increased by the number returned
 func (bd *BodyDownload) NextProcessingCount() uint64 {
-	if bd.delivered.IsEmpty() {
-		return 0
+	var i uint64
+	for i = 0; bd.delivered.Contains(bd.requestedLow + i); i++ {
 	}
-	min := bd.delivered.Minimum()
-	if min < bd.requestedLow {
-		return 0
-	}
-	return min - bd.requestedLow
+	return i
 }
 
 func (bd *BodyDownload) AdvanceLow() {
