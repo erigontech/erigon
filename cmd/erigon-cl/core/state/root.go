@@ -41,7 +41,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(3): Fork
 	if b.isLeafDirty(ForkLeafIndex) {
-		forkRoot, err := b.fork.HashTreeRoot()
+		forkRoot, err := b.fork.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -59,7 +59,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(5): BlockRoots
 	if b.isLeafDirty(BlockRootsLeafIndex) {
-		blockRootsRoot, err := merkle_tree.ArraysRoot(b.blockRoots, state_encoding.BlockRootsLength)
+		blockRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.blockRoots[:]), state_encoding.BlockRootsLength)
 		if err != nil {
 			return err
 		}
@@ -68,7 +68,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(6): StateRoots
 	if b.isLeafDirty(StateRootsLeafIndex) {
-		stateRootsRoot, err := merkle_tree.ArraysRoot(b.stateRoots, state_encoding.StateRootsLength)
+		stateRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.stateRoots[:]), state_encoding.StateRootsLength)
 		if err != nil {
 			return err
 		}
@@ -77,7 +77,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(7): HistoricalRoots
 	if b.isLeafDirty(HistoricalRootsLeafIndex) {
-		historicalRootsRoot, err := merkle_tree.ArraysRootWithLimit(b.historicalRoots, state_encoding.HistoricalRootsLength)
+		historicalRootsRoot, err := merkle_tree.ArraysRootWithLimit(preparateRootsForHashing(b.historicalRoots), state_encoding.HistoricalRootsLength)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(13): RandaoMixes
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
-		randaoRootsRoot, err := merkle_tree.ArraysRoot(b.randaoMixes, state_encoding.RandaoMixesLength)
+		randaoRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.randaoMixes[:]), state_encoding.RandaoMixesLength)
 		if err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(14): Slashings
 	if b.isLeafDirty(SlashingsLeafIndex) {
-		slashingsRoot, err := state_encoding.SlashingsRoot(b.slashings)
+		slashingsRoot, err := state_encoding.SlashingsRoot(b.slashings[:])
 		if err != nil {
 			return err
 		}
@@ -163,7 +163,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 	// Field(17): JustificationBits
 	if b.isLeafDirty(JustificationBitsLeafIndex) {
 		var root [32]byte
-		copy(root[:], b.justificationBits)
+		root[0] = b.justificationBits
 		b.updateLeaf(JustificationBitsLeafIndex, root)
 	}
 

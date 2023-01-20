@@ -3,219 +3,13 @@
 package cltypes
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/core/types"
 
 	ssz "github.com/prysmaticlabs/fastssz"
 )
-
-
-
-
-
-
-
-// MarshalSSZ ssz marshals the Fork object
-func (f *Fork) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(f)
-}
-
-// MarshalSSZTo ssz marshals the Fork object to a target array
-func (f *Fork) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'PreviousVersion'
-	dst = append(dst, f.PreviousVersion[:]...)
-
-	// Field (1) 'CurrentVersion'
-	dst = append(dst, f.CurrentVersion[:]...)
-
-	// Field (2) 'Epoch'
-	dst = ssz.MarshalUint64(dst, f.Epoch)
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the Fork object
-func (f *Fork) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 16 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'PreviousVersion'
-	copy(f.PreviousVersion[:], buf[0:4])
-
-	// Field (1) 'CurrentVersion'
-	copy(f.CurrentVersion[:], buf[4:8])
-
-	// Field (2) 'Epoch'
-	f.Epoch = ssz.UnmarshallUint64(buf[8:16])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the Fork object
-func (f *Fork) SizeSSZ() (size int) {
-	size = 16
-	return
-}
-
-// HashTreeRoot ssz hashes the Fork object
-func (f *Fork) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(f)
-}
-
-// HashTreeRootWith ssz hashes the Fork object with a hasher
-func (f *Fork) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'PreviousVersion'
-	hh.PutBytes(f.PreviousVersion[:])
-
-	// Field (1) 'CurrentVersion'
-	hh.PutBytes(f.CurrentVersion[:])
-
-	// Field (2) 'Epoch'
-	hh.PutUint64(f.Epoch)
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
-
-// MarshalSSZ ssz marshals the Validator object
-func (v *Validator) MarshalSSZ() ([]byte, error) {
-	return ssz.MarshalSSZ(v)
-}
-
-// MarshalSSZTo ssz marshals the Validator object to a target array
-func (v *Validator) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	// Field (0) 'PublicKey'
-	dst = append(dst, v.PublicKey[:]...)
-
-	// Field (1) 'WithdrawalCredentials'
-	if size := len(v.WithdrawalCredentials); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.WithdrawalCredentials", size, 32)
-		return
-	}
-	dst = append(dst, v.WithdrawalCredentials...)
-
-	// Field (2) 'EffectiveBalance'
-	dst = ssz.MarshalUint64(dst, v.EffectiveBalance)
-
-	// Field (3) 'Slashed'
-	dst = ssz.MarshalBool(dst, v.Slashed)
-
-	// Field (4) 'ActivationEligibilityEpoch'
-	dst = ssz.MarshalUint64(dst, v.ActivationEligibilityEpoch)
-
-	// Field (5) 'ActivationEpoch'
-	dst = ssz.MarshalUint64(dst, v.ActivationEpoch)
-
-	// Field (6) 'ExitEpoch'
-	dst = ssz.MarshalUint64(dst, v.ExitEpoch)
-
-	// Field (7) 'WithdrawableEpoch'
-	dst = ssz.MarshalUint64(dst, v.WithdrawableEpoch)
-
-	return
-}
-
-// UnmarshalSSZ ssz unmarshals the Validator object
-func (v *Validator) UnmarshalSSZ(buf []byte) error {
-	var err error
-	size := uint64(len(buf))
-	if size != 121 {
-		return ssz.ErrSize
-	}
-
-	// Field (0) 'PublicKey'
-	copy(v.PublicKey[:], buf[0:48])
-
-	// Field (1) 'WithdrawalCredentials'
-	if cap(v.WithdrawalCredentials) == 0 {
-		v.WithdrawalCredentials = make([]byte, 0, len(buf[48:80]))
-	}
-	v.WithdrawalCredentials = append(v.WithdrawalCredentials, buf[48:80]...)
-
-	// Field (2) 'EffectiveBalance'
-	v.EffectiveBalance = ssz.UnmarshallUint64(buf[80:88])
-
-	// Field (3) 'Slashed'
-	v.Slashed = ssz.UnmarshalBool(buf[88:89])
-
-	// Field (4) 'ActivationEligibilityEpoch'
-	v.ActivationEligibilityEpoch = ssz.UnmarshallUint64(buf[89:97])
-
-	// Field (5) 'ActivationEpoch'
-	v.ActivationEpoch = ssz.UnmarshallUint64(buf[97:105])
-
-	// Field (6) 'ExitEpoch'
-	v.ExitEpoch = ssz.UnmarshallUint64(buf[105:113])
-
-	// Field (7) 'WithdrawableEpoch'
-	v.WithdrawableEpoch = ssz.UnmarshallUint64(buf[113:121])
-
-	return err
-}
-
-// SizeSSZ returns the ssz encoded size in bytes for the Validator object
-func (v *Validator) SizeSSZ() (size int) {
-	size = 121
-	return
-}
-
-// HashTreeRoot ssz hashes the Validator object
-func (v *Validator) HashTreeRoot() ([32]byte, error) {
-	return ssz.HashWithDefaultHasher(v)
-}
-
-// HashTreeRootWith ssz hashes the Validator object with a hasher
-func (v *Validator) HashTreeRootWith(hh *ssz.Hasher) (err error) {
-	indx := hh.Index()
-
-	// Field (0) 'PublicKey'
-	hh.PutBytes(v.PublicKey[:])
-
-	// Field (1) 'WithdrawalCredentials'
-	if size := len(v.WithdrawalCredentials); size != 32 {
-		err = ssz.ErrBytesLengthFn("--.WithdrawalCredentials", size, 32)
-		return
-	}
-	hh.PutBytes(v.WithdrawalCredentials)
-
-	// Field (2) 'EffectiveBalance'
-	hh.PutUint64(v.EffectiveBalance)
-
-	// Field (3) 'Slashed'
-	hh.PutBool(v.Slashed)
-
-	// Field (4) 'ActivationEligibilityEpoch'
-	hh.PutUint64(v.ActivationEligibilityEpoch)
-
-	// Field (5) 'ActivationEpoch'
-	hh.PutUint64(v.ActivationEpoch)
-
-	// Field (6) 'ExitEpoch'
-	hh.PutUint64(v.ExitEpoch)
-
-	// Field (7) 'WithdrawableEpoch'
-	hh.PutUint64(v.WithdrawableEpoch)
-
-	if ssz.EnableVectorizedHTR {
-		hh.MerkleizeVectorizedHTR(indx)
-	} else {
-		hh.Merkleize(indx)
-	}
-	return
-}
 
 // MarshalSSZ ssz marshals the BeaconStateBellatrix object
 func (b *BeaconStateBellatrix) MarshalSSZ() ([]byte, error) {
@@ -240,7 +34,7 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 	if b.Fork == nil {
 		b.Fork = new(Fork)
 	}
-	if dst, err = b.Fork.MarshalSSZTo(dst); err != nil {
+	if dst, err = b.Fork.EncodeSSZ(dst); err != nil {
 		return
 	}
 
@@ -394,7 +188,7 @@ func (b *BeaconStateBellatrix) MarshalSSZTo(buf []byte) (dst []byte, err error) 
 		return
 	}
 	for ii := 0; ii < len(b.Validators); ii++ {
-		if dst, err = b.Validators[ii].MarshalSSZTo(dst); err != nil {
+		if dst, err = b.Validators[ii].EncodeSSZ(dst); err != nil {
 			return
 		}
 	}
@@ -459,7 +253,7 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 	if b.Fork == nil {
 		b.Fork = new(Fork)
 	}
-	if err = b.Fork.UnmarshalSSZ(buf[48:64]); err != nil {
+	if err = b.Fork.DecodeSSZ(buf[48:64]); err != nil {
 		return err
 	}
 
@@ -639,11 +433,12 @@ func (b *BeaconStateBellatrix) UnmarshalSSZ(buf []byte) error {
 			if b.Validators[ii] == nil {
 				b.Validators[ii] = new(Validator)
 			}
-			if err = b.Validators[ii].UnmarshalSSZ(buf[ii*121 : (ii+1)*121]); err != nil {
+			if err = b.Validators[ii].DecodeSSZ(buf[ii*121 : (ii+1)*121]); err != nil {
 				return err
 			}
 		}
 	}
+	fmt.Println(len(b.Validators))
 
 	// Field (12) 'Balances'
 	{

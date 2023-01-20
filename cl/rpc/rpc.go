@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
 )
+
+const maxMessageLength = 18 * datasize.MB
 
 // BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
@@ -179,6 +182,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
 			return nil, fmt.Errorf("unable to read varint from message prefix: %v", err)
+		}
+		// Sanity check for message size.
+		if encodedLn > uint64(maxMessageLength) {
+			return nil, fmt.Errorf("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
