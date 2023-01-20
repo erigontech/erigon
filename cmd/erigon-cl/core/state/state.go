@@ -10,6 +10,13 @@ import (
 
 type HashFunc func([]byte) ([32]byte, error)
 
+const (
+	blockRootsLength = 8192
+	stateRootsLength = 8192
+	randoMixesLength = 65536
+	slashingsLength  = 8192
+)
+
 type BeaconState struct {
 	// State fields
 	genesisTime                  uint64
@@ -17,19 +24,19 @@ type BeaconState struct {
 	slot                         uint64
 	fork                         *cltypes.Fork
 	latestBlockHeader            *cltypes.BeaconBlockHeader
-	blockRoots                   [][32]byte
-	stateRoots                   [][32]byte
-	historicalRoots              [][32]byte
+	blockRoots                   [blockRootsLength]libcommon.Hash
+	stateRoots                   [stateRootsLength]libcommon.Hash
+	historicalRoots              []libcommon.Hash
 	eth1Data                     *cltypes.Eth1Data
 	eth1DataVotes                []*cltypes.Eth1Data
 	eth1DepositIndex             uint64
 	validators                   []*cltypes.Validator
 	balances                     []uint64
-	randaoMixes                  [][32]byte
-	slashings                    []uint64
+	randaoMixes                  [randoMixesLength]libcommon.Hash
+	slashings                    [slashingsLength]uint64
 	previousEpochParticipation   []byte
 	currentEpochParticipation    []byte
-	justificationBits            []byte
+	justificationBits            byte
 	previousJustifiedCheckpoint  *cltypes.Checkpoint
 	currentJustifiedCheckpoint   *cltypes.Checkpoint
 	finalizedCheckpoint          *cltypes.Checkpoint
@@ -43,27 +50,54 @@ type BeaconState struct {
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 }
 
+func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
+	ret := make([][32]byte, len(roots))
+	for i := range roots {
+		copy(ret[i][:], roots[i][:])
+	}
+	return ret
+}
+
 // FromBellatrixState initialize the beacon state as a bellatrix state.
 func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
+	var blockRoots [stateRootsLength]libcommon.Hash
+	var stateRoots [stateRootsLength]libcommon.Hash
+	var randaoMixes [randoMixesLength]libcommon.Hash
+	historicalRoots := make([]libcommon.Hash, len(state.HistoricalRoots))
+	var slashings [slashingsLength]uint64
+	copy(slashings[:], state.Slashings)
+	for i := range state.BlockRoots {
+		copy(blockRoots[i][:], state.BlockRoots[i][:])
+	}
+	for i := range state.StateRoots {
+		copy(stateRoots[i][:], state.StateRoots[i][:])
+	}
+	for i := range state.RandaoMixes {
+		copy(randaoMixes[i][:], state.RandaoMixes[i][:])
+	}
+	for i := range state.HistoricalRoots {
+		copy(historicalRoots[i][:], state.HistoricalRoots[i][:])
+	}
+
 	return &BeaconState{
 		genesisTime:                 state.GenesisTime,
 		genesisValidatorsRoot:       state.GenesisValidatorsRoot,
 		slot:                        state.Slot,
 		fork:                        state.Fork,
 		latestBlockHeader:           state.LatestBlockHeader,
-		blockRoots:                  state.BlockRoots,
-		stateRoots:                  state.StateRoots,
-		historicalRoots:             state.HistoricalRoots,
+		blockRoots:                  blockRoots,
+		stateRoots:                  stateRoots,
+		historicalRoots:             historicalRoots,
 		eth1Data:                    state.Eth1Data,
 		eth1DataVotes:               state.Eth1DataVotes,
 		eth1DepositIndex:            state.Eth1DepositIndex,
 		validators:                  state.Validators,
 		balances:                    state.Balances,
-		randaoMixes:                 state.RandaoMixes,
-		slashings:                   state.Slashings,
+		randaoMixes:                 randaoMixes,
+		slashings:                   slashings,
 		previousEpochParticipation:  state.PreviousEpochParticipation,
 		currentEpochParticipation:   state.CurrentEpochParticipation,
-		justificationBits:           state.JustificationBits,
+		justificationBits:           state.JustificationBits[0],
 		previousJustifiedCheckpoint: state.PreviousJustifiedCheckpoint,
 		currentJustifiedCheckpoint:  state.CurrentJustifiedCheckpoint,
 		finalizedCheckpoint:         state.FinalizedCheckpoint,
