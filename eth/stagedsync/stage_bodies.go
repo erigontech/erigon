@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 8
+const requestLoopCutOff int = 1
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -199,10 +199,16 @@ func BodiesForward(
 
 		write := true
 		for i := uint64(0); i < toProcess; i++ {
+			if !quiet {
+				select {
+				case <-logEvery.C:
+					logWritingBodies(logPrefix, bodyProgress, headerProgress)
+				default:
+				}
+			}
 			nextBlock := requestedLow + i
 			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
 			if rawBody == nil {
-				log.Debug("Body was nil when reading from cache", "block", nextBlock)
 				cfg.bd.NotDelivered(nextBlock)
 				write = false
 			}
@@ -245,10 +251,6 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
-		}
-
-		if !quiet && toProcess > 0 {
-			logWritingBodies(logPrefix, bodyProgress, headerProgress)
 		}
 
 		d5 += time.Since(start)
