@@ -654,7 +654,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		param.Withdrawals = ConvertWithdrawalsFromRpc(payloadAttributes.Withdrawals)
 	}
 
-	if !s.config.IsShanghai(headHeader.Time) && param.Withdrawals != nil || s.config.IsShanghai(headHeader.Time) && param.Withdrawals == nil {
+	if (!s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals != nil) ||
+		(s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals == nil) {
 		return nil, &InvalidParamsErr
 	}
 
