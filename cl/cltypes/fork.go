@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
-// Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch. NOT USED.
+// Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch.
 type Fork struct {
 	PreviousVersion [4]byte
 	CurrentVersion  [4]byte
@@ -25,8 +25,8 @@ func (f *Fork) DecodeSSZ(buf []byte) error {
 	if len(buf) < f.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
-	copy(f.CurrentVersion[:], buf)
-	copy(f.PreviousVersion[:], buf[clparams.VersionLength:])
+	copy(f.PreviousVersion[:], buf)
+	copy(f.CurrentVersion[:], buf[clparams.VersionLength:])
 	f.Epoch = ssz_utils.UnmarshalUint64SSZ(buf[clparams.VersionLength*2:])
 	return nil
 }
