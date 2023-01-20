@@ -184,14 +184,14 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(4, int(results.Receipts[0]["blockNumber"].(hexutil.Uint64)))
 		require.Equal(libcommon.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0]["transactionHash"].(libcommon.Hash))
 		require.Equal(libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0]["from"].(libcommon.Address))
-		require.Equal(libcommon.HexToAddress("0x537e697c7AB75A26f9ECF0Ce810e3154dFcaaf44"), *results.Receipts[0]["to"].(*libcommon.Address))
+		require.Equal(addr, *results.Receipts[0]["to"].(*libcommon.Address))
 
 		require.Equal(3, int(results.Txs[1].BlockNumber.ToInt().Uint64()))
 		require.Equal(2, int(results.Txs[1].Nonce))
 		require.Equal(3, int(results.Receipts[1]["blockNumber"].(hexutil.Uint64)))
 		require.Equal(libcommon.HexToHash("0x79491e16fd1b1ceea44c46af850b2ef121683055cd579fd4d877beba22e77c1c"), results.Receipts[0]["transactionHash"].(libcommon.Hash))
 		require.Equal(libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"), results.Receipts[0]["from"].(libcommon.Address))
-		require.Equal(libcommon.HexToAddress("0x537e697c7AB75A26f9ECF0Ce810e3154dFcaaf44"), *results.Receipts[0]["to"].(*libcommon.Address))
+		require.Equal(addr, *results.Receipts[0]["to"].(*libcommon.Address))
 	})
 
 }

@@ -11,6 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -173,6 +176,10 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
+	if api.historyV3(dbtx) {
+		return api.searchTransactionsBeforeV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	}
+
 	callFromCursor, err := dbtx.Cursor(kv.CallFromIndex)
 	if err != nil {
 		return nil, err
@@ -238,6 +245,124 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 		}
 	}
 
+	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
+}
+func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr libcommon.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	isFirstPage := false
+	if fromBlockNum == 0 {
+		isFirstPage = true
+	} else {
+		// Internal search code considers blockNum [including], so adjust the value
+		fromBlockNum--
+	}
+	from, err := rawdb.TxNums.Max(tx, fromBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("from: %d\n", from)
+	itTo, err := tx.(kv.TemporalTx).IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
+	if err != nil {
+		return nil, err
+	}
+	itFrom, err := tx.(kv.TemporalTx).IndexRange(temporal.TracesFromIdx, addr[:], from, 0, false, -1)
+	if err != nil {
+		return nil, err
+	}
+	iter := stream.Intersect[uint64](itFrom, itTo)
+
+	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+
+	var lastBlockNum uint64
+	var blockHash libcommon.Hash
+	var header *types.Header
+	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
+	var blockNum uint64
+	var ok bool
+
+	txs := make([]*RPCTransaction, 0, pageSize)
+	receipts := make([]map[string]interface{}, 0, pageSize)
+
+	resultCount := uint16(0)
+	hasMore := true
+
+	//iter := txNums.Iterator()
+	//iter := itTo
+	for iter.HasNext() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
+		txNum, err := iter.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
+
+		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
+			// Find block number
+			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !ok {
+			break
+		}
+
+		// if block number changed, calculate all related field
+		if blockNum > lastBlockNum {
+			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+				return nil, err
+			}
+			if header == nil {
+				log.Warn("header is nil", "blockNum", blockNum)
+				continue
+			}
+			lastBlockNum = blockNum
+			blockHash = header.Hash()
+			exec.changeBlock(header)
+			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		txIndex := int(txNum) - int(minTxNumInBlock) - 1
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		if err != nil {
+			return nil, err
+		}
+		if txn == nil {
+			continue
+		}
+		rawLogs, res, err := exec.execTx(txNum, txIndex, txn)
+		if err != nil {
+			return nil, err
+		}
+		_ = rawLogs
+		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		txs = append(txs, rpcTx)
+		receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: res.UsedGas, Logs: rawLogs}
+		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt["timestamp"] = header.Time
+		receipts = append(receipts, mReceipt)
+
+		resultCount++
+		if resultCount >= pageSize {
+			break
+		}
+	}
+	hasMore = iter.HasNext()
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
@@ -481,7 +606,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b, txn.Hash(), true)
+		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
 		marshalledRcpt["logs"] = nil
 		marshalledRcpt["logsBloom"] = nil
 		result = append(result, marshalledRcpt)

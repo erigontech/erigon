@@ -246,12 +246,12 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs, limit int) (timestamps kv.U64Stream, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, limit)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps kv.U64Stream, err error) {
+	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs, limit int) (timestamps kv.U64Stream, err error) {
+func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps kv.U64Stream, err error) {
 	switch name {
 	case LogTopicIdx:
 		t, err := tx.agg.LogTopicIterator(key, uint64(fromTs), uint64(toTs), tx)
@@ -268,14 +268,14 @@ func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs, limit i
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, uint64(fromTs), uint64(toTs), tx)
+		t, err := tx.agg.TraceFromIterator(key, uint64(fromTs), uint64(toTs), orderAscend, limit, tx)
 		if err != nil {
 			return nil, err
 		}
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, uint64(fromTs), uint64(toTs), tx)
+		t, err := tx.agg.TraceToIterator(key, uint64(fromTs), uint64(toTs), orderAscend, limit, tx)
 		if err != nil {
 			return nil, err
 		}
