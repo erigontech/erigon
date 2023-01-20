@@ -173,6 +173,7 @@ func TestSearchTransactionsBefore(t *testing.T) {
 	})
 	t.Run("filter last block", func(t *testing.T) {
 		results, err := api.SearchTransactionsBefore(m.Ctx, addr, 5, 10)
+
 		require.NoError(err)
 		require.False(results.FirstPage)
 		require.True(results.LastPage)

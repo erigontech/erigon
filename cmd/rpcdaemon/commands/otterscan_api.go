@@ -247,6 +247,7 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
+
 func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr libcommon.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
@@ -273,7 +274,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	iter := stream.Intersect[uint64](itFrom, itTo)
+	iter := stream.Union[uint64](itFrom, itTo)
 
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
@@ -290,8 +291,6 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	resultCount := uint16(0)
 	hasMore := true
 
-	//iter := txNums.Iterator()
-	//iter := itTo
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -300,7 +299,6 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-
 		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
 
 		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
@@ -352,7 +350,11 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		_ = rawLogs
 		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
-		receipt := &types.Receipt{Type: txn.Type(), CumulativeGasUsed: res.UsedGas, Logs: rawLogs}
+		receipt := &types.Receipt{
+			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
+			TransactionIndex: uint(txIndex),
+			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
+		}
 		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
