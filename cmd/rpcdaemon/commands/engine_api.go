@@ -159,11 +159,9 @@ func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, fork
 			PrevRandao:            gointerfaces.ConvertHashToH256(payloadAttributes.PrevRandao),
 			SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(payloadAttributes.SuggestedFeeRecipient),
 		}
-		if version >= 2 {
+		if version >= 2 && payloadAttributes.Withdrawals != nil {
+			attributes.Version = 2
 			attributes.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payloadAttributes.Withdrawals)
-			if attributes.Withdrawals != nil {
-				attributes.Version = 2
-			}
 		}
 	}
 	reply, err := e.api.EngineForkchoiceUpdated(ctx, &remote.EngineForkChoiceUpdatedRequest{
@@ -238,11 +236,9 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		BlockHash:     gointerfaces.ConvertHashToH256(payload.BlockHash),
 		Transactions:  transactions,
 	}
-	if version >= 2 {
+	if version >= 2 && payload.Withdrawals != nil {
+		ep.Version = 2
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
-		if ep.Withdrawals != nil {
-			ep.Version = 2
-		}
 	}
 
 	res, err := e.api.EngineNewPayload(ctx, ep)
