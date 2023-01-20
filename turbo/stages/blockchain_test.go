@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
@@ -580,8 +579,6 @@ func TestEIP155Transition(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key, false)
-	db := olddb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	chain, chainErr := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
@@ -980,8 +977,6 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey, false)
-	db := olddb.NewObjectDatabase(m.DB)
-	defer db.Close()
 
 	var theAddr libcommon.Address
 
@@ -1023,7 +1018,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	tx, err := db.RwKV().BeginRw(context.Background())
+	tx, err := m.DB.BeginRo(context.Background())
 	if err != nil {
 		t.Fatalf("read only db tx to read state: %v", err)
 	}
@@ -1672,8 +1667,6 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 		},
 	}
 	m := stages.MockWithGenesis(t, gspec, key, false)
-	db := olddb.NewObjectDatabase(m.DB)
-	defer db.Close()
 	var nonce uint64
 
 	type expectation struct {

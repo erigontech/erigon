@@ -302,7 +302,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	backend.agg, backend.blockSnapshots, backend.blockReader = agg, allSnapshots, blockReader
 
 	if config.HistoryV3 {
-		backend.chainDB = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
+		backend.chainDB = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 		chainKv = backend.chainDB
 	}
 

@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 16
+const requestLoopCutOff int = 1
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -152,7 +152,6 @@ func BodiesForward(
 			currentTime := uint64(time.Now().Unix())
 			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 			d3 += time.Since(start)
-			log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
 		}
 
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -179,7 +178,6 @@ func BodiesForward(
 				start = time.Now()
 				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
 				d3 += time.Since(start)
-				log.Debug("body request sent", "req", fmt.Sprintf("%+v", req), "peer", fmt.Sprintf("%x", peer))
 			}
 
 			loopCount++
@@ -200,55 +198,60 @@ func BodiesForward(
 
 		toProcess := cfg.bd.NextProcessingCount()
 
-		if toProcess > 0 {
-			var i uint64
-			for i = 0; i < toProcess; i++ {
-				nextBlock := requestedLow + i
-
-				header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
-				if err != nil {
-					return false, err
-				}
-				blockHeight := header.Number.Uint64()
-				if blockHeight != nextBlock {
-					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
-				}
-
-				rawBody := cfg.bd.GetBodyFromCache(nextBlock)
-				if rawBody == nil {
-					return false, fmt.Errorf("[%s] Body was nil when reading from bucket, block: %v", logPrefix, nextBlock)
-				}
-
-				// Txn & uncle roots are verified via bd.requestedMap
-				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
-				if err != nil {
-					log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-					u.UnwindTo(blockHeight-1, header.Hash())
-					return true, nil
-				}
-
-				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-				ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
-				if err != nil {
-					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
-				}
-				if cfg.historyV3 && ok {
-					if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
-						return false, err
-					}
-				}
-
-				if blockHeight > bodyProgress {
-					bodyProgress = blockHeight
-					if err = s.Update(tx, blockHeight); err != nil {
-						return false, fmt.Errorf("saving Bodies progress: %w", err)
-					}
+		write := true
+		for i := uint64(0); i < toProcess; i++ {
+			if !quiet {
+				select {
+				case <-logEvery.C:
+					logWritingBodies(logPrefix, bodyProgress, headerProgress)
+				default:
 				}
 			}
-		}
+			nextBlock := requestedLow + i
+			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
+			if rawBody == nil {
+				cfg.bd.NotDelivered(nextBlock)
+				write = false
+			}
+			if !write {
+				continue
+			}
+			cfg.bd.NotDelivered(nextBlock)
+			header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
+			if err != nil {
+				return false, err
+			}
+			blockHeight := header.Number.Uint64()
+			if blockHeight != nextBlock {
+				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
+			}
 
-		if !quiet && toProcess > 0 {
-			logWritingBodies(logPrefix, bodyProgress, headerProgress)
+			// Txn & uncle roots are verified via bd.requestedMap
+			err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
+			if err != nil {
+				log.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
+				u.UnwindTo(blockHeight-1, header.Hash())
+				return true, nil
+			}
+
+			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+			if err != nil {
+				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+			}
+			if cfg.historyV3 && ok {
+				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+					return false, err
+				}
+			}
+
+			if blockHeight > bodyProgress {
+				bodyProgress = blockHeight
+				if err = s.Update(tx, blockHeight); err != nil {
+					return false, fmt.Errorf("saving Bodies progress: %w", err)
+				}
+			}
+			cfg.bd.AdvanceLow()
 		}
 
 		d5 += time.Since(start)

@@ -77,8 +77,6 @@ type EVM struct {
 	txContext evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
 	intraBlockState evmtypes.IntraBlockState
-	// Depth is the current call stack
-	depth int
 
 	// chainConfig contains information about the current chain
 	chainConfig *chain.Config
@@ -150,17 +148,27 @@ func (evm *EVM) Cancelled() bool {
 	return atomic.LoadInt32(&evm.abort) == 1
 }
 
+// CallGasTemp returns the callGasTemp for the EVM
+func (evm *EVM) CallGasTemp() uint64 {
+	return evm.callGasTemp
+}
+
+// SetCallGasTemp sets the callGasTemp for the EVM
+func (evm *EVM) SetCallGasTemp(gas uint64) {
+	evm.callGasTemp = gas
+}
+
 // Interpreter returns the current interpreter
 func (evm *EVM) Interpreter() Interpreter {
 	return evm.interpreter
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	if evm.config.NoRecursion && evm.depth > 0 {
+	if evm.config.NoRecursion && evm.interpreter.Depth() > 0 {
 		return nil, gas, nil
 	}
 	// Fail if we're trying to execute above the call depth limit
-	if evm.depth > int(params.CallCreateDepth) {
+	if evm.interpreter.Depth() > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
 	if typ == CALL || typ == CALLCODE {
@@ -188,7 +196,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 						v = nil
 					}
 					// Calling a non existing account, don't do anything, but ping the tracer
-					if evm.depth == 0 {
+					if evm.interpreter.Depth() == 0 {
 						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
 						defer func(startGas uint64) { // Lazy evaluation of the parameters
 							evm.config.Tracer.CaptureEnd(ret, 0, err)
@@ -217,7 +225,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		if typ == STATICCALL {
 			v = nil
 		}
-		if evm.depth == 0 {
+		if evm.interpreter.Depth() == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
 			defer func(startGas uint64) { // Lazy evaluation of the parameters
 				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
@@ -330,7 +338,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	var err error
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
-	if evm.depth > int(params.CallCreateDepth) {
+	if evm.interpreter.Depth() > int(params.CallCreateDepth) {
 		return nil, libcommon.Address{}, gas, ErrDepth
 	}
 	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
@@ -368,14 +376,14 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
 	if evm.config.Debug {
-		if evm.depth == 0 {
+		if evm.interpreter.Depth() == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
 		} else {
 			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
 		}
 	}
 
-	if evm.config.NoRecursion && evm.depth > 0 {
+	if evm.config.NoRecursion && evm.interpreter.Depth() > 0 {
 		return nil, address, gas, nil
 	}
 
@@ -414,7 +422,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 
 	if evm.config.Debug {
-		if evm.depth == 0 {
+		if evm.interpreter.Depth() == 0 {
 			evm.config.Tracer.CaptureEnd(ret, gas-contract.Gas, err)
 		} else {
 			evm.config.Tracer.CaptureExit(ret, gas-contract.Gas, err)
@@ -459,18 +467,22 @@ func (evm *EVM) ChainConfig() *chain.Config {
 	return evm.chainConfig
 }
 
+// ChainRules returns the environment's chain rules
 func (evm *EVM) ChainRules() *chain.Rules {
 	return evm.chainRules
 }
 
+// Context returns the EVM's BlockContext
 func (evm *EVM) Context() evmtypes.BlockContext {
 	return evm.context
 }
 
+// TxContext returns the EVM's TxContext
 func (evm *EVM) TxContext() evmtypes.TxContext {
 	return evm.txContext
 }
 
+// IntraBlockState returns the EVM's IntraBlockState
 func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }

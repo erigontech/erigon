@@ -396,7 +396,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			})
 			if histV3Enabled {
 				log.Info("HistoryV3", "enable", histV3Enabled)
-				db = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash)
+				db = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 			}
 			stateCache = kvcache.NewDummy()
 		} else {

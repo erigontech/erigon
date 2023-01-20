@@ -718,7 +718,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
 	// We can use this as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -756,7 +756,7 @@ func opCallCode(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	stack := scope.Stack
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -790,7 +790,7 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())
@@ -820,7 +820,7 @@ func opStaticCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) 
 	stack := scope.Stack
 	// We use it as a temporary value
 	temp := stack.Pop()
-	gas := interpreter.evm.callGasTemp
+	gas := interpreter.evm.CallGasTemp()
 	// Pop other call parameters.
 	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
 	toAddr := libcommon.Address(addr.Bytes20())

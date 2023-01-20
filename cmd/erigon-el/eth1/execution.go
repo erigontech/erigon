@@ -85,7 +85,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 				Index:     withdrawal.Index,
 				Validator: withdrawal.ValidatorIndex,
 				Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
-				Amount:    *gointerfaces.ConvertH256ToUint256Int(withdrawal.Amount),
+				Amount:    withdrawal.Amount,
 			})
 		}
 
