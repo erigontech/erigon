@@ -57,9 +57,6 @@ type VMInterface interface {
 type VMInterpreter interface {
 	VMInterface
 	Cancelled() bool
-	IncrementDepth()
-	DecrementDepth()
-	Depth() int
 	SetCallGasTemp(gas uint64)
 	CallGasTemp() uint64
 	StaticCall(caller ContractRef, addr libcommon.Address, input []byte, gas uint64) (ret []byte, leftOverGas uint64, err error)
