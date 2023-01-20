@@ -5,6 +5,11 @@ import (
 	"testing"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/stretchr/testify/require"
 )
 
 func newMockBackwardChunkLocator(chunks [][]byte) ChunkLocator {
@@ -140,4 +145,19 @@ func TestBackwardBlockProviderWithMultipleChunksBlockNotFound(t *testing.T) {
 	blockProvider := NewBackwardBlockProvider(chunkLocator, 900)
 
 	checkNext(t, blockProvider, 0, false)
+}
+
+func TestSearchTransactionsBefore(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg, require := m.HistoryV3Components(), require.New(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB)
+
+	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	results, err := api.SearchTransactionsBefore(m.Ctx, addr, 6, 10)
+	require.NoError(err)
+	require.False(results.FirstPage)
+	require.True(results.LastPage)
+	require.Equal(3, len(results.Receipts))
+	require.Equal(3, len(results.Txs))
 }
