@@ -211,7 +211,8 @@ func (hr *HistoryReader) searchInHistory(bitmapType, historyType FileType, key [
 			it := ef.Iterator()
 			if trace {
 				for it.HasNext() {
-					fmt.Printf(" %d", it.Next())
+					v, _ := it.Next()
+					fmt.Printf(" %d", v)
 				}
 				fmt.Printf("\n")
 			}

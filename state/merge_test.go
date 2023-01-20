@@ -77,7 +77,7 @@ func Test_mergeEliasFano(t *testing.T) {
 
 	fit := first.Iterator()
 	for fit.HasNext() {
-		v := fit.Next()
+		v, _ := fit.Next()
 		require.Contains(t, firstList, int(v))
 	}
 
@@ -98,7 +98,7 @@ func Test_mergeEliasFano(t *testing.T) {
 
 	sit := second.Iterator()
 	for sit.HasNext() {
-		v := sit.Next()
+		v, _ := sit.Next()
 		require.Contains(t, secondList, int(v))
 	}
 
@@ -116,7 +116,7 @@ func Test_mergeEliasFano(t *testing.T) {
 
 	mit := merged.Iterator()
 	for mit.HasNext() {
-		v := mit.Next()
+		v, _ := mit.Next()
 		require.Contains(t, mergedLists, int(v))
 	}
 }

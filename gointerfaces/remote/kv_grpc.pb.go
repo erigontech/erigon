@@ -38,8 +38,14 @@ type KVClient interface {
 	// Temporal methods
 	DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error)
 	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
-	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error)
-	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_RangeClient, error)
+	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
+	IndexStream(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexStreamClient, error)
+	// Range [from, to)
+	// Range(from, nil) means [from, EndOfTable)
+	// Range(nil, to)   means [StartOfTable, to)
+	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
+	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
+	Stream(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_StreamClient, error)
 }
 
 type kVClient struct {
@@ -149,12 +155,21 @@ func (c *kVClient) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...gr
 	return out, nil
 }
 
-func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexRangeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/IndexRange", opts...)
+func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
+	out := new(IndexRangeReply)
+	err := c.cc.Invoke(ctx, "/remote.KV/IndexRange", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &kVIndexRangeClient{stream}
+	return out, nil
+}
+
+func (c *kVClient) IndexStream(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexStreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[2], "/remote.KV/IndexStream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kVIndexStreamClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -164,16 +179,16 @@ func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...gr
 	return x, nil
 }
 
-type KV_IndexRangeClient interface {
+type KV_IndexStreamClient interface {
 	Recv() (*IndexRangeReply, error)
 	grpc.ClientStream
 }
 
-type kVIndexRangeClient struct {
+type kVIndexStreamClient struct {
 	grpc.ClientStream
 }
 
-func (x *kVIndexRangeClient) Recv() (*IndexRangeReply, error) {
+func (x *kVIndexStreamClient) Recv() (*IndexRangeReply, error) {
 	m := new(IndexRangeReply)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -181,12 +196,21 @@ func (x *kVIndexRangeClient) Recv() (*IndexRangeReply, error) {
 	return m, nil
 }
 
-func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_RangeClient, error) {
-	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[3], "/remote.KV/Range", opts...)
+func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+	out := new(Pairs)
+	err := c.cc.Invoke(ctx, "/remote.KV/Range", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &kVRangeClient{stream}
+	return out, nil
+}
+
+func (c *kVClient) Stream(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_StreamClient, error) {
+	stream, err := c.cc.NewStream(ctx, &KV_ServiceDesc.Streams[3], "/remote.KV/Stream", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &kVStreamClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -196,16 +220,16 @@ func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOpt
 	return x, nil
 }
 
-type KV_RangeClient interface {
+type KV_StreamClient interface {
 	Recv() (*Pairs, error)
 	grpc.ClientStream
 }
 
-type kVRangeClient struct {
+type kVStreamClient struct {
 	grpc.ClientStream
 }
 
-func (x *kVRangeClient) Recv() (*Pairs, error) {
+func (x *kVStreamClient) Recv() (*Pairs, error) {
 	m := new(Pairs)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -231,8 +255,14 @@ type KVServer interface {
 	// Temporal methods
 	DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error)
 	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
-	IndexRange(*IndexRangeReq, KV_IndexRangeServer) error
-	Range(*RangeReq, KV_RangeServer) error
+	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
+	IndexStream(*IndexRangeReq, KV_IndexStreamServer) error
+	// Range [from, to)
+	// Range(from, nil) means [from, EndOfTable)
+	// Range(nil, to)   means [StartOfTable, to)
+	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
+	Range(context.Context, *RangeReq) (*Pairs, error)
+	Stream(*RangeReq, KV_StreamServer) error
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -258,11 +288,17 @@ func (UnimplementedKVServer) DomainGet(context.Context, *DomainGetReq) (*DomainG
 func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HistoryGet not implemented")
 }
-func (UnimplementedKVServer) IndexRange(*IndexRangeReq, KV_IndexRangeServer) error {
-	return status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
+func (UnimplementedKVServer) IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
 }
-func (UnimplementedKVServer) Range(*RangeReq, KV_RangeServer) error {
-	return status.Errorf(codes.Unimplemented, "method Range not implemented")
+func (UnimplementedKVServer) IndexStream(*IndexRangeReq, KV_IndexStreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method IndexStream not implemented")
+}
+func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Range not implemented")
+}
+func (UnimplementedKVServer) Stream(*RangeReq, KV_StreamServer) error {
+	return status.Errorf(codes.Unimplemented, "method Stream not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -396,45 +432,81 @@ func _KV_HistoryGet_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KV_IndexRange_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _KV_IndexRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IndexRangeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).IndexRange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.KV/IndexRange",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).IndexRange(ctx, req.(*IndexRangeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_IndexStream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(IndexRangeReq)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(KVServer).IndexRange(m, &kVIndexRangeServer{stream})
+	return srv.(KVServer).IndexStream(m, &kVIndexStreamServer{stream})
 }
 
-type KV_IndexRangeServer interface {
+type KV_IndexStreamServer interface {
 	Send(*IndexRangeReply) error
 	grpc.ServerStream
 }
 
-type kVIndexRangeServer struct {
+type kVIndexStreamServer struct {
 	grpc.ServerStream
 }
 
-func (x *kVIndexRangeServer) Send(m *IndexRangeReply) error {
+func (x *kVIndexStreamServer) Send(m *IndexRangeReply) error {
 	return x.ServerStream.SendMsg(m)
 }
 
-func _KV_Range_Handler(srv interface{}, stream grpc.ServerStream) error {
+func _KV_Range_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RangeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Range(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/remote.KV/Range",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Range(ctx, req.(*RangeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_Stream_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(RangeReq)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(KVServer).Range(m, &kVRangeServer{stream})
+	return srv.(KVServer).Stream(m, &kVStreamServer{stream})
 }
 
-type KV_RangeServer interface {
+type KV_StreamServer interface {
 	Send(*Pairs) error
 	grpc.ServerStream
 }
 
-type kVRangeServer struct {
+type kVStreamServer struct {
 	grpc.ServerStream
 }
 
-func (x *kVRangeServer) Send(m *Pairs) error {
+func (x *kVStreamServer) Send(m *Pairs) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -461,6 +533,14 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "HistoryGet",
 			Handler:    _KV_HistoryGet_Handler,
 		},
+		{
+			MethodName: "IndexRange",
+			Handler:    _KV_IndexRange_Handler,
+		},
+		{
+			MethodName: "Range",
+			Handler:    _KV_Range_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -475,13 +555,13 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "IndexRange",
-			Handler:       _KV_IndexRange_Handler,
+			StreamName:    "IndexStream",
+			Handler:       _KV_IndexStream_Handler,
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "Range",
-			Handler:       _KV_Range_Handler,
+			StreamName:    "Stream",
+			Handler:       _KV_Stream_Handler,
 			ServerStreams: true,
 		},
 	},

@@ -93,7 +93,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.Range("Table", []byte("key1"), []byte("key3"))
+		it, err := tx.Stream("Table", []byte("key1"), []byte("key3"))
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -111,7 +111,7 @@ func TestRange(t *testing.T) {
 		require.False(t, it.HasNext())
 
 		// [from, nil) means [from, INF)
-		it, err = tx.Range("Table", []byte("key1"), nil)
+		it, err = tx.Stream("Table", []byte("key1"), nil)
 		require.NoError(t, err)
 		cnt := 0
 		for it.HasNext() {
@@ -125,7 +125,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.RangeDescend("Table", []byte("key3"), []byte("key1"), -1)
+		it, err := tx.StreamDescend("Table", []byte("key3"), []byte("key1"), -1)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
@@ -135,7 +135,7 @@ func TestRange(t *testing.T) {
 
 		require.False(t, it.HasNext())
 
-		it, err = tx.RangeDescend("Table", nil, nil, 2)
+		it, err = tx.StreamDescend("Table", nil, nil, 2)
 		require.NoError(t, err)
 
 		cnt := 0

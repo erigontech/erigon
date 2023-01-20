@@ -32,6 +32,7 @@ import (
 	stack2 "github.com/go-stack/stack"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pbnjay/memory"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -1707,70 +1708,94 @@ func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	return nil
 }
 
-func (tx *MdbxTx) Prefix(table string, prefix []byte) (kv.Pairs, error) {
+func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.Kv, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return tx.Range(table, prefix, nil)
+		return tx.Stream(table, prefix, nil)
 	}
-	return tx.Range(table, prefix, nextPrefix)
+	return tx.Stream(table, prefix, nextPrefix)
 }
-
-func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
-	return tx.RangeAscend(table, fromPrefix, toPrefix, -1)
+func (tx *MdbxTx) Stream(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
+	return tx.StreamAscend(table, fromPrefix, toPrefix, -1)
 }
-func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+func (tx *MdbxTx) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, true, limit)
 }
-func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+func (tx *MdbxTx) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, false, limit)
+}
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
+	return tx.Stream(table, fromPrefix, toPrefix)
+}
+func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+	return tx.StreamAscend(table, fromPrefix, toPrefix, limit)
+}
+func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+	return tx.StreamDescend(table, fromPrefix, toPrefix, limit)
 }
 
 type cursor2stream struct {
 	c                                  kv.Cursor
 	fromPrefix, toPrefix, nextK, nextV []byte
-	nextErr                            error
+	err                                error
 	orderAscend                        bool
-	limit                              int
+	limit                              int64
 	ctx                                context.Context
 }
 
 func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend bool, limit int) (*cursor2stream, error) {
-	if orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
-		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
+	s := &cursor2stream{ctx: tx.ctx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit)}
+	tx.streams = append(tx.streams, s)
+	return s.init(table, tx)
+}
+func (s *cursor2stream) init(table string, tx kv.Tx) (*cursor2stream, error) {
+	if s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) >= 0 {
+		return nil, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.fromPrefix, s.toPrefix)
 	}
-	if !orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) <= 0 {
-		return nil, fmt.Errorf("tx.Range: %x must be lexicographicaly before %x", toPrefix, fromPrefix)
+	if !s.orderAscend && s.fromPrefix != nil && s.toPrefix != nil && bytes.Compare(s.fromPrefix, s.toPrefix) <= 0 {
+		return nil, fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", s.toPrefix, s.fromPrefix)
 	}
 	c, err := tx.Cursor(table)
 	if err != nil {
 		return nil, err
 	}
-	s := &cursor2stream{c: c, ctx: tx.ctx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: limit}
-	tx.streams = append(tx.streams, s)
-	if orderAscend {
-		s.nextK, s.nextV, s.nextErr = s.c.Seek(fromPrefix)
-		return s, nil
+	s.c = c
+
+	if s.fromPrefix == nil { // no initial position
+		if s.orderAscend {
+			s.nextK, s.nextV, s.err = s.c.First()
+		} else {
+			s.nextK, s.nextV, s.err = s.c.Last()
+		}
+		return s, s.err
 	}
 
-	if fromPrefix == nil {
-		s.nextK, s.nextV, s.nextErr = s.c.Last()
-	} else { // seek exactly to given key or previous one
-		s.nextK, s.nextV, s.nextErr = s.c.SeekExact(fromPrefix)
+	if s.orderAscend {
+		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
+		return s, s.err
+	} else {
+		// seek exactly to given key or previous one
+		s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
 		if s.nextK == nil { // no such key
-			s.nextK, s.nextV, s.nextErr = s.c.Prev()
+			s.nextK, s.nextV, s.err = s.c.Prev()
 		}
+		return s, s.err
 	}
-	return s, nil
 }
-func (s *cursor2stream) Close() { s.c.Close() }
+
+func (s *cursor2stream) Close() {
+	if s.c != nil {
+		s.c.Close()
+	}
+}
 func (s *cursor2stream) HasNext() bool {
-	if s.nextErr != nil {
-		return true // always true when error, then next call to .Next() will return this error
+	if s.err != nil { // always true, then .Next() call will return this error
+		return true
 	}
 	if s.limit == 0 { // limit reached
 		return false
 	}
-	if s.nextK == nil { // end of table
+	if s.nextK == nil { // EndOfTable
 		return false
 	}
 	if s.toPrefix == nil { // s.nextK == nil check is above
@@ -1789,11 +1814,11 @@ func (s *cursor2stream) Next() (k, v []byte, err error) {
 	default:
 	}
 	s.limit--
-	k, v, err = s.nextK, s.nextV, s.nextErr
+	k, v, err = s.nextK, s.nextV, s.err
 	if s.orderAscend {
-		s.nextK, s.nextV, s.nextErr = s.c.Next()
+		s.nextK, s.nextV, s.err = s.c.Next()
 	} else {
-		s.nextK, s.nextV, s.nextErr = s.c.Prev()
+		s.nextK, s.nextV, s.err = s.c.Prev()
 	}
 	return k, v, err
 }

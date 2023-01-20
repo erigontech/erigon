@@ -440,10 +440,12 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	efIt := ef.Iterator()
 	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
 	for preIt.HasNext() {
-		newEf.AddOffset(preIt.Next())
+		v, _ := preIt.Next()
+		newEf.AddOffset(v)
 	}
 	for efIt.HasNext() {
-		newEf.AddOffset(efIt.Next())
+		v, _ := efIt.Next()
+		newEf.AddOffset(v)
 	}
 	newEf.Build()
 	return newEf.AppendBytes(buf), nil
@@ -908,7 +910,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 				ef, _ := eliasfano32.ReadEliasFano(valBuf)
 				efIt := ef.Iterator()
 				for efIt.HasNext() {
-					txNum := efIt.Next()
+					txNum, _ := efIt.Next()
 					binary.BigEndian.PutUint64(txKey[:], txNum)
 					historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
 					if err = rs.AddKey(historyKey, valOffset); err != nil {

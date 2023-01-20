@@ -1683,10 +1683,12 @@ func mergeBitmaps(preval, val, buf commitment.BranchData) (commitment.BranchData
 	efIt := ef.Iterator()
 	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
 	for preIt.HasNext() {
-		newEf.AddOffset(preIt.Next())
+		v, _ := preIt.Next()
+		newEf.AddOffset(v)
 	}
 	for efIt.HasNext() {
-		newEf.AddOffset(efIt.Next())
+		v, _ := efIt.Next()
+		newEf.AddOffset(v)
 	}
 	newEf.Build()
 	return newEf.AppendBytes(buf), nil

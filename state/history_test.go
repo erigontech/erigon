@@ -127,7 +127,8 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var ints []uint64
 		it := ef.Iterator()
 		for it.HasNext() {
-			ints = append(ints, it.Next())
+			v, _ := it.Next()
+			ints = append(ints, v)
 		}
 		intArrs = append(intArrs, ints)
 	}

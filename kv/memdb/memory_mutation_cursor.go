@@ -448,6 +448,12 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 func (m *memoryMutationCursor) Prev() ([]byte, []byte, error) {
 	panic("Prev is not implemented!")
 }
+func (m *memoryMutationCursor) PrevDup() ([]byte, []byte, error) {
+	panic("Prev is not implemented!")
+}
+func (m *memoryMutationCursor) PrevNoDup() ([]byte, []byte, error) {
+	panic("Prev is not implemented!")
+}
 
 func (m *memoryMutationCursor) Close() {
 	if m.cursor != nil {

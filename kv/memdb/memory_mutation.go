@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -205,20 +206,29 @@ func (m *MemoryMutation) ForEach(bucket string, fromPrefix []byte, walker func(k
 	return nil
 }
 
-func (m *MemoryMutation) Prefix(table string, prefix []byte) (kv.Pairs, error) {
+func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.Kv, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
-		return m.Range(table, prefix, nil)
+		return m.Stream(table, prefix, nil)
 	}
-	return m.Range(table, prefix, nextPrefix)
+	return m.Stream(table, prefix, nextPrefix)
 }
-func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (kv.Pairs, error) {
+func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
 	panic("please implement me")
 }
-func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (kv.Pairs, error) {
+func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+	panic("please implement me")
+}
+func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
+	panic("please implement me")
+}
+func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+	panic("please implement me")
+}
+func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
 	panic("please implement me")
 }
 

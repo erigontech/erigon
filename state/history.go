@@ -386,7 +386,7 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, coun
 			ef, _ := eliasfano32.ReadEliasFano(valBuf)
 			efIt := ef.Iterator()
 			for efIt.HasNext() {
-				txNum := efIt.Next()
+				txNum, _ := efIt.Next()
 				binary.BigEndian.PutUint64(txKey[:], txNum)
 				historyKey = append(append(historyKey[:0], txKey[:]...), keyBuf...)
 				if err = rs.AddKey(historyKey, valOffset); err != nil {

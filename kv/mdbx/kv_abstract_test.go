@@ -269,7 +269,7 @@ func TestRemoteKvStream(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Range(kv.PlainState, from, to)
+			it, err := tx.Stream(kv.PlainState, from, to)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -290,7 +290,7 @@ func TestRemoteKvStream(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeAscend(kv.PlainState, from, to, 2)
+			it, err := tx.StreamAscend(kv.PlainState, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -310,7 +310,7 @@ func TestRemoteKvStream(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.RangeDescend(kv.PlainState, from, to, 2)
+			it, err := tx.StreamDescend(kv.PlainState, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
