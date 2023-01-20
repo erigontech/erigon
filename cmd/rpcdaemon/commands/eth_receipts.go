@@ -522,7 +522,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uin
 			if err != nil {
 				return nil, err
 			}
-			bm, err := it.ToBitmap()
+			bm, err := it.(bitmapdb.ToBitmap).ToBitmap()
 			if err != nil {
 				return nil, err
 			}
@@ -556,7 +556,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint
 		if err != nil {
 			return nil, err
 		}
-		rx[idx], err = it.ToBitmap()
+		rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
 		if err != nil {
 			return nil, err
 		}
