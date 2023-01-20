@@ -753,7 +753,7 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 			id := newBaseId + 1 + i
 			if transactionsV3 {
 				key := append(hexutility.EncodeTs(id), h.Bytes()...)
-				if err := tx.Put(kv.EthTxV2, key, v); err != nil {
+				if err := tx.Put(kv.EthTxV3, key, v); err != nil {
 					return err
 				}
 			} else {
