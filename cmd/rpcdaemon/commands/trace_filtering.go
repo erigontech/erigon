@@ -243,11 +243,11 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		for _, addr := range req.FromAddress {
 			if addr != nil {
-				it, err := ttx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), from, to)
+				it, err := ttx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), from, to, true, -1)
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
+				b, err := it.(bitmapdb.ToBitmap).ToBitmap()
 				if err != nil {
 					return nil, nil, nil, err
 				}
@@ -258,11 +258,11 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 
 		for _, addr := range req.ToAddress {
 			if addr != nil {
-				it, err := ttx.IndexRange(temporal.TracesToIdx, addr.Bytes(), from, to)
+				it, err := ttx.IndexRange(temporal.TracesToIdx, addr.Bytes(), from, to, true, -1)
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
+				b, err := it.(bitmapdb.ToBitmap).ToBitmap()
 				if err != nil {
 					return nil, nil, nil, err
 				}

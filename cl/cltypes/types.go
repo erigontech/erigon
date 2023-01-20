@@ -3,8 +3,6 @@ package cltypes
 import (
 	"bytes"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -24,14 +22,6 @@ type BeaconBodyBellatrix struct {
 	ExecutionPayload  *Eth1Block
 }
 
-/*
- * Sync committe public keys and their aggregate public keys, we use array of pubKeys.
- */
-type SyncCommittee struct {
-	PubKeys            [][48]byte `ssz-size:"512,48"`
-	AggregatePublicKey [48]byte   `ssz-size:"48"`
-}
-
 func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 	if !bytes.Equal(s.AggregatePublicKey[:], s2.AggregatePublicKey[:]) {
 		return false
@@ -45,69 +35,6 @@ func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
 		}
 	}
 	return true
-}
-
-// LightClientBootstrap is used to bootstrap the lightclient from checkpoint sync.
-type LightClientBootstrap struct {
-	Header                     *BeaconBlockHeader
-	CurrentSyncCommittee       *SyncCommittee
-	CurrentSyncCommitteeBranch []libcommon.Hash
-}
-
-func (l *LightClientBootstrap) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
-}
-
-// LightClientUpdate is used to update the sync committee every 27 hours.
-type LightClientUpdate struct {
-	AttestedHeader          *BeaconBlockHeader
-	NextSyncCommitee        *SyncCommittee
-	NextSyncCommitteeBranch []libcommon.Hash
-	FinalizedHeader         *BeaconBlockHeader
-	FinalityBranch          []libcommon.Hash
-	SyncAggregate           *SyncAggregate
-	SignatureSlot           uint64
-}
-
-func (l *LightClientUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
-}
-
-func (l *LightClientUpdate) HasNextSyncCommittee() bool {
-	return l.NextSyncCommitee != nil
-}
-
-func (l *LightClientUpdate) IsFinalityUpdate() bool {
-	return l.FinalityBranch != nil
-}
-
-func (l *LightClientUpdate) HasSyncFinality() bool {
-	return l.FinalizedHeader != nil &&
-		utils.SlotToPeriod(l.AttestedHeader.Slot) == utils.SlotToPeriod(l.FinalizedHeader.Slot)
-}
-
-// LightClientFinalityUpdate is used to update the sync aggreggate every 6 minutes.
-type LightClientFinalityUpdate struct {
-	AttestedHeader  *BeaconBlockHeader
-	FinalizedHeader *BeaconBlockHeader
-	FinalityBranch  []libcommon.Hash `ssz-size:"6,32"`
-	SyncAggregate   *SyncAggregate
-	SignatureSlot   uint64
-}
-
-func (l *LightClientFinalityUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
-}
-
-// LightClientOptimisticUpdate is used for verifying N-1 block.
-type LightClientOptimisticUpdate struct {
-	AttestedHeader *BeaconBlockHeader
-	SyncAggregate  *SyncAggregate
-	SignatureSlot  uint64
-}
-
-func (l *LightClientOptimisticUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
 }
 
 // Fork data, contains if we were on bellatrix/alteir/phase0 and transition epoch. NOT USED.

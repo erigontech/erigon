@@ -416,7 +416,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		rawLogs, err := exec.execTx(txNum, txIndex, txn)
+		rawLogs, _, err := exec.execTx(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
@@ -484,7 +484,7 @@ func (e *intraBlockExec) changeBlock(header *types.Header) {
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, error) {
+func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, *core.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
@@ -492,14 +492,14 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	gp := new(core.GasPool).AddGas(txn.GetGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
-	_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
-	return e.ibs.GetLogs(txHash), nil
+	return e.ibs.GetLogs(txHash), res, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -520,11 +520,11 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uin
 		defer bitmapdb.ReturnToPool64(bitmapForORing)
 
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to, true, -1)
 			if err != nil {
 				return nil, err
 			}
-			bm, err := it.ToBitmap()
+			bm, err := it.(bitmapdb.ToBitmap).ToBitmap()
 			if err != nil {
 				return nil, err
 			}
@@ -554,11 +554,11 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint
 		}
 	}()
 	for idx, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to, true, -1)
 		if err != nil {
 			return nil, err
 		}
-		rx[idx], err = it.ToBitmap()
+		rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
 		if err != nil {
 			return nil, err
 		}
@@ -647,10 +647,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon
 		if borReceipt == nil {
 			return nil, nil
 		}
-		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
+		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, txnHash, true), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -684,7 +684,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -695,7 +695,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}
@@ -703,7 +703,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, block *types.Block, txnHash libcommon.Hash, signed bool) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash libcommon.Hash, signed bool) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -737,11 +737,11 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
-	if !chainConfig.IsLondon(block.NumberU64()) {
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
 	} else {
-		baseFee, _ := uint256.FromBig(block.BaseFee())
-		gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
 		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
 	}
 	// Assign receipt status.

@@ -46,7 +46,7 @@ const MaxBuilders = 128
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
-var ErrWithdrawalsNotSupported = rpc.CustomError{Code: -38004, Message: "Withdrawals not supported"}
+var InvalidParamsErr = rpc.CustomError{Code: -32602, Message: "Invalid params"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -319,6 +319,10 @@ func (s *EthBackendServer) engineNewPayload(req *types2.ExecutionPayload, withdr
 	if withdrawals != nil {
 		wh := types.DeriveSha(types.Withdrawals(withdrawals))
 		header.WithdrawalsHash = &wh
+	}
+
+	if !s.config.IsShanghai(header.Time) && withdrawals != nil || s.config.IsShanghai(header.Time) && withdrawals == nil {
+		return nil, &InvalidParamsErr
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -732,14 +736,8 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 	}
 
 	// If pre-Shanghai and there are withdrawals, we should error
-	if reqWithdrawals != nil && !s.config.IsShanghai(payloadAttributes.Timestamp) {
-		return &remote.EngineForkChoiceUpdatedReply{
-			PayloadStatus: &remote.EnginePayloadStatus{
-				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-			},
-			PayloadId: s.payloadId,
-		}, &ErrWithdrawalsNotSupported
+	if !s.config.IsShanghai(headHeader.Time) && reqWithdrawals != nil {
+		return nil, &InvalidParamsErr
 	}
 
 	// Initiate payload building
@@ -749,17 +747,12 @@ func (s *EthBackendServer) engineForkChoiceUpdated(ctx context.Context, reqForkc
 	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
 
-	var withdrawals []*types.Withdrawal
-	if reqWithdrawals != nil {
-		withdrawals = ConvertWithdrawalsFromRpc(reqWithdrawals)
-	}
-
 	param := core.BlockBuilderParameters{
 		ParentHash:            forkChoice.HeadBlockHash,
 		Timestamp:             payloadAttributes.Timestamp,
 		PrevRandao:            gointerfaces.ConvertH256ToHash(payloadAttributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertH160toAddress(payloadAttributes.SuggestedFeeRecipient),
-		Withdrawals:           withdrawals,
+		Withdrawals:           ConvertWithdrawalsFromRpc(reqWithdrawals),
 		PayloadId:             s.payloadId,
 	}
 
@@ -804,6 +797,9 @@ func (s *EthBackendServer) SubscribeLogs(server remote.ETHBACKEND_SubscribeLogsS
 }
 
 func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
+	if in == nil {
+		return nil
+	}
 	out := make([]*types.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types.Withdrawal{
@@ -817,6 +813,9 @@ func ConvertWithdrawalsFromRpc(in []*types2.Withdrawal) []*types.Withdrawal {
 }
 
 func ConvertWithdrawalsToRpc(in []*types.Withdrawal) []*types2.Withdrawal {
+	if in == nil {
+		return nil
+	}
 	out := make([]*types2.Withdrawal, 0, len(in))
 	for _, w := range in {
 		out = append(out, &types2.Withdrawal{

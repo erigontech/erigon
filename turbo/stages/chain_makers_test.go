@@ -99,7 +99,11 @@ func TestGenerateChain(t *testing.T) {
 		return
 	}
 
-	tx, _ := m.DB.BeginRo(m.Ctx)
+	tx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
 	defer tx.Rollback()
 
 	st := state.New(state.NewPlainStateReader(tx))

@@ -394,7 +394,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -405,7 +405,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}

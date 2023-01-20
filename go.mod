@@ -3,8 +3,8 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230117095843-fc3dd4fd2789
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230117072003-4cc5ebded386
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230120091748-2ea0cb82e919
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230120022649-cd9409a200da
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0 // indirect
@@ -264,4 +264,4 @@ require (
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
-replace github.com/ledgerwatch/erigon-lib => github.com/roberto-bayardo/erigon-lib v0.0.0-20230118175919-dfe261407f64
+replace github.com/ledgerwatch/erigon-lib => github.com/roberto-bayardo/erigon-lib v0.0.0-20230120161428-77db2ff0eb9a

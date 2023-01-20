@@ -75,11 +75,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
-		// Check if we reached the highest allowed request block number, and turn back
-		if blockNum >= bd.maxProgress {
-			break // Avoid tight loop
-		}
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
@@ -141,17 +137,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 					(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
 					// Perhaps we already have this block
 					block := rawdb.ReadBlock(tx, hash, blockNum)
-					if block == nil {
-						var tripleHash TripleHash
-						copy(tripleHash[:], header.UncleHash.Bytes())
-						copy(tripleHash[length.Hash:], header.TxHash.Bytes())
-						if header.WithdrawalsHash != nil {
-							copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
-						} else {
-							copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
-						}
-						bd.requestedMap[tripleHash] = blockNum
-					} else {
+					if block != nil {
 						bd.addBodyToCache(blockNum, block.RawBody())
 						request = false
 					}
@@ -163,6 +149,15 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		}
 
 		if request {
+			var tripleHash TripleHash
+			copy(tripleHash[:], header.UncleHash.Bytes())
+			copy(tripleHash[length.Hash:], header.TxHash.Bytes())
+			if header.WithdrawalsHash != nil {
+				copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
+			} else {
+				copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
+			}
+			bd.requestedMap[tripleHash] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
@@ -172,11 +167,7 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		for _, num := range blockNums {
-			bd.requests[num] = bodyReq
-		}
 	}
-
 	return bodyReq, nil
 }
 
@@ -210,6 +201,12 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {
+	if len(bodyReq.BlockNums) > 0 {
+		log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
+	}
+	for _, num := range bodyReq.BlockNums {
+		bd.requests[num] = bodyReq
+	}
 	bodyReq.waitUntil = timeWithTimeout
 	bodyReq.peerID = peer
 }
@@ -329,8 +326,7 @@ Loop:
 // the requestedLow count is increased by the number returned
 func (bd *BodyDownload) NextProcessingCount() uint64 {
 	var i uint64
-	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		bd.delivered.Remove(bd.requestedLow + i)
+	for i = 0; bd.delivered.Contains(bd.requestedLow + i); i++ {
 	}
 	return i
 }
@@ -341,6 +337,10 @@ func (bd *BodyDownload) AdvanceLow() {
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
+}
+
+func (bd *BodyDownload) NotDelivered(blockNum uint64) {
+	bd.delivered.Remove(blockNum)
 }
 
 func (bd *BodyDownload) GetPenaltyPeers() [][64]byte {
@@ -393,7 +393,7 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	size := body.EncodingSize()
 	if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: key}); ok {
-		bd.bodyCacheSize -= item.payloadSize // It will be replace, so subtracting
+		bd.bodyCacheSize -= item.payloadSize // It will be replaced, so subtracting
 	}
 	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
@@ -404,9 +404,16 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64) *types.RawBody {
-	if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
-		return item.rawBody
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
+	if delete {
+		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+			bd.bodyCacheSize -= item.payloadSize
+			return item.rawBody
+		}
+	} else {
+		if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
+			return item.rawBody
+		}
 	}
 	return nil
 }

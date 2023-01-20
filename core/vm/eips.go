@@ -213,8 +213,8 @@ func enableSharding(jt *JumpTable) {
 // opDataHash implements DATAHASH opcode
 func opDataHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := scope.Stack.Peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.txContext.DataHashes))) {
-		hash := interpreter.evm.txContext.DataHashes[idx.Uint64()]
+	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().DataHashes))) {
+		hash := interpreter.evm.TxContext().DataHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()

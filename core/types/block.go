@@ -1712,6 +1712,9 @@ func (b *Block) HashCheck() error {
 		}
 		return nil
 	}
+	if b.Withdrawals() == nil {
+		return errors.New("body missing Withdrawals")
+	}
 	if hash := DeriveSha(b.Withdrawals()); hash != *b.WithdrawalsHash() {
 		return fmt.Errorf("block has invalid withdrawals hash: have %x, exp: %x", hash, b.WithdrawalsHash())
 	}
