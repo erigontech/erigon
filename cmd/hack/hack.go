@@ -1284,7 +1284,7 @@ func iterate(filename string, prefix string) error {
 		if bytes.HasPrefix(key, pBytes) {
 			val, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(val)
-			efIt := ef.Iterator(0)
+			efIt := ef.Iterator()
 			fmt.Printf("[%x] =>", key)
 			cnt := 0
 			for efIt.HasNext() {
