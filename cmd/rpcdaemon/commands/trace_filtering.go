@@ -247,7 +247,7 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
+				b, err := it.(bitmapdb.ToBitmap).ToBitmap()
 				if err != nil {
 					return nil, nil, nil, err
 				}
@@ -262,7 +262,7 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
+				b, err := it.(bitmapdb.ToBitmap).ToBitmap()
 				if err != nil {
 					return nil, nil, nil, err
 				}

@@ -24,7 +24,7 @@ import (
 
 //Methods Naming:
 // Get: exact match of criterias
-// Stream: [from, to)
+// Dual: [from, to)
 // Each: [from, INF)
 // Prefix: Has(k, prefix)
 // Amount: [from, INF) AND maximum N records
@@ -122,7 +122,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs kv.Pairs, err error) {
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs stream.Kv, err error) {
 	switch name {
 	case AccountsDomain:
 		panic("not implemented yet")
@@ -156,13 +156,8 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		it3 := stream.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
-		//for it3.HasNext() {
-		//	k, v, err := it3.Next()
-		//	fmt.Printf("PlainState: %x, %x, %s\n", k, v, err)
-		//}
-
 		//TODO: seems MergePairs can't handle "amount" request
-		return stream.MergePairs(it, it3), nil
+		return stream.UnionPairs(it, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -246,12 +241,12 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps kv.U64Stream, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
 	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps kv.U64Stream, err error) {
+func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
 	switch name {
 	case LogTopicIdx:
 		t, err := tx.agg.LogTopicIterator(key, uint64(fromTs), uint64(toTs), tx)
