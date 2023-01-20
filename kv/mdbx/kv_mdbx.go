@@ -583,11 +583,6 @@ func (tx *MdbxTx) CollectMetrics() {
 	kv.DbPgopsSpill.Set(info.PageOps.Spill)
 	kv.DbPgopsUnspill.Set(info.PageOps.Unspill)
 	kv.DbPgopsWops.Set(info.PageOps.Wops)
-	kv.DbPgopsPrefault.Set(info.PageOps.Prefault)
-	kv.DbPgopsMinicore.Set(info.PageOps.Minicore)
-	kv.DbPgopsMsync.Set(info.PageOps.Msync)
-	kv.DbPgopsFsync.Set(info.PageOps.Fsync)
-	kv.DbMiLastPgNo.Set(info.MiLastPgNo * tx.db.opts.pageSize)
 
 	txInfo, err := tx.tx.Info(true)
 	if err != nil {
@@ -794,33 +789,11 @@ func (tx *MdbxTx) Commit() error {
 
 	if tx.db.opts.label == kv.ChainDB {
 		kv.DbCommitPreparation.Update(latency.Preparation.Seconds())
-		kv.DbGCWallClock.Update(latency.GCWallClock.Seconds())
-		kv.DbGCCpuTime.Update(latency.GCCpuTime.Seconds())
 		kv.DbCommitAudit.Update(latency.Audit.Seconds())
 		kv.DbCommitWrite.Update(latency.Write.Seconds())
 		kv.DbCommitSync.Update(latency.Sync.Seconds())
 		kv.DbCommitEnding.Update(latency.Ending.Seconds())
 		kv.DbCommitTotal.Update(latency.Whole.Seconds())
-
-		kv.DbGcWorkRtime.Update(latency.GCDetails.WorkRtime.Seconds())
-		kv.DbGcSelfRtime.Update(latency.GCDetails.SelfRtime.Seconds())
-		kv.DbGcSelfXtime.Update(latency.GCDetails.SelfXtime.Seconds())
-		kv.DbGcWorkXtime.Update(latency.GCDetails.WorkXtime.Seconds())
-
-		kv.DbGcWorkRsteps.Set(uint64(latency.GCDetails.WorkRsteps))
-		kv.DbGcSelfRsteps.Set(uint64(latency.GCDetails.SelfRsteps))
-
-		kv.DbGcWorkRxpages.Set(uint64(latency.GCDetails.WorkRxpages))
-		kv.DbGcSelfXpages.Set(uint64(latency.GCDetails.SelfXpages))
-		kv.DbGcWloops.Set(uint64(latency.GCDetails.Wloops))
-		kv.DbGcCoalescences.Set(uint64(latency.GCDetails.Coalescences))
-		kv.DbGcWipes.Set(uint64(latency.GCDetails.Wipes))
-		kv.DbGcFlushes.Set(uint64(latency.GCDetails.Flushes))
-		kv.DbGcKicks.Set(uint64(latency.GCDetails.Kicks))
-		kv.DbGcWorkMajflt.Set(uint64(latency.GCDetails.WorkMajflt))
-		kv.DbGcSelfMajflt.Set(uint64(latency.GCDetails.SelfMajflt))
-		kv.DbGcWorkCounter.Set(uint64(latency.GCDetails.WorkCounter))
-		kv.DbGcSelfCounter.Set(uint64(latency.GCDetails.SelfCounter))
 
 		//kv.DbGcWorkPnlMergeTime.Update(latency.GCDetails.WorkPnlMergeTime.Seconds())
 		//kv.DbGcWorkPnlMergeVolume.Set(uint64(latency.GCDetails.WorkPnlMergeVolume))
