@@ -278,7 +278,7 @@ Loop:
 			continue
 		}
 
-		var deliveredNums []uint64
+		//var deliveredNums []uint64
 		toClean := map[uint64]struct{}{}
 		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
 
@@ -298,7 +298,7 @@ Loop:
 				undelivered++
 				continue
 			}
-			deliveredNums = append(deliveredNums, blockNum)
+			//deliveredNums = append(deliveredNums, blockNum)
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
