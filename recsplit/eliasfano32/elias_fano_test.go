@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -89,5 +89,5 @@ func TestIterator(t *testing.T) {
 		assert.Equal(t, offsets[i], v, "iter")
 		i++
 	}
-	stream.ExpectEqual[uint64](t, stream.ReverseArray(values), ef.ReverseIterator(0))
+	iter.ExpectEqual[uint64](t, iter.ReverseArray(values), ef.ReverseIterator(0))
 }

@@ -32,7 +32,7 @@ import (
 	stack2 "github.com/go-stack/stack"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pbnjay/memory"
 	"github.com/torquem-ch/mdbx-go/mdbx"
@@ -1681,29 +1681,29 @@ func (tx *MdbxTx) ForPrefix(bucket string, prefix []byte, walker func(k, v []byt
 	return nil
 }
 
-func (tx *MdbxTx) Prefix(table string, prefix []byte) (stream.Kv, error) {
+func (tx *MdbxTx) Prefix(table string, prefix []byte) (iter.KV, error) {
 	nextPrefix, ok := kv.NextSubtree(prefix)
 	if !ok {
 		return tx.Stream(table, prefix, nil)
 	}
 	return tx.Stream(table, prefix, nextPrefix)
 }
-func (tx *MdbxTx) Stream(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
+func (tx *MdbxTx) Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
 	return tx.StreamAscend(table, fromPrefix, toPrefix, -1)
 }
-func (tx *MdbxTx) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+func (tx *MdbxTx) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, true, limit)
 }
-func (tx *MdbxTx) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+func (tx *MdbxTx) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, false, limit)
 }
-func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (stream.Kv, error) {
+func (tx *MdbxTx) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
 	return tx.Stream(table, fromPrefix, toPrefix)
 }
-func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+func (tx *MdbxTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.StreamAscend(table, fromPrefix, toPrefix, limit)
 }
-func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.Kv, error) {
+func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.StreamDescend(table, fromPrefix, toPrefix, limit)
 }
 

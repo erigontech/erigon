@@ -237,7 +237,7 @@ func (a *AggregatorV3) SetTxNum(txNum uint64) {
 	a.tracesTo.SetTxNum(txNum)
 }
 
-type Agg22Collation struct {
+type AggV3Collation struct {
 	logAddrs   map[string]*roaring64.Bitmap
 	logTopics  map[string]*roaring64.Bitmap
 	tracesFrom map[string]*roaring64.Bitmap
@@ -247,7 +247,7 @@ type Agg22Collation struct {
 	code       HistoryCollation
 }
 
-func (c Agg22Collation) Close() {
+func (c AggV3Collation) Close() {
 	c.accounts.Close()
 	c.storage.Close()
 	c.code.Close()
@@ -273,7 +273,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64, txFrom, txTo
 		log.Info(fmt.Sprintf("[snapshot] build %d-%d", step, step+1), "took", time.Since(t))
 	}(time.Now())
 	var sf Agg22StaticFiles
-	var ac Agg22Collation
+	var ac AggV3Collation
 	closeColl := true
 	defer func() {
 		if closeColl {
@@ -1158,31 +1158,31 @@ func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 	return a
 }
 
-func (ac *Aggregator22Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, true, -1, roTx)
 }
 
-func (ac *Aggregator22Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, true, -1, roTx)
 }
 
-func (ac *Aggregator22Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, orderAscend, limit, roTx)
 }
 
-func (ac *Aggregator22Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, orderAscend, limit, roTx)
 }
 
-func (ac *Aggregator22Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoStateWithRecent(addr, txNum, ac.tx)
 }
 
-func (ac *Aggregator22Context) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountDataNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoState(addr, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -1192,11 +1192,11 @@ func (ac *Aggregator22Context) ReadAccountStorageNoStateWithRecent(addr []byte, 
 	copy(ac.keyBuf[len(addr):], loc)
 	return ac.storage.GetNoStateWithRecent(ac.keyBuf, txNum, ac.tx)
 }
-func (ac *Aggregator22Context) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountStorageNoStateWithRecent2(key []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.storage.GetNoStateWithRecent(key, txNum, ac.tx)
 }
 
-func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, error) {
 	if cap(ac.keyBuf) < len(addr)+len(loc) {
 		ac.keyBuf = make([]byte, len(addr)+len(loc))
 	} else if len(ac.keyBuf) != len(addr)+len(loc) {
@@ -1207,21 +1207,21 @@ func (ac *Aggregator22Context) ReadAccountStorageNoState(addr []byte, loc []byte
 	return ac.storage.GetNoState(ac.keyBuf, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountCodeNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.code.GetNoStateWithRecent(addr, txNum, ac.tx)
 }
-func (ac *Aggregator22Context) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountCodeNoState(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.code.GetNoState(addr, txNum)
 }
 
-func (ac *Aggregator22Context) ReadAccountCodeSizeNoStateWithRecent(addr []byte, txNum uint64) (int, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountCodeSizeNoStateWithRecent(addr []byte, txNum uint64) (int, bool, error) {
 	code, noState, err := ac.code.GetNoStateWithRecent(addr, txNum, ac.tx)
 	if err != nil {
 		return 0, false, err
 	}
 	return len(code), noState, nil
 }
-func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
+func (ac *AggregatorV3Context) ReadAccountCodeSizeNoState(addr []byte, txNum uint64) (int, bool, error) {
 	code, noState, err := ac.code.GetNoState(addr, txNum)
 	if err != nil {
 		return 0, false, err
@@ -1229,15 +1229,15 @@ func (ac *Aggregator22Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 	return len(code), noState, nil
 }
 
-func (ac *Aggregator22Context) AccountHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
+func (ac *AggregatorV3Context) AccountHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
 	return ac.accounts.IterateChanged(startTxNum, endTxNum, roTx)
 }
 
-func (ac *Aggregator22Context) StorageHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
+func (ac *AggregatorV3Context) StorageHistoryIterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
 	return ac.storage.IterateChanged(startTxNum, endTxNum, roTx)
 }
 
-func (ac *Aggregator22Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, roTx kv.Tx) *WalkAsOfIter {
+func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, roTx kv.Tx) *WalkAsOfIter {
 	return ac.storage.WalkAsOf(startTxNum, from, to, roTx, amount)
 }
 
@@ -1253,7 +1253,7 @@ func (a *AggregatorV3) Code() *History     { return a.code }
 func (a *AggregatorV3) Accounts() *History { return a.accounts }
 func (a *AggregatorV3) Storage() *History  { return a.storage }
 
-type Aggregator22Context struct {
+type AggregatorV3Context struct {
 	tx         kv.Tx
 	a          *AggregatorV3
 	accounts   *HistoryContext
@@ -1266,8 +1266,8 @@ type Aggregator22Context struct {
 	keyBuf     []byte
 }
 
-func (a *AggregatorV3) MakeContext() *Aggregator22Context {
-	return &Aggregator22Context{
+func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
+	return &AggregatorV3Context{
 		a:          a,
 		accounts:   a.accounts.MakeContext(),
 		storage:    a.storage.MakeContext(),
@@ -1278,8 +1278,8 @@ func (a *AggregatorV3) MakeContext() *Aggregator22Context {
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
 }
-func (ac *Aggregator22Context) SetTx(tx kv.Tx) { ac.tx = tx }
-func (ac *Aggregator22Context) Close()         {}
+func (ac *AggregatorV3Context) SetTx(tx kv.Tx) { ac.tx = tx }
+func (ac *AggregatorV3Context) Close()         {}
 
 // BackgroundResult - used only indicate that some work is done
 // no much reason to pass exact results by this object, just get latest state when need

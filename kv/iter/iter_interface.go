@@ -1,4 +1,4 @@
-package stream
+package iter
 
 // Dual - Iterator-like interface designed for grpc server-side streaming: 1 client request -> much responses from server
 //   - K, V are valid only until next .Next() call (TODO: extend it to whole Tx lifetime?)
@@ -19,7 +19,7 @@ type U64 interface {
 	Unary[uint64]
 }
 
-// Kv - stream which return 2 items - usually called Key and Value (or `k` and `v`)
+// KV - stream which return 2 items - usually called Key and Value (or `k` and `v`)
 // Example:
 //
 //	for s.HasNext() {
@@ -28,4 +28,4 @@ type U64 interface {
 //			return err
 //		}
 //	}
-type Kv Dual[[]byte, []byte]
+type KV Dual[[]byte, []byte]

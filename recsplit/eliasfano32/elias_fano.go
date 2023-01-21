@@ -26,7 +26,7 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/bitutil"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -230,7 +230,7 @@ func (ef *EliasFano) Iterator() *EliasFanoIter {
 	it := &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l}
 	return it
 }
-func (ef *EliasFano) ReverseIterator(seek uint64) *stream.ArrStream[uint64] {
+func (ef *EliasFano) ReverseIterator(seek uint64) *iter.ArrStream[uint64] {
 	//TODO: this is very un-optimal, need implement proper reverse-iterator
 	it := ef.Iterator()
 	var values []uint64
@@ -241,7 +241,7 @@ func (ef *EliasFano) ReverseIterator(seek uint64) *stream.ArrStream[uint64] {
 		}
 		values = append(values, v)
 	}
-	return stream.ReverseArray[uint64](values)
+	return iter.ReverseArray[uint64](values)
 }
 
 type EliasFanoIter struct {

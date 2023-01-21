@@ -1,4 +1,4 @@
-package stream
+package iter
 
 import (
 	"bytes"
@@ -61,14 +61,14 @@ func ExpectEqual[V comparable](tb testing.TB, s1, s2 Unary[V]) {
 // UnionPairsStream - merge 2 kv.Pairs streams to 1 in lexicographically order
 // 1-st stream has higher priority - when 2 streams return same key
 type UnionPairsStream struct {
-	x, y               Kv
+	x, y               KV
 	xHasNext, yHasNext bool
 	xNextK, xNextV     []byte
 	yNextK, yNextV     []byte
 	err                error
 }
 
-func UnionPairs(x, y Kv) *UnionPairsStream {
+func UnionPairs(x, y KV) *UnionPairsStream {
 	m := &UnionPairsStream{x: x, y: y}
 	m.advanceX()
 	m.advanceY()
@@ -253,7 +253,7 @@ func (m *IntersectStream[T]) Next() (T, error) {
 
 //func (m *IntersectStream[T]) ToArray() (res []T, err error) { return ToArr[T](m) }
 
-func ParisToArray(s Kv) ([][]byte, [][]byte, error) {
+func ParisToArray(s KV) ([][]byte, [][]byte, error) {
 	keys, values := make([][]byte, 0), make([][]byte, 0) //nolint
 	for s.HasNext() {
 		k, v, err := s.Next()
@@ -301,7 +301,7 @@ type TransformStream[K, V any] struct {
 	transform func(K, V) (K, V)
 }
 
-func TransformPairs(it Kv, transform func(k, v []byte) ([]byte, []byte)) *TransformStream[[]byte, []byte] {
+func TransformPairs(it KV, transform func(k, v []byte) ([]byte, []byte)) *TransformStream[[]byte, []byte] {
 	return &TransformStream[[]byte, []byte]{it: it, transform: transform}
 }
 func Transform[K, V any](it Dual[K, V], transform func(K, V) (K, V)) *TransformStream[K, V] {
@@ -323,7 +323,7 @@ type FilterStream[K, V any] struct {
 	filter func(K, V) bool
 }
 
-func FilterPairs(it Kv, filter func(k, v []byte) bool) *FilterStream[[]byte, []byte] {
+func FilterPairs(it KV, filter func(k, v []byte) bool) *FilterStream[[]byte, []byte] {
 	return &FilterStream[[]byte, []byte]{it: it, filter: filter}
 }
 func Filter[K, V any](it Dual[K, V], filter func(K, V) bool) *FilterStream[K, V] {

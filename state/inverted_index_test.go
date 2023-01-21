@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -267,7 +267,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		reverseStream, err := ic.IterateRange(k[:], 976, 0, false, -1, nil)
 		require.NoError(t, err)
 		defer it.Close()
-		stream.ExpectEqual[uint64](t, stream.ReverseArray(values), reverseStream)
+		iter.ExpectEqual[uint64](t, iter.ReverseArray(values), reverseStream)
 	}
 	// Now check ranges that require access to DB
 	roTx, err := db.BeginRo(ctx)
@@ -293,7 +293,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		reverseStream, err := ic.IterateRange(k[:], 1000-1, 400-1, false, -1, roTx)
 		require.NoError(t, err)
 		defer it.Close()
-		stream.ExpectEqual[uint64](t, stream.ReverseArray(values), reverseStream)
+		iter.ExpectEqual[uint64](t, iter.ReverseArray(values), reverseStream)
 	}
 }
 

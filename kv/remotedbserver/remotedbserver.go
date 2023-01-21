@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	stream2 "github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -630,7 +630,7 @@ func (s *KvServer) Stream(req *remote.RangeReq, stream remote.KV_StreamServer) e
 		fromPrefix = []byte{}
 	}
 
-	var it stream2.Kv
+	var it iter.KV
 	var err error
 	var skipFirst = false
 
@@ -716,7 +716,7 @@ func (s *KvServer) Range(ctx context.Context, req *remote.RangeReq) (*remote.Pai
 	reply := &remote.Pairs{}
 	var err error
 	if err = s.with(req.TxId, func(tx kv.Tx) error {
-		var it stream2.Kv
+		var it iter.KV
 		if req.OrderAscend {
 			it, err = tx.StreamAscend(req.Table, from, req.ToPrefix, limit)
 			if err != nil {
