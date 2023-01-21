@@ -97,6 +97,7 @@ type stTransactionMarshaling struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *math.HexOrDecimal256 `json:"maxPriorityFeePerGas"`
+	MaxFeePerDataGas     *math.HexOrDecimal256 `json:"maxFeePerDataGas"`
 	Nonce                math.HexOrDecimal64   `json:"nonce"`
 	GasLimit             []math.HexOrDecimal64 `json:"gasLimit"`
 	PrivateKey           hexutil.Bytes         `json:"secretKey"`
@@ -463,6 +464,13 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	gpi := big.Int(*gasPrice)
 	gasPriceInt := uint256.NewInt(gpi.Uint64())
 
+	nBigInt := big.Int(*tx.MaxFeePerDataGas)
+	maxFeePerDataGas := new(uint256.Int)
+	overflow := maxFeePerDataGas.SetFromBig(&nBigInt)
+	if overflow {
+		return types.Message{}, fmt.Errorf("tx.MaxFeePerDataGas higher than 2^256-1")
+	}
+
 	// TODO the conversion to int64 then uint64 then new int isn't working!
 	msg := types.NewMessage(
 		from,
@@ -476,7 +484,9 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 		data,
 		accessList,
 		false, /* checkNonce */
-		false /* isFree */)
+		false, /* isFree */
+		maxFeePerDataGas,
+	)
 
 	return msg, nil
 }

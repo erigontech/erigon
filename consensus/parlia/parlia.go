@@ -1260,7 +1260,8 @@ func (p *Parlia) systemCall(from, contract common.Address, data []byte, ibs *sta
 		math.MaxUint64/2, u256.Num0,
 		nil, nil,
 		data, nil, false,
-		true, // isFree
+		true,      // isFree
+		u256.Num0, // TODO set a correct arg here
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 

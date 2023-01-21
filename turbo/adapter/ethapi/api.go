@@ -40,6 +40,7 @@ type CallArgs struct {
 	GasPrice             *hexutil.Big      `json:"gasPrice"`
 	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
 	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
+	MaxFeePerDataGas     *hexutil.Big      `json:"maxFeePerDataGas"`
 	Value                *hexutil.Big      `json:"value"`
 	Nonce                *hexutil.Uint64   `json:"nonce"`
 	Data                 *hexutil.Bytes    `json:"data"`
@@ -78,9 +79,10 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	}
 
 	var (
-		gasPrice  *uint256.Int
-		gasFeeCap *uint256.Int
-		gasTipCap *uint256.Int
+		gasPrice         *uint256.Int
+		gasFeeCap        *uint256.Int
+		gasTipCap        *uint256.Int
+		maxFeePerDataGas *uint256.Int
 	)
 	if baseFee == nil {
 		// If there's no basefee, then it must be a non-1559 execution
@@ -124,6 +126,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 				gasPrice = math.U256Min(new(uint256.Int).Add(gasTipCap, baseFee), gasFeeCap)
 			}
 		}
+		maxFeePerDataGas = new(uint256.Int)
+		if args.MaxFeePerDataGas != nil {
+			overflow := maxFeePerDataGas.SetFromBig(args.MaxFeePerDataGas.ToInt())
+			if overflow {
+				return types.Message{}, fmt.Errorf("args.MaxFeePerDataGas higher than 2^256-1")
+			}
+		}
 	}
 
 	value := new(uint256.Int)
@@ -142,7 +151,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 		accessList = *args.AccessList
 	}
 
-	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */)
+	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* isFree */, maxFeePerDataGas)
 	return msg, nil
 }
 

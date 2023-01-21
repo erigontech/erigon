@@ -374,11 +374,12 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx DynamicFeeTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
-		gasPrice:   *tx.FeeCap,
-		tip:        *tx.Tip,
-		feeCap:     *tx.FeeCap,
+		nonce:    tx.Nonce,
+		gasLimit: tx.Gas,
+		gasPrice: *tx.FeeCap,
+		tip:      *tx.Tip,
+		feeCap:   *tx.FeeCap,
+		// maxFeePerDataGas: *tx.MaxFeePerDataGas(),
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,
@@ -487,3 +488,5 @@ func (tx *DynamicFeeTransaction) DataGas() *big.Int {
 	}
 	return r
 }
+
+func (tx *DynamicFeeTransaction) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }

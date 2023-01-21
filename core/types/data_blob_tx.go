@@ -461,6 +461,7 @@ func (stx *SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
+// Double check this part: see if this requires dataGasFee inclusion
 func (stx *SignedBlobTx) Cost() *uint256.Int {
 	total := new(uint256.Int).SetUint64(uint64(stx.Message.Gas))
 	tip := uint256.Int(stx.Message.GasTipCap)
@@ -471,14 +472,14 @@ func (stx *SignedBlobTx) Cost() *uint256.Int {
 	return total
 }
 
-func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
-	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
-	return &fee
-}
+// func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int { // 1
+// 	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
+// 	return &fee
+// }
 
-func (stx *SignedBlobTx) GetDataHashes() []common.Hash {
-	return stx.Message.BlobVersionedHashes
-}
+// func (stx *SignedBlobTx) GetDataHashes() []common.Hash { // 2
+// 	return stx.Message.BlobVersionedHashes
+// }
 
 // TODO
 func (stx *SignedBlobTx) Sender(signer Signer) (common.Address, error) {
@@ -556,7 +557,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *params.Rule
 		amount:           stx.GetAmount(),
 		data:             stx.Message.Data,
 		accessList:       stx.GetAccessList(),
-		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
+		maxFeePerDataGas: *stx.MaxFeePerDataGas(),
 		// make sure following field isn't required in other tx types
 		dataHashes: stx.Message.BlobVersionedHashes,
 		checkNonce: true,
@@ -666,8 +667,10 @@ func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 	return stx.Message.BlobVersionedHashes
 }
 
-func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.GetDataHashes() }
+func (stx *SignedBlobTx) DataHashes() []common.Hash { return stx.Message.BlobVersionedHashes }
 
+// DataGas implements get_total_data_gas from EIP-4844. While this returns a big.Int for
+// convenience, it should never exceed math.MaxUint64.
 func (stx *SignedBlobTx) DataGas() *big.Int {
 	r := new(big.Int)
 	l := int64(len(stx.DataHashes()))
@@ -676,4 +679,9 @@ func (stx *SignedBlobTx) DataGas() *big.Int {
 		r.Mul(r, big.NewInt(params.DataGasPerBlob))
 	}
 	return r
+}
+
+func (stx *SignedBlobTx) MaxFeePerDataGas() *uint256.Int {
+	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
+	return &fee
 }

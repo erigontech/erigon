@@ -57,6 +57,7 @@ type ExecutionPayloadV2 struct {
 	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
+	ExcessDataGas *big.Int            `json:"excessDataGas"` // New in EIP-4844
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
 }
 
@@ -316,6 +317,7 @@ func (e *EngineImpl) NewPayloadV2(ctx context.Context, payload *ExecutionPayload
 	for i, transaction := range payload.Transactions {
 		transactions[i] = transaction
 	}
+	// TODO: see if this part must include ExcessDataGas field (eip-4844)
 	ep := &types2.ExecutionPayload{
 		ParentHash:    gointerfaces.ConvertHashToH256(payload.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(payload.FeeRecipient),
@@ -455,7 +457,8 @@ func (e *EngineImpl) GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) 
 		BaseFeePerGas: (*hexutil.Big)(baseFee),
 		BlockHash:     gointerfaces.ConvertH256ToHash(payload.BlockHash),
 		Transactions:  transactions,
-		Withdrawals:   privateapi.ConvertWithdrawalsFromRpc(ep.Withdrawals),
+		// ExcessDataGas: nil, // TODO
+		Withdrawals: privateapi.ConvertWithdrawalsFromRpc(ep.Withdrawals),
 	}
 	return &GetPayloadV2Response{
 		epl,

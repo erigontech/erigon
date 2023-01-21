@@ -480,3 +480,5 @@ func (tx StarknetTransaction) DataGas() *big.Int {
 	}
 	return r
 }
+
+func (tx StarknetTransaction) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }

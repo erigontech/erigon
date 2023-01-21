@@ -357,11 +357,12 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *params.Rules) (Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
-		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
+		nonce:    tx.Nonce,
+		gasLimit: tx.Gas,
+		gasPrice: *tx.GasPrice,
+		tip:      *tx.GasPrice,
+		feeCap:   *tx.GasPrice,
+		// maxFeePerDataGas: *tx.MaxFeePerDataGas(),
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,
@@ -468,3 +469,5 @@ func (tx *LegacyTx) DataGas() *big.Int {
 	}
 	return r
 }
+
+func (tx *LegacyTx) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }

@@ -497,7 +497,8 @@ func SysCallContract(contract common.Address, data []byte, chainConfig params.Ch
 		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
-		true, // isFree
+		true,      // isFree
+		u256.Num0, // TODO set correct maxFeePerDataGas
 	)
 	vmConfig := vm.Config{NoReceipts: true, RestoreState: constCall}
 	// Create a new context to be used in the EVM environment
@@ -542,7 +543,8 @@ func SysCreate(contract common.Address, data []byte, chainConfig params.ChainCon
 		math.MaxUint64, u256.Num0,
 		nil, nil,
 		data, nil, false,
-		true, // isFree
+		true,      // isFree
+		u256.Num0, // TODO set correct maxFeePerDataGas
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 	// Create a new context to be used in the EVM environment

@@ -95,6 +95,8 @@ type Transaction interface {
 	// DataGas implements get_total_data_gas from EIP-4844. While this returns a big.Int for
 	// convenience, it should never exceed math.MaxUint64.
 	DataGas() *big.Int
+	// MaxFeePerDataGas returns the max_fee_per_data_gas value for the transaction
+	// MaxFeePerDataGas() *uint256.Int
 }
 
 // TxBlobWrapData returns the blob and kzg data, if any.
@@ -511,17 +513,18 @@ type Message struct {
 	dataHashes       []common.Hash
 }
 
-func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
+func NewMessage(from common.Address, to *common.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool, maxFeePerDataGas *uint256.Int) Message {
 	m := Message{
-		from:       from,
-		to:         to,
-		nonce:      nonce,
-		amount:     *amount,
-		gasLimit:   gasLimit,
-		data:       data,
-		accessList: accessList,
-		checkNonce: checkNonce,
-		isFree:     isFree,
+		from:             from,
+		to:               to,
+		nonce:            nonce,
+		amount:           *amount,
+		gasLimit:         gasLimit,
+		data:             data,
+		accessList:       accessList,
+		checkNonce:       checkNonce,
+		isFree:           isFree,
+		maxFeePerDataGas: *maxFeePerDataGas,
 	}
 	if gasPrice != nil {
 		m.gasPrice.Set(gasPrice)

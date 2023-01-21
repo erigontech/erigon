@@ -367,8 +367,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	timestamp := new(big.Int).SetUint64(st.evm.Context().Time)
-	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(timestamp) {
+	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(new(big.Int).SetUint64(st.evm.Context().Time)) {
 		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
 		if dataGasPrice.Cmp(st.msg.MaxFeePerDataGas().ToBig()) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",

@@ -468,11 +468,12 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 // AsMessage returns the transaction as a core.Message.
 func (tx AccessListTx) AsMessage(s Signer, _ *big.Int, rules *params.Rules) (Message, error) {
 	msg := Message{
-		nonce:      tx.Nonce,
-		gasLimit:   tx.Gas,
-		gasPrice:   *tx.GasPrice,
-		tip:        *tx.GasPrice,
-		feeCap:     *tx.GasPrice,
+		nonce:    tx.Nonce,
+		gasLimit: tx.Gas,
+		gasPrice: *tx.GasPrice,
+		tip:      *tx.GasPrice,
+		feeCap:   *tx.GasPrice,
+		// maxFeePerDataGas: *tx.MaxFeePerDataGas(),
 		to:         tx.To,
 		amount:     *tx.Value,
 		data:       tx.Data,
@@ -568,3 +569,15 @@ func (tx *AccessListTx) Sender(signer Signer) (common.Address, error) {
 }
 
 func (tx *AccessListTx) DataHashes() []common.Hash { return nil }
+
+func (tx *AccessListTx) DataGas() *big.Int {
+	r := new(big.Int)
+	l := int64(len(tx.DataHashes()))
+	if l != 0 {
+		r.SetInt64(l)
+		r.Mul(r, big.NewInt(params.DataGasPerBlob))
+	}
+	return r
+}
+
+func (tx *AccessListTx) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }
