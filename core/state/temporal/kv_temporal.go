@@ -8,8 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -84,7 +84,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 type Tx struct {
 	kv.Tx
 	db               *DB
-	agg              *state.Aggregator22Context
+	agg              *state.AggregatorV3Context
 	resourcesToClose []kv.Closer
 }
 
@@ -122,7 +122,7 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs stream.Kv, err error) {
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
 	switch name {
 	case AccountsDomain:
 		panic("not implemented yet")
@@ -153,11 +153,11 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		if err != nil {
 			return nil, err
 		}
-		it3 := stream.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
+		it3 := iter.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return stream.UnionPairs(it, it3), nil
+		return iter.UnionPairs(it, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -231,7 +231,7 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 
 type Cursor struct {
 	kv  kv.Cursor
-	agg *state.Aggregator22Context
+	agg *state.AggregatorV3Context
 
 	//HistoryV2 fields
 	accHistoryC, storageHistoryC kv.Cursor
@@ -241,12 +241,12 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
 	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
+func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case LogTopicIdx:
 		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
