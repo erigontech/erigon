@@ -2,7 +2,6 @@ package transition
 
 import (
 	"encoding/hex"
-	"math/big"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var (
@@ -44,25 +42,6 @@ var (
 	blockHashValidator1 = "f5b74f03650fb65362badf85660ab2f6e92e8df10af9a981a2b5a4df1d9f2479"
 )
 
-func getEmptyState() *state.BeaconState {
-	bellatrixState := &cltypes.BeaconStateBellatrix{
-		Fork:                        &cltypes.Fork{},
-		LatestBlockHeader:           &cltypes.BeaconBlockHeader{},
-		Eth1Data:                    &cltypes.Eth1Data{},
-		CurrentJustifiedCheckpoint:  &cltypes.Checkpoint{},
-		FinalizedCheckpoint:         &cltypes.Checkpoint{},
-		PreviousJustifiedCheckpoint: &cltypes.Checkpoint{},
-		CurrentSyncCommittee:        &cltypes.SyncCommittee{},
-		NextSyncCommittee:           &cltypes.SyncCommittee{},
-		LatestExecutionPayloadHeader: &types.Header{
-			BaseFee: big.NewInt(0),
-			Number:  big.NewInt(0),
-		},
-		JustificationBits: []byte{0},
-	}
-	return state.FromBellatrixState(bellatrixState)
-}
-
 func getEmptyBlock() *cltypes.SignedBeaconBlock {
 	return &cltypes.SignedBeaconBlock{
 		Block: &cltypes.BeaconBlock{
@@ -94,32 +73,13 @@ func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
 }
 
 func getTestBeaconState() *state.BeaconState {
-	bellatrixState := &cltypes.BeaconStateBellatrix{
-		BlockRoots:        make([][32]byte, 8192),
-		StateRoots:        make([][32]byte, 8192),
-		RandaoMixes:       make([][32]byte, 65536),
-		Slashings:         make([]uint64, 8192),
-		JustificationBits: make([]byte, 1),
-		CurrentSyncCommittee: &cltypes.SyncCommittee{
-			PubKeys: make([][48]byte, 512),
-		},
-		NextSyncCommittee: &cltypes.SyncCommittee{
-			PubKeys: make([][48]byte, 512),
-		},
-		LatestExecutionPayloadHeader: &types.Header{
-			BaseFee: big.NewInt(0),
-			Number:  big.NewInt(0),
-		},
-		LatestBlockHeader: &cltypes.BeaconBlockHeader{
-			Root: [32]byte{},
-		},
-		Fork:                        &cltypes.Fork{},
-		Eth1Data:                    &cltypes.Eth1Data{},
-		PreviousJustifiedCheckpoint: &cltypes.Checkpoint{},
-		CurrentJustifiedCheckpoint:  &cltypes.Checkpoint{},
-		FinalizedCheckpoint:         &cltypes.Checkpoint{},
-	}
-	return state.FromBellatrixState(bellatrixState)
+	return state.GetEmptyBeaconState()
+}
+
+func getEmptyInvalidBeaconState() *state.BeaconState {
+	b := state.GetEmptyBeaconState()
+	b.SetCurrentSyncCommittee(&cltypes.SyncCommittee{})
+	return b // Invalid public key length
 }
 
 func assertStateEq(t *testing.T, got *state.BeaconState, expected *state.BeaconState) {
@@ -193,7 +153,7 @@ func TestTransitionSlot(t *testing.T) {
 		},
 		{
 			description:   "failure_empty_state",
-			prevState:     getEmptyState(),
+			prevState:     getEmptyInvalidBeaconState(),
 			expectedState: nil,
 			wantErr:       true,
 		},
@@ -270,7 +230,7 @@ func TestProcessSlots(t *testing.T) {
 		},
 		{
 			description:   "error_empty_state",
-			prevState:     getEmptyState(),
+			prevState:     getEmptyInvalidBeaconState(),
 			expectedState: nil,
 			startSlot:     0,
 			numSlots:      1,

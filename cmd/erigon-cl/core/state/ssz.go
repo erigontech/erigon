@@ -71,11 +71,11 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	for _, blockRoot := range b.blockRoots {
+	for _, blockRoot := range &b.blockRoots {
 		dst = append(dst, blockRoot[:]...)
 	}
 
-	for _, stateRoot := range b.stateRoots {
+	for _, stateRoot := range &b.stateRoots {
 		dst = append(dst, stateRoot[:]...)
 	}
 
@@ -101,11 +101,11 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
 	offset += uint32(len(b.balances)) * 8
 
-	for _, mix := range b.randaoMixes {
+	for _, mix := range &b.randaoMixes {
 		dst = append(dst, mix[:]...)
 	}
 
-	for _, slashing := range b.slashings {
+	for _, slashing := range &b.slashings {
 		dst = append(dst, ssz_utils.Uint64SSZ(slashing)...)
 	}
 
@@ -144,9 +144,10 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 	// Offset (24) 'LatestExecutionPayloadHeader'
 	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
-	if b.version >= clparams.BellatrixVersion {
+	/*if b.version >= clparams.BellatrixVersion {
 		offset += uint32(b.latestExecutionPayloadHeader.EncodingSizeSSZ(b.version))
-	}
+	} Will uncomment for Capella.
+	*/
 	// Write historical roots (offset 1)
 	for _, root := range b.historicalRoots {
 		dst = append(dst, root[:]...)
@@ -295,7 +296,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	// Execution Payload header offset
 	if b.version >= clparams.BellatrixVersion {
 		executionPayloadOffset = ssz_utils.DecodeOffset(buf[pos:])
-		pos += 4
+		// pos += 4 TODO: will uncomment in case
 	}
 	// Now decode all the lists.
 	var err error

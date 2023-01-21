@@ -17,10 +17,9 @@ func getTestStateBalances(t *testing.T) *state.BeaconState {
 	for i := uint64(0); i < numVals; i++ {
 		balances[i] = i
 	}
-	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Balances:          balances,
-		JustificationBits: []byte{0},
-	})
+	b := state.GetEmptyBeaconState()
+	b.SetBalances(balances)
+	return b
 }
 
 func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
@@ -31,11 +30,10 @@ func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
 			ExitEpoch:       testExitEpoch,
 		}
 	}
-	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Slot:              testExitEpoch * SLOTS_PER_EPOCH,
-		Validators:        validators,
-		JustificationBits: []byte{0},
-	})
+	b := state.GetEmptyBeaconState()
+	b.SetSlot(testExitEpoch * SLOTS_PER_EPOCH)
+	b.SetValidators(validators)
+	return b
 }
 
 func TestIncreaseBalance(t *testing.T) {
