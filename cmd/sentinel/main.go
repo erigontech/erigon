@@ -62,7 +62,7 @@ func constructBodyFreeRequest(t string) *sentinelrpc.RequestData {
 	}
 }
 
-func constructRequest(t string, reqBody ssz_utils.ObjectSSZ) (*sentinelrpc.RequestData, error) {
+func constructRequest(t string, reqBody ssz_utils.EncodableSSZ) (*sentinelrpc.RequestData, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
 		return nil, fmt.Errorf("unable to encode request body: %v", err)
@@ -207,7 +207,7 @@ func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
 			continue
 		}
 		block := &cltypes.SignedAggregateAndProof{}
-		if err := block.UnmarshalSSZ(data.Data); err != nil {
+		if err := block.DecodeSSZ(data.Data); err != nil {
 			log.Error("[Sentinel] Error", "err", err)
 			continue
 		}

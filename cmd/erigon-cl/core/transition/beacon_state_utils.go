@@ -181,7 +181,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) er
 	if block.ProposerIndex != propInd {
 		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
 	}
-	latestRoot, err := state.LatestBlockHeader().HashTreeRoot()
+	latestRoot, err := state.LatestBlockHeader().HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}

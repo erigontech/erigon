@@ -46,7 +46,7 @@ type BeaconState struct {
 	latestExecutionPayloadHeader *types.Header
 	// Internals
 	version       clparams.StateVersion   // State version
-	leaves        [][32]byte              // Pre-computed leaves.
+	leaves        [32][32]byte            // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 }
 
@@ -58,85 +58,14 @@ func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
 	return ret
 }
 
-// FromBellatrixState initialize the beacon state as a bellatrix state.
-func FromBellatrixState(state *cltypes.BeaconStateBellatrix) *BeaconState {
-	var blockRoots [stateRootsLength]libcommon.Hash
-	var stateRoots [stateRootsLength]libcommon.Hash
-	var randaoMixes [randoMixesLength]libcommon.Hash
-	historicalRoots := make([]libcommon.Hash, len(state.HistoricalRoots))
-	var slashings [slashingsLength]uint64
-	copy(slashings[:], state.Slashings)
-	for i := range state.BlockRoots {
-		copy(blockRoots[i][:], state.BlockRoots[i][:])
-	}
-	for i := range state.StateRoots {
-		copy(stateRoots[i][:], state.StateRoots[i][:])
-	}
-	for i := range state.RandaoMixes {
-		copy(randaoMixes[i][:], state.RandaoMixes[i][:])
-	}
-	for i := range state.HistoricalRoots {
-		copy(historicalRoots[i][:], state.HistoricalRoots[i][:])
-	}
-
-	return &BeaconState{
-		genesisTime:                 state.GenesisTime,
-		genesisValidatorsRoot:       state.GenesisValidatorsRoot,
-		slot:                        state.Slot,
-		fork:                        state.Fork,
-		latestBlockHeader:           state.LatestBlockHeader,
-		blockRoots:                  blockRoots,
-		stateRoots:                  stateRoots,
-		historicalRoots:             historicalRoots,
-		eth1Data:                    state.Eth1Data,
-		eth1DataVotes:               state.Eth1DataVotes,
-		eth1DepositIndex:            state.Eth1DepositIndex,
-		validators:                  state.Validators,
-		balances:                    state.Balances,
-		randaoMixes:                 randaoMixes,
-		slashings:                   slashings,
-		previousEpochParticipation:  state.PreviousEpochParticipation,
-		currentEpochParticipation:   state.CurrentEpochParticipation,
-		justificationBits:           state.JustificationBits[0],
-		previousJustifiedCheckpoint: state.PreviousJustifiedCheckpoint,
-		currentJustifiedCheckpoint:  state.CurrentJustifiedCheckpoint,
-		finalizedCheckpoint:         state.FinalizedCheckpoint,
-		inactivityScores:            state.InactivityScores,
-		currentSyncCommittee:        state.CurrentSyncCommittee,
-		nextSyncCommittee:           state.NextSyncCommittee,
-		// Bellatrix only
-		latestExecutionPayloadHeader: state.LatestExecutionPayloadHeader,
-		// Internals
-		version:       clparams.BellatrixVersion,
-		leaves:        make([][32]byte, BellatrixLeavesSize),
-		touchedLeaves: map[StateLeafIndex]bool{},
-		// TODO: Make proper hasher
-	}
-}
-
-// MarshallSSZTo encodes the state into the given buffer.
-func (b *BeaconState) MarshalSSZTo(dst []byte) ([]byte, error) {
-	return b.GetStateSSZObject().MarshalSSZTo(dst)
-}
-
-// MarshallSSZTo encodes the state.
-func (b *BeaconState) MarshalSSZ() ([]byte, error) {
-	return b.GetStateSSZObject().MarshalSSZ()
-}
-
 // MarshallSSZTo retrieve the SSZ encoded length of the state.
-func (b *BeaconState) SizeSSZ() int {
-	return b.GetStateSSZObject().SizeSSZ()
-}
-
-// MarshallSSZTo retrieve the SSZ encoded length of the state.
-func (b *BeaconState) UnmarshalSSZ(buf []byte) error {
-	panic("beacon state should be derived, use FromBellatrixState instead.")
+func (b *BeaconState) DecodeSSZ(buf []byte) error {
+	panic("not implemented")
 }
 
 // BlockRoot computes the block root for the state.
 func (b *BeaconState) BlockRoot() ([32]byte, error) {
-	stateRoot, err := b.HashTreeRoot()
+	stateRoot, err := b.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -146,5 +75,9 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 		BodyRoot:      b.latestBlockHeader.BodyRoot,
 		ParentRoot:    b.latestBlockHeader.ParentRoot,
 		Root:          stateRoot,
-	}).HashTreeRoot()
+	}).HashSSZ()
+}
+
+func (b *BeaconState) initBeaconState() {
+	b.touchedLeaves = make(map[StateLeafIndex]bool)
 }

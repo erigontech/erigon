@@ -44,7 +44,7 @@ func BenchmarkStateRootNonCached(b *testing.B) {
 	base := getTestBeaconState()
 	for i := 0; i < b.N; i++ {
 		state := state.FromBellatrixState(base)
-		state.HashTreeRoot()
+		state.HashSSZ()
 	}
 }
 
@@ -54,6 +54,6 @@ func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	state := state.FromBellatrixState(getTestBeaconState())
 	for i := 0; i < b.N; i++ {
-		state.HashTreeRoot()
+		state.HashSSZ()
 	}
 }

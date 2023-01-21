@@ -7,17 +7,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
-func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
+func (b *BeaconState) HashSSZ() ([32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-
-	currentLayer := b.leaves
 	// Pad to 32 of length
-	for len(currentLayer) != 32 {
-		currentLayer = append(currentLayer, [32]byte{})
-	}
-	return merkle_tree.MerkleRootFromLeaves(currentLayer)
+	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -50,7 +45,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(4): LatestBlockHeader
 	if b.isLeafDirty(LatestBlockHeaderLeafIndex) {
-		headerRoot, err := b.latestBlockHeader.HashTreeRoot()
+		headerRoot, err := b.latestBlockHeader.HashSSZ()
 		if err != nil {
 			return err
 		}

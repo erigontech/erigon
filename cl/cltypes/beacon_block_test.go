@@ -106,14 +106,14 @@ func TestBellatrixBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.BellatrixVersion
 	require.Equal(t, testBeaconBlockVariation.Version(), clparams.BellatrixVersion)
 	// Simple unit test: unmarshal + marshal + hashtreeroot
-	hash, err := testBeaconBlockVariation.HashTreeRoot()
+	hash, err := testBeaconBlockVariation.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash), bellatrixHash)
-	encoded, err := testBeaconBlockVariation.MarshalSSZ()
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.UnmarshalSSZWithVersion(encoded, int(clparams.BellatrixVersion)))
-	hash2, err := block2.HashTreeRoot()
+	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.BellatrixVersion)))
+	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), bellatrixHash)
 	// encode/decode for storage
@@ -127,14 +127,14 @@ func TestAltairBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.AltairVersion
 	require.Equal(t, testBeaconBlockVariation.Version(), clparams.AltairVersion)
 	// Simple unit test: unmarshal + marshal + hashtreeroot
-	hash, err := testBeaconBlockVariation.HashTreeRoot()
+	hash, err := testBeaconBlockVariation.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash), altairHash)
-	encoded, err := testBeaconBlockVariation.MarshalSSZ()
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.UnmarshalSSZWithVersion(encoded, int(clparams.AltairVersion)))
-	hash2, err := block2.HashTreeRoot()
+	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.AltairVersion)))
+	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), altairHash)
 	// encode/decode for storage
@@ -148,14 +148,14 @@ func TestPhase0Block(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.Phase0Version
 	require.Equal(t, testBeaconBlockVariation.Version(), clparams.Phase0Version)
 	// Simple unit test: unmarshal + marshal + hashtreeroot
-	hash, err := testBeaconBlockVariation.HashTreeRoot()
+	hash, err := testBeaconBlockVariation.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash), phase0Hash)
-	encoded, err := testBeaconBlockVariation.MarshalSSZ()
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
-	require.NoError(t, block2.UnmarshalSSZWithVersion(encoded, int(clparams.Phase0Version)))
-	hash2, err := block2.HashTreeRoot()
+	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.Phase0Version)))
+	hash2, err := block2.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(hash2), phase0Hash)
 	// encode/decode for storage

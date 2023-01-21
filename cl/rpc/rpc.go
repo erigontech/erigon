@@ -238,11 +238,11 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.Phase0Version))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.Phase0Version))
 		case utils.Bytes4ToUint32(altairForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.AltairVersion))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.AltairVersion))
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.BellatrixVersion))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.BellatrixVersion))
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}
