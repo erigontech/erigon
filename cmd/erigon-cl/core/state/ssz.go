@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
@@ -194,7 +195,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
-	// Direct unmarshalling for first 5 fields
+	// Direct unmarshalling for first 3 fields
 	b.genesisTime = ssz_utils.UnmarshalUint64SSZ(buf)
 	copy(b.genesisValidatorsRoot[:], buf[8:])
 	b.slot = ssz_utils.UnmarshalUint64SSZ(buf[40:])
@@ -203,16 +204,17 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if err := b.fork.DecodeSSZ(buf[48:]); err != nil {
 		return err
 	}
+	pos := 64
 	// Latest block header
 	b.latestBlockHeader = new(cltypes.BeaconBlockHeader)
 	if err := b.latestBlockHeader.DecodeSSZ(buf[64:]); err != nil {
 		return err
 	}
+	pos += b.latestBlockHeader.EncodingSizeSSZ()
 	// Decode block roots
-	pos := 176
 	for i := range b.blockRoots {
 		copy(b.blockRoots[i][:], buf[pos:])
-		pos += 32
+		pos += length.Hash
 	}
 	// Decode state roots
 	for i := range b.stateRoots {
@@ -325,8 +327,11 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.version == clparams.AltairVersion {
 		return nil
 	}
+	if len(buf) <= int(executionPayloadOffset) {
+		return ssz_utils.ErrLowBufferSize
+	}
 	b.latestExecutionPayloadHeader = new(types.Header)
-	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf, b.version); err != nil {
+	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:], b.version); err != nil {
 		return err
 	}
 	return nil
