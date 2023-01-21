@@ -48,6 +48,13 @@ func Uint64SSZ(x uint64) []byte {
 	return b
 }
 
+func BoolSSZ(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 func OffsetSSZ(x uint32) []byte {
 	b := make([]byte, 4)
 	binary.LittleEndian.PutUint32(b, x)
