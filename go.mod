@@ -11,8 +11,8 @@ require (
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.2.1
-	github.com/VictoriaMetrics/metrics v1.23.0
+	github.com/RoaringBitmap/roaring v1.2.2
+	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/go-libutp v1.2.0
 	github.com/anacrolix/log v0.13.2-0.20221123232138-02e2764801c3
 	github.com/anacrolix/torrent v1.48.0
@@ -31,12 +31,12 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/tidwall/btree v1.5.0
 	go.uber.org/atomic v1.10.0
-	golang.org/x/crypto v0.4.0
-	golang.org/x/exp v0.0.0-20230111222715-75897c7a292a
+	golang.org/x/crypto v0.5.0
+	golang.org/x/exp v0.0.0-20230118134722-a68e582fa157
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.4.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.51.0
+	google.golang.org/grpc v1.52.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
 	google.golang.org/protobuf v1.28.1
 )
@@ -100,9 +100,9 @@ require (
 	go.opentelemetry.io/otel v1.8.0 // indirect
 	go.opentelemetry.io/otel/trace v1.8.0 // indirect
 	golang.org/x/mod v0.7.0 // indirect
-	golang.org/x/net v0.3.0 // indirect
-	golang.org/x/text v0.5.0 // indirect
+	golang.org/x/net v0.5.0 // indirect
+	golang.org/x/text v0.6.0 // indirect
 	golang.org/x/tools v0.3.0 // indirect
-	google.golang.org/genproto v0.0.0-20211118181313-81c1377c94b1 // indirect
+	google.golang.org/genproto v0.0.0-20221118155620-16455021b5e6 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
