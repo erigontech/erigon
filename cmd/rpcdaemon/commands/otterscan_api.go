@@ -266,11 +266,11 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		return nil, err
 	}
 	fmt.Printf("from: %d\n", from)
-	itTo, err := tx.(kv.TemporalTx).IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.(kv.TemporalTx).IndexRange(temporal.TracesFromIdx, addr[:], from, 0, false, -1)
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], from, 0, false, -1)
 	if err != nil {
 		return nil, err
 	}
