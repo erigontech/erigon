@@ -6,7 +6,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 const (
@@ -21,17 +20,19 @@ type LightClientBootstrap struct {
 	CurrentSyncCommitteeBranch []libcommon.Hash
 }
 
-func (l *LightClientBootstrap) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
+func (l *LightClientBootstrap) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
 }
 
-// MarshalSSZ ssz marshals the LightClientBootstrap object
-func (l *LightClientBootstrap) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, 0, l.SizeSSZ())
+// EncodeSSZ ssz marshals the LightClientBootstrap object
+func (l *LightClientBootstrap) EncodeSSZ(dst []byte) ([]byte, error) {
+	buf := dst
 	var err error
-	buf = l.Header.EncodeSSZ(buf)
-	buf, err = l.CurrentSyncCommittee.EncodeSSZ(buf)
-	if err != nil {
+	if buf, err = l.Header.EncodeSSZ(buf); err != nil {
+		return nil, err
+	}
+
+	if buf, err = l.CurrentSyncCommittee.EncodeSSZ(buf); err != nil {
 		return nil, err
 	}
 	if len(l.CurrentSyncCommitteeBranch) != SyncCommitteeBranchLength {
@@ -43,11 +44,11 @@ func (l *LightClientBootstrap) MarshalSSZ() ([]byte, error) {
 	return buf, nil
 }
 
-// UnmarshalSSZ ssz unmarshals the LightClientBootstrap object
-func (l *LightClientBootstrap) UnmarshalSSZ(buf []byte) error {
+// DecodeSSZ ssz unmarshals the LightClientBootstrap object
+func (l *LightClientBootstrap) DecodeSSZ(buf []byte) error {
 	var err error
-	if len(buf) < l.SizeSSZ() {
-		return ssz.ErrSize
+	if len(buf) < l.EncodingSizeSSZ() {
+		return ssz_utils.ErrLowBufferSize
 	}
 
 	l.Header = new(BeaconBlockHeader)
@@ -70,8 +71,8 @@ func (l *LightClientBootstrap) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the LightClientBootstrap object
-func (l *LightClientBootstrap) SizeSSZ() (size int) {
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the LightClientBootstrap object
+func (l *LightClientBootstrap) EncodingSizeSSZ() (size int) {
 	size = 24896
 	return
 }
@@ -87,8 +88,8 @@ type LightClientUpdate struct {
 	SignatureSlot           uint64
 }
 
-func (l *LightClientUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
+func (l *LightClientUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
 }
 
 func (l *LightClientUpdate) HasNextSyncCommittee() bool {
@@ -105,11 +106,13 @@ func (l *LightClientUpdate) HasSyncFinality() bool {
 }
 
 // MarshalSSZTo ssz marshals the LightClientUpdate object to a target array
-func (l *LightClientUpdate) MarshalSSZ() ([]byte, error) {
-	dst := make([]byte, 0, l.SizeSSZ())
+func (l *LightClientUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
 	var err error
 	// Generic Update Specific
-	dst = l.AttestedHeader.EncodeSSZ(dst)
+	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
 	if dst, err = l.NextSyncCommitee.EncodeSSZ(dst); err != nil {
 		return nil, err
 	}
@@ -131,7 +134,10 @@ func (l *LightClientUpdate) MarshalSSZ() ([]byte, error) {
 
 func encodeFinalityUpdateSpecificField(buf []byte, finalizedHeader *BeaconBlockHeader, finalityBranch []libcommon.Hash) ([]byte, error) {
 	dst := buf
-	dst = finalizedHeader.EncodeSSZ(dst)
+	var err error
+	if dst, err = finalizedHeader.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
 	if len(finalityBranch) != FinalityBranchLength {
 		return nil, fmt.Errorf("invalid finality branch length")
 	}
@@ -177,14 +183,14 @@ type LightClientFinalityUpdate struct {
 	SignatureSlot   uint64
 }
 
-func (l *LightClientFinalityUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
+func (l *LightClientFinalityUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
 }
 
-// UnmarshalSSZ ssz unmarshals the LightClientUpdate object
-func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
+// DecodeSSZ ssz unmarshals the LightClientUpdate object
+func (l *LightClientUpdate) DecodeSSZ(buf []byte) error {
 	var err error
-	if len(buf) < l.SizeSSZ() {
+	if len(buf) < l.EncodingSizeSSZ() {
 		return ssz_utils.ErrBadOffset
 	}
 
@@ -219,19 +225,20 @@ func (l *LightClientUpdate) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the LightClientUpdate object
-func (l *LightClientUpdate) SizeSSZ() int {
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the LightClientUpdate object
+func (l *LightClientUpdate) EncodingSizeSSZ() int {
 	return 25368
 }
 
-func (l *LightClientFinalityUpdate) MarshalSSZ() ([]byte, error) {
-	dst := make([]byte, 0, l.SizeSSZ())
+func (l *LightClientFinalityUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
 	var err error
 
-	dst = l.AttestedHeader.EncodeSSZ(dst)
+	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
 
-	dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch)
-	if err != nil {
+	if dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch); err != nil {
 		return nil, err
 	}
 	dst = encodeUpdateFooter(dst, l.SyncAggregate, l.SignatureSlot)
@@ -239,10 +246,10 @@ func (l *LightClientFinalityUpdate) MarshalSSZ() ([]byte, error) {
 	return dst, nil
 }
 
-// UnmarshalSSZ ssz unmarshals the LightClientFinalityUpdate object
-func (l *LightClientFinalityUpdate) UnmarshalSSZ(buf []byte) error {
+// DecodeSSZ ssz unmarshals the LightClientFinalityUpdate object
+func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte) error {
 	var err error
-	if len(buf) < l.SizeSSZ() {
+	if len(buf) < l.EncodingSizeSSZ() {
 		return ssz_utils.ErrBadOffset
 	}
 
@@ -264,7 +271,7 @@ func (l *LightClientFinalityUpdate) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-func (l *LightClientFinalityUpdate) SizeSSZ() int {
+func (l *LightClientFinalityUpdate) EncodingSizeSSZ() int {
 	return 584
 }
 
@@ -275,23 +282,25 @@ type LightClientOptimisticUpdate struct {
 	SignatureSlot  uint64
 }
 
-func (l *LightClientOptimisticUpdate) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return l.UnmarshalSSZ(buf)
+func (l *LightClientOptimisticUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
 }
 
-func (l *LightClientOptimisticUpdate) MarshalSSZ() ([]byte, error) {
-	dst := make([]byte, 0, l.SizeSSZ())
-
-	dst = l.AttestedHeader.EncodeSSZ(dst)
+func (l *LightClientOptimisticUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
+	var err error
+	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
 	dst = encodeUpdateFooter(dst, l.SyncAggregate, l.SignatureSlot)
 
 	return dst, nil
 }
 
-func (l *LightClientOptimisticUpdate) UnmarshalSSZ(buf []byte) error {
+func (l *LightClientOptimisticUpdate) DecodeSSZ(buf []byte) error {
 	var err error
-	if len(buf) < l.SizeSSZ() {
-		return ssz.ErrSize
+	if len(buf) < l.EncodingSizeSSZ() {
+		return ssz_utils.ErrLowBufferSize
 	}
 
 	// Field (0) 'AttestedHeader'
@@ -305,6 +314,6 @@ func (l *LightClientOptimisticUpdate) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-func (l *LightClientOptimisticUpdate) SizeSSZ() (size int) {
+func (l *LightClientOptimisticUpdate) EncodingSizeSSZ() (size int) {
 	return 280
 }

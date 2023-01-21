@@ -15,12 +15,12 @@ func IsSlashableValidator(validator *cltypes.Validator, epoch uint64) bool {
 }
 
 func IsSlashableAttestationData(d1, d2 *cltypes.AttestationData) (bool, error) {
-	hash1, err := d1.HashTreeRoot()
+	hash1, err := d1.HashSSZ()
 	if err != nil {
 		return false, fmt.Errorf("unable to hash attestation data 1: %v", err)
 	}
 
-	hash2, err := d2.HashTreeRoot()
+	hash2, err := d2.HashSSZ()
 	if err != nil {
 		return false, fmt.Errorf("unable to hash attestation data 2: %v", err)
 	}
@@ -97,11 +97,11 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 		return fmt.Errorf("non-matching proposer indices proposer slashing: %d != %d", h1.ProposerIndex, h2.ProposerIndex)
 	}
 
-	h1Root, err := h1.HashTreeRoot()
+	h1Root, err := h1.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash header1: %v", err)
 	}
-	h2Root, err := h2.HashTreeRoot()
+	h2Root, err := h2.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash header2: %v", err)
 	}

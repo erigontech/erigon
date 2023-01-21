@@ -142,7 +142,7 @@ func ComputeSigningRoot(
 	obj ssz_utils.HashableSSZ,
 	domain []byte,
 ) ([32]byte, error) {
-	objRoot, err := obj.HashTreeRoot()
+	objRoot, err := obj.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
