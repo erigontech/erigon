@@ -10,6 +10,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/google/btree"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -109,55 +110,6 @@ type Anchor struct {
 	blockHeight   uint64
 	nextRetryTime time.Time // Zero when anchor has just been created, otherwise time when anchor needs to be check to see if retry is needed
 	timeouts      int       // Number of timeout that this anchor has experiences - after certain threshold, it gets invalidated
-	idx           int       // Index of the anchor in the queue to be able to modify specific items
-}
-
-// AnchorQueue is a priority queue of anchors that priorises by the time when
-// another retry on the extending the anchor needs to be attempted
-// Every time anchor's extension is requested, the `nextRetryTime` is reset
-// to 5 seconds in the future, and when it expires, and the anchor is still
-// retry is made
-// It implement heap.Interface to be useable by the standard library `heap`
-// as a priority queue (implemented as a binary heap)
-// As anchors are moved around in the binary heap, they internally track their
-// position in the heap (using `idx` field). This feature allows updating
-// the heap (using `Fix` function) in situations when anchor is accessed not
-// through the priority queue, but through the map `anchor` in the
-// HeaderDownloader type.
-type AnchorQueue []*Anchor
-
-func (aq AnchorQueue) Len() int {
-	return len(aq)
-}
-
-func (aq AnchorQueue) Less(i, j int) bool {
-	if aq[i].nextRetryTime == aq[j].nextRetryTime {
-		// When next retry times are the same, we prioritise low block height anchors
-		return aq[i].blockHeight < aq[j].blockHeight
-	}
-	return aq[i].nextRetryTime.Before(aq[j].nextRetryTime)
-}
-
-func (aq AnchorQueue) Swap(i, j int) {
-	aq[i], aq[j] = aq[j], aq[i]
-	aq[i].idx, aq[j].idx = i, j // Restore indices after the swap
-}
-
-func (aq *AnchorQueue) Push(x interface{}) {
-	// Push and Pop use pointer receivers because they modify the slice's length,
-	// not just its contents.
-	x.(*Anchor).idx = len(*aq)
-	*aq = append(*aq, x.(*Anchor))
-}
-
-func (aq *AnchorQueue) Pop() interface{} {
-	old := *aq
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = nil
-	*aq = old[0 : n-1]
-	x.idx = -1
-	return x
 }
 
 type ChainSegmentHeader struct {
@@ -283,7 +235,7 @@ type HeaderDownload struct {
 	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
 	persistedLinkQueue     LinkQueue      // Priority queue of persisted links used to limit their number
 	linkQueue              LinkQueue      // Priority queue of non-persisted links used to limit their number
-	anchorQueue            *AnchorQueue   // Priority queue of anchors used to sequence the header requests
+	anchorTree             *btree.BTreeG[*Anchor]   // anchors sorted by block height
 	DeliveryNotify         chan struct{}
 	toAnnounce             []Announce
 	lock                   sync.RWMutex
@@ -342,7 +294,7 @@ func NewHeaderDownload(
 		anchorLimit:        anchorLimit,
 		engine:             engine,
 		links:              make(map[libcommon.Hash]*Link),
-		anchorQueue:        &AnchorQueue{},
+		anchorTree:         btree.NewG[*Anchor](32, func(a, b *Anchor) bool { return a.blockHeight < b.blockHeight }),
 		seenAnnounces:      NewSeenAnnounces(),
 		DeliveryNotify:     make(chan struct{}, 1),
 		QuitPoWMining:      make(chan struct{}),
@@ -354,7 +306,6 @@ func NewHeaderDownload(
 	}
 	heap.Init(&hd.persistedLinkQueue)
 	heap.Init(&hd.linkQueue)
-	heap.Init(hd.anchorQueue)
 	heap.Init(&hd.insertQueue)
 	return hd
 }
