@@ -2,6 +2,7 @@ package lightclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -55,8 +56,9 @@ func (c *ChainTipSubscriber) StartLoop() {
 	for {
 		data, err := stream.Recv()
 		if err != nil {
-
-			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Debug("[Lightclient] could not read gossip :/", "reason", err)
+			}
 			continue
 		}
 		if err := c.handleGossipData(data); err != nil {
