@@ -14,7 +14,7 @@ import (
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	ac    *libstate.Aggregator22Context
+	ac    *libstate.AggregatorV3Context
 	txNum uint64
 	trace bool
 	ttx   kv.TemporalTx
@@ -24,7 +24,7 @@ func NewHistoryReaderV3() *HistoryReaderV3 {
 	return &HistoryReaderV3{}
 }
 
-func (hr *HistoryReaderV3) SetAc(ac *libstate.Aggregator22Context) {
+func (hr *HistoryReaderV3) SetAc(ac *libstate.AggregatorV3Context) {
 	hr.ac = ac
 }
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
