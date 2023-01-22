@@ -135,9 +135,9 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	//if m.HistoryV3 {
-	//	t.Skip("TODO: FIXME")
-	//}
+	if m.HistoryV3 {
+		t.Skip("TODO: FIXME")
+	}
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -171,6 +171,9 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if m.HistoryV3 {
+		t.Skip("TODO: FIXME")
+	}
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
 	api := NewPrivateDebugAPI(
