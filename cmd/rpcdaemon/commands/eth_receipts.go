@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -790,4 +791,61 @@ Logs:
 		result = append(result, log)
 	}
 	return result
+}
+
+// MapTxNum2BlockNumIter - enrich iterator by TxNumbers adding more info: blockNum, txIndex in block, isNewBlock started.
+//
+// Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
+//
+//	it allow certain optimizations.
+type MapTxNum2BlockNumIter struct {
+	it          iter.U64
+	tx          kv.Tx
+	orderAscend bool
+
+	blockNum                         uint64
+	minTxNumInBlock, maxTxNumInBlock uint64
+}
+
+func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
+}
+func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
+}
+func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blockNumChanged bool, err error) {
+	txNum, err = i.it.Next()
+	if err != nil {
+		return txNum, blockNum, txIndex, blockNumChanged, err
+	}
+
+	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
+	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
+		blockNumChanged = true
+
+		var ok bool
+		ok, blockNum, err = rawdb.TxNums.FindBlockNum(i.tx, txNum)
+		if err != nil {
+			return
+		}
+		if !ok {
+			return txNum, blockNum, txIndex, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+		}
+	}
+
+	// if block number changed, calculate all related field
+	if blockNumChanged {
+		i.minTxNumInBlock, err = rawdb.TxNums.Min(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+		i.maxTxNumInBlock, err = rawdb.TxNums.Max(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+	}
+
+	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
+	return
 }

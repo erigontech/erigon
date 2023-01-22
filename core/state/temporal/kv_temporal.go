@@ -249,14 +249,14 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, o
 func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
+		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, orderAscend, limit, tx)
 		if err != nil {
 			return nil, err
 		}
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
+		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, orderAscend, limit, tx)
 		if err != nil {
 			return nil, err
 		}
