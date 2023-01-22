@@ -10,9 +10,11 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -133,9 +135,9 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	if m.HistoryV3 {
-		t.Skip("TODO: FIXME")
-	}
+	//if m.HistoryV3 {
+	//	t.Skip("TODO: FIXME")
+	//}
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -296,4 +298,57 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 	})
 
+}
+
+func TestMapTxNum2BlockNum(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if !m.HistoryV3 {
+		t.Skip()
+	}
+
+	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *MapTxNum2BlockNumIter) {
+		for expectTxNums.HasNext() {
+			require.True(t, txNumsIter.HasNext())
+			expectTxNum, _ := expectTxNums.Next()
+			txNum, _, _, _, _, _ := txNumsIter.Next()
+			require.Equal(t, expectTxNum, txNum)
+		}
+	}
+	t.Run("descend", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, 0, false, -1)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, 0, false, -1)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
+	t.Run("ascend", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, -1)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, -1)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
+	t.Run("ascend limit", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, 2)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, 2)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
 }

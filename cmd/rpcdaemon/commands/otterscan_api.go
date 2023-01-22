@@ -11,6 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -172,6 +176,10 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 	}
 	defer dbtx.Rollback()
 
+	if api.historyV3(dbtx) {
+		return api.searchTransactionsBeforeV3(dbtx.(kv.TemporalTx), ctx, addr, blockNum, pageSize)
+	}
+
 	callFromCursor, err := dbtx.Cursor(kv.CallFromIndex)
 	if err != nil {
 		return nil, err
@@ -237,6 +245,94 @@ func (api *OtterscanAPIImpl) SearchTransactionsBefore(ctx context.Context, addr 
 		}
 	}
 
+	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
+}
+
+func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx context.Context, addr libcommon.Address, fromBlockNum uint64, pageSize uint16) (*TransactionsWithReceipts, error) {
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	isFirstPage := false
+	if fromBlockNum == 0 {
+		isFirstPage = true
+	} else {
+		// Internal search code considers blockNum [including], so adjust the value
+		fromBlockNum--
+	}
+	from, err := rawdb.TxNums.Max(tx, fromBlockNum)
+	if err != nil {
+		return nil, err
+	}
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
+	if err != nil {
+		return nil, err
+	}
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], from, 0, false, -1)
+	if err != nil {
+		return nil, err
+	}
+	txNums := iter.Union[uint64](itFrom, itTo)
+	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+
+	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+	var blockHash libcommon.Hash
+	var header *types.Header
+	txs := make([]*RPCTransaction, 0, pageSize)
+	receipts := make([]map[string]interface{}, 0, pageSize)
+	resultCount := uint16(0)
+
+	for txNumsIter.HasNext() {
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
+		if err != nil {
+			return nil, err
+		}
+		if isFinalTxn {
+			continue
+		}
+
+		if blockNumChanged { // things which not changed within 1 block
+			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+				return nil, err
+			}
+			if header == nil {
+				log.Warn("header is nil", "blockNum", blockNum)
+				continue
+			}
+			blockHash = header.Hash()
+			exec.changeBlock(header)
+		}
+
+		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		if err != nil {
+			return nil, err
+		}
+		if txn == nil {
+			continue
+		}
+		rawLogs, res, err := exec.execTx(txNum, txIndex, txn)
+		if err != nil {
+			return nil, err
+		}
+		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		txs = append(txs, rpcTx)
+		receipt := &types.Receipt{
+			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
+			TransactionIndex: uint(txIndex),
+			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
+		}
+		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt["timestamp"] = header.Time
+		receipts = append(receipts, mReceipt)
+
+		resultCount++
+		if resultCount >= pageSize {
+			break
+		}
+	}
+	hasMore := txNumsIter.HasNext()
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 
