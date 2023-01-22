@@ -265,7 +265,6 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("from: %d\n", from)
 	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
 	if err != nil {
 		return nil, err
@@ -274,46 +273,24 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	iter := iter.Union[uint64](itFrom, itTo)
+	txNums := iter.Union[uint64](itFrom, itTo)
+	iter := MapTxNum2BlockNum(tx, txNums)
 
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
-
-	var lastBlockNum uint64
 	var blockHash libcommon.Hash
 	var header *types.Header
-	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
-	var blockNum uint64
-	var ok bool
-
 	txs := make([]*RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
-
 	resultCount := uint16(0)
 	hasMore := true
 
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
-			return nil, err
-		}
-		txNum, err := iter.Next()
+		txNum, blockNum, txIndex, blockNumChanged, err := iter.Next()
 		if err != nil {
 			return nil, err
 		}
-		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
 
-		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
-			// Find block number
-			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if !ok {
-			break
-		}
-
-		// if block number changed, calculate all related field
-		if blockNum > lastBlockNum {
+		if blockNumChanged { // things which not changed within 1 block
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -321,20 +298,10 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 				log.Warn("header is nil", "blockNum", blockNum)
 				continue
 			}
-			lastBlockNum = blockNum
 			blockHash = header.Hash()
 			exec.changeBlock(header)
-			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
 		}
 
-		txIndex := int(txNum) - int(minTxNumInBlock) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
@@ -347,7 +314,6 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-		_ = rawLogs
 		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
