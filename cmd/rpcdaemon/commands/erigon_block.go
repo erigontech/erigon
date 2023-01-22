@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	currenttHeaderTime := currentHeader.Time
+	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
 	firstHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -99,7 +99,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	firstHeaderTime := firstHeader.Time
 
-	if currenttHeaderTime <= uintTimestamp {
+	if currentHeaderTime <= uintTimestamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
