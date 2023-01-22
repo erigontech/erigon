@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -29,7 +31,7 @@ import (
 // Prefix: Has(k, prefix)
 // Amount: [from, INF) AND maximum N records
 
-type tRestoreCodeHash func(tx kv.Getter, key, v []byte) ([]byte, error)
+type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
 type tParseIncarnation func(v []byte) (uint64, error)
 
@@ -37,16 +39,34 @@ type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
 
-	convertV3toV2   tConvertV3toV2
-	restoreCodeHash tRestoreCodeHash
-	parseInc        tParseIncarnation
+	convertV3toV2        tConvertV3toV2
+	restoreCodeHash      tRestoreCodeHash
+	parseInc             tParseIncarnation
+	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(kv kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation) *DB {
-	if !kvcfg.HistoryV3.FromDB(kv) {
+func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
-	return &DB{RwDB: kv, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3}
+	if systemContractLookup != nil {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
+			var err error
+			for _, list := range systemContractLookup {
+				for i := range list {
+					list[i].TxNumber, err = rawdbv3.TxNums.Min(tx, list[i].BlockNumber)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
@@ -215,7 +235,17 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if err != nil {
 			return nil, false, err
 		}
-		v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
+		var force *common.Hash
+		if tx.db.systemContractLookup != nil {
+			if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
+				p := sort.Search(len(records), func(i int) bool {
+					return records[i].TxNumber > ts
+				})
+				hash := records[p-1].CodeHash
+				force = &hash
+			}
+		}
+		v, err = tx.db.restoreCodeHash(tx.Tx, key, v, force)
 		if err != nil {
 			return nil, false, err
 		}

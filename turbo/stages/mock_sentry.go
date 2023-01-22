@@ -15,6 +15,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -255,7 +256,10 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	if cfg.HistoryV3 {
-		db = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
+		db, err = temporal.New(db, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName])
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil)
@@ -670,9 +674,9 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 
 func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
 	if ms.HistoryV3 {
-		r := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[ms.ChainConfig.ChainName])
+		r := state.NewHistoryReaderV3()
 		r.SetTx(tx)
-		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
+		minTxNum, err := rawdbv3.TxNums.Min(tx, blockNum)
 		if err != nil {
 			panic(err)
 		}
