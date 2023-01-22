@@ -29,4 +29,4 @@ This runs Erigon with RPCDaemon, TxPool etc. all in one single process. This is 
 - `--chain` dictactes the chain (goerli/mainnet etc.) - https://chainlist.org/ is a helpful resource
 - `--log.dir.path` dictates where logs will be output - useful for sending reports to the Erigon team when issues occur
 - `--http.api` defines the set of APIs which are enabled, the above example is a pretty comprehensive list - what these do is beyond the scope of this example
-- `--authrpc.port` is the port which the concensus layer (PoS) uses to talk to Erigon
+- `--authrpc.port` is the port which the consensus layer (PoS) uses to talk to Erigon

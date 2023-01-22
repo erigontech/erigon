@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -37,10 +37,10 @@ func RetrieveBeaconState(ctx context.Context, uri string) (*state.BeaconState, e
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
 
-	beaconState := &cltypes.BeaconStateBellatrix{}
-	err = beaconState.UnmarshalSSZ(marshaled)
+	beaconState := &state.BeaconState{}
+	err = beaconState.DecodeSSZWithVersion(marshaled, int(clparams.BellatrixVersion))
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync failed %s", err)
 	}
-	return state.FromBellatrixState(beaconState), nil
+	return beaconState, nil
 }

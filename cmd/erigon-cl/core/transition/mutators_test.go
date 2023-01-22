@@ -17,9 +17,9 @@ func getTestStateBalances(t *testing.T) *state.BeaconState {
 	for i := uint64(0); i < numVals; i++ {
 		balances[i] = i
 	}
-	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Balances: balances,
-	})
+	b := state.GetEmptyBeaconState()
+	b.SetBalances(balances)
+	return b
 }
 
 func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
@@ -30,10 +30,10 @@ func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
 			ExitEpoch:       testExitEpoch,
 		}
 	}
-	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Slot:       testExitEpoch * SLOTS_PER_EPOCH,
-		Validators: validators,
-	})
+	b := state.GetEmptyBeaconState()
+	b.SetSlot(testExitEpoch * SLOTS_PER_EPOCH)
+	b.SetValidators(validators)
+	return b
 }
 
 func TestIncreaseBalance(t *testing.T) {
@@ -140,7 +140,6 @@ func TestSlashValidator(t *testing.T) {
 	whistleblowerInd := 678
 
 	successState := getTestState(t)
-	successState.SetSlashings([]uint64{0})
 
 	successBalances := []uint64{}
 	wantBalances := []uint64{}
@@ -166,7 +165,6 @@ func TestSlashValidator(t *testing.T) {
 	wantBalances[valInd] += wbReward / PROPOSER_REWARD_QUOTIENT
 
 	failState := getTestState(t)
-	failState.SetSlashings([]uint64{0})
 	for _, v := range failState.Validators() {
 		v.ExitEpoch = 0
 	}

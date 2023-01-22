@@ -30,7 +30,7 @@ type JsonStreamLogger struct {
 	logs      []StructLog
 	output    []byte //nolint
 	err       error  //nolint
-	env       *vm.EVM
+	env       vm.VMInterface
 }
 
 // NewStructLogger returns a new logger
@@ -52,7 +52,7 @@ func (l *JsonStreamLogger) CaptureTxStart(gasLimit uint64) {}
 func (l *JsonStreamLogger) CaptureTxEnd(restGas uint64) {}
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (l *JsonStreamLogger) CaptureStart(env *vm.EVM, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *JsonStreamLogger) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	l.env = env
 }
 

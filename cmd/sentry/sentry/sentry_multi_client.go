@@ -297,7 +297,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
+	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit))
 
 	cs := &MultiClient{
 		nodeName:      nodeName,
@@ -400,7 +400,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 				return fmt.Errorf("sending peer useless request: %v", err)
 			}
-			log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
+			log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		}
 		// No point processing empty response
 		return nil
@@ -410,6 +410,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Extract headers from the block
+	//var blockNums []int
 	var highestBlock uint64
 	csHeaders := make([]headerdownload.ChainSegmentHeader, 0, len(pkt))
 	for _, header := range pkt {
@@ -428,7 +429,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			Hash:      types.RawRlpHash(hRaw),
 			Number:    number,
 		})
+		//blockNums = append(blockNums, int(number))
 	}
+	//sort.Ints(blockNums)
+	//log.Debug("Delivered headers", "peer",  fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8], "blockNums", fmt.Sprintf("%d", blockNums))
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
@@ -451,11 +455,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			currentTime := time.Now()
 			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-					cs.Hd.UpdateStats(req, false /* skeleton */)
+				if peer, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+					cs.Hd.UpdateStats(req, false /* skeleton */, peer)
+					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				}
-				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cs.Penalize(ctx, penalties)

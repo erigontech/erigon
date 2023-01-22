@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/common"
@@ -56,32 +57,32 @@ func (g *GossipManager) Loop() {
 		var object ssz_utils.Unmarshaler
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
-			object = &cltypes.SignedBeaconBlockBellatrix{}
-			if err := object.UnmarshalSSZ(common.CopyBytes(data.Data)); err != nil {
+			object = &cltypes.SignedBeaconBlock{}
+			if err := object.DecodeSSZWithVersion(common.CopyBytes(data.Data), int(clparams.BellatrixVersion)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding block", "err", err)
 				continue
 			}
 		case sentinel.GossipType_VoluntaryExitGossipType:
-			object = &cltypes.VoluntaryExit{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			object = &cltypes.SignedVoluntaryExit{}
+			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding exit", "err", err)
 				continue
 			}
 		case sentinel.GossipType_ProposerSlashingGossipType:
 			object = &cltypes.ProposerSlashing{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
 				continue
 			}
 		case sentinel.GossipType_AttesterSlashingGossipType:
 			object = &cltypes.AttesterSlashing{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
 				continue
 			}
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
-			if err := object.UnmarshalSSZ(data.Data); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 				log.Warn("[Beacon Gossip] Failure in decoding proof", "err", err)
 				continue
 			}
