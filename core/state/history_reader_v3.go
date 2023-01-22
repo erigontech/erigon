@@ -12,14 +12,13 @@ import (
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	txNum                uint64
-	trace                bool
-	ttx                  kv.TemporalTx
-	systemContractLookup map[libcommon.Address][]CodeRecord
+	txNum uint64
+	trace bool
+	ttx   kv.TemporalTx
 }
 
-func NewHistoryReaderV3(systemContractLookup map[libcommon.Address][]CodeRecord) *HistoryReaderV3 {
-	return &HistoryReaderV3{systemContractLookup: systemContractLookup}
+func NewHistoryReaderV3() *HistoryReaderV3 {
+	return &HistoryReaderV3{}
 }
 
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {

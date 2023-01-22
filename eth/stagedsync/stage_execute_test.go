@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -189,7 +189,7 @@ func TestExec22(t *testing.T) {
 		require.NoError(err)
 
 		for i := uint64(0); i < 50; i++ {
-			err = rawdb.TxNums.Append(tx2, i, i)
+			err = rawdbv3.TxNums.Append(tx2, i, i)
 			require.NoError(err)
 		}
 
@@ -213,7 +213,7 @@ func TestExec22(t *testing.T) {
 		require.NoError(err)
 
 		for i := uint64(0); i < 50; i++ {
-			err = rawdb.TxNums.Append(tx2, i, i)
+			err = rawdbv3.TxNums.Append(tx2, i, i)
 			require.NoError(err)
 		}
 

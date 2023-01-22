@@ -32,6 +32,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -500,7 +501,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteBlock(tx, block); err != nil {
 		return nil, nil, err
 	}
-	if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
+	if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
 		return nil, nil, err
 	}
 	if err := rawdb.WriteReceipts(tx, block.NumberU64(), nil); err != nil {

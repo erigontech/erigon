@@ -6,6 +6,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -67,7 +68,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash li
 
 	if api.historyV3(tx) {
 		number := rawdb.ReadHeaderNumber(tx, blockHash)
-		minTxNum, err := rawdb.TxNums.Min(tx, *number)
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
 		if err != nil {
 			return StorageRangeResult{}, err
 		}

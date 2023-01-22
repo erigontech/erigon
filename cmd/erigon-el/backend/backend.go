@@ -275,6 +275,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	backend.agg = agg
 
 	if config.HistoryV3 {
+
 		backend.chainDB = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
 		chainKv = backend.chainDB
 	}
