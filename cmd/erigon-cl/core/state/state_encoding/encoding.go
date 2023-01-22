@@ -21,7 +21,7 @@ const (
 // hashing state data in the Ethereum 2.0 beacon chain.
 
 // Eth1DataVectorRoot calculates the root hash of an array of Eth1Data values by first vectorizing the input array using
-// the HashTreeRoot method on each Eth1Data value, then calculating the root hash of the vectorized array using
+// the HashSSZ method on each Eth1Data value, then calculating the root hash of the vectorized array using
 // the ArraysRootWithLimit function and the Eth1DataVotesRootsLimit constant.
 func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	var err error

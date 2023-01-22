@@ -119,7 +119,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	offset := getBeaconBlockMinimumSize(b.Version)
 	// Write "easy" fields
 	buf = append(buf, b.RandaoReveal[:]...)
-	buf = b.Eth1Data.EncodeSSZ(buf)
+	if buf, err = b.Eth1Data.EncodeSSZ(buf); err != nil {
+		return nil, err
+	}
 	if len(b.Graffiti) != 32 {
 		return nil, fmt.Errorf("bad graffiti length")
 	}
@@ -168,7 +170,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	// Write proposer slashings
 	for _, proposerSlashing := range b.ProposerSlashings {
-		buf = proposerSlashing.EncodeSSZ(buf)
+		if buf, err = proposerSlashing.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 	// Write attester slashings as a dynamic list.
 	subOffset := len(b.AttesterSlashings) * 4
@@ -391,7 +395,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 16)
 }
 
-func (b *BeaconBlock) MarshalSSZ(buf []byte) (dst []byte, err error) {
+func (b *BeaconBlock) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
 	// Encode base params
 	dst = append(dst, ssz_utils.Uint64SSZ(b.Slot)...)
@@ -440,38 +444,38 @@ func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
 	}, 8)
 }
 
-func (b *SignedBeaconBlock) MarshalSSZ() ([]byte, error) {
-	dst := make([]byte, 0, b.SizeSSZ())
+func (b *SignedBeaconBlock) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
 	var err error
 	dst = append(dst, ssz_utils.OffsetSSZ(100)...)
 	dst = append(dst, b.Signature[:]...)
-	dst, err = b.Block.MarshalSSZ(dst)
+	dst, err = b.Block.EncodeSSZ(dst)
 	if err != nil {
 		return nil, err
 	}
 	return dst, nil
 }
 
-func (b *SignedBeaconBlock) SizeSSZ() int {
+func (b *SignedBeaconBlock) EncodingSizeSSZ() int {
 	if b.Block == nil {
 		b.Block = new(BeaconBlock)
 	}
 	return 100 + b.Block.EncodingSizeSSZ()
 }
 
-func (b *SignedBeaconBlock) UnmarshalSSZ(buf []byte) error {
-	return b.UnmarshalSSZWithVersion(buf, int(clparams.BellatrixVersion))
+func (b *SignedBeaconBlock) DecodeSSZ(buf []byte) error {
+	return b.DecodeSSZWithVersion(buf, int(clparams.BellatrixVersion))
 }
 
-func (b *SignedBeaconBlock) UnmarshalSSZWithVersion(buf []byte, s int) error {
-	if len(buf) < b.SizeSSZ() {
+func (b *SignedBeaconBlock) DecodeSSZWithVersion(buf []byte, s int) error {
+	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
 	copy(b.Signature[:], buf[4:100])
 	return b.Block.DecodeSSZ(buf[100:], clparams.StateVersion(s))
 }
 
-func (b *SignedBeaconBlock) HashTreeRoot() ([32]byte, error) {
+func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	blockRoot, err := b.Block.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err

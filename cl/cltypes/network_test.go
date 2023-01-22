@@ -1,7 +1,6 @@
 package cltypes_test
 
 import (
-	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -110,11 +109,10 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		&cltypes.LightClientBootstrap{},
 	}
 	for i, tc := range cases {
-		fmt.Println("a")
-		marshalledBytes, err := tc.MarshalSSZ()
+		marshalledBytes, err := tc.EncodeSSZ(nil)
 		require.NoError(t, err)
-		require.Equal(t, len(marshalledBytes), tc.SizeSSZ())
-		require.NoError(t, unmarshalDestinations[i].UnmarshalSSZ(marshalledBytes))
+		require.Equal(t, len(marshalledBytes), tc.EncodingSizeSSZ())
+		require.NoError(t, unmarshalDestinations[i].DecodeSSZ(marshalledBytes))
 		require.Equal(t, tc, unmarshalDestinations[i])
 	}
 }
