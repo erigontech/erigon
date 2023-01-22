@@ -898,7 +898,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
+	blockNumber, hash, _, err := rpchelper.GetBlockNumber(*blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
@@ -929,7 +929,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	header := block.Header()
 
-	stateReader, err := rpchelper.CreateStateReaderWithBlockNumber(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName, blockNumber, latest)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, *blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
