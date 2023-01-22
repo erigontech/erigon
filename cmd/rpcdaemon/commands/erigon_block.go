@@ -139,7 +139,6 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
 	}
 
-
 	for resultingHeader.Time > uintTimestamp {
 		beforeHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum)-1)
 		if err != nil {
