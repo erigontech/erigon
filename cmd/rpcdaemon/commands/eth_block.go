@@ -86,7 +86,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []libcommon.Hash, s
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api._agg, api.historyV3(tx), chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api.historyV3(tx), chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}

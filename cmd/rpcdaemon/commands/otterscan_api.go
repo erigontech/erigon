@@ -285,9 +285,12 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	hasMore := true
 
 	for txNumsIter.HasNext() {
-		txNum, blockNum, txIndex, blockNumChanged, err := txNumsIter.Next()
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, err
+		}
+		if isFinalTxn {
+			continue
 		}
 
 		if blockNumChanged { // things which not changed within 1 block
