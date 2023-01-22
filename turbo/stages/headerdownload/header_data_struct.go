@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/btree"
 	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/google/btree"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -231,11 +231,11 @@ type HeaderDownload struct {
 	anchors                map[libcommon.Hash]*Anchor // Mapping from parentHash to collection of anchors
 	links                  map[libcommon.Hash]*Link   // Links by header hash
 	engine                 consensus.Engine
-	insertQueue            InsertQueue    // Priority queue of non-persisted links that need to be verified and can be inserted
-	seenAnnounces          *SeenAnnounces // External announcement hashes, after header verification if hash is in this set - will broadcast it further
-	persistedLinkQueue     LinkQueue      // Priority queue of persisted links used to limit their number
-	linkQueue              LinkQueue      // Priority queue of non-persisted links used to limit their number
-	anchorTree             *btree.BTreeG[*Anchor]   // anchors sorted by block height
+	insertQueue            InsertQueue            // Priority queue of non-persisted links that need to be verified and can be inserted
+	seenAnnounces          *SeenAnnounces         // External announcement hashes, after header verification if hash is in this set - will broadcast it further
+	persistedLinkQueue     LinkQueue              // Priority queue of persisted links used to limit their number
+	linkQueue              LinkQueue              // Priority queue of non-persisted links used to limit their number
+	anchorTree             *btree.BTreeG[*Anchor] // anchors sorted by block height
 	DeliveryNotify         chan struct{}
 	toAnnounce             []Announce
 	lock                   sync.RWMutex
