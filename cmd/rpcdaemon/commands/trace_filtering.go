@@ -12,6 +12,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -606,28 +607,32 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	it := allTxs.Iterator()
-	var lastBlockNum uint64
+	it := MapTxNum2BlockNum(dbtx, bitmapdb.ToIter(allTxs.Iterator()))
+
 	var lastBlockHash libcommon.Hash
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
-	var maxTxNum uint64
 
-	stateReader := state.NewHistoryReaderV3()
+	stateReader := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
+
 	for it.HasNext() {
-		txNum := it.Next()
-		// Find block number
-		ok, blockNum, err := rawdb.TxNums.FindBlockNum(dbtx, txNum)
+		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
-		if !ok {
-			break
-		}
-		if blockNum > lastBlockNum {
+
+		if blockNumChanged {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
 				if first {
 					first = false
@@ -639,25 +644,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
-			lastBlockNum = blockNum
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
-			maxTxNum, err = rawdb.TxNums.Max(dbtx, blockNum)
-			if err != nil {
-				if first {
-					first = false
-				} else {
-					stream.WriteMore()
-				}
-				stream.WriteObjectStart()
-				rpc.HandleError(err, stream)
-				stream.WriteObjectEnd()
-				continue
-			}
 		}
-
-		if txNum == maxTxNum {
+		if isFnalTxn {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -750,17 +741,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		var startTxNum uint64
-		if blockNum > 0 {
-			startTxNum, err = rawdb.TxNums.Min(dbtx, blockNum)
-			if err != nil {
-				return err
-			}
-		}
-		if txNum == startTxNum { //is system tx
+		if txIndex == -1 { //is system tx
 			continue
 		}
-		txIndex := txNum - startTxNum - 1
+		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, int(txIndex))
 		if err != nil {
@@ -853,7 +837,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
 				pt.TransactionHash = &txHash
-				pt.TransactionPosition = &txIndex
+				pt.TransactionPosition = &txIndexU64
 				b, err := json.Marshal(pt)
 				if err != nil {
 					if first {

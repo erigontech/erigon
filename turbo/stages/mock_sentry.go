@@ -28,6 +28,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -669,11 +670,8 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 
 func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
 	if ms.HistoryV3 {
-		aggCtx := ms.agg.MakeContext()
-		aggCtx.SetTx(tx)
-		r := state.NewHistoryReaderV3()
+		r := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[ms.ChainConfig.ChainName])
 		r.SetTx(tx)
-		r.SetAc(aggCtx)
 		minTxNum, err := rawdb.TxNums.Min(tx, blockNum)
 		if err != nil {
 			panic(err)
@@ -682,7 +680,7 @@ func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.
 		return r
 	}
 
-	return state.NewPlainState(tx, blockNum, nil)
+	return state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[ms.ChainConfig.ChainName])
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {

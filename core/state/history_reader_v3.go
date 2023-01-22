@@ -6,27 +6,22 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 // HistoryReaderV3 Implements StateReader and StateWriter
 type HistoryReaderV3 struct {
-	ac    *libstate.AggregatorV3Context
-	txNum uint64
-	trace bool
-	ttx   kv.TemporalTx
+	txNum                uint64
+	trace                bool
+	ttx                  kv.TemporalTx
+	systemContractLookup map[libcommon.Address][]CodeRecord
 }
 
-func NewHistoryReaderV3() *HistoryReaderV3 {
-	return &HistoryReaderV3{}
+func NewHistoryReaderV3(systemContractLookup map[libcommon.Address][]CodeRecord) *HistoryReaderV3 {
+	return &HistoryReaderV3{systemContractLookup: systemContractLookup}
 }
 
-func (hr *HistoryReaderV3) SetAc(ac *libstate.AggregatorV3Context) {
-	hr.ac = ac
-}
 func (hr *HistoryReaderV3) SetTx(tx kv.Tx) {
 	if ttx, casted := tx.(kv.TemporalTx); casted {
 		hr.ttx = ttx

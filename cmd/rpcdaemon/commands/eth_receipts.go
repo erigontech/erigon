@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -460,7 +461,7 @@ type intraBlockExec struct {
 }
 
 func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader) *intraBlockExec {
-	stateReader := state.NewHistoryReaderV3()
+	stateReader := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 	stateReader.SetTx(tx)
 	return &intraBlockExec{
 		engine:      engine,
@@ -793,7 +794,11 @@ Logs:
 	return result
 }
 
-// MapTxNum2BlockNumIter - enrich iterator by TxNumbers adding more info: blockNum, txIndex in block, isNewBlock started.
+// MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
+//   - blockNum
+//   - txIndex in block: -1 means first system tx
+//   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
 //
 // Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
 //
@@ -814,10 +819,10 @@ func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
 	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blockNumChanged bool, err error) {
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
 	txNum, err = i.it.Next()
 	if err != nil {
-		return txNum, blockNum, txIndex, blockNumChanged, err
+		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
 	}
 
 	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
@@ -830,7 +835,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blo
 			return
 		}
 		if !ok {
-			return txNum, blockNum, txIndex, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+			return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
 		}
 	}
 
@@ -847,5 +852,6 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blo
 	}
 
 	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
+	isFinalTxn = txNum == i.maxTxNumInBlock
 	return
 }
