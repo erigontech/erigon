@@ -809,14 +809,15 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		blockNumChanged = true
 
 		var ok bool
-		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
+		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
 		if err != nil {
 			return
 		}
 		if !ok {
-			return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
 		}
 	}
+	blockNum = i.blockNum
 
 	// if block number changed, calculate all related field
 	if blockNumChanged {
