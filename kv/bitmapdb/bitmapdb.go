@@ -420,3 +420,10 @@ func Bytesmask(fixedbits int) (fixedbytes int, mask byte) {
 type ToBitmap interface {
 	ToBitmap() (*roaring64.Bitmap, error)
 }
+
+func ToIter(it roaring64.IntIterable64) *ToIterInterface { return &ToIterInterface{it: it} }
+
+type ToIterInterface struct{ it roaring64.IntIterable64 }
+
+func (i *ToIterInterface) HasNext() bool         { return i.it.HasNext() }
+func (i *ToIterInterface) Next() (uint64, error) { return i.it.Next(), nil }
