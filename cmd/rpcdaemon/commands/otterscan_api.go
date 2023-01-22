@@ -282,7 +282,6 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	txs := make([]*RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
-	hasMore := true
 
 	for txNumsIter.HasNext() {
 		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := txNumsIter.Next()
@@ -333,7 +332,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 			break
 		}
 	}
-	hasMore = txNumsIter.HasNext()
+	hasMore := txNumsIter.HasNext()
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 

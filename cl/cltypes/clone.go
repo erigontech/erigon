@@ -14,6 +14,14 @@ func (*Eth1Data) Clone() clonable.Clonable {
 	return &Eth1Data{}
 }
 
+func (*SignedBLSToExecutionChange) Clone() clonable.Clonable {
+	return &SignedBLSToExecutionChange{}
+}
+
+func (*HistoricalSummary) Clone() clonable.Clonable {
+	return &HistoricalSummary{}
+}
+
 func (*Validator) Clone() clonable.Clonable {
 	return &Validator{}
 }
