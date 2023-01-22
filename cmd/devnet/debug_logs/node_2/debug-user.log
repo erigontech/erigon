@@ -1,0 +1,279 @@
+t=2023-01-17T21:55:12+0000 lvl=info msg="logging to file system" log dir=./cmd/devnet/debug_logs/node_2 file prefix=debug log level=dbug json=false
+t=2023-01-17T21:55:12+0000 lvl=info msg="Build info" git_branch=pos-body-debug git_tag=v2.31.0-rc.4-316-gc63b8e68b-dirty git_commit=c63b8e68b60db4a53640d35c3a6f95536f70c444
+t=2023-01-17T21:55:12+0000 lvl=info msg="Starting Erigon in ephemeral dev mode..."
+t=2023-01-17T21:55:12+0000 lvl=info msg="Maximum peer count" ETH=100 total=100
+t=2023-01-17T21:55:12+0000 lvl=info msg="Development chain flags set" --nodiscover=true --v5disc=false --port=:0
+t=2023-01-17T21:55:12+0000 lvl=info msg="starting HTTP APIs" APIs=eth,erigon,engine
+t=2023-01-17T21:55:12+0000 lvl=info msg="torrent verbosity" level=WRN
+t=2023-01-17T21:55:12+0000 lvl=info msg="[torrent] Public IP" ip=86.152.18.202
+t=2023-01-17T21:55:12+0000 lvl=info msg="Set global gas cap" cap=50000000
+t=2023-01-17T21:55:12+0000 lvl=info msg="Using developer account" address=0x67b1d87101671b127f5f8714789C7192f7ad340e
+t=2023-01-17T21:55:12+0000 lvl=info msg="Using custom developer period" seconds=0
+t=2023-01-17T21:55:12+0000 lvl=info msg="[Downloader] Runnning with" ipv6-enabled=true ipv4-enabled=true download.rate=16mb upload.rate=4mb
+t=2023-01-17T21:55:12+0000 lvl=info msg="Opening Database" label=chaindata path=/Users/alexeysharp/github/erigon/dev2/chaindata
+t=2023-01-17T21:55:12+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:12+0000 lvl=info msg="Re-Opening DB in exclusive mode to apply migrations"
+t=2023-01-17T21:55:12+0000 lvl=info msg="Apply migration" name=db_schema_version5
+t=2023-01-17T21:55:13+0000 lvl=info msg="Applied migration" name=db_schema_version5
+t=2023-01-17T21:55:13+0000 lvl=info msg="Apply migration" name=txs_begin_end
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:13+0000 lvl=info msg="Applied migration" name=txs_begin_end
+t=2023-01-17T21:55:13+0000 lvl=info msg="Apply migration" name=reset_blocks_4
+t=2023-01-17T21:55:13+0000 lvl=info msg="Applied migration" name=reset_blocks_4
+t=2023-01-17T21:55:13+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:13+0000 lvl=info msg="Updated DB schema to" version=6.0.0
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=107.008847ms
+t=2023-01-17T21:55:13+0000 lvl=dbug msg=Filtration initial=0 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=0
+t=2023-01-17T21:55:13+0000 lvl=dbug msg=SpawnMiningExecStage block txn=0 payload=0
+t=2023-01-17T21:55:13+0000 lvl=dbug msg=FinalizeBlockExecution current txn=0 current receipt=0 payload=0
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=330.665037ms
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="[3/5 HashState] DONE" in=114.716µs
+t=2023-01-17T21:55:13+0000 lvl=info msg="Writing custom genesis block" hash=0xc493151b4991dd1bf459952509bba9bc3fb2b706299e18e36e6b78781835065d
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:13+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=210.891µs
+t=2023-01-17T21:55:13+0000 lvl=info msg="Initialised chain configuration" config="{ChainID: 1337, Homestead: 0, DAO: <nil>, DAO Support: false, Tangerine Whistle: 0, Spurious Dragon: 0, Byzantium: 0, Constantinople: 0, Petersburg: 0, Istanbul: 0, Muir Glacier: 0, Berlin: 0, London: 0, Arrow Glacier: <nil>, Gray Glacier: <nil>, Terminal Total Difficulty: <nil>, Merge Netsplit: <nil>, Shanghai: <nil>, Cancun: <nil>, Engine: clique}" genesis=0xc493151b4991dd1bf459952509bba9bc3fb2b706299e18e36e6b78781835065d
+t=2023-01-17T21:55:14+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=126.717µs
+t=2023-01-17T21:55:14+0000 lvl=info msg=Effective prune_flags= snapshot_flags= history.v3=false
+t=2023-01-17T21:55:14+0000 lvl=warn msg="bind protocol to port has failed: port is busy" protocol=eth/66 port=30303
+t=2023-01-17T21:55:14+0000 lvl=warn msg="bind protocol to port has failed: port is busy" protocol=eth/66 port=30304
+t=2023-01-17T21:55:14+0000 lvl=info msg="Initialising Ethereum protocol" network=1337
+t=2023-01-17T21:55:14+0000 lvl=info msg="Starting private RPC server" on=localhost:9091
+t=2023-01-17T21:55:14+0000 lvl=info msg="new subscription to logs established"
+t=2023-01-17T21:55:14+0000 lvl=info msg="rpc filters: subscribing to Erigon events"
+t=2023-01-17T21:55:14+0000 lvl=info msg="[txpool] Started"
+t=2023-01-17T21:55:14+0000 lvl=info msg="New txs subscriber joined"
+t=2023-01-17T21:55:14+0000 lvl=dbug msg="Establishing event subscription channel with the RPC daemon ..."
+t=2023-01-17T21:55:14+0000 lvl=info msg="Reading JWT secret" path=/Users/alexeysharp/github/erigon/dev2/jwt.hex
+t=2023-01-17T21:55:14+0000 lvl=dbug msg="[1/16 Snapshots] DONE" in=25.715µs
+t=2023-01-17T21:55:14+0000 lvl=info msg="new subscription to newHeaders established"
+t=2023-01-17T21:55:14+0000 lvl=info msg="Started P2P networking" version=66 self="enode://5402f230f09d5dfb20a4eb0c40c0669004ec8e1bc6a5ac5f5c9ba5bbaa8e1ec7a9436a5bea59533d6e2cfd08981de9d71dd31c4e4a14b9d586cb3d4e6851303f@127.0.0.1:30305?discport=0" name=erigon/v2.35.0-dev-c63b8e68/darwin-amd64/go1.19.3
+t=2023-01-17T21:55:15+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:15+0000 lvl=info msg="Generated JWT secret" path=/Users/alexeysharp/github/erigon/dev2/jwt.hex
+t=2023-01-17T21:55:15+0000 lvl=dbug msg="[2/16 Headers] DONE" in=106.621µs
+t=2023-01-17T21:55:15+0000 lvl=info msg="Started P2P networking" version=67 self="enode://5402f230f09d5dfb20a4eb0c40c0669004ec8e1bc6a5ac5f5c9ba5bbaa8e1ec7a9436a5bea59533d6e2cfd08981de9d71dd31c4e4a14b9d586cb3d4e6851303f@127.0.0.1:30306?discport=0" name=erigon/v2.35.0-dev-c63b8e68/darwin-amd64/go1.19.3
+t=2023-01-17T21:55:15+0000 lvl=info msg="Mapped network port" proto=tcp extport=30305 intport=30305 interface="UPNP IGDv1-PPP1"
+t=2023-01-17T21:55:15+0000 lvl=eror msg="could not start RPC api for engine: could not start RPC api: listen tcp 127.0.0.1:8551: bind: address already in use"
+t=2023-01-17T21:55:15+0000 lvl=dbug msg="[3/16 CumulativeIndex] DONE" in=27.833µs
+t=2023-01-17T21:55:15+0000 lvl=dbug msg="[4/16 BlockHashes] DONE" in=35.664µs
+t=2023-01-17T21:55:15+0000 lvl=dbug msg="[5/16 Bodies] DONE" in=60.527µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[6/16 Senders] DONE" in=463.399µs
+t=2023-01-17T21:55:16+0000 lvl=info msg="Mapped network port" proto=tcp extport=30306 intport=30306 interface="UPNP IGDv1-PPP1"
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[7/16 Execution] DONE" in=33.165µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[8/16 HashState] DONE" in=44.526µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[9/16 IntermediateHashes] DONE" in=39.147µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[10/16 CallTraces] DONE" in=27.725µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[11/16 AccountHistoryIndex] DONE" in=59.082µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[12/16 StorageHistoryIndex] DONE" in=32.599µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[13/16 LogIndex] DONE" in=32.278µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[14/16 TxLookup] DONE" in=347.978µs
+t=2023-01-17T21:55:16+0000 lvl=dbug msg="[15/16 WatchTheBurn] DONE" in=93.325µs
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[16/16 Finish] DONE" in=43.319µs
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[1/16 Snapshots] DONE" in=3.73µs
+t=2023-01-17T21:55:17+0000 lvl=info msg="[2/16 Headers] Waiting for headers..." from=0
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=0
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:17+0000 lvl=info msg="[Clique] Stored checkpoint snapshot to disk" number=0 hash=0xc493151b4991dd1bf459952509bba9bc3fb2b706299e18e36e6b78781835065d
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:17+0000 lvl=info msg="[2/16 Headers] Processed" highest inserted=1 age=9s
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[2/16 Headers] DONE" in=482.162564ms
+t=2023-01-17T21:55:17+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[3/16 CumulativeIndex] DONE" in=92.205µs
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=193.977988ms
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[4/16 BlockHashes] DONE" in=104.234µs
+t=2023-01-17T21:55:17+0000 lvl=dbug msg=Filtration initial=0 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=0
+t=2023-01-17T21:55:17+0000 lvl=dbug msg=SpawnMiningExecStage block txn=0 payload=0
+t=2023-01-17T21:55:17+0000 lvl=info msg="[5/16 Bodies] Writing block bodies" block_num=1 remaining=0 alloc=56.5MB sys=98.3MB
+t=2023-01-17T21:55:17+0000 lvl=dbug msg="[5/16 Bodies] DONE" in=95.130318ms
+t=2023-01-17T21:55:17+0000 lvl=dbug msg=FinalizeBlockExecution current txn=0 current receipt=0 payload=0
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[6/16 Senders] DONE" in=395.994µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="[7/16 Execution] Completed on" block=1
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[7/16 Execution] DONE" in=47.297045ms
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=276.385078ms
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[8/16 HashState] DONE" in=1.452428ms
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[3/5 HashState] DONE" in=111.327µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="[9/16 IntermediateHashes] Regeneration trie hashes started"
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=198.782µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="[9/16 IntermediateHashes] Trie root" hash=0x6a0673c691edfa4c4528323986bb43c579316f436ff6f8b4ac70854bbd95340b
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=210.405µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="[9/16 IntermediateHashes] Regeneration ended"
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[9/16 IntermediateHashes] DONE" in=127.977859ms
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[10/16 CallTraces] DONE" in=221.798µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[11/16 AccountHistoryIndex] DONE" in=152.811µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[12/16 StorageHistoryIndex] DONE" in=49.368µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[13/16 LogIndex] DONE" in=69.122µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[14/16 TxLookup] DONE" in=90.843µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[15/16 WatchTheBurn] DONE" in=12.938µs
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[16/16 Finish] DONE" in=35.661µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="Commit cycle" in=223.316µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="Timings (slower than 50ms)" Headers=482ms Bodies=95ms IntermediateHashes=127ms
+t=2023-01-17T21:55:18+0000 lvl=info msg=Tables PlainState=4.0KB AccountChangeSet=4.0KB StorageChangeSet=0B BlockTransaction=0B TransactionLog=0B FreeList=4.0KB ReclaimableSpace=4.0MB
+t=2023-01-17T21:55:18+0000 lvl=info msg="RPC Daemon notified of new headers" from=0 to=1 hash=0xf27b311f7ae21b78594b2eafe8764017160a784d304f517d8f5f8c80e86e9b0c header sending=25.941µs log sending=279ns
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[1/16 Snapshots] DONE" in=9.848µs
+t=2023-01-17T21:55:18+0000 lvl=info msg="[2/16 Headers] Waiting for headers..." from=1
+t=2023-01-17T21:55:18+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:19+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:19+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:20+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:20+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:21+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=21.422345ms
+t=2023-01-17T21:55:21+0000 lvl=dbug msg=Filtration initial=0 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=0
+t=2023-01-17T21:55:21+0000 lvl=dbug msg=SpawnMiningExecStage block txn=0 payload=0
+t=2023-01-17T21:55:21+0000 lvl=dbug msg=FinalizeBlockExecution current txn=0 current receipt=0 payload=0
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=94.696869ms
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[3/5 HashState] DONE" in=97.589µs
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=172.986µs
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=113.796µs
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:21+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:22+0000 lvl=info msg="Got in" time=0.000
+t=2023-01-17T21:55:22+0000 lvl=info msg="Got in" time=0.001
+t=2023-01-17T21:55:22+0000 lvl=info msg="Got in" time=0.001
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="Start mining new block based on txpool notif"
+t=2023-01-17T21:55:22+0000 lvl=info msg="local tx propagated" tx_hash=cfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6 announced to peers=0 broadcast to peers=0 baseFee=765625000
+t=2023-01-17T21:55:22+0000 lvl=info msg="Submitted contract creation" hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6 from=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 contract=0x3126D03e98bb95a7d4046bA8A64369E6656Fe448 value=0x0
+t=2023-01-17T21:55:22+0000 lvl=info msg="Got in" time=0.064
+t=2023-01-17T21:55:22+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:22+0000 lvl=info msg="local tx propagated" tx_hash=16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a announced to peers=0 broadcast to peers=0 baseFee=765625000
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="Start mining new block based on txpool notif"
+t=2023-01-17T21:55:22+0000 lvl=info msg="Submitted transaction" hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a from=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 recipient=0x3126D03e98bb95a7d4046bA8A64369E6656Fe448 value=0x0
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=42.549702ms
+t=2023-01-17T21:55:22+0000 lvl=info msg="Got in" time=0.084
+t=2023-01-17T21:55:22+0000 lvl=dbug msg=Filtration initial=2 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=2
+t=2023-01-17T21:55:22+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 payload=0
+t=2023-01-17T21:55:22+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 payload=0
+t=2023-01-17T21:55:22+0000 lvl=dbug msg=SpawnMiningExecStage block txn=2 payload=0
+t=2023-01-17T21:55:22+0000 lvl=dbug msg=FinalizeBlockExecution current txn=2 current receipt=2 payload=0
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=205.792415ms
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[3/5 HashState] DONE" in=139.911µs
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=183.639µs
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:22+0000 lvl=info msg="[5/5 MiningFinish] block ready for seal" block_num=2 transactions=2 gas_used=99661 gas_limit=11522469 difficulty=2
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:22+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=43.844023ms
+t=2023-01-17T21:55:23+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:23+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:24+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:24+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:25+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:25+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:25+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:25+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:25+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=21.320235ms
+t=2023-01-17T21:55:25+0000 lvl=dbug msg=Filtration initial=2 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=2
+t=2023-01-17T21:55:25+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6
+t=2023-01-17T21:55:25+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 payload=0
+t=2023-01-17T21:55:26+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 payload=0
+t=2023-01-17T21:55:26+0000 lvl=dbug msg=SpawnMiningExecStage block txn=2 payload=0
+t=2023-01-17T21:55:26+0000 lvl=dbug msg=FinalizeBlockExecution current txn=2 current receipt=2 payload=0
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=177.846942ms
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[3/5 HashState] DONE" in=129.542µs
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=165.966µs
+t=2023-01-17T21:55:26+0000 lvl=info msg="[5/5 MiningFinish] block ready for seal" block_num=2 transactions=2 gas_used=99661 gas_limit=11522469 difficulty=2
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=22.220136ms
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:26+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:27+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:27+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:28+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:28+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:29+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=21.771328ms
+t=2023-01-17T21:55:29+0000 lvl=dbug msg=Filtration initial=2 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=2
+t=2023-01-17T21:55:29+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 payload=0
+t=2023-01-17T21:55:29+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 payload=0
+t=2023-01-17T21:55:29+0000 lvl=dbug msg=SpawnMiningExecStage block txn=2 payload=0
+t=2023-01-17T21:55:29+0000 lvl=dbug msg=FinalizeBlockExecution current txn=2 current receipt=2 payload=0
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=178.556974ms
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[3/5 HashState] DONE" in=135.202µs
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=188.288µs
+t=2023-01-17T21:55:29+0000 lvl=info msg="[5/5 MiningFinish] block ready for seal" block_num=2 transactions=2 gas_used=99661 gas_limit=11522469 difficulty=2
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=21.895947ms
+t=2023-01-17T21:55:29+0000 lvl=info msg="[2/16 Headers] No block headers to write in this log period" block number=1
+t=2023-01-17T21:55:29+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:30+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:31+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:31+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:32+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=21.299281ms
+t=2023-01-17T21:55:32+0000 lvl=dbug msg=Filtration initial=2 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=2
+t=2023-01-17T21:55:32+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 payload=0
+t=2023-01-17T21:55:32+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 payload=0
+t=2023-01-17T21:55:32+0000 lvl=dbug msg=SpawnMiningExecStage block txn=2 payload=0
+t=2023-01-17T21:55:32+0000 lvl=dbug msg=FinalizeBlockExecution current txn=2 current receipt=2 payload=0
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=201.45994ms
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[3/5 HashState] DONE" in=137.84µs
+t=2023-01-17T21:55:32+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=156.513µs
+t=2023-01-17T21:55:32+0000 lvl=info msg="[5/5 MiningFinish] block ready for seal" block_num=2 transactions=2 gas_used=99661 gas_limit=11522469 difficulty=2
+t=2023-01-17T21:55:33+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=21.073285ms
+t=2023-01-17T21:55:33+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:33+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:34+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:34+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:35+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:35+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="Start mining new block based on miner.recommit"
+t=2023-01-17T21:55:36+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=2 baseFee=765625000 gasLimit=11522469
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[1/5 MiningCreateBlock] DONE" in=21.17926ms
+t=2023-01-17T21:55:36+0000 lvl=dbug msg=Filtration initial=2 no sender=0 no account=0 nonce too low=0 nonceTooHigh=0 sender not EOA=0 fee too low=0 overflow=0 balance too low=0 filtered=2
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:36+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0xcfa2347fa3446c37f60fe3bdf97f5948b3c3d884d3535b6bfa181685a4099dc6
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=0 payload=0
+t=2023-01-17T21:55:36+0000 lvl=dbug msg=addTransactionsToMiningBlock txn hash=0x16d639144557b38e6fa65c566048a052bdcfce33afd910680d8a1476c025526a
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[2/5 MiningExecution] addTransactionsToMiningBlock Successful" sender=0x67b1d87101671b127f5f8714789C7192f7ad340e nonce=1 payload=0
+t=2023-01-17T21:55:36+0000 lvl=dbug msg=SpawnMiningExecStage block txn=2 payload=0
+t=2023-01-17T21:55:36+0000 lvl=dbug msg=FinalizeBlockExecution current txn=2 current receipt=2 payload=0
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[2/5 MiningExecution] DONE" in=199.562247ms
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[3/5 HashState] DONE" in=274.076µs
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[4/5 IntermediateHashes] DONE" in=181.713µs
+t=2023-01-17T21:55:36+0000 lvl=info msg="[5/5 MiningFinish] block ready for seal" block_num=2 transactions=2 gas_used=99661 gas_limit=11522469 difficulty=2
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[5/5 MiningFinish] DONE" in=21.168955ms
+t=2023-01-17T21:55:36+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:37+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:37+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=1
+t=2023-01-17T21:55:38+0000 lvl=dbug msg=BroadcastMinedBlock block hash=0xa812ff217bd9f9bc4e4a110eaf47419ccd857fde14bb46c20a57fd42a062a33c block number=2 root=0x5b25aac5b83bc6c1792d06c1dcd34fcbb3bb2d3000ba2b8b91cfbddec5b85340 gas=99661
+t=2023-01-17T21:55:38+0000 lvl=info msg="[2/16 Headers] Processed" highest inserted=2 age=0
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[2/16 Headers] DONE" in=28.333450898s
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[3/16 CumulativeIndex] DONE" in=60.515µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[4/16 BlockHashes] DONE" in=52.779µs
+t=2023-01-17T21:55:38+0000 lvl=info msg="[5/16 Bodies] Writing block bodies" block_num=2 remaining=0 alloc=50.6MB sys=114.7MB
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[5/16 Bodies] DONE" in=21.754537ms
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[Downloader] Verification failed for header" hash=0x88ec91c9d25c4a50466fe3b99c97911b81fa93fb11e7f0aa232c1c12c3681f10 height=2 err="unauthorized signer"
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[6/16 Senders] DONE" in=435.376µs
+t=2023-01-17T21:55:38+0000 lvl=info msg="[7/16 Execution] Completed on" block=2
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[7/16 Execution] DONE" in=27.173546ms
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[8/16 HashState] DONE" in=111.149µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[9/16 IntermediateHashes] DONE" in=195.401µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[10/16 CallTraces] DONE" in=164.032µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[11/16 AccountHistoryIndex] DONE" in=92.771µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[12/16 StorageHistoryIndex] DONE" in=82.293µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[13/16 LogIndex] DONE" in=155.571µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[14/16 TxLookup] DONE" in=88.745µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[15/16 WatchTheBurn] DONE" in=10.005µs
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[16/16 Finish] DONE" in=26.123µs
+t=2023-01-17T21:55:38+0000 lvl=info msg="Commit cycle" in=227.626µs
+t=2023-01-17T21:55:38+0000 lvl=info msg="Timings (slower than 50ms)" Headers=28.333s
+t=2023-01-17T21:55:38+0000 lvl=info msg=Tables PlainState=4.0KB AccountChangeSet=4.0KB StorageChangeSet=0B BlockTransaction=4.0KB TransactionLog=4.0KB FreeList=4.0KB ReclaimableSpace=4.0MB
+t=2023-01-17T21:55:38+0000 lvl=info msg="RPC Daemon notified of new headers" from=1 to=2 hash=0xa812ff217bd9f9bc4e4a110eaf47419ccd857fde14bb46c20a57fd42a062a33c header sending=19.921µs log sending=294ns
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="Start mining new block based on new head channel"
+t=2023-01-17T21:55:38+0000 lvl=info msg="Got in" time=0.001
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[1/16 Snapshots] DONE" in=8.178µs
+t=2023-01-17T21:55:38+0000 lvl=info msg="Got in" time=0.001
+t=2023-01-17T21:55:38+0000 lvl=info msg="[2/16 Headers] Waiting for headers..." from=2
+t=2023-01-17T21:55:38+0000 lvl=dbug msg="[Downloader] Request skeleton" anchors=0 highestInDb=2
+t=2023-01-17T21:55:38+0000 lvl=info msg="[1/5 MiningCreateBlock] Start mine" block=3 baseFee=671577401 gasLimit=11533720
+t=2023-01-17T21:55:38+0000 lvl=info msg="[2/16 Headers] No block headers to write in this log period" block number=1
