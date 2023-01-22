@@ -178,17 +178,17 @@ func (s *GossipManager) Close() {
 }
 
 func (s *GossipManager) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sb := strings.Builder{}
 	sb.Grow(len(s.subscriptions) * 4)
 
-	s.mu.RLock()
 	for _, v := range s.subscriptions {
 		sb.Write([]byte(v.topic.String()))
 		sb.WriteString("=")
 		sb.WriteString(strconv.Itoa(len(v.topic.ListPeers())))
 		sb.WriteString(" ")
 	}
-	s.mu.RUnlock()
 	return sb.String()
 }
 
