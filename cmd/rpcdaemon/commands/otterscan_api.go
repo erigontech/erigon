@@ -274,7 +274,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		return nil, err
 	}
 	txNums := iter.Union[uint64](itFrom, itTo)
-	iter := MapTxNum2BlockNum(tx, txNums)
+	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 	var blockHash libcommon.Hash
@@ -284,8 +284,8 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	resultCount := uint16(0)
 	hasMore := true
 
-	for iter.HasNext() {
-		txNum, blockNum, txIndex, blockNumChanged, err := iter.Next()
+	for txNumsIter.HasNext() {
+		txNum, blockNum, txIndex, blockNumChanged, err := txNumsIter.Next()
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +330,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 			break
 		}
 	}
-	hasMore = iter.HasNext()
+	hasMore = txNumsIter.HasNext()
 	return &TransactionsWithReceipts{txs, receipts, isFirstPage, !hasMore}, nil
 }
 

@@ -799,15 +799,19 @@ Logs:
 //
 //	it allow certain optimizations.
 type MapTxNum2BlockNumIter struct {
-	it iter.U64
-	tx kv.Tx
+	it          iter.U64
+	tx          kv.Tx
+	orderAscend bool
 
 	blockNum                         uint64
 	minTxNumInBlock, maxTxNumInBlock uint64
 }
 
 func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it}
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
+}
+func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
 }
 func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
 func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blockNumChanged bool, err error) {
@@ -817,8 +821,9 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blo
 	}
 
 	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
-	if i.maxTxNumInBlock == 0 || txNum > i.maxTxNumInBlock {
-		// Find block number
+	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
+		blockNumChanged = true
+
 		var ok bool
 		ok, blockNum, err = rawdb.TxNums.FindBlockNum(i.tx, txNum)
 		if err != nil {
@@ -830,10 +835,7 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, blo
 	}
 
 	// if block number changed, calculate all related field
-	if blockNum > i.blockNum {
-		i.blockNum = blockNum
-		blockNumChanged = true
-
+	if blockNumChanged {
 		i.minTxNumInBlock, err = rawdb.TxNums.Min(i.tx, blockNum)
 		if err != nil {
 			return
