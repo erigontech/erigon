@@ -152,3 +152,9 @@ func (h *Hash) Scan(src interface{}) error {
 func (h Hash) Value() (driver.Value, error) {
 	return h[:], nil
 }
+
+type CodeRecord struct {
+	BlockNumber uint64
+	TxNumber    uint64
+	CodeHash    Hash
+}
