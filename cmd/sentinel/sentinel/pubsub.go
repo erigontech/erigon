@@ -131,8 +131,8 @@ func (s *GossipManager) CloseTopic(topic string) {
 
 // get a specific topic
 func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if val, ok := s.subscriptions[topic]; ok {
 		return val, true
 	}
@@ -140,8 +140,8 @@ func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var sub *GossipSubscription
 	for topic, currSub := range s.subscriptions {
 		if strings.Contains(topic, string(BeaconBlockTopic)) {
@@ -152,15 +152,15 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.subscriptions[topic] = sub
 }
 
 // starts listening to a specific topic (forwarding its messages to the gossip manager channel)
 func (s *GossipManager) ListenTopic(topic string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if val, ok := s.subscriptions[topic]; ok {
 		return val.Listen()
 	}
