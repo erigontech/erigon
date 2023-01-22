@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 /*
@@ -21,17 +20,17 @@ type BeaconBlockHeader struct {
 	BodyRoot      libcommon.Hash
 }
 
-func (b *BeaconBlockHeader) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, b.SizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, b.Slot)
-	ssz_utils.MarshalUint64SSZ(buf[8:], b.ProposerIndex)
-	copy(buf[16:], b.ParentRoot[:])
-	copy(buf[48:], b.Root[:])
-	copy(buf[80:], b.BodyRoot[:])
+func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
+	buf := dst
+	buf = append(buf, ssz_utils.Uint64SSZ(b.Slot)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(b.ProposerIndex)...)
+	buf = append(buf, b.ParentRoot[:]...)
+	buf = append(buf, b.Root[:]...)
+	buf = append(buf, b.BodyRoot[:]...)
 	return buf, nil
 }
 
-func (b *BeaconBlockHeader) UnmarshalSSZ(buf []byte) error {
+func (b *BeaconBlockHeader) DecodeSSZ(buf []byte) error {
 	b.Slot = ssz_utils.UnmarshalUint64SSZ(buf)
 	b.ProposerIndex = ssz_utils.UnmarshalUint64SSZ(buf[8:])
 	copy(b.ParentRoot[:], buf[16:])
@@ -40,7 +39,7 @@ func (b *BeaconBlockHeader) UnmarshalSSZ(buf []byte) error {
 	return nil
 }
 
-func (b *BeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
+func (b *BeaconBlockHeader) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot([][32]byte{
 		merkle_tree.Uint64Root(b.Slot),
 		merkle_tree.Uint64Root(b.ProposerIndex),
@@ -50,8 +49,8 @@ func (b *BeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
 	}, 8)
 }
 
-func (b *BeaconBlockHeader) SizeSSZ() int {
-	return length.Hash*3 + common.BlockNumberLength*2
+func (b *BeaconBlockHeader) EncodingSizeSSZ() int {
+	return length.Hash*3 + length.BlockNum*2
 }
 
 /*
@@ -62,42 +61,42 @@ type SignedBeaconBlockHeader struct {
 	Signature [96]byte
 }
 
-func (b *SignedBeaconBlockHeader) MarshalSSZ() ([]byte, error) {
-	buf := make([]byte, b.SizeSSZ())
-	marshalledHeader, err := b.Header.MarshalSSZ()
+func (b *SignedBeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
+	buf := dst
+	var err error
+	buf, err = b.Header.EncodeSSZ(buf)
 	if err != nil {
 		return nil, err
 	}
-
-	copy(buf, marshalledHeader)
-	copy(buf[b.Header.SizeSSZ():], b.Signature[:])
+	buf = append(buf, b.Signature[:]...)
 	return buf, nil
 }
 
-func (b *SignedBeaconBlockHeader) UnmarshalSSZ(buf []byte) error {
-	if err := b.Header.UnmarshalSSZ(buf); err != nil {
+func (b *SignedBeaconBlockHeader) DecodeSSZ(buf []byte) error {
+	b.Header = new(BeaconBlockHeader)
+	if err := b.Header.DecodeSSZ(buf); err != nil {
 		return err
 	}
-	copy(b.Signature[:], buf[b.Header.SizeSSZ():])
+	copy(b.Signature[:], buf[b.Header.EncodingSizeSSZ():])
 	return nil
 }
 
-func (b *SignedBeaconBlockHeader) HashTreeRoot() ([32]byte, error) {
+func (b *SignedBeaconBlockHeader) HashSSZ() ([32]byte, error) {
 	signatureRoot, err := merkle_tree.SignatureRoot(b.Signature)
 	if err != nil {
 		return [32]byte{}, err
 	}
 
-	headerRoot, err := b.Header.HashTreeRoot()
+	headerRoot, err := b.Header.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
 	return merkle_tree.ArraysRoot([][32]byte{
 		headerRoot,
 		signatureRoot,
-	}, 8)
+	}, 2)
 }
 
-func (b *SignedBeaconBlockHeader) SizeSSZ() int {
-	return b.Header.SizeSSZ() + 96
+func (b *SignedBeaconBlockHeader) EncodingSizeSSZ() int {
+	return b.Header.EncodingSizeSSZ() + 96
 }

@@ -151,7 +151,7 @@ func (l *LightClient) Start() {
 		if len(updates) > 0 {
 			lastValidated := updates[len(updates)-1]
 			l.highestValidated = lastValidated.AttestedHeader.Slot
-			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HashTreeRoot()
+			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HashSSZ()
 			if err != nil {
 				log.Warn("could not compute root", "err", err)
 				continue
@@ -239,13 +239,13 @@ func (l *LightClient) importBlockIfPossible() {
 	if curr.Slot > l.highestValidated+maxChainExtension {
 		return
 	}
-	currentRoot, err := curr.HashTreeRoot()
+	currentRoot, err := curr.HashSSZ()
 	if err != nil {
 		log.Warn("Could not send beacon block to ETH1", "err", err)
 		return
 	}
 
-	finalizedEth2Root, err := l.store.finalizedHeader.HashTreeRoot()
+	finalizedEth2Root, err := l.store.finalizedHeader.HashSSZ()
 	if err != nil {
 		return
 	}
@@ -276,11 +276,11 @@ func (l *LightClient) importBlockIfPossible() {
 }
 
 func (l *LightClient) updateStatus() error {
-	finalizedRoot, err := l.store.finalizedHeader.HashTreeRoot()
+	finalizedRoot, err := l.store.finalizedHeader.HashSSZ()
 	if err != nil {
 		return err
 	}
-	headRoot, err := l.store.optimisticHeader.HashTreeRoot()
+	headRoot, err := l.store.optimisticHeader.HashSSZ()
 	if err != nil {
 		return err
 	}

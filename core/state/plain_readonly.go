@@ -27,22 +27,17 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
-
-type CodeRecord struct {
-	BlockNumber uint64
-	CodeHash    libcommon.Hash
-}
 
 type storageItem struct {
 	key, seckey libcommon.Hash
@@ -63,10 +58,10 @@ type PlainState struct {
 	histV3                       bool
 	storage                      map[libcommon.Address]*btree.BTree
 	trace                        bool
-	systemContractLookup         map[libcommon.Address][]CodeRecord
+	systemContractLookup         map[libcommon.Address][]libcommon.CodeRecord
 }
 
-func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]CodeRecord) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
 	ps := &PlainState{
 		tx:                   tx,
@@ -89,7 +84,7 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 	}
 
 	if histV3 {
-		ps.txNr, _ = rawdb.TxNums.Min(tx, blockNr)
+		ps.txNr, _ = rawdbv3.TxNums.Min(tx, blockNr)
 	}
 	return ps
 }
@@ -110,18 +105,9 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	var accData []byte
-	var err error
-	if ttx, ok := s.tx.(kv.TemporalTx); ok {
-		accData, _, err = ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, s.txNr)
-		if err != nil {
-			return err
-		}
-	} else {
-		accData, err = historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
-		if err != nil {
-			return err
-		}
+	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+	if err != nil {
+		return err
 	}
 
 	var acc accounts.Account

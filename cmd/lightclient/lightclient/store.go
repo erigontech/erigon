@@ -31,7 +31,7 @@ type LightClientStore struct {
  *	received LightClientBootstrap derived from a given trusted_block_root.
  */
 func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBootstrap) (*LightClientStore, error) {
-	headerRoot, err := bootstrap.Header.HashTreeRoot()
+	headerRoot, err := bootstrap.Header.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 			headerRoot, trustedRoot)
 	}
 
-	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashTreeRoot()
+	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashSSZ()
 	if err != nil {
 		return nil, err
 	}

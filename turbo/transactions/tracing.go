@@ -38,25 +38,9 @@ type BlockGetter interface {
 // ComputeTxEnv returns the execution environment of a certain transaction.
 func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.AggregatorV3, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	header := block.HeaderNoCopy()
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3, cfg.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-	}
-	if historyV3 {
-		ibs := state.New(reader)
-		if txIndex == 0 && len(block.Transactions()) == 0 {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		if int(txIndex) > block.Transactions().Len() {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		txn := block.Transactions()[txIndex]
-		signer := types.MakeSigner(cfg, block.NumberU64())
-		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.Time()))
-		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader)
-		txCtx := core.NewEVMTxContext(msg)
-		return msg, blockCtx, txCtx, ibs, reader, nil
-
 	}
 
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {

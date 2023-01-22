@@ -7,7 +7,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
 func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.ExecutionPayload {
@@ -25,7 +27,8 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 		}
 	}
 
-	return &types.ExecutionPayload{
+	res := &types.ExecutionPayload{
+		Version:       1,
 		ParentHash:    gointerfaces.ConvertHashToH256(header.ParentHash),
 		Coinbase:      gointerfaces.ConvertAddressToH160(header.Coinbase),
 		StateRoot:     gointerfaces.ConvertHashToH256(header.Root),
@@ -41,14 +44,20 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 		BlockHash:     gointerfaces.ConvertHashToH256(header.BlockHashCL),
 		Transactions:  body.Transactions,
 	}
+	if body.Withdrawals != nil {
+		res.Version = 2
+		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(body.Withdrawals)
+	}
+
+	return res
 }
 
-func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatrix) error {
+func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error {
 	if l.execution == nil {
 		return nil
 	}
 	// If we recently imported the beacon block, skip.
-	bcRoot, err := beaconBlock.HashTreeRoot()
+	bcRoot, err := beaconBlock.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -62,14 +71,14 @@ func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlockBellatr
 
 	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
 
-	_, err = l.execution.EngineNewPayloadV1(l.ctx, payload)
+	_, err = l.execution.EngineNewPayload(l.ctx, payload)
 	if err != nil {
 		return err
 	}
 
 	// Wait a bit
 	time.Sleep(500 * time.Millisecond)
-	_, err = l.execution.EngineForkChoiceUpdatedV1(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
+	_, err = l.execution.EngineForkChoiceUpdated(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
 		ForkchoiceState: &remote.EngineForkChoiceState{
 			HeadBlockHash:      payloadHash,
 			SafeBlockHash:      payloadHash,
