@@ -92,8 +92,8 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 		From: &bankAddress,
 		To:   &contractAddress,
 		Data: &callDataBytes,
-	}, rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err != nil {
-		t.Errorf("unexpected error: %v", err)
+	}, rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber), nil); err == nil {
+		t.Errorf("Expected a prune error: block pruned")
 	}
 }
 
