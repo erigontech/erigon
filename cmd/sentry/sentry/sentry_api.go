@@ -113,7 +113,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			if cs.passivePeers {
 				maxPeers = 5
 			} else {
-				maxPeers = 2
+				maxPeers = 1
 			}
 			outreq := proto_sentry.SendMessageByMinBlockRequest{
 				MinBlock: minBlock,
