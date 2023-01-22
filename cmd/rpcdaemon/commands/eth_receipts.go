@@ -358,35 +358,24 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
-	var lastBlockNum uint64
 	var blockHash libcommon.Hash
 	var header *types.Header
-	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
-	var blockNum uint64
-	var ok bool
 
-	iter := txNumbers.Iterator()
+	iter := MapTxNum2BlockNum(tx, bitmapdb.ToIter(txNumbers.Iterator()))
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum := iter.Next()
-
-		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
-
-		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
-			// Find block number
-			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
-			if err != nil {
-				return nil, err
-			}
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := iter.Next()
+		if err != nil {
+			return nil, err
 		}
-		if !ok {
-			break
+		if isFinalTxn {
+			continue
 		}
 
 		// if block number changed, calculate all related field
-		if blockNum > lastBlockNum {
+		if blockNumChanged {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -394,20 +383,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("header is nil", "blockNum", blockNum)
 				continue
 			}
-			lastBlockNum = blockNum
 			blockHash = header.Hash()
 			exec.changeBlock(header)
-			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
 		}
 
-		txIndex := int(txNum) - int(minTxNumInBlock) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
