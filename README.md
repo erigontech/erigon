@@ -105,6 +105,15 @@ For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) cli
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk.
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
+
 ### Logging
 
 _Flags:_ 
