@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
 )
+
+const maxMessageLength = 18 * datasize.MB
 
 // BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
@@ -180,6 +183,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		if err != nil {
 			return nil, fmt.Errorf("unable to read varint from message prefix: %v", err)
 		}
+		// Sanity check for message size.
+		if encodedLn > uint64(maxMessageLength) {
+			return nil, fmt.Errorf("received message too big")
+		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
@@ -231,11 +238,11 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.Phase0Version))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.Phase0Version))
 		case utils.Bytes4ToUint32(altairForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.AltairVersion))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.AltairVersion))
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.BellatrixVersion))
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.BellatrixVersion))
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}

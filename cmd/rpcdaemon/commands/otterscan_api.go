@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -481,7 +480,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b, txn.Hash(), true)
+		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
 		marshalledRcpt["logs"] = nil
 		marshalledRcpt["logsBloom"] = nil
 		result = append(result, marshalledRcpt)

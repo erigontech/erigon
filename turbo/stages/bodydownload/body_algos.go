@@ -133,32 +133,32 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 				request = false
 			} else {
 				bd.deliveriesH[blockNum] = header
-				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
-					(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
-					// Perhaps we already have this block
-					block := rawdb.ReadBlock(tx, hash, blockNum)
-					if block == nil {
-						var tripleHash TripleHash
-						copy(tripleHash[:], header.UncleHash.Bytes())
-						copy(tripleHash[length.Hash:], header.TxHash.Bytes())
-						if header.WithdrawalsHash != nil {
-							copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
-						} else {
-							copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
-						}
-						bd.requestedMap[tripleHash] = blockNum
-					} else {
-						bd.addBodyToCache(blockNum, block.RawBody())
-						request = false
-					}
-				} else {
-					bd.addBodyToCache(blockNum, &types.RawBody{})
-					request = false
-				}
 			}
 		}
-
 		if request {
+			if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
+				(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
+				// Perhaps we already have this block
+				block := rawdb.ReadBlock(tx, hash, blockNum)
+				if block != nil {
+					bd.addBodyToCache(blockNum, block.RawBody())
+					request = false
+				}
+			} else {
+				bd.addBodyToCache(blockNum, &types.RawBody{})
+				request = false
+			}
+		}
+		if request {
+			var tripleHash TripleHash
+			copy(tripleHash[:], header.UncleHash.Bytes())
+			copy(tripleHash[length.Hash:], header.TxHash.Bytes())
+			if header.WithdrawalsHash != nil {
+				copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
+			} else {
+				copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
+			}
+			bd.requestedMap[tripleHash] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
@@ -187,24 +187,24 @@ func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, bl
 	bd.addBodyToCache(blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-	if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
-		log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
-	} else if parent != nil {
-		if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
+	if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
+		if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
+			log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
+		} else if parent != nil {
 			td := new(big.Int).Add(header.Difficulty, parent)
 			go blockPropagator(context.Background(), header, body, td)
+		} else {
+			log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 		}
-	} else {
-		log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 	}
 
 	return true
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {
-	if len(bodyReq.BlockNums) > 0 {
-		log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "min", bodyReq.BlockNums[0], "max", bodyReq.BlockNums[len(bodyReq.BlockNums)-1])
-	}
+	//if len(bodyReq.BlockNums) > 0 {
+	//	log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "nums", fmt.Sprintf("%d", bodyReq.BlockNums))
+	//}
 	for _, num := range bodyReq.BlockNums {
 		bd.requests[num] = bodyReq
 	}
@@ -278,6 +278,7 @@ Loop:
 			continue
 		}
 
+		//var deliveredNums []uint64
 		toClean := map[uint64]struct{}{}
 		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
 
@@ -297,6 +298,7 @@ Loop:
 				undelivered++
 				continue
 			}
+			//deliveredNums = append(deliveredNums, blockNum)
 			if req, ok := bd.requests[blockNum]; ok {
 				for _, blockNum := range req.BlockNums {
 					toClean[blockNum] = struct{}{}
@@ -309,9 +311,14 @@ Loop:
 			delivered++
 		}
 		// Clean up the requests
+		//var clearedNums []uint64
 		for blockNum := range toClean {
 			delete(bd.requests, blockNum)
+			//clearedNums = append(clearedNums, blockNum)
 		}
+		//sort.Slice(deliveredNums, func(i, j int) bool { return deliveredNums[i] < deliveredNums[j] })
+		//sort.Slice(clearedNums, func(i, j int) bool { return clearedNums[i] < clearedNums[j] })
+		//log.Debug("Delivered", "blockNums", fmt.Sprintf("%d", deliveredNums), "clearedNums", fmt.Sprintf("%d", clearedNums))
 		total := delivered + undelivered
 		if total > 0 {
 			// Approximate numbers
@@ -327,8 +334,7 @@ Loop:
 // the requestedLow count is increased by the number returned
 func (bd *BodyDownload) NextProcessingCount() uint64 {
 	var i uint64
-	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		bd.delivered.Remove(bd.requestedLow + i)
+	for i = 0; bd.delivered.Contains(bd.requestedLow + i); i++ {
 	}
 	return i
 }
@@ -395,7 +401,7 @@ func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBloc
 func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	size := body.EncodingSize()
 	if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: key}); ok {
-		bd.bodyCacheSize -= item.payloadSize // It will be replace, so subtracting
+		bd.bodyCacheSize -= item.payloadSize // It will be replaced, so subtracting
 	}
 	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
 	bd.bodyCacheSize += size
@@ -406,9 +412,16 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64) *types.RawBody {
-	if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
-		return item.rawBody
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
+	if delete {
+		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+			bd.bodyCacheSize -= item.payloadSize
+			return item.rawBody
+		}
+	} else {
+		if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
+			return item.rawBody
+		}
 	}
 	return nil
 }

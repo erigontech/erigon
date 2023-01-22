@@ -38,10 +38,6 @@ func TestBlockchain(t *testing.T) {
 	// For speedier CI-runs those are skipped.
 	bt.skipLoad(`^GeneralStateTests/`)
 
-	// TODO(yperbasis): re-enable after the tests are updated to GWei
-	bt.skipLoad(`^EIPTests/bc4895-withdrawals/`)
-	bt.skipLoad(`^TransitionTests/bcMergeToShanghai/`)
-
 	// Currently it fails because SpawnStageHeaders doesn't accept any PoW blocks after PoS transition
 	// TODO(yperbasis): make it work
 	bt.skipLoad(`^TransitionTests/bcArrowGlacierToMerge/powToPosBlockRejection\.json`)

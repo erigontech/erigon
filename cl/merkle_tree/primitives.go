@@ -13,6 +13,13 @@ func Uint64Root(val uint64) libcommon.Hash {
 	return root
 }
 
+func BoolRoot(b bool) (root libcommon.Hash) {
+	if b {
+		root[0] = 1
+	}
+	return
+}
+
 func SignatureRoot(signature [96]byte) (libcommon.Hash, error) {
 	return ArraysRoot([][32]byte{
 		libcommon.BytesToHash(signature[0:32]),

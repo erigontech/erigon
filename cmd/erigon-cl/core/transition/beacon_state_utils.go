@@ -181,7 +181,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) er
 	if block.ProposerIndex != propInd {
 		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
 	}
-	latestRoot, err := state.LatestBlockHeader().HashTreeRoot()
+	latestRoot, err := state.LatestBlockHeader().HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}
@@ -234,13 +234,13 @@ func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBody) error {
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
 	}
-	state.RandaoMixes()[epoch%EPOCHS_PER_HISTORICAL_VECTOR] = mix
+	state.SetRandaoMixAt(int(epoch%EPOCHS_PER_HISTORICAL_VECTOR), mix)
 	return nil
 }
 
 func ProcessEth1Data(state *state.BeaconState, body *cltypes.BeaconBody) error {
-	newVotes := append(state.Eth1DataVotes(), body.Eth1Data)
-	state.SetEth1DataVotes(newVotes)
+	state.AddEth1DataVote(body.Eth1Data)
+	newVotes := state.Eth1DataVotes()
 
 	ethDataHash, err := body.Eth1Data.HashSSZ()
 	if err != nil {

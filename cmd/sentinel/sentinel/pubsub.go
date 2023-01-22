@@ -21,11 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
@@ -54,6 +50,7 @@ const (
 // Specifies the prefix for any pubsub topic.
 const gossipTopicPrefix = "/eth2/"
 const blockSubnetTopicFormat = "/eth2/%x/beacon_block"
+const SSZSnappyCodec = "ssz_snappy"
 
 type TopicName string
 
@@ -69,56 +66,40 @@ const (
 
 type GossipTopic struct {
 	Name     TopicName
-	Codec    func(*pubsub.Subscription, *pubsub.Topic) communication.GossipCodec
-	Typ      clonable.Clonable
 	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
 	Name:     BeaconBlockTopic,
-	Typ:      &cltypes.SignedBeaconBlock{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var BeaconAggregateAndProofSsz = GossipTopic{
 	Name:     BeaconAggregateAndProofTopic,
-	Typ:      &cltypes.SignedAggregateAndProof{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var VoluntaryExitSsz = GossipTopic{
 	Name:     VoluntaryExitTopic,
-	Typ:      &cltypes.SignedVoluntaryExit{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var ProposerSlashingSsz = GossipTopic{
 	Name:     ProposerSlashingTopic,
-	Typ:      &cltypes.ProposerSlashing{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var AttesterSlashingSsz = GossipTopic{
 	Name:     AttesterSlashingTopic,
-	Typ:      &cltypes.AttesterSlashing{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var LightClientFinalityUpdateSsz = GossipTopic{
 	Name:     LightClientFinalityUpdateTopic,
-	Typ:      &cltypes.LightClientFinalityUpdate{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 var LightClientOptimisticUpdateSsz = GossipTopic{
 	Name:     LightClientOptimisticUpdateTopic,
-	Typ:      &cltypes.LightClientOptimisticUpdate{},
-	Codec:    ssz_snappy.NewGossipCodec,
-	CodecStr: "ssz_snappy",
+	CodecStr: SSZSnappyCodec,
 }
 
 type GossipManager struct {
-	ch            chan *communication.GossipContext
+	ch            chan *pubsub.Message
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
@@ -128,13 +109,13 @@ func NewGossipManager(
 	ctx context.Context,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *communication.GossipContext, 1),
+		ch:            make(chan *pubsub.Message, 1),
 		subscriptions: map[string]*GossipSubscription{},
 	}
 	return g
 }
 
-func (s *GossipManager) Recv() <-chan *communication.GossipContext {
+func (s *GossipManager) Recv() <-chan *pubsub.Message {
 	return s.ch
 }
 
