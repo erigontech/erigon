@@ -88,6 +88,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	logPrefix := s.LogPrefix()
 	current := cfg.miningState.MiningBlock
 	txs := current.PreparedTxs
+	dataGasUsed := uint64(0)
 	noempty := true
 
 	stateReader := state.NewPlainStateReader(tx)
@@ -112,7 +113,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	// empty block is necessary to keep the liveness of the network.
 	if noempty {
 		if txs != nil && !txs.Empty() {
-			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId)
+			logs, _, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, &dataGasUsed)
 			if err != nil {
 				return err
 			}
@@ -128,13 +129,14 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			}
 
 			for {
-				txs, y, err := getNextTransactions(cfg, chainID, current.Header, 50, executionAt, simulationTx, yielded)
+				remainingDataGas := params.MaxDataGasPerBlock - dataGasUsed
+				txs, y, err := getNextTransactions(cfg, chainID, current.Header, remainingDataGas, 50, executionAt, simulationTx, yielded)
 				if err != nil {
 					return err
 				}
 
 				if !txs.Empty() {
-					logs, stop, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId)
+					logs, stop, err := addTransactionsToMiningBlock(logPrefix, current, cfg.chainConfig, cfg.vmConfig, getHeader, cfg.engine, txs, cfg.miningState.MiningConfig.Etherbase, ibs, quit, cfg.interrupt, cfg.payloadId, &dataGasUsed)
 					if err != nil {
 						return err
 					}
@@ -189,6 +191,7 @@ func getNextTransactions(
 	cfg MiningExecCfg,
 	chainID *uint256.Int,
 	header *types.Header,
+	remainingDataGas uint64,
 	amount uint16,
 	executionAt uint64,
 	simulationTx *memdb.MemoryMutation,
@@ -202,7 +205,7 @@ func getNextTransactions(
 		counter := 0
 		for !onTime && counter < 1000 {
 			remainingGas := header.GasLimit - header.GasUsed
-			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, alreadyYielded); err != nil {
+			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingDataGas, alreadyYielded); err != nil {
 				return err
 			}
 			time.Sleep(1 * time.Millisecond)
@@ -361,10 +364,10 @@ func filterBadTransactions(transactions []types.Transaction, config chain.Config
 	return filtered, nil
 }
 
-func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig chain.Config, vmConfig *vm.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase libcommon.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64) (types.Logs, bool, error) {
+func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainConfig chain.Config, vmConfig *vm.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, engine consensus.Engine, txs types.TransactionsStream, coinbase libcommon.Address, ibs *state.IntraBlockState, quit <-chan struct{}, interrupt *int32, payloadId uint64, dataGasUsed *uint64) (types.Logs, bool, error) {
 	header := current.Header
 	tcount := 0
-	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
+	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed).AddDataGas(params.MaxDataGasPerBlock - *dataGasUsed)
 	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
 
 	var coalescedLogs types.Logs
@@ -375,12 +378,13 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 	var miningCommitTx = func(txn types.Transaction, coinbase libcommon.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *MiningBlock) ([]*types.Log, error) {
 		ibs.Prepare(txn.Hash(), libcommon.Hash{}, tcount)
 		gasSnap := gasPool.Gas()
+		dataGasSnap := gasPool.DataGas()
 		snap := ibs.Snapshot()
 		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
-		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, parentHeader.ExcessDataGas, txn, &header.GasUsed, *vmConfig)
+		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, parentHeader.ExcessDataGas, txn, &header.GasUsed, dataGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
-			gasPool = new(core.GasPool).AddGas(gasSnap) // restore gasPool as well as ibs
+			gasPool = new(core.GasPool).AddGas(gasSnap).AddDataGas(dataGasSnap) // restore gasPool as well as ibs
 			return nil, err
 		}
 
@@ -455,6 +459,10 @@ LOOP:
 			// Pop the env out-of-gas transaction without shifting in the next from the account
 			log.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
 			txs.Pop()
+		} else if errors.Is(err, core.ErrDataGasLimitReached) {
+			// Shift, as the next tx from the account may not contain blobs
+			log.Debug(fmt.Sprintf("[%s] Data gas limit exceeded for block", logPrefix), "hash", txn.Hash(), "sender", from)
+			txs.Shift()
 		} else if errors.Is(err, core.ErrNonceTooLow) {
 			// New head notification data race between the transaction pool and miner, shift
 			log.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())

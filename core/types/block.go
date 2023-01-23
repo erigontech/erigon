@@ -540,14 +540,15 @@ var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
 
 // Size returns the approximate memory used by all internal contents. It is used
 // to approximate and limit the memory consumption of various caches.
-//
-// TODO(EIP-4844): Account for excessDataGas and Withdrawals hash storage
 func (h *Header) Size() common.StorageSize {
 	s := headerSize + common.StorageSize(len(h.Extra)+bitsToBytes(h.Difficulty.BitLen())+bitsToBytes(h.Number.BitLen()))
 	if h.BaseFee != nil {
 		s += common.StorageSize(bitsToBytes(h.BaseFee.BitLen()))
 	}
 	if h.WithdrawalsHash != nil {
+		s += common.StorageSize(32)
+	}
+	if h.ExcessDataGas != nil {
 		s += common.StorageSize(32)
 	}
 	return s

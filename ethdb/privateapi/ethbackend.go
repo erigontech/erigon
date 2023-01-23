@@ -637,6 +637,8 @@ func (s *EthBackendServer) engineGetPayload(req *remote.EngineGetPayloadRequest)
 		baseFeeReply = gointerfaces.ConvertUint256IntToH256(&baseFee)
 	}
 
+	// TODO(eip-4844):  These transactions are the network-wrapped variety, they need
+	// to be unwrapped before adding to execution payload.
 	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
 	if err != nil {
 		return nil, nil, err
