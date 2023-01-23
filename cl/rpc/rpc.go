@@ -205,35 +205,30 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 			return nil, fmt.Errorf("null fork digest")
 		}
 		var phase0ForkDigest, altairForkDigest, bellatrixForkDigest [4]byte
-		if b.beaconConfig.GenesisForkVersion != nil {
-			phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.GenesisForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
+		phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(b.beaconConfig.GenesisForkVersion),
+			b.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		if b.beaconConfig.AltairForkVersion != nil {
-			altairForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.AltairForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
+		altairForkDigest, err = fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(b.beaconConfig.AltairForkVersion),
+			b.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		if b.beaconConfig.BellatrixForkVersion != nil {
-			bellatrixForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.BellatrixForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
+		bellatrixForkDigest, err = fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(b.beaconConfig.BellatrixForkVersion),
+			b.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return nil, err
 		}
+
 		responseChunk := &cltypes.SignedBeaconBlock{}
 
 		switch respForkDigest {
