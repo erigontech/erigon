@@ -398,6 +398,18 @@ type BeaconChainConfig struct {
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 }
 
+func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
+	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch}
+	stateVersion := Phase0Version
+	for _, forkEpoch := range forkEpochList {
+		if forkEpoch > epoch {
+			return stateVersion
+		}
+		stateVersion++
+	}
+	return stateVersion
+}
+
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
@@ -630,6 +642,7 @@ func CustomConfig(configFile string) (BeaconChainConfig, error) {
 		return BeaconChainConfig{}, nil
 	}
 	err = yaml.Unmarshal(b, &cfg)
+	cfg.InitializeForkSchedule()
 	return cfg, err
 }
 
