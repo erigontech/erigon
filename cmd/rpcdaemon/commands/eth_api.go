@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -114,6 +115,8 @@ type BaseAPI struct {
 	_txnReader   services.TxnReader
 	_agg         *libstate.AggregatorV3
 	_engine      consensus.EngineReader
+
+	_pruneAmount *prune.Mode
 
 	evmCallTimeout time.Duration
 }

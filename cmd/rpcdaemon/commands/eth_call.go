@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -39,6 +40,14 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	if api._pruneAmount == nil {
+		pruneAmount, err := prune.Get(tx)
+		if err != nil {
+			return nil, err
+		}
+		*api._pruneAmount = pruneAmount
+	}
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
@@ -67,7 +76,8 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, err
 	}
 	header := block.HeaderNoCopy()
-	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout)
+	result, err := transactions.DoCall(ctx, engine, args, tx, blockNrOrHash, header, overrides, api.GasCap, chainConfig, stateReader, api._blockReader, api.evmCallTimeout, *api._pruneAmount)
+
 	if err != nil {
 		return nil, err
 	}

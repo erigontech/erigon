@@ -165,9 +165,10 @@ type Mode struct {
 type BlockAmount interface {
 	PruneTo(stageHead uint64) uint64
 	Enabled() bool
-	ToValue() uint64
+	toValue() uint64
 	dbType() []byte
 	useDefaultValue() bool
+	HasBeenPruned(latestBlockNum, blockNum uint64) bool
 }
 
 // Distance amount of blocks to keep in DB
@@ -180,9 +181,13 @@ type BlockAmount interface {
 type Distance uint64
 
 func (p Distance) Enabled() bool         { return p != math.MaxUint64 }
-func (p Distance) ToValue() uint64       { return uint64(p) }
+func (p Distance) toValue() uint64       { return uint64(p) }
 func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
+
+func (p Distance) HasBeenPruned(latestBlockNum, blockNum uint64) bool {
+	return latestBlockNum > p.toValue() && latestBlockNum-p.toValue() >= blockNum
+}
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
 	if p == 0 {
@@ -198,9 +203,13 @@ func (p Distance) PruneTo(stageHead uint64) uint64 {
 type Before uint64
 
 func (b Before) Enabled() bool         { return b > 0 }
-func (b Before) ToValue() uint64       { return uint64(b) }
+func (b Before) toValue() uint64       { return uint64(b) }
 func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
 func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
+
+func (b Before) HasBeenPruned(_, blockNum uint64) bool {
+	return blockNum <= b.toValue()
+}
 
 func (b Before) PruneTo(uint64) uint64 {
 	if b == 0 {

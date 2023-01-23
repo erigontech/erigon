@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -903,21 +904,24 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	num := rpc.LatestBlockNumber
-	latestBlockNumber, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &num}, tx, api.filters)
+	latestFinishedBlockNumber, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	pruneAmount, err := prune.Get(tx)
-	if err != nil {
-		return nil, err
+	if api._pruneAmount == nil {
+		pruneAmount, err := prune.Get(tx)
+		if err != nil {
+			return nil, err
+		}
+		*api._pruneAmount = pruneAmount
 	}
 
-	latestPrunedBlock := latestBlockNumber - pruneAmount.CallTraces.ToValue()
+	hasCallTracesBeenPruned := api._pruneAmount.CallTraces.HasBeenPruned(latestFinishedBlockNumber, blockNumber)
+	hasHistoryBeenPruned := api._pruneAmount.History.HasBeenPruned(latestFinishedBlockNumber, blockNumber)
 
-	if latestPrunedBlock >= blockNumber {
-		return &TraceCallResult{Output: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestBlockNumber))}, nil
+	if hasCallTracesBeenPruned || hasHistoryBeenPruned {
+		return &TraceCallResult{Output: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestFinishedBlockNumber))}, nil
 	}
 
 	block, err := api.blockWithSenders(tx, hash, blockNumber)

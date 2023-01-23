@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -23,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -40,6 +40,7 @@ func DoCall(
 	stateReader state.StateReader,
 	headerReader services.HeaderReader,
 	callTimeout time.Duration,
+	pruneAmount prune.Mode,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
@@ -48,21 +49,17 @@ func DoCall(
 			return state, block.Header(), nil
 		}
 	*/
-	num := rpc.LatestBlockNumber
-	latestBlockNumber, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockNumber: &num}, tx, nil)
+	latestFinishedBlockNumber, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return nil, err
 	}
 
-	pruneAmount, err := prune.Get(tx)
-	if err != nil {
-		return nil, err
-	}
+	hasCallTracesBeenPruned := pruneAmount.CallTraces.HasBeenPruned(latestFinishedBlockNumber, header.Number.Uint64())
+	hasHistoryBeenPruned := pruneAmount.History.HasBeenPruned(latestFinishedBlockNumber, header.Number.Uint64())
 
-	latestPrunedBlockNumber := latestBlockNumber - pruneAmount.CallTraces.ToValue()
-	if latestPrunedBlockNumber >= header.Number.Uint64() {
+	if hasCallTracesBeenPruned || hasHistoryBeenPruned {
 		return &core.ExecutionResult{
-			ReturnData: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", header.Number.Uint64(), latestBlockNumber)),
+			ReturnData: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", header.Number.Uint64(), latestFinishedBlockNumber)),
 			Err:        errors.New("block pruned"),
 		}, nil
 	}
