@@ -144,3 +144,15 @@ func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
 }
+
+func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.nextWithdrawalIndex = index
+}
+
+func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.nextWithdrawalValidatorIndex = index
+}
+
+func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.historicalSummaries = append(b.historicalSummaries, summary)
+}
