@@ -27,6 +27,7 @@ var (
 			Bloom:     types.Bloom{},
 			TxHashSSZ: txHashEmpty,
 		},
+		Body: &types.RawBody{},
 	}
 )
 

@@ -431,7 +431,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		leaves = append(leaves, aggLeaf)
 	}
 	if b.Version >= clparams.BellatrixVersion {
-		payloadLeaf, err := b.ExecutionPayload.HashSSZ()
+		payloadLeaf, err := b.ExecutionPayload.HashSSZ(b.Version)
 		if err != nil {
 			return [32]byte{}, err
 		}

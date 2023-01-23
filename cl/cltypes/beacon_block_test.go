@@ -109,7 +109,7 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 
 var (
 	// Hashes
-	capellaHash   = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
+	capellaHash   = common.HexToHash("0x00a1f1a46f4bcdd9030c11c1cf9a8062cd48478620e6fd3bd3a748263a49433f")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
 	phase0Hash    = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
