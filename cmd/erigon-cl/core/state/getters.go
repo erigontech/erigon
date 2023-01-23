@@ -112,3 +112,15 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
 	return b.latestExecutionPayloadHeader
 }
+
+func (b *BeaconState) NextWithdrawalIndex() uint64 {
+	return b.nextWithdrawalIndex
+}
+
+func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
+	return b.nextWithdrawalValidatorIndex
+}
+
+func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
+	return b.historicalSummaries
+}
