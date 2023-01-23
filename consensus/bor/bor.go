@@ -345,12 +345,6 @@ func (c *Bor) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.
 	return abort, results
 }
 
-func (c *Bor) WithExecutionContext(ctx context.Context) *Bor {
-	subclient := *c
-	subclient.execCtx = ctx
-	return &subclient
-}
-
 // verifyHeader checks whether a header conforms to the consensus rules.The
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
