@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230121041031-e5b04275c96f
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230123115809-907487a116a9
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230120022649-cd9409a200da
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -93,6 +93,11 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.20.2
 	pgregory.net/rapid v0.5.3
+)
+
+require (
+	github.com/ledgerwatch/interfaces v0.0.0-20230120145059-26c0bf72eacc // indirect
+	github.com/matryer/moq v0.3.0 // indirect
 )
 
 require (
