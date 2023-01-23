@@ -362,7 +362,7 @@ func NewDefaultStages(ctx context.Context,
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
 	}
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
@@ -410,7 +410,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
 	}
 
 	return stagedsync.New(

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/bits"
 	"os"
 	"os/signal"
@@ -236,7 +237,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(false)
 	}
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 

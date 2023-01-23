@@ -385,10 +385,17 @@ func ReadStorageBody(db kv.Getter, hash libcommon.Hash, number uint64) (types.Bo
 	return *bodyForStorage, nil
 }
 
-func CanonicalTxnByID(db kv.Getter, id uint64) (types.Transaction, error) {
+func CanonicalTxnByID(db kv.Getter, id uint64, blockHash libcommon.Hash, transactionsV3 bool) (types.Transaction, error) {
 	txIdKey := make([]byte, 8)
 	binary.BigEndian.PutUint64(txIdKey, id)
-	v, err := db.GetOne(kv.EthTx, txIdKey)
+	var v []byte
+	var err error
+	if transactionsV3 {
+		key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+		v, err = db.GetOne(kv.EthTxV3, key)
+	} else {
+		v, err = db.GetOne(kv.EthTx, txIdKey)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +463,7 @@ func NonCanonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]t
 	return txs, nil
 }
 
-func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) error {
+func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blockHash libcommon.Hash) error {
 	txId := baseTxId
 	buf := bytes.NewBuffer(nil)
 	for _, tx := range txs {
@@ -470,21 +477,35 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64) err
 		}
 
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := db.Append(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
-			return err
+		if true {
+			if err := db.Append(kv.EthTx, txIdKey, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
+		} else {
+			key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+			if err := db.Append(kv.EthTxV3, key, common.CopyBytes(buf.Bytes())); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64) error {
+func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash libcommon.Hash) error {
 	txId := baseTxId
 	for _, txn := range txs {
 		txIdKey := make([]byte, 8)
 		binary.BigEndian.PutUint64(txIdKey, txId)
 		// If next Append returns KeyExists error - it means you need to open transaction in App code before calling this func. Batch is also fine.
-		if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
-			return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
+		if true {
+			if err := tx.Append(kv.EthTx, txIdKey, txn); err != nil {
+				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
+			}
+		} else {
+			key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+			if err := tx.Append(kv.EthTxV3, key, txn); err != nil {
+				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
+			}
 		}
 		txId++
 	}
@@ -676,7 +697,7 @@ func WriteRawBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Ra
 	}
 	lastTxnID = baseTxnID + uint64(data.TxAmount) - 1
 	firstNonSystemTxnID := baseTxnID + 1
-	if err = WriteRawTransactions(db, body.Transactions, firstNonSystemTxnID); err != nil {
+	if err = WriteRawTransactions(db, body.Transactions, firstNonSystemTxnID, hash); err != nil {
 		return false, 0, fmt.Errorf("WriteRawTransactions: %w", err)
 	}
 	return true, lastTxnID, nil
@@ -698,7 +719,7 @@ func WriteBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body)
 	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	err = WriteTransactions(db, body.Transactions, baseTxId+1)
+	err = WriteTransactions(db, body.Transactions, baseTxId+1, hash)
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
