@@ -16,8 +16,7 @@ import (
 type Eth1Block struct {
 	Header *types.Header
 	// Transactions can be kept in bytes.
-	Body    *types.RawBody
-	version clparams.StateVersion
+	Body *types.RawBody
 }
 
 func (b *Eth1Block) NumberU64() uint64 {
@@ -202,7 +201,19 @@ func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte
 	return buf, nil
 }
 
-func (b *Eth1Block) HashSSZ() ([32]byte, error) {
+func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
+	var err error
+	if b.Header.TxHashSSZ, err = merkle_tree.TransactionsListRoot(b.Body.Transactions); err != nil {
+		return [32]byte{}, err
+	}
+	if version >= clparams.CapellaVersion {
+		b.Header.WithdrawalsHash = new(libcommon.Hash)
+		if *b.Header.WithdrawalsHash, err = types.Withdrawals(b.Body.Withdrawals).HashSSZ(16); err != nil {
+			return [32]byte{}, err
+		}
+	} else {
+		b.Header.WithdrawalsHash = nil
+	}
 	return b.Header.HashSSZ()
 }
 
