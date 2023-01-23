@@ -914,7 +914,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		if err != nil {
 			return nil, err
 		}
-		*api._pruneAmount = pruneAmount
+		api._pruneAmount = &pruneAmount
 	}
 
 	hasCallTracesBeenPruned := api._pruneAmount.CallTraces.HasBeenPruned(latestFinishedBlockNumber, blockNumber)

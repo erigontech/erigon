@@ -46,7 +46,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		if err != nil {
 			return nil, err
 		}
-		*api._pruneAmount = pruneAmount
+		api._pruneAmount = &pruneAmount
 	}
 
 	chainConfig, err := api.chainConfig(tx)

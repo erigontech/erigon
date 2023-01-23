@@ -186,7 +186,10 @@ func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmuta
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
 func (p Distance) HasBeenPruned(latestBlockNum, blockNum uint64) bool {
-	return latestBlockNum > p.toValue() && latestBlockNum-p.toValue() >= blockNum
+	if p == 0 {
+		return false
+	}
+	return latestBlockNum < p.toValue() || latestBlockNum-p.toValue() >= blockNum
 }
 
 func (p Distance) PruneTo(stageHead uint64) uint64 {
@@ -208,6 +211,9 @@ func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
 func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
 
 func (b Before) HasBeenPruned(_, blockNum uint64) bool {
+	if b == 0 {
+		return false
+	}
 	return blockNum <= b.toValue()
 }
 
@@ -230,28 +236,28 @@ func (m Mode) String() string {
 		if m.History.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.h.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.ToValue())
+			long += fmt.Sprintf(" --prune.h.%s=%d", m.History.dbType(), m.History.toValue())
 		}
 	}
 	if m.Receipts.Enabled() {
 		if m.Receipts.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.r.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.ToValue())
+			long += fmt.Sprintf(" --prune.r.%s=%d", m.Receipts.dbType(), m.Receipts.toValue())
 		}
 	}
 	if m.TxIndex.Enabled() {
 		if m.TxIndex.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.t.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.ToValue())
+			long += fmt.Sprintf(" --prune.t.%s=%d", m.TxIndex.dbType(), m.TxIndex.toValue())
 		}
 	}
 	if m.CallTraces.Enabled() {
 		if m.CallTraces.useDefaultValue() {
 			short += fmt.Sprintf(" --prune.c.older=%d", defaultVal)
 		} else {
-			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.ToValue())
+			long += fmt.Sprintf(" --prune.c.%s=%d", m.CallTraces.dbType(), m.CallTraces.toValue())
 		}
 	}
 
@@ -375,7 +381,7 @@ func get(db kv.Getter, key []byte) (BlockAmount, error) {
 
 func set(db kv.Putter, key []byte, blockAmount BlockAmount) error {
 	v := make([]byte, 8)
-	binary.BigEndian.PutUint64(v, blockAmount.ToValue())
+	binary.BigEndian.PutUint64(v, blockAmount.toValue())
 	if err := db.Put(kv.DatabaseInfo, key, v); err != nil {
 		return err
 	}
@@ -400,7 +406,7 @@ func setOnEmpty(db kv.GetPut, key []byte, blockAmount BlockAmount) error {
 	}
 	if len(mode) == 0 {
 		v := make([]byte, 8)
-		binary.BigEndian.PutUint64(v, blockAmount.ToValue())
+		binary.BigEndian.PutUint64(v, blockAmount.toValue())
 		if err = db.Put(kv.DatabaseInfo, key, v); err != nil {
 			return err
 		}
