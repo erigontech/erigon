@@ -3,6 +3,7 @@ package historyv2read
 import (
 	"encoding/binary"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
@@ -11,12 +12,14 @@ import (
 
 const DefaultIncarnation = uint64(1)
 
-func RestoreCodeHash(tx kv.Getter, key, v []byte) ([]byte, error) {
+func RestoreCodeHash(tx kv.Getter, key, v []byte, force *libcommon.Hash) ([]byte, error) {
 	var acc accounts.Account
 	if err := acc.DecodeForStorage(v); err != nil {
 		return nil, err
 	}
-	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+	if force != nil {
+		acc.CodeHash = *force
+	} else if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		var codeHash []byte
 		var err error
 
@@ -46,7 +49,7 @@ func GetAsOf(tx kv.Tx, indexC kv.Cursor, changesC kv.CursorDupSort, storage bool
 		//restore codehash
 		if !storage {
 			//restore codehash
-			v, err = RestoreCodeHash(tx, key, v)
+			v, err = RestoreCodeHash(tx, key, v, nil)
 			if err != nil {
 				return nil, err
 			}

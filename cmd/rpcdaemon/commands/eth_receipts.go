@@ -13,8 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -304,12 +306,12 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
-		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
+		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(tx, end)
+	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
 	if err != nil {
 		return err
 	}
@@ -356,35 +358,24 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
-	var lastBlockNum uint64
 	var blockHash libcommon.Hash
 	var header *types.Header
-	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
-	var blockNum uint64
-	var ok bool
 
-	iter := txNumbers.Iterator()
+	iter := MapTxNum2BlockNum(tx, bitmapdb.ToIter(txNumbers.Iterator()))
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
 		}
-		txNum := iter.Next()
-
-		// txNums are sorted, it means blockNum will not change until `txNum < maxTxNum`
-
-		if maxTxNumInBlock == 0 || txNum > maxTxNumInBlock {
-			// Find block number
-			ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, txNum)
-			if err != nil {
-				return nil, err
-			}
+		txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err := iter.Next()
+		if err != nil {
+			return nil, err
 		}
-		if !ok {
-			break
+		if isFinalTxn {
+			continue
 		}
 
 		// if block number changed, calculate all related field
-		if blockNum > lastBlockNum {
+		if blockNumChanged {
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
@@ -392,20 +383,10 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("header is nil", "blockNum", blockNum)
 				continue
 			}
-			lastBlockNum = blockNum
 			blockHash = header.Hash()
 			exec.changeBlock(header)
-			minTxNumInBlock, err = rawdb.TxNums.Min(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			maxTxNumInBlock, err = rawdb.TxNums.Max(tx, blockNum)
-			if err != nil {
-				return nil, err
-			}
 		}
 
-		txIndex := int(txNum) - int(minTxNumInBlock) - 1
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
@@ -790,4 +771,67 @@ Logs:
 		result = append(result, log)
 	}
 	return result
+}
+
+// MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
+//   - blockNum
+//   - txIndex in block: -1 means first system tx
+//   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
+//   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
+//
+// Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
+//
+//	it allow certain optimizations.
+type MapTxNum2BlockNumIter struct {
+	it          iter.U64
+	tx          kv.Tx
+	orderAscend bool
+
+	blockNum                         uint64
+	minTxNumInBlock, maxTxNumInBlock uint64
+}
+
+func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
+}
+func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
+	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
+}
+func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
+func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
+	txNum, err = i.it.Next()
+	if err != nil {
+		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
+	}
+
+	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
+	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
+		blockNumChanged = true
+
+		var ok bool
+		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
+		if err != nil {
+			return
+		}
+		if !ok {
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+		}
+	}
+	blockNum = i.blockNum
+
+	// if block number changed, calculate all related field
+	if blockNumChanged {
+		i.minTxNumInBlock, err = rawdbv3.TxNums.Min(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+		i.maxTxNumInBlock, err = rawdbv3.TxNums.Max(i.tx, blockNum)
+		if err != nil {
+			return
+		}
+	}
+
+	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
+	isFinalTxn = txNum == i.maxTxNumInBlock
+	return
 }

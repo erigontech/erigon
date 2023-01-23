@@ -7,7 +7,6 @@ import (
 	"testing/fstest"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -238,26 +237,4 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(f.T, snaptype.Bodies)
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
-}
-
-func BenchmarkName(b *testing.B) {
-	a := libcommon.Address{}
-	c := a[:]
-	var x libcommon.Address
-	b.Run("a1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = libcommon.BytesToAddress(c)
-		}
-	})
-	b.Run("a2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = libcommon.BytesToAddressNoCopy(c)
-		}
-	})
-	b.Run("a3", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = *(*libcommon.Address)(c)
-		}
-	})
-	_ = x
 }
