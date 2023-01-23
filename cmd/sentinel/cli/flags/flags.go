@@ -33,6 +33,21 @@ var (
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
 	}
+	BootnodesFlag = cli.StringFlag{
+		Name:  "sentinel.bootnodes",
+		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: "",
+	}
+	BeaconConfigFlag = cli.StringFlag{
+		Name:  "beacon-config",
+		Usage: "Path to beacon config",
+		Value: "",
+	}
+	GenesisSSZFlag = cli.StringFlag{
+		Name:  "genesis-ssz",
+		Usage: "Path to genesis ssz",
+		Value: "",
+	}
 	Chain = cli.StringFlag{
 		Name:  "chain",
 		Usage: "sets the chain specs for the lightclient",

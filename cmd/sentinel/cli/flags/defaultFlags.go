@@ -14,4 +14,7 @@ var CLDefaultFlags = []cli.Flag{
 	&ChaindataFlag,
 	&ELEnabledFlag,
 	&BeaconDBModeFlag,
+	&BootnodesFlag,
+	&BeaconConfigFlag,
+	&GenesisSSZFlag,
 }

@@ -18,10 +18,13 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"gopkg.in/yaml.v2"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -411,6 +414,7 @@ func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	fvs[toBytes4(b.GenesisForkVersion)] = 0
 	fvs[toBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[toBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
+	fvs[toBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
 	return fvs
 }
 
@@ -419,6 +423,7 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn[toBytes4(b.GenesisForkVersion)] = "phase0"
 	fvn[toBytes4(b.AltairForkVersion)] = "altair"
 	fvn[toBytes4(b.BellatrixForkVersion)] = "bellatrix"
+	fvn[toBytes4(b.CapellaForkVersion)] = "capella"
 	return fvn
 }
 
@@ -616,6 +621,28 @@ func mainnetConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	return cfg
+}
+
+func CustomConfig(configFile string) (BeaconChainConfig, error) {
+	cfg := MainnetBeaconConfig
+	b, err := os.ReadFile(configFile) // just pass the file name
+	if err != nil {
+		return BeaconChainConfig{}, nil
+	}
+	err = yaml.Unmarshal(b, &cfg)
+	return cfg, err
+}
+
+func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
+	cfg := GenesisConfig{}
+	b, err := os.ReadFile(genesisFile) // just pass the file name
+	if err != nil {
+		return GenesisConfig{}, nil
+	}
+	// Read first 2 fields of SSZ
+	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
+	copy(cfg.GenesisValidatorRoot[:], b[8:])
+	return cfg, nil
 }
 
 func sepoliaConfig() BeaconChainConfig {
