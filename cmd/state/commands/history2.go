@@ -12,8 +12,12 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/aggregator"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
@@ -23,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -126,7 +128,9 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 		}
 		writeWrapper := state.NewNoopWriter()
 		txNum++ // Pre block transaction
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(historyTx, hash, number)
+		}
 		if txNum, _, err = runHistory2(trace, blockNum, txNum, readWrapper, writeWrapper, chainConfig, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("block %d: %w", blockNum, err)
 		}
@@ -141,7 +145,7 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 	return nil
 }
 
-func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww state.StateWriter, chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
+func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww state.StateWriter, chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
@@ -185,7 +189,7 @@ type HistoryWrapper struct {
 	trace bool
 }
 
-func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (hw *HistoryWrapper) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := hw.r.ReadAccountData(address.Bytes(), hw.trace)
 	if err != nil {
 		return nil, err
@@ -225,7 +229,7 @@ func (hw *HistoryWrapper) ReadAccountData(address common.Address) (*accounts.Acc
 	return &a, nil
 }
 
-func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+func (hw *HistoryWrapper) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, err := hw.r.ReadAccountStorage(address.Bytes(), key.Bytes(), hw.trace)
 	if hw.trace {
 		if enc == nil {
@@ -244,14 +248,14 @@ func (hw *HistoryWrapper) ReadAccountStorage(address common.Address, incarnation
 	return enc.Bytes(), nil
 }
 
-func (hw *HistoryWrapper) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+func (hw *HistoryWrapper) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return hw.r.ReadAccountCode(address.Bytes(), false /* trace */)
 }
 
-func (hw *HistoryWrapper) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+func (hw *HistoryWrapper) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return hw.r.ReadAccountCodeSize(address.Bytes(), false /* trace */)
 }
 
-func (hw *HistoryWrapper) ReadAccountIncarnation(address common.Address) (uint64, error) {
+func (hw *HistoryWrapper) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }

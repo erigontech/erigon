@@ -7,7 +7,7 @@ package types
 
 import (
 	"errors"
-	pkg1_common "github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	codec1978 "github.com/ugorji/go/codec"
 	pkg2_big "math/big"
 	"runtime"
@@ -46,7 +46,7 @@ func init() {
 		panic(errors.New("codecgen version mismatch: current: 19, need " + ver + ". Re-generate file: " + file))
 	}
 	if false { // reference the types, but skip this branch at build/run time
-		var _ pkg1_common.Address
+		var _ libcommon.Address
 		var _ pkg2_big.Int
 	}
 }
@@ -255,13 +255,13 @@ func (x *Log) CodecEncodeSelf(e *codec1978.Encoder) {
 			if !z.EncBinary() {
 				z.EncTextMarshal(*yy6)
 			} else {
-				h.enccommon_Address((*pkg1_common.Address)(yy6), e)
+				h.enccommon_Address((*libcommon.Address)(yy6), e)
 			}
 			z.EncWriteArrayElem()
 			if x.Topics == nil {
 				r.EncodeNil()
 			} else {
-				h.encSlicecommon_Hash(([]pkg1_common.Hash)(x.Topics), e)
+				h.encSlicecommon_Hash(([]libcommon.Hash)(x.Topics), e)
 			} // end block: if x.Topics slice == nil
 			z.EncWriteArrayElem()
 			if x.Data == nil {
@@ -326,10 +326,10 @@ func (x *Log) codecDecodeSelfFromMap(l int, d *codec1978.Decoder) {
 			if !z.DecBinary() && z.IsJSONHandle() {
 				z.DecJSONUnmarshal(&x.Address)
 			} else {
-				h.deccommon_Address((*pkg1_common.Address)(&x.Address), d)
+				h.deccommon_Address((*libcommon.Address)(&x.Address), d)
 			}
 		case "2":
-			h.decSlicecommon_Hash((*[]pkg1_common.Hash)(&x.Topics), d)
+			h.decSlicecommon_Hash((*[]libcommon.Hash)(&x.Topics), d)
 		case "3":
 			x.Data = r.DecodeBytes(([]byte)(x.Data), false)
 		default:
@@ -359,7 +359,7 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 	if !z.DecBinary() && z.IsJSONHandle() {
 		z.DecJSONUnmarshal(&x.Address)
 	} else {
-		h.deccommon_Address((*pkg1_common.Address)(&x.Address), d)
+		h.deccommon_Address((*libcommon.Address)(&x.Address), d)
 	}
 	yyj10++
 	if yyhl10 {
@@ -372,7 +372,7 @@ func (x *Log) codecDecodeSelfFromArray(l int, d *codec1978.Decoder) {
 		return
 	}
 	z.DecReadArrayElem()
-	h.decSlicecommon_Hash((*[]pkg1_common.Hash)(&x.Topics), d)
+	h.decSlicecommon_Hash((*[]libcommon.Hash)(&x.Topics), d)
 	yyj10++
 	if yyhl10 {
 		yyb10 = yyj10 > l
@@ -526,7 +526,7 @@ func (x codecSelfer2) decReceipts(v *Receipts, d *codec1978.Decoder) {
 	}
 }
 
-func (x codecSelfer2) enccommon_Address(v *pkg1_common.Address, e *codec1978.Encoder) {
+func (x codecSelfer2) enccommon_Address(v *libcommon.Address, e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
@@ -537,14 +537,14 @@ func (x codecSelfer2) enccommon_Address(v *pkg1_common.Address, e *codec1978.Enc
 	r.EncodeStringBytesRaw(((*[20]byte)(v))[:])
 }
 
-func (x codecSelfer2) deccommon_Address(v *pkg1_common.Address, d *codec1978.Decoder) {
+func (x codecSelfer2) deccommon_Address(v *libcommon.Address, d *codec1978.Decoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
 	r.DecodeBytes(((*[20]byte)(v))[:], true)
 }
 
-func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Encoder) {
+func (x codecSelfer2) encSlicecommon_Hash(v []libcommon.Hash, e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
@@ -559,13 +559,13 @@ func (x codecSelfer2) encSlicecommon_Hash(v []pkg1_common.Hash, e *codec1978.Enc
 		if !z.EncBinary() {
 			z.EncTextMarshal(*yy2)
 		} else {
-			h.enccommon_Hash((*pkg1_common.Hash)(yy2), e)
+			h.enccommon_Hash((*libcommon.Hash)(yy2), e)
 		}
 	}
 	z.EncWriteArrayEnd()
 }
 
-func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.Decoder) {
+func (x codecSelfer2) decSlicecommon_Hash(v *[]libcommon.Hash, d *codec1978.Decoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r
@@ -581,7 +581,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 		}
 	} else if yyl1 == 0 {
 		if yyv1 == nil {
-			yyv1 = []pkg1_common.Hash{}
+			yyv1 = []libcommon.Hash{}
 			yyc1 = true
 		} else if len(yyv1) != 0 {
 			yyv1 = yyv1[:0]
@@ -597,7 +597,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 				if yyrl1 <= cap(yyv1) {
 					yyv1 = yyv1[:yyrl1]
 				} else {
-					yyv1 = make([]pkg1_common.Hash, yyrl1)
+					yyv1 = make([]libcommon.Hash, yyrl1)
 				}
 				yyc1 = true
 			} else if yyl1 != len(yyv1) {
@@ -613,13 +613,13 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 				} else {
 					yyrl1 = 8
 				}
-				yyv1 = make([]pkg1_common.Hash, yyrl1)
+				yyv1 = make([]libcommon.Hash, yyrl1)
 				yyc1 = true
 			}
 			yyh1.ElemContainerState(yyj1)
 			var yydb1 bool
 			if yyj1 >= len(yyv1) {
-				yyv1 = append(yyv1, pkg1_common.Hash{})
+				yyv1 = append(yyv1, libcommon.Hash{})
 				yyc1 = true
 			}
 			if yydb1 {
@@ -628,7 +628,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 				if !z.DecBinary() && z.IsJSONHandle() {
 					z.DecJSONUnmarshal(&yyv1[yyj1])
 				} else {
-					h.deccommon_Hash((*pkg1_common.Hash)(&yyv1[yyj1]), d)
+					h.deccommon_Hash((*libcommon.Hash)(&yyv1[yyj1]), d)
 				}
 			}
 		}
@@ -636,7 +636,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 			yyv1 = yyv1[:yyj1]
 			yyc1 = true
 		} else if yyj1 == 0 && yyv1 == nil {
-			yyv1 = make([]pkg1_common.Hash, 0)
+			yyv1 = make([]libcommon.Hash, 0)
 			yyc1 = true
 		}
 	}
@@ -646,7 +646,7 @@ func (x codecSelfer2) decSlicecommon_Hash(v *[]pkg1_common.Hash, d *codec1978.De
 	}
 }
 
-func (x codecSelfer2) enccommon_Hash(v *pkg1_common.Hash, e *codec1978.Encoder) {
+func (x codecSelfer2) enccommon_Hash(v *libcommon.Hash, e *codec1978.Encoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperEncoder(e)
 	_, _, _ = h, z, r
@@ -657,7 +657,7 @@ func (x codecSelfer2) enccommon_Hash(v *pkg1_common.Hash, e *codec1978.Encoder) 
 	r.EncodeStringBytesRaw(((*[32]byte)(v))[:])
 }
 
-func (x codecSelfer2) deccommon_Hash(v *pkg1_common.Hash, d *codec1978.Decoder) {
+func (x codecSelfer2) deccommon_Hash(v *libcommon.Hash, d *codec1978.Decoder) {
 	var h codecSelfer2
 	z, r := codec1978.GenHelperDecoder(d)
 	_, _, _ = h, z, r

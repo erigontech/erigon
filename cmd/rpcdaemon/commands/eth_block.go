@@ -6,11 +6,12 @@ import (
 	"math/big"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -25,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
+func (api *APIImpl) CallBundle(ctx context.Context, txHashes []libcommon.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -110,9 +111,8 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Difficulty: parent.Difficulty,
 		Coinbase:   coinbase,
 	}
-	t := new(big.Int).SetUint64(timestamp)
-	signer := types.MakeSigner(chainConfig, blockNumber, t) // TODO: see if t is correct arg here?
-	rules := chainConfig.Rules(blockNumber, t)
+	signer := types.MakeSigner(chainConfig, blockNumber, timestamp) // TODO: see if t is correct arg here?
+	rules := chainConfig.Rules(blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err
@@ -180,7 +180,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
-			jsonResult["value"] = common.BytesToHash(result.Return())
+			jsonResult["value"] = libcommon.BytesToHash(result.Return())
 		}
 
 		results = append(results, jsonResult)
@@ -188,7 +188,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	ret := map[string]interface{}{}
 	ret["results"] = results
-	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutility.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
@@ -220,7 +220,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash common.Hash
+	var borTxHash libcommon.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
 		if borTx != nil {
@@ -282,7 +282,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash common.Hash
+	var borTxHash libcommon.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
@@ -342,7 +342,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 }
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
-func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
+func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash libcommon.Hash) (*hexutil.Uint, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

@@ -5,12 +5,14 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/stretchr/testify/require"
 )
 
 var txHashEmpty, _ = merkle_tree.TransactionsListRoot([][]byte{})
@@ -47,8 +49,9 @@ func getTestState(t *testing.T) *state.BeaconState {
 			PreviousVersion: [4]byte{0, 1, 2, 3},
 			CurrentVersion:  [4]byte{3, 2, 1, 0},
 		},
-		Validators:  validators,
-		RandaoMixes: make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
+		Validators:        validators,
+		JustificationBits: []byte{0},
+		RandaoMixes:       make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
 	})
 }
 
@@ -59,17 +62,18 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 	}
 	headerArr := [32]byte{}
 	copy(headerArr[:], header)
-	return cltypes.NewBeaconBlock(&cltypes.BeaconBlockBellatrix{
+	return &cltypes.BeaconBlock{
 		Slot:          19,
 		ProposerIndex: 1947,
 		ParentRoot:    headerArr,
-		Body: &cltypes.BeaconBodyBellatrix{
+		Body: &cltypes.BeaconBody{
 			Graffiti:         make([]byte, 32),
 			Eth1Data:         &cltypes.Eth1Data{},
 			SyncAggregate:    &cltypes.SyncAggregate{},
 			ExecutionPayload: emptyBlock,
+			Version:          clparams.BellatrixVersion,
 		},
-	})
+	}
 }
 
 func TestComputeShuffledIndex(t *testing.T) {
@@ -124,6 +128,7 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
+				JustificationBits: []byte{0},
 			}),
 			indices:  []uint64{0, 1, 2, 3, 4},
 			seed:     seed,
@@ -139,6 +144,7 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
+				JustificationBits: []byte{0},
 			}),
 			indices:  []uint64{3},
 			seed:     seed,
@@ -159,6 +165,7 @@ func TestComputeProposerIndex(t *testing.T) {
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
+				JustificationBits: []byte{0},
 			}),
 			indices:  []uint64{5, 6, 7, 8, 9},
 			seed:     seed,
@@ -177,6 +184,7 @@ func TestComputeProposerIndex(t *testing.T) {
 				Validators: []*cltypes.Validator{
 					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
 				},
+				JustificationBits: []byte{0},
 			}),
 			seed:    seed,
 			wantErr: true,
@@ -273,7 +281,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	badProposerInd.ProposerIndex = 0
 
 	badParentRoot := getTestBlock(t)
-	badParentRoot.ParentRoot = common.Hash{}
+	badParentRoot.ParentRoot = libcommon.Hash{}
 
 	badBlockBodyHash := getTestBlock(t)
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
@@ -429,7 +437,7 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 42,
 		BlockHash:    [32]byte{4, 5, 6},
 	}
-	eth1dataAHash, err := Eth1DataA.HashTreeRoot()
+	eth1dataAHash, err := Eth1DataA.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
@@ -438,25 +446,27 @@ func TestProcessEth1Data(t *testing.T) {
 		DepositCount: 43,
 		BlockHash:    [32]byte{6, 5, 4},
 	}
-	eth1dataBHash, err := Eth1DataB.HashTreeRoot()
+	eth1dataBHash, err := Eth1DataB.HashSSZ()
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
 	successState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Eth1DataVotes: []*cltypes.Eth1Data{},
-		Eth1Data:      Eth1DataB,
+		Eth1DataVotes:     []*cltypes.Eth1Data{},
+		Eth1Data:          Eth1DataB,
+		JustificationBits: []byte{0},
 	})
 	// Fill all votes.
 	for i := 0; i < int(EPOCHS_PER_ETH1_VOTING_PERIOD)*int(SLOTS_PER_EPOCH)-1; i++ {
-		successState.SetEth1DataVotes(append(successState.Eth1DataVotes(), Eth1DataA))
+		successState.AddEth1DataVote(Eth1DataA)
 	}
 	successBody := &cltypes.BeaconBody{
 		Eth1Data: Eth1DataA,
 	}
 
 	noUpdateState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Eth1DataVotes: []*cltypes.Eth1Data{},
-		Eth1Data:      Eth1DataB,
+		Eth1DataVotes:     []*cltypes.Eth1Data{},
+		Eth1Data:          Eth1DataB,
+		JustificationBits: []byte{0},
 	})
 
 	testCases := []struct {
@@ -486,15 +496,11 @@ func TestProcessEth1Data(t *testing.T) {
 				t.Errorf("unexpected error: %v", err)
 			}
 			gotEth1Data := tc.state.Eth1Data()
-			gotHash, err := gotEth1Data.HashTreeRoot()
+			gotHash, err := gotEth1Data.HashSSZ()
 			if err != nil {
 				t.Fatalf("unable to hash output eth1data: %v", err)
 			}
-			for i := 0; i < len(tc.expectedHash); i++ {
-				if gotHash[i] != tc.expectedHash[i] {
-					t.Errorf("unexpected output byte: got %x, want %x", gotHash[i], tc.expectedHash[i])
-				}
-			}
+			require.Equal(t, gotHash, tc.expectedHash)
 		})
 	}
 }

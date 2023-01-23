@@ -7,7 +7,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/protolambda/ztyp/view"
 	"github.com/valyala/fastjson"
@@ -18,31 +18,31 @@ type txJSON struct {
 	Type hexutil.Uint64 `json:"type"`
 
 	// Common transaction fields:
-	Nonce    *hexutil.Uint64 `json:"nonce"`
-	GasPrice *hexutil.Big    `json:"gasPrice"`
-	FeeCap   *hexutil.Big    `json:"maxFeePerGas"`
-	Tip      *hexutil.Big    `json:"maxPriorityFeePerGas"`
-	Gas      *hexutil.Uint64 `json:"gas"`
-	Value    *hexutil.Big    `json:"value"`
-	Data     *hexutil.Bytes  `json:"input"`
-	V        *hexutil.Big    `json:"v"`
-	R        *hexutil.Big    `json:"r"`
-	S        *hexutil.Big    `json:"s"`
-	To       *common.Address `json:"to"`
+	Nonce    *hexutil.Uint64    `json:"nonce"`
+	GasPrice *hexutil.Big       `json:"gasPrice"`
+	FeeCap   *hexutil.Big       `json:"maxFeePerGas"`
+	Tip      *hexutil.Big       `json:"maxPriorityFeePerGas"`
+	Gas      *hexutil.Uint64    `json:"gas"`
+	Value    *hexutil.Big       `json:"value"`
+	Data     *hexutil.Bytes     `json:"input"`
+	V        *hexutil.Big       `json:"v"`
+	R        *hexutil.Big       `json:"r"`
+	S        *hexutil.Big       `json:"s"`
+	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
 	// Blob transaction fields:
-	MaxFeePerDataGas    *hexutil.Big  `json:"maxFeePerDataGas,omitempty"`
-	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
-	Blobs               Blobs         `json:"blobs,omitempty"`
-	BlobKzgs            BlobKzgs      `json:"blobKzgs,omitempty"`
-	KzgAggregatedProof  KZGProof      `json:"kzgAggregatedProof,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
+	Blobs               Blobs            `json:"blobs,omitempty"`
+	BlobKzgs            BlobKzgs         `json:"blobKzgs,omitempty"`
+	KzgAggregatedProof  KZGProof         `json:"kzgAggregatedProof,omitempty"`
 
 	// Only used for encoding:
-	Hash common.Hash `json:"hash"`
+	Hash libcommon.Hash `json:"hash"`
 }
 
 func (tx LegacyTx) MarshalJSON() ([]byte, error) {

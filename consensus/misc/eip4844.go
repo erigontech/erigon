@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -66,7 +67,7 @@ func CountBlobs(txs []types.Transaction) int {
 }
 
 // VerifyEip4844Header verifies that the header is not malformed
-func VerifyEip4844Header(config *params.ChainConfig, parent, header *types.Header) error {
+func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) error {
 	if header.ExcessDataGas == nil {
 		return fmt.Errorf("header is missing excessDataGas")
 	}
@@ -79,7 +80,7 @@ func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
 }
 
 func HeaderSetExcessDataGas(chain consensus.ChainHeaderReader, header *types.Header, txs types.Transactions) {
-	if chain.Config().IsSharding(header.TimeBig()) {
+	if chain.Config().IsSharding(header.Time) {
 		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
 			header.SetExcessDataGas(CalcExcessDataGas(parent.ExcessDataGas, CountBlobs(txs)))
 		} else {

@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -75,10 +76,10 @@ type opcode struct {
 type RetStackTop []uint32
 
 type tx struct {
-	From        common.Address
-	To          common.Address
-	TxHash      *common.Hash
-	CodeHash    *common.Hash
+	From        libcommon.Address
+	To          libcommon.Address
+	TxHash      *libcommon.Hash
+	CodeHash    *libcommon.Hash
 	Opcodes     sliceOpcodes
 	Input       sliceBytes //ByteSliceAsHex
 	Bblocks     sliceBblocks
@@ -110,7 +111,7 @@ type opcodeTracer struct {
 	saveBblocks bool
 	blockNumber uint64
 	depth       int
-	env         *vm.EVM
+	env         vm.VMInterface
 }
 
 func NewOpcodeTracer(blockNum uint64, saveOpcodes bool, saveBblocks bool) *opcodeTracer {
@@ -144,9 +145,9 @@ type bblock struct {
 }
 
 type bblockDump struct {
-	Tx          *common.Hash
+	Tx          *libcommon.Hash
 	TxAddr      *string
-	CodeHash    *common.Hash
+	CodeHash    *libcommon.Hash
 	Bblocks     *sliceBblocks
 	OpcodeFault *string
 	Fault       *string
@@ -163,7 +164,7 @@ func (ot *opcodeTracer) CaptureTxStart(gasLimit uint64) {}
 
 func (ot *opcodeTracer) CaptureTxEnd(restGas uint64) {}
 
-func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool, input []byte) {
+func (ot *opcodeTracer) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte) {
 	//fmt.Fprint(ot.summary, ot.lastLine)
 
 	// When a CaptureStart is called, a Tx is starting. Create its entry in our list and initialize it with the partial data available
@@ -191,13 +192,13 @@ func (ot *opcodeTracer) captureStartOrEnter(from, to common.Address, create bool
 	ot.stack = append(ot.stack, &newTx)
 }
 
-func (ot *opcodeTracer) CaptureStart(env *vm.EVM, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.env = env
 	ot.depth = 0
 	ot.captureStartOrEnter(from, to, create, input)
 }
 
-func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *opcodeTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ot.depth++
 	ot.captureStartOrEnter(from, to, create, input)
 }
@@ -274,9 +275,9 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 		// Note that the only connection between CaptureStart and CaptureState that we can notice is that the current op's depth should be lastTxEntry.Depth+1
 
 		// fill in the missing data in the entry
-		currentEntry.TxHash = new(common.Hash)
+		currentEntry.TxHash = new(libcommon.Hash)
 		currentEntry.TxHash.SetBytes(currentTxHash.Bytes())
-		currentEntry.CodeHash = new(common.Hash)
+		currentEntry.CodeHash = new(libcommon.Hash)
 		currentEntry.CodeHash.SetBytes(contract.CodeHash.Bytes())
 		currentEntry.CodeSize = len(contract.Code)
 		if ot.saveOpcodes {
@@ -573,7 +574,9 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 		dbstate := state.NewPlainState(historyTx, block.NumberU64(), systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		intraBlockState := state.New(dbstate)
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(historyTx, hash, number) }
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+			return rawdb.ReadHeader(historyTx, hash, number)
+		}
 		receipts, err1 := runBlock(ethash.NewFullFaker(), intraBlockState, noOpWriter, noOpWriter, chainConfig, getHeader, block, vmConfig, false)
 		if err1 != nil {
 			return err1
@@ -685,7 +688,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 }
 
 func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
-	chainConfig *params.ChainConfig, getHeader func(hash common.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool) (types.Receipts, error) {
+	chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config, trace bool) (types.Receipts, error) {
 	header := block.Header()
 	vmConfig.TraceJumpDest = true
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
@@ -695,7 +698,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 		misc.ApplyDAOHardFork(ibs)
 	}
 	systemcontracts.UpgradeBuildInSystemContract(chainConfig, header.Number, ibs)
-	rules := chainConfig.Rules(block.NumberU64(), block.TimeBig())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 
 	var excessDataGas *big.Int
 	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)

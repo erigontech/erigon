@@ -18,14 +18,13 @@ package vm
 
 import (
 	"hash"
-	"sync/atomic"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Config are the configuration options for the Interpreter
@@ -44,7 +43,7 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
 
-func (vmConfig *Config) HasEip3860(rules *params.Rules) bool {
+func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
 	for _, eip := range vmConfig.ExtraEips {
 		if eip == 3860 {
 			return true
@@ -61,6 +60,9 @@ type Interpreter interface {
 	// Run loops and evaluates the contract's code with the given input data and returns
 	// the return byte-slice and an error if one occurred.
 	Run(contract *Contract, input []byte, static bool) ([]byte, error)
+
+	// `Depth` returns the current call stack's depth.
+	Depth() int
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -82,18 +84,19 @@ type keccakState interface {
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
 	*VM
-	jt *JumpTable // EVM instruction table
+	jt    *JumpTable // EVM instruction table
+	depth int
 }
 
 // structcheck doesn't see embedding
 //
 //nolint:structcheck
 type VM struct {
-	evm *EVM
+	evm VMInterpreter
 	cfg Config
 
-	hasher    keccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash // Keccak256 hasher result array shared across opcodes
+	hasher    keccakState    // Keccak256 hasher instance shared across opcodes
+	hasherBuf libcommon.Hash // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -111,7 +114,7 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
-func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
+func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
 	case evm.ChainRules().IsSharding:
@@ -167,8 +170,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
 	// Increment the call depth which is restricted to 1024
-	in.evm.depth++
-	defer func() { in.evm.depth-- }()
+	in.depth++
+	defer func() { in.depth-- }()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -215,9 +218,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		defer func() {
 			if err != nil {
 				if !logged {
-					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 				} else {
-					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.evm.depth, err)
+					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
 				}
 			}
 		}()
@@ -229,7 +232,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	steps := 0
 	for {
 		steps++
-		if steps%1000 == 0 && atomic.LoadInt32(&in.evm.abort) != 0 {
+		if steps%1000 == 0 && in.evm.Cancelled() {
 			break
 		}
 		if in.cfg.Debug {
@@ -281,7 +284,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}
 		if in.cfg.Debug {
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err) //nolint:errcheck
+			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
 			logged = true
 		}
 		// execute the operation
@@ -298,6 +301,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	return res, err
+}
+
+// Depth returns the current call stack depth.
+func (in *EVMInterpreter) Depth() int {
+	return in.depth
 }
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {

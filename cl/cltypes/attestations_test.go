@@ -3,16 +3,18 @@ package cltypes_test
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 var testAttData = &cltypes.AttestationData{
 	Slot:            69,
 	Index:           402,
-	BeaconBlockHash: common.HexToHash("123"),
+	BeaconBlockHash: libcommon.HexToHash("123"),
 	Source:          testCheckpoint,
 	Target:          testCheckpoint,
 }
@@ -46,14 +48,14 @@ func TestAttestationHashTest(t *testing.T) {
 
 func TestEncodeForStorage(t *testing.T) {
 	enc := cltypes.EncodeAttestationsForStorage(attestations)
-	require.Less(t, len(enc), attestations[0].SizeSSZ()*len(attestations))
+	require.Less(t, len(enc), attestations[0].EncodingSizeSSZ()*len(attestations))
 	decAttestations, err := cltypes.DecodeAttestationsForStorage(enc)
 	require.NoError(t, err)
 	require.Equal(t, attestations, decAttestations)
 }
 
 func TestAttestationMarshalUnmarmashal(t *testing.T) {
-	marshalled, err := attestations[0].MarshalSSZ()
+	marshalled, err := attestations[0].EncodeSSZ(nil)
 	require.NoError(t, err)
 	assert.Equal(t, common.Bytes2Hex(marshalled[:]), expectedAttestationMarshalled)
 	testData2 := &cltypes.Attestation{}

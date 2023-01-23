@@ -5,12 +5,13 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/stretchr/testify/assert"
 )
 
 var (
@@ -33,8 +34,7 @@ var (
 	testSignature = [96]byte{141, 154, 97, 227, 33, 202, 245, 163, 252, 75, 124, 240, 197, 188, 117, 88, 146, 35, 171, 19, 247, 222, 208, 78, 160, 135, 37, 246, 251, 1, 170, 160, 121, 83, 11, 146, 207, 100, 82, 101, 243, 131, 17, 142, 201, 231, 170, 116, 5, 62, 23, 250, 166, 178, 120, 64, 214, 70, 122, 203, 30, 156, 153, 12, 69, 247, 193, 208, 73, 4, 245, 70, 97, 67, 42, 217, 30, 98, 191, 21, 190, 47, 168, 218, 36, 52, 59, 238, 88, 14, 100, 105, 16, 231, 157, 172}
 	badSignature  = [96]byte{182, 82, 244, 116, 233, 59, 56, 251, 52, 194, 122, 255, 161, 96, 204, 165, 43, 97, 19, 48, 130, 187, 17, 200, 223, 62, 114, 194, 225, 19, 242, 174, 224, 24, 188, 83, 118, 45, 23, 192, 205, 200, 47, 165, 212, 35, 193, 189, 10, 165, 161, 72, 81, 250, 195, 186, 174, 197, 26, 208, 165, 254, 31, 214, 135, 140, 129, 47, 211, 59, 87, 136, 55, 242, 93, 149, 128, 30, 84, 126, 182, 157, 70, 90, 68, 113, 7, 92, 70, 230, 164, 54, 120, 16, 180, 151}
 	testValidator = &cltypes.Validator{
-		PublicKey:             testPubKey,
-		WithdrawalCredentials: make([]byte, 32),
+		PublicKey: testPubKey,
 	}
 	testStateRoot = [32]byte{243, 188, 193, 154, 58, 176, 139, 235, 38, 219, 21, 196, 194, 30, 119, 102, 233, 246, 197, 228, 242, 75, 89, 204, 102, 150, 82, 251, 101, 124, 98, 78}
 
@@ -58,36 +58,39 @@ func getEmptyState() *state.BeaconState {
 			BaseFee: big.NewInt(0),
 			Number:  big.NewInt(0),
 		},
+		JustificationBits: []byte{0},
 	}
 	return state.FromBellatrixState(bellatrixState)
 }
 
 func getEmptyBlock() *cltypes.SignedBeaconBlock {
-	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
-		Block: &cltypes.BeaconBlockBellatrix{
-			Body: &cltypes.BeaconBodyBellatrix{
+	return &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
+			Body: &cltypes.BeaconBody{
 				Eth1Data:         &cltypes.Eth1Data{},
 				SyncAggregate:    &cltypes.SyncAggregate{},
 				ExecutionPayload: emptyBlock,
+				Version:          clparams.BellatrixVersion,
 			},
 		},
-	})
+	}
 }
 
 func getTestBeaconBlock() *cltypes.SignedBeaconBlock {
-	return cltypes.NewSignedBeaconBlock(&cltypes.SignedBeaconBlockBellatrix{
-		Block: &cltypes.BeaconBlockBellatrix{
+	return &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
 			ProposerIndex: 0,
-			Body: &cltypes.BeaconBodyBellatrix{
+			Body: &cltypes.BeaconBody{
 				Eth1Data:         &cltypes.Eth1Data{},
 				Graffiti:         make([]byte, 32),
 				SyncAggregate:    &cltypes.SyncAggregate{},
 				ExecutionPayload: emptyBlock,
+				Version:          clparams.BellatrixVersion,
 			},
 			StateRoot: testStateRoot,
 		},
 		Signature: testSignature,
-	})
+	}
 }
 
 func getTestBeaconState() *state.BeaconState {
@@ -138,18 +141,18 @@ func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs
 		if err != nil {
 			t.Fatalf("unable to decode test hash: %v", err)
 		}
-		nextState.SetStateRootAt(int(val), common.BytesToHash(hash))
+		nextState.SetStateRootAt(int(val), libcommon.BytesToHash(hash))
 		latestBlockHeader := nextState.LatestBlockHeader()
 		// Only copy if the previous is empty.
 		if latestBlockHeader.Root == [32]byte{} {
-			latestBlockHeader.Root = common.BytesToHash(hash)
+			latestBlockHeader.Root = libcommon.BytesToHash(hash)
 			nextState.SetLatestBlockHeader(latestBlockHeader)
 		}
 		hash, err = hex.DecodeString(blockHashs[i])
 		if err != nil {
 			t.Fatalf("unable to decode test hash: %v", err)
 		}
-		nextState.SetBlockRootAt(int(val), common.BytesToHash(hash))
+		nextState.SetBlockRootAt(int(val), libcommon.BytesToHash(hash))
 	}
 	nextState.SetSlot(slots[len(slots)-1] + 1)
 	return nextState
@@ -356,7 +359,7 @@ func TestTransitionState(t *testing.T) {
 	badSigBlock := getTestBeaconBlock()
 	badSigBlock.Signature = badSignature
 	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block.StateRoot = common.Hash{}
+	badStateRootBlock.Block.StateRoot = libcommon.Hash{}
 	testCases := []struct {
 		description   string
 		prevState     *state.BeaconState

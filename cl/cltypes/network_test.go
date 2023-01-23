@@ -1,12 +1,14 @@
 package cltypes_test
 
 import (
+	"fmt"
 	"testing"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -19,7 +21,7 @@ var testPing = &cltypes.Ping{
 }
 
 var testSingleRoot = &cltypes.SingleRoot{
-	Root: common.HexToHash("96"),
+	Root: libcommon.HexToHash("96"),
 }
 
 var testLcRangeRequest = &cltypes.LightClientUpdatesByRangeRequest{
@@ -35,8 +37,50 @@ var testBlockRangeRequest = &cltypes.BeaconBlocksByRangeRequest{
 var testStatus = &cltypes.Status{
 	FinalizedEpoch: 666,
 	HeadSlot:       94,
-	HeadRoot:       common.HexToHash("a"),
-	FinalizedRoot:  common.HexToHash("bbba"),
+	HeadRoot:       libcommon.HexToHash("a"),
+	FinalizedRoot:  libcommon.HexToHash("bbba"),
+}
+
+var testHeader = &cltypes.BeaconBlockHeader{
+	Slot:          2,
+	ProposerIndex: 24,
+	ParentRoot:    libcommon.HexToHash("a"),
+	Root:          libcommon.HexToHash("d"),
+	BodyRoot:      libcommon.HexToHash("ad"),
+}
+
+var testLcUpdate = &cltypes.LightClientUpdate{
+	AttestedHeader: testHeader,
+	NextSyncCommitee: &cltypes.SyncCommittee{
+		PubKeys: make([][48]byte, 512),
+	},
+	NextSyncCommitteeBranch: make([]libcommon.Hash, 5),
+	FinalizedHeader:         testHeader,
+	FinalityBranch:          make([]libcommon.Hash, 6),
+	SyncAggregate:           &cltypes.SyncAggregate{},
+	SignatureSlot:           294,
+}
+
+var testLcUpdateFinality = &cltypes.LightClientFinalityUpdate{
+	AttestedHeader:  testHeader,
+	FinalizedHeader: testHeader,
+	FinalityBranch:  make([]libcommon.Hash, 6),
+	SyncAggregate:   &cltypes.SyncAggregate{},
+	SignatureSlot:   294,
+}
+
+var testLcUpdateOptimistic = &cltypes.LightClientOptimisticUpdate{
+	AttestedHeader: testHeader,
+	SyncAggregate:  &cltypes.SyncAggregate{},
+	SignatureSlot:  294,
+}
+
+var testLcBootstrap = &cltypes.LightClientBootstrap{
+	Header: testHeader,
+	CurrentSyncCommittee: &cltypes.SyncCommittee{
+		PubKeys: make([][48]byte, 512),
+	},
+	CurrentSyncCommitteeBranch: make([]libcommon.Hash, 5),
 }
 
 func TestMarshalNetworkTypes(t *testing.T) {
@@ -47,6 +91,10 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		testLcRangeRequest,
 		testBlockRangeRequest,
 		testStatus,
+		testLcUpdate,
+		testLcUpdateFinality,
+		testLcUpdateOptimistic,
+		testLcBootstrap,
 	}
 
 	unmarshalDestinations := []ssz_utils.EncodableSSZ{
@@ -56,8 +104,13 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		&cltypes.LightClientUpdatesByRangeRequest{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
+		&cltypes.LightClientUpdate{},
+		&cltypes.LightClientFinalityUpdate{},
+		&cltypes.LightClientOptimisticUpdate{},
+		&cltypes.LightClientBootstrap{},
 	}
 	for i, tc := range cases {
+		fmt.Println("a")
 		marshalledBytes, err := tc.MarshalSSZ()
 		require.NoError(t, err)
 		require.Equal(t, len(marshalledBytes), tc.SizeSSZ())

@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -61,7 +62,7 @@ func TestPrintLoad(t *testing.T) {
 		if trace {
 			fmt.Printf("Test number %d\n", tn)
 		}
-		tr := New(common.Hash{})
+		tr := New(libcommon.Hash{})
 		for i, balance := range debugTest.aBalances {
 			account := &accounts.Account{Initialised: true, Balance: *uint256.NewInt(balance), CodeHash: emptyState}
 			tr.UpdateAccount(common.FromHex(debugTest.aHexKeys[i]), account)

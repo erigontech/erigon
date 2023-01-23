@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/params"
@@ -45,11 +46,11 @@ func (p KZGCommitment) String() string {
 }
 
 func (p *KZGCommitment) UnmarshalText(text []byte) error {
-	return hexutil.UnmarshalFixedText("KZGCommitment", text, p[:])
+	return hexutil.UnmarshalFixedUnprefixedText("KZGCommitment", text, p[:])
 }
 
-func (c KZGCommitment) ComputeVersionedHash() common.Hash {
-	return common.Hash(eth.KZGToVersionedHash(eth.KZGCommitment(c)))
+func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
+	return libcommon.Hash(eth.KZGToVersionedHash(eth.KZGCommitment(c)))
 }
 
 // Compressed BLS12-381 G1 element
@@ -84,7 +85,7 @@ func (p KZGProof) String() string {
 }
 
 func (p *KZGProof) UnmarshalText(text []byte) error {
-	return hexutil.UnmarshalFixedText("KZGProof", text, p[:])
+	return hexutil.UnmarshalFixedUnprefixedText("KZGProof", text, p[:])
 }
 
 // BLSFieldElement is the raw bytes representation of a field element
@@ -99,7 +100,7 @@ func (p BLSFieldElement) String() string {
 }
 
 func (p *BLSFieldElement) UnmarshalText(text []byte) error {
-	return hexutil.UnmarshalFixedText("BLSFieldElement", text, p[:])
+	return hexutil.UnmarshalFixedUnprefixedText("BLSFieldElement", text, p[:])
 }
 
 // Blob data
@@ -265,16 +266,16 @@ func (blobs Blobs) copy() Blobs {
 }
 
 // Return KZG commitments, versioned hashes and the aggregated KZG proof that correspond to these blobs
-func (blobs Blobs) ComputeCommitmentsAndAggregatedProof() (commitments []KZGCommitment, versionedHashes []common.Hash, aggregatedProof KZGProof, err error) {
+func (blobs Blobs) ComputeCommitmentsAndAggregatedProof() (commitments []KZGCommitment, versionedHashes []libcommon.Hash, aggregatedProof KZGProof, err error) {
 	commitments = make([]KZGCommitment, len(blobs))
-	versionedHashes = make([]common.Hash, len(blobs))
+	versionedHashes = make([]libcommon.Hash, len(blobs))
 	for i, blob := range blobs {
 		c, ok := eth.BlobToKZGCommitment(blob)
 		if !ok {
 			return nil, nil, KZGProof{}, errors.New("could not convert blob to commitment")
 		}
 		commitments[i] = KZGCommitment(c)
-		versionedHashes[i] = common.Hash(eth.KZGToVersionedHash(c))
+		versionedHashes[i] = libcommon.Hash(eth.KZGToVersionedHash(c))
 	}
 
 	proof, err := eth.ComputeAggregateKZGProof(blobs)

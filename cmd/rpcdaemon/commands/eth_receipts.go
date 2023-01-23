@@ -10,16 +10,20 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/services"
+
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -28,13 +32,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *params.ChainConfig, block *types.Block, senders []common.Address) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []libcommon.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
 	}
@@ -52,7 +55,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *para
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -149,7 +152,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
@@ -164,7 +167,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		var txIndex uint
 		var blockLogs []*types.Log
 
-		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
 		if err != nil {
 			return nil, err
 		}
@@ -235,7 +238,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]libcommon.Hash, from, to uint64) (*roaring.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
@@ -263,7 +266,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 	}
 	return result, nil
 }
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
+func getAddrsBitmap(tx kv.Tx, addrs []libcommon.Address, from, to uint64) (*roaring.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -348,7 +351,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, nil
 	}
 
-	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
+	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
@@ -360,7 +363,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	exec := newIntraBlockExec(tx, chainConfig, api.engine())
 
 	var lastBlockNum uint64
-	var blockHash common.Hash
+	var blockHash libcommon.Hash
 	var header, parent *types.Header
 	var minTxNumInBlock, maxTxNumInBlock uint64 // end is an inclusive bound
 	var blockNum uint64
@@ -425,7 +428,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if txn == nil {
 			continue
 		}
-		rawLogs, err := exec.execTx(txNum, txIndex, txn)
+		rawLogs, _, err := exec.execTx(txNum, txIndex, txn)
 		if err != nil {
 			return nil, err
 		}
@@ -456,20 +459,20 @@ type intraBlockExec struct {
 	engine      consensus.EngineReader
 	tx          kv.TemporalTx
 	br          services.FullBlockReader
-	chainConfig *params.ChainConfig
+	chainConfig *chain.Config
 	evm         *vm.EVM
 
 	// calculated by .changeBlock()
-	blockHash common.Hash
+	blockHash libcommon.Hash
 	blockNum  uint64
 	header    *types.Header
 	blockCtx  *evmtypes.BlockContext
-	rules     *params.Rules
+	rules     *chain.Rules
 	signer    *types.Signer
 	vmConfig  *vm.Config
 }
 
-func newIntraBlockExec(tx kv.TemporalTx, chainConfig *params.ChainConfig, engine consensus.EngineReader) *intraBlockExec {
+func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader) *intraBlockExec {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 	return &intraBlockExec{
@@ -488,12 +491,12 @@ func (e *intraBlockExec) changeBlock(header *types.Header, excessDataGas *big.In
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header
-	e.rules = e.chainConfig.Rules(e.blockNum, header.TimeBig())
-	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.TimeBig()) // TODO: make sure `header.Time` is right arg
+	e.rules = e.chainConfig.Rules(e.blockNum, header.Time)
+	e.signer = types.MakeSigner(e.chainConfig, e.blockNum, header.Time) // TODO: make sure `header.Time` is right arg
 	e.vmConfig.SkipAnalysis = core.SkipAnalysis(e.chainConfig, e.blockNum)
 }
 
-func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, error) {
+func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction) ([]*types.Log, *core.ExecutionResult, error) {
 	e.stateReader.SetTxNum(txNum)
 	txHash := txn.Hash()
 	e.ibs.Reset()
@@ -501,14 +504,14 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	gp := new(core.GasPool).AddGas(txn.GetGas())
 	msg, err := txn.AsMessage(*e.signer, e.header.BaseFee, e.rules)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
-	_, err = core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
+	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
-		return nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
+		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
-	return e.ibs.GetLogs(txHash), nil
+	return e.ibs.GetLogs(txHash), res, nil
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
@@ -522,18 +525,18 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
 		bitmapForORing := bitmapdb.NewBitmap64()
 		defer bitmapdb.ReturnToPool64(bitmapForORing)
 
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to, true, -1)
 			if err != nil {
 				return nil, err
 			}
-			bm, err := it.ToBitmap()
+			bm, err := it.(bitmapdb.ToBitmap).ToBitmap()
 			if err != nil {
 				return nil, err
 			}
@@ -552,7 +555,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 	return result, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (*roaring64.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -563,11 +566,11 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		}
 	}()
 	for idx, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to, true, -1)
 		if err != nil {
 			return nil, err
 		}
-		rx[idx], err = it.ToBitmap()
+		rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
 		if err != nil {
 			return nil, err
 		}
@@ -576,7 +579,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -656,10 +659,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		if borReceipt == nil {
 			return nil, nil
 		}
-		return marshalReceipt(borReceipt, borTx, cc, block, txnHash, false), nil
+		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block, txnHash, true), nil
+	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -693,7 +696,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -704,7 +707,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}
@@ -712,7 +715,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *params.ChainConfig, block *types.Block, txnHash common.Hash, signed bool) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash libcommon.Hash, signed bool) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -725,7 +728,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		chainId = t.ChainID.ToBig()
 	}
 
-	var from common.Address
+	var from libcommon.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
 		from, _ = txn.Sender(*signer)
@@ -746,11 +749,11 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
 	}
 
-	if !chainConfig.IsLondon(block.NumberU64()) {
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
 	} else {
-		baseFee, _ := uint256.FromBig(block.BaseFee())
-		gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
 		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
 	}
 	// Assign receipt status.
@@ -759,13 +762,13 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		fields["logs"] = [][]*types.Log{}
 	}
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
-	if receipt.ContractAddress != (common.Address{}) {
+	if receipt.ContractAddress != (libcommon.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	return fields
 }
 
-func includes(addresses []common.Address, a common.Address) bool {
+func includes(addresses []libcommon.Address, a libcommon.Address) bool {
 	for _, addr := range addresses {
 		if addr == a {
 			return true
@@ -775,7 +778,7 @@ func includes(addresses []common.Address, a common.Address) bool {
 }
 
 // filterLogs creates a slice of logs matching the given criteria.
-func filterLogsOld(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
+func filterLogsOld(logs []*types.Log, addresses []libcommon.Address, topics [][]libcommon.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 Logs:
 	for _, log := range logs {

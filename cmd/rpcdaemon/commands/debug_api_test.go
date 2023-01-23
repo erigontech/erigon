@@ -2,20 +2,27 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"github.com/davecgh/go-spew/spew"
 	jsoniter "github.com/json-iterator/go"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/stretchr/testify/require"
 )
+
+var dumper = spew.ConfigState{Indent: "    "}
 
 var debugTraceTransactionTests = []struct {
 	txHash      string
@@ -50,15 +57,15 @@ func TestTraceBlockByNumber(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(context.Background(), common.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(m.Ctx, libcommon.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
+		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -75,7 +82,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(context.Background(), rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
 	}
@@ -99,7 +106,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(m.Ctx, libcommon.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -135,7 +142,7 @@ func TestTraceTransaction(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -162,15 +169,14 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
+		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
 		m.DB, 0)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 		var norefunds = true
-		err := api.TraceTransaction(context.Background(), common.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -193,68 +199,99 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	}
 }
 
-/*
 func TestStorageRangeAt(t *testing.T) {
-	t.Parallel()
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
+	api := NewPrivateDebugAPI(
+		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
+		m.DB, 0)
+	t.Run("invalid addr", func(t *testing.T) {
+		var block4 *types.Block
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
+			return nil
+		})
+		require.NoError(t, err)
+		addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+		expect := StorageRangeResult{storageMap{}, nil}
+		result, err := api.StorageRangeAt(m.Ctx, block4.Hash(), 0, addr, nil, 100)
+		require.NoError(t, err)
+		require.Equal(t, expect, result)
+	})
+	t.Run("block 4, addr 1", func(t *testing.T) {
+		var block4 *types.Block
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
+			return nil
+		})
+		require.NoError(t, err)
+		addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+		keys := []libcommon.Hash{ // hashes of Keys of storage
+			libcommon.HexToHash("0x405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace"),
+			libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002"),
+		}
+		storage := storageMap{
+			keys[0]: {Key: &keys[1], Value: libcommon.HexToHash("0000000000000000000000000d3ab14bbad3d99f4203bd7a11acb94882050e7e")},
+		}
+		expect := StorageRangeResult{storageMap{keys[0]: storage[keys[0]]}, nil}
 
-	// Create a state where account 0x010000... has a few storage entries.
-	var (
-		//state, _ = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-		addr = common.Address{0x01}
-		keys = []common.Hash{ // hashes of Keys of storage
-			common.HexToHash("340dd630ad21bf010b4e676dbfa9ba9a02175262d1fa356232cfde6cb5b47ef2"),
-			common.HexToHash("426fcb404ab2d5d8e61a3d918108006bbb0a9be65e92235bb10eefbdb6dcd053"),
-			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
-			common.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
-		}
-		storage = storageMap{
-			keys[0]: {Key: &common.Hash{0x02}, Value: common.Hash{0x01}},
-			keys[1]: {Key: &common.Hash{0x04}, Value: common.Hash{0x02}},
-			keys[2]: {Key: &common.Hash{0x01}, Value: common.Hash{0x03}},
-			keys[3]: {Key: &common.Hash{0x03}, Value: common.Hash{0x04}},
-		}
-	)
-	//for _, entry := range storage {
-	//	state.SetState(addr, *entry.Key, entry.Value)
-	//}
+		result, err := api.StorageRangeAt(m.Ctx, block4.Hash(), 0, addr, nil, 100)
+		require.NoError(t, err)
+		require.Equal(t, expect, result)
+	})
+	t.Run("block latest, addr 1", func(t *testing.T) {
+		var latestBlock *types.Block
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			latestBlock = rawdb.ReadCurrentBlock(tx)
+			return nil
+		})
+		require.NoError(t, err)
+		addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+		keys := []libcommon.Hash{ // hashes of Keys of storage
+			libcommon.HexToHash("0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"),
+			libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 
-	// Check a few combinations of limit and start/end.
-	tests := []struct {
-		start []byte
-		limit int
-		want  StorageRangeResult
-	}{
-		{
-			start: []byte{}, limit: 0,
-			want: StorageRangeResult{storageMap{}, &keys[0]},
-		},
-		{
-			start: []byte{}, limit: 100,
-			want: StorageRangeResult{storage, nil},
-		},
-		{
-			start: []byte{}, limit: 2,
-			want: StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
-		},
-		{
-			start: []byte{0x00}, limit: 4,
-			want: StorageRangeResult{storage, nil},
-		},
-		{
-			start: []byte{0x40}, limit: 2,
-			want: StorageRangeResult{storageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
-		},
-	}
-	for _, test := range tests {
-		//tr, err := state.StorageTrie(addr)
-		//if err != nil {
-		//	t.Error(err)
-		//}
-		result, err := storageRangeAt(stateReader.(*state.PlainState), test.start, test.limit)
-		if err != nil {
-			t.Error(err)
+			libcommon.HexToHash("0x405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace"),
+			libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002"),
+
+			libcommon.HexToHash("0xb077f7530a1364c54ee00cf94ba99175db81e7e002c97e344aa5d3c4908617c4"),
+			libcommon.HexToHash("0x9541d803110b392ecde8e03af7ae34d4457eb4934dac09903ccee819bec4a355"),
+
+			libcommon.HexToHash("0xb6b80924ee71b506e16a000e00b0f8f3a82f53791c6b87f5958fdf562f3d12c8"),
+			libcommon.HexToHash("0xf41f8421ae8c8d7bb78783a0bdadb801a5f895bea868c1d867ae007558809ef1"),
 		}
-		require.EqualValues(t, test.want, result)
-	}
+		storage := storageMap{
+			keys[0]: {Key: &keys[1], Value: libcommon.HexToHash("0x000000000000000000000000000000000000000000000000000000000000000a")},
+			keys[2]: {Key: &keys[3], Value: libcommon.HexToHash("0x0000000000000000000000000d3ab14bbad3d99f4203bd7a11acb94882050e7e")},
+			keys[4]: {Key: &keys[5], Value: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000003")},
+			keys[6]: {Key: &keys[7], Value: libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000007")},
+		}
+		expect := StorageRangeResult{
+			storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]], keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]},
+			nil}
+
+		result, err := api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 100)
+		require.NoError(t, err)
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+
+		// limited
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 2)
+		require.NoError(t, err)
+		expect = StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]]}, &keys[5]}
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+
+		// start from something, limited
+		result, err = api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, expect.NextKey.Bytes(), 2)
+		require.NoError(t, err)
+		expect = StorageRangeResult{storageMap{keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]}, nil}
+		if !reflect.DeepEqual(result, expect) {
+			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
+		}
+	})
+
 }
-*/

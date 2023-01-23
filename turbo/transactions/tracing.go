@@ -10,9 +10,12 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -22,21 +25,20 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type BlockGetter interface {
 	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
-	GetBlockByHash(hash common.Hash) (*types.Block, error)
+	GetBlockByHash(hash libcommon.Hash) (*types.Block, error)
 	// GetBlock retrieves a block from the database by hash and number,
 	// caching it if found.
-	GetBlock(hash common.Hash, number uint64) *types.Block
+	GetBlock(hash libcommon.Hash, number uint64) *types.Block
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *params.ChainConfig, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.AggregatorV3, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, agg *state2.AggregatorV3, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	header := block.HeaderNoCopy()
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, agg, historyV3, cfg.ChainName)
 	if err != nil {
@@ -54,23 +56,6 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		excessDataGas = ph.ExcessDataGas
 	}
 
-	if historyV3 {
-		ibs := state.New(reader)
-		if txIndex == 0 && len(block.Transactions()) == 0 {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		if int(txIndex) > block.Transactions().Len() {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, reader, nil
-		}
-		txn := block.Transactions()[txIndex]
-		signer := types.MakeSigner(cfg, block.NumberU64(), block.TimeBig())
-		msg, _ := txn.AsMessage(*signer, header.BaseFee, cfg.Rules(block.NumberU64(), block.TimeBig()))
-		blockCtx := NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, headerReader, excessDataGas)
-		txCtx := core.NewEVMTxContext(msg)
-		return msg, blockCtx, txCtx, ibs, reader, nil
-
-	}
-
 	// Create the parent state database
 	statedb := state.New(reader)
 
@@ -78,7 +63,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(cfg, block.NumberU64(), block.TimeBig())
+	signer := types.MakeSigner(cfg, block.NumberU64(), block.Time())
 	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
@@ -98,7 +83,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, excessDataGas)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -135,7 +120,7 @@ func TraceTx(
 	txCtx evmtypes.TxContext,
 	ibs evmtypes.IntraBlockState,
 	config *tracers.TraceConfig,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) error {

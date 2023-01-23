@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -42,8 +43,8 @@ func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 
 func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	trie := newEmpty()
-	addr1 := common.HexToAddress("0x6295ee1b4f6dd65047762f924ecd367c17eabf8f")
-	addr2 := common.HexToAddress("0xfc597da4849c0d854629216d9e297bbca7bb4616")
+	addr1 := libcommon.HexToAddress("0x6295ee1b4f6dd65047762f924ecd367c17eabf8f")
+	addr2 := libcommon.HexToAddress("0xfc597da4849c0d854629216d9e297bbca7bb4616")
 
 	key := []byte{uint8(1)}
 	val := []byte{uint8(1)}
@@ -83,7 +84,7 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	}
 }
 
-func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
+func GenerateCompositeTrieKey(addressHash libcommon.Hash, seckey libcommon.Hash) []byte {
 	compositeKey := make([]byte, 0, length.Hash+length.Hash)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)

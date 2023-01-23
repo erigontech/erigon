@@ -26,8 +26,12 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -39,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -110,13 +113,13 @@ type stTransactionMarshaling struct {
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 
 type stEnv struct {
-	Coinbase   common.Address `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty *big.Int       `json:"currentDifficulty" gencodec:"required"`
-	Random     *big.Int       `json:"currentRandom"     gencodec:"optional"`
-	GasLimit   uint64         `json:"currentGasLimit"   gencodec:"required"`
-	Number     uint64         `json:"currentNumber"     gencodec:"required"`
-	Timestamp  uint64         `json:"currentTimestamp"  gencodec:"required"`
-	BaseFee    *big.Int       `json:"currentBaseFee"    gencodec:"optional"`
+	Coinbase   libcommon.Address `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty *big.Int          `json:"currentDifficulty" gencodec:"required"`
+	Random     *big.Int          `json:"currentRandom"     gencodec:"optional"`
+	GasLimit   uint64            `json:"currentGasLimit"   gencodec:"required"`
+	Number     uint64            `json:"currentNumber"     gencodec:"required"`
+	Timestamp  uint64            `json:"currentTimestamp"  gencodec:"required"`
+	BaseFee    *big.Int          `json:"currentBaseFee"    gencodec:"optional"`
 }
 
 type stEnvMarshaling struct {
@@ -133,7 +136,7 @@ type stEnvMarshaling struct {
 // The fork definition can be
 // - a plain forkname, e.g. `Byzantium`,
 // - a fork basename, and a list of EIPs to enable; e.g. `Byzantium+1884+1283`.
-func GetChainConfig(forkString string) (baseConfig *params.ChainConfig, eips []int, err error) {
+func GetChainConfig(forkString string) (baseConfig *chain.Config, eips []int, err error) {
 	var (
 		splitForks            = strings.Split(forkString, "+")
 		ok                    bool
@@ -175,33 +178,33 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
-	if root != common.Hash(post.Root) {
+	if root != libcommon.Hash(post.Root) {
 		return state, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
-	if logs := rlpHash(state.Logs()); logs != common.Hash(post.Logs) {
+	if logs := rlpHash(state.Logs()); logs != libcommon.Hash(post.Logs) {
 		return state, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
 	return state, nil
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, common.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
 	block, _, err := t.genesis(config).ToBlock()
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 
 	readBlockNr := block.NumberU64()
 	writeBlockNr := readBlockNr + 1
 
-	_, err = MakePreState(&params.Rules{}, tx, t.json.Pre, readBlockNr)
+	_, err = MakePreState(&chain.Rules{}, tx, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
+		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	statedb := state.New(state.NewPlainStateReader(tx))
 	w := state.NewPlainStateWriter(tx, nil, writeBlockNr)
@@ -218,16 +221,16 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := toMessage(t.json.Tx, post, baseFee)
 	if err != nil {
-		return nil, common.Hash{}, err
+		return nil, libcommon.Hash{}, err
 	}
 	if len(post.Tx) != 0 {
 		txn, err := types.UnmarshalTransactionFromBinary(post.Tx)
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
-		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, new(big.Int)), baseFee, config.Rules(0, new(big.Int)))
+		msg, err = txn.AsMessage(*types.MakeSigner(config, 0, 0), baseFee, config.Rules(0, 0))
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
 	}
 
@@ -251,7 +254,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		context.BaseFee.SetFromBig(baseFee)
 	}
 	if t.json.Env.Random != nil {
-		rnd := common.BigToHash(t.json.Env.Random)
+		rnd := libcommon.BigToHash(t.json.Env.Random)
 		context.PrevRanDao = &rnd
 	}
 	evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
@@ -265,21 +268,21 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	}
 
 	if err = statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, err
+		return nil, libcommon.Hash{}, err
 	}
 	if err = statedb.CommitBlock(evm.ChainRules(), w); err != nil {
-		return nil, common.Hash{}, err
+		return nil, libcommon.Hash{}, err
 	}
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {
-		return nil, common.Hash{}, err
+		return nil, libcommon.Hash{}, err
 	}
 	h := common.NewHasher()
 	defer common.ReturnHasherToPool(h)
 	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
 		if err != nil {
-			return nil, common.Hash{}, fmt.Errorf("interate over plain state: %w", err)
+			return nil, libcommon.Hash{}, fmt.Errorf("interate over plain state: %w", err)
 		}
 		var newK []byte
 		if len(k) == length.Addr {
@@ -300,11 +303,11 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 			//nolint:errcheck
 			h.Sha.Read(newK[length.Hash+length.Incarnation:])
 			if err = tx.Put(kv.HashedStorage, newK, common.CopyBytes(v)); err != nil {
-				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		} else {
 			if err = tx.Put(kv.HashedAccounts, newK, common.CopyBytes(v)); err != nil {
-				return nil, common.Hash{}, fmt.Errorf("insert hashed key: %w", err)
+				return nil, libcommon.Hash{}, fmt.Errorf("insert hashed key: %w", err)
 			}
 		}
 	}
@@ -312,13 +315,13 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 
 	root, err := trie.CalcRoot("", tx)
 	if err != nil {
-		return nil, common.Hash{}, fmt.Errorf("error calculating state root: %w", err)
+		return nil, libcommon.Hash{}, fmt.Errorf("error calculating state root: %w", err)
 	}
 
 	return statedb, root, nil
 }
 
-func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
+func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
 	r := state.NewPlainStateReader(tx)
 	statedb := state.New(r)
 	for addr, a := range accounts {
@@ -356,7 +359,7 @@ func MakePreState(rules *params.Rules, tx kv.RwTx, accounts core.GenesisAlloc, b
 	return statedb, nil
 }
 
-func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {
+func (t *StateTest) genesis(config *chain.Config) *core.Genesis {
 	return &core.Genesis{
 		Config:     config,
 		Coinbase:   t.json.Env.Coinbase,
@@ -368,7 +371,7 @@ func (t *StateTest) genesis(config *params.ChainConfig) *core.Genesis {
 	}
 }
 
-func rlpHash(x interface{}) (h common.Hash) {
+func rlpHash(x interface{}) (h libcommon.Hash) {
 	hw := sha3.NewLegacyKeccak256()
 	if err := rlp.Encode(hw, x); err != nil {
 		panic(err)
@@ -377,13 +380,13 @@ func rlpHash(x interface{}) (h common.Hash) {
 	return h
 }
 
-func vmTestBlockHash(n uint64) common.Hash {
-	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
+func vmTestBlockHash(n uint64) libcommon.Hash {
+	return libcommon.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
 }
 
 func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (core.Message, error) {
 	// Derive sender from private key if present.
-	var from common.Address
+	var from libcommon.Address
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
@@ -393,9 +396,9 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	}
 
 	// Parse recipient if present.
-	var to *common.Address
+	var to *libcommon.Address
 	if tx.To != "" {
-		to = new(common.Address)
+		to = new(libcommon.Address)
 		if err := to.UnmarshalText([]byte(tx.To)); err != nil {
 			return nil, fmt.Errorf("invalid to address: %v", err)
 		}

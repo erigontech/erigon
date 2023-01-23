@@ -19,7 +19,8 @@ package core
 import (
 	"sort"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -41,7 +42,7 @@ var analysisBlocks = map[string][]uint64{
 	networkname.BorMainnetChainName: {29_447_463},
 }
 
-func SkipAnalysis(config *params.ChainConfig, blockNumber uint64) bool {
+func SkipAnalysis(config *chain.Config, blockNumber uint64) bool {
 	blockNums, ok := analysisBlocks[config.ChainName]
 	if !ok {
 		return false

@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // typeWithoutStringer is a alias for the Type type which simply doesn't implement
@@ -211,10 +211,10 @@ func TestTypeCheck(t *testing.T) {
 		{"uint16[3]", nil, [4]uint16{1, 2, 3}, "abi: cannot use [4]uint16 as type [3]uint16 as argument"},
 		{"uint16[3]", nil, []uint16{1, 2, 3}, ""},
 		{"uint16[3]", nil, []uint16{1, 2, 3, 4}, "abi: cannot use [4]uint16 as type [3]uint16 as argument"},
-		{"address[]", nil, []common.Address{{1}}, ""},
-		{"address[1]", nil, []common.Address{{1}}, ""},
-		{"address[1]", nil, [1]common.Address{{1}}, ""},
-		{"address[2]", nil, [1]common.Address{{1}}, "abi: cannot use [1]array as type [2]array as argument"},
+		{"address[]", nil, []libcommon.Address{{1}}, ""},
+		{"address[1]", nil, []libcommon.Address{{1}}, ""},
+		{"address[1]", nil, [1]libcommon.Address{{1}}, ""},
+		{"address[2]", nil, [1]libcommon.Address{{1}}, "abi: cannot use [1]array as type [2]array as argument"},
 		{"bytes32", nil, [32]byte{}, ""},
 		{"bytes31", nil, [31]byte{}, ""},
 		{"bytes30", nil, [30]byte{}, ""},
@@ -248,20 +248,20 @@ func TestTypeCheck(t *testing.T) {
 		{"bytes2", nil, [2]byte{}, ""},
 		{"bytes1", nil, [1]byte{}, ""},
 		{"bytes32", nil, [33]byte{}, "abi: cannot use [33]uint8 as type [32]uint8 as argument"},
-		{"bytes32", nil, common.Hash{1}, ""},
-		{"bytes31", nil, common.Hash{1}, "abi: cannot use common.Hash as type [31]uint8 as argument"},
+		{"bytes32", nil, libcommon.Hash{1}, ""},
+		{"bytes31", nil, libcommon.Hash{1}, "abi: cannot use common.Hash as type [31]uint8 as argument"},
 		{"bytes31", nil, [32]byte{}, "abi: cannot use [32]uint8 as type [31]uint8 as argument"},
 		{"bytes", nil, []byte{0, 1}, ""},
 		{"bytes", nil, [2]byte{0, 1}, "abi: cannot use array as type slice as argument"},
-		{"bytes", nil, common.Hash{1}, "abi: cannot use array as type slice as argument"},
+		{"bytes", nil, libcommon.Hash{1}, "abi: cannot use array as type slice as argument"},
 		{"string", nil, "hello world", ""},
 		{"string", nil, "", ""},
 		{"string", nil, []byte{}, "abi: cannot use slice as type string as argument"},
 		{"bytes32[]", nil, [][32]byte{{}}, ""},
 		{"function", nil, [24]byte{}, ""},
-		{"bytes20", nil, common.Address{}, ""},
+		{"bytes20", nil, libcommon.Address{}, ""},
 		{"address", nil, [20]byte{}, ""},
-		{"address", nil, common.Address{}, ""},
+		{"address", nil, libcommon.Address{}, ""},
 		{"bytes32[]]", nil, "", "invalid arg type in abi"},
 		{"invalidType", nil, "", "unsupported arg type: invalidType"},
 		{"invalidSlice[]", nil, "", "unsupported arg type: invalidSlice"},

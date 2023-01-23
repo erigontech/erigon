@@ -7,9 +7,14 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/zap/buffer"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
@@ -18,9 +23,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/zap/buffer"
 )
+
+const maxMessageLength = 18 * datasize.MB
 
 // BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
@@ -91,7 +96,7 @@ func (b *BeaconRpcP2P) SendLightClientOptimisticUpdateReqV1() (*cltypes.LightCli
 
 // SendLightClientBootstrapReqV1 sends a request for a LightClientBootstrap message to a beacon chain node.
 // It returns a LightClientBootstrap struct or an error if one occurred.
-func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root common.Hash) (*cltypes.LightClientBootstrap, error) {
+func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root libcommon.Hash) (*cltypes.LightClientBootstrap, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &cltypes.SingleRoot{Root: root}); err != nil {
 		return nil, err
@@ -127,7 +132,7 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 		return nil, err
 	}
 
-	responsePacket := []ssz_utils.ObjectSSZ{&cltypes.LightClientUpdate{}}
+	responsePacket := []ssz_utils.EncodableSSZ{&cltypes.LightClientUpdate{}}
 
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
@@ -147,9 +152,9 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 	return responsePacket[0].(*cltypes.LightClientUpdate), nil
 }
 
-func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
 	// Prepare output slice.
-	responsePacket := []ssz_utils.ObjectSSZ{}
+	responsePacket := []*cltypes.SignedBeaconBlock{}
 
 	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
 		Data:  reqData,
@@ -177,6 +182,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
 			return nil, fmt.Errorf("unable to read varint from message prefix: %v", err)
+		}
+		// Sanity check for message size.
+		if encodedLn > uint64(maxMessageLength) {
+			return nil, fmt.Errorf("received message too big")
 		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
@@ -225,24 +234,23 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 				return nil, err
 			}
 		}
-		var responseChunk ssz_utils.ObjectSSZ
+		responseChunk := &cltypes.SignedBeaconBlock{}
 
 		switch respForkDigest {
 		case utils.Bytes4ToUint32(phase0ForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockPhase0{}
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.Phase0Version))
 		case utils.Bytes4ToUint32(altairForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockAltair{}
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.AltairVersion))
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			responseChunk = &cltypes.SignedBeaconBlockBellatrix{}
+			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.BellatrixVersion))
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}
-
-		if err := responseChunk.UnmarshalSSZ(raw); err != nil {
-			return nil, fmt.Errorf("unmarshalling: %w", err)
+		if err != nil {
+			return nil, err
 		}
 
-		responsePacket = append(responsePacket, cltypes.NewSignedBeaconBlock(responseChunk))
+		responsePacket = append(responsePacket, responseChunk)
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()
 	}
@@ -251,7 +259,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 }
 
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]*cltypes.SignedBeaconBlock, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{
 		StartSlot: start,
 		Count:     count,
@@ -267,7 +275,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(start, count uint64) ([]ssz_ut
 }
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
-func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]ssz_utils.ObjectSSZ, error) {
+func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(roots [][32]byte) ([]*cltypes.SignedBeaconBlock, error) {
 	var req cltypes.BeaconBlocksByRootRequest = roots
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, &req); err != nil {
@@ -286,7 +294,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	return amount.Amount, nil
 }
 
-func (b *BeaconRpcP2P) SetStatus(finalizedRoot common.Hash, finalizedEpoch uint64, headRoot common.Hash, headSlot uint64) error {
+func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
 	forkDigest, err := fork.ComputeForkDigest(b.beaconConfig, b.genesisConfig)
 	if err != nil {
 		return err

@@ -5,17 +5,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
 type UpgradeConfig struct {
 	BeforeUpgrade upgradeHook
 	AfterUpgrade  upgradeHook
-	ContractAddr  common.Address
+	ContractAddr  libcommon.Address
 	CommitUrl     string
 	Code          string
 }
@@ -25,7 +26,7 @@ type Upgrade struct {
 	Configs     []*UpgradeConfig
 }
 
-type upgradeHook func(blockNumber *big.Int, contractAddr common.Address, statedb *state.IntraBlockState) error
+type upgradeHook func(blockNumber *big.Int, contractAddr libcommon.Address, statedb *state.IntraBlockState) error
 
 var (
 	//upgrade config
@@ -48,7 +49,7 @@ var (
 	// recent version. This problem will not exist in erigon3, but until then, a workaround will be used to access code of such contracts through this structure
 	// Lookup is performed first by chain name, then by contract address. The value in the map is the list of CodeRecords, with increasing block numbers,
 	// to be used in binary search to determine correct historical code
-	SystemContractCodeLookup = map[string]map[common.Address][]state.CodeRecord{}
+	SystemContractCodeLookup = map[string]map[libcommon.Address][]state.CodeRecord{}
 )
 
 func init() {
@@ -476,7 +477,7 @@ func init() {
 	}
 }
 
-func UpgradeBuildInSystemContract(config *params.ChainConfig, blockNumber *big.Int, statedb *state.IntraBlockState) {
+func UpgradeBuildInSystemContract(config *chain.Config, blockNumber *big.Int, statedb *state.IntraBlockState) {
 	if config == nil || blockNumber == nil || statedb == nil {
 		return
 	}

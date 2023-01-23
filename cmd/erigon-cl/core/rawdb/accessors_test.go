@@ -27,10 +27,17 @@ var emptyBlock = &cltypes.Eth1Block{
 }
 
 func TestBeaconBlock(t *testing.T) {
-	signedBeaconBlockRaw := &cltypes.SignedBeaconBlockBellatrix{}
-	require.NoError(t, signedBeaconBlockRaw.UnmarshalSSZ(rawdb.SSZTestBeaconBlock))
 	_, tx := memdb.NewTestTx(t)
-	signedBeaconBlock := cltypes.NewSignedBeaconBlock(signedBeaconBlockRaw)
+	signedBeaconBlock := &cltypes.SignedBeaconBlock{
+		Block: &cltypes.BeaconBlock{
+			Body: &cltypes.BeaconBody{
+				Eth1Data:         &cltypes.Eth1Data{},
+				Graffiti:         make([]byte, 32),
+				SyncAggregate:    &cltypes.SyncAggregate{},
+				ExecutionPayload: emptyBlock,
+			},
+		},
+	}
 
 	require.NoError(t, rawdb.WriteBeaconBlock(tx, signedBeaconBlock))
 	newBlock, err := rawdb.ReadBeaconBlock(tx, signedBeaconBlock.Block.Slot)

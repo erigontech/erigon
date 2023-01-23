@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -40,10 +41,10 @@ var (
 		Usage: "Buffer size for ETL operations.",
 		Value: etl.BufferOptimalSize.String(),
 	}
-	BlockDownloaderWindowFlag = cli.IntFlag{
-		Name:  "blockDownloaderWindow",
-		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: ethconfig.Defaults.Sync.BlockDownloaderWindow,
+	BodyCacheLimitFlag = cli.StringFlag{
+		Name:  "bodies.cache",
+		Usage: "Limit on the cache for block bodies",
+		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
 	}
 
 	PrivateApiAddr = cli.StringFlag{
@@ -231,7 +232,12 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
-	cfg.Sync.BlockDownloaderWindow = ctx.Int(BlockDownloaderWindowFlag.Name)
+	if ctx.String(BodyCacheLimitFlag.Name) != "" {
+		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
+		if err != nil {
+			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
+		}
+	}
 
 	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
 		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
@@ -246,7 +252,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if err != nil {
 			log.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
-			cfg.BadBlockHash = common.BytesToHash(bytes)
+			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
 		}
 	}
 

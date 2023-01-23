@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -44,11 +45,11 @@ func Bench2(erigon_url string) {
 		for i, tx := range b.Result.Transactions {
 			if tx.To != nil && tx.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
-				// blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int
+				// blockHash libcommon.Hash, txIndex int, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int
 				req_id++
 				storageRangeTemplate := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}` //nolint
-				sm := make(map[common.Hash]storageEntry)
-				nextKey := &common.Hash{}
+				sm := make(map[libcommon.Hash]storageEntry)
+				nextKey := &libcommon.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
 					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {

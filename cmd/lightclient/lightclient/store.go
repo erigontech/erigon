@@ -40,7 +40,7 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 			headerRoot, trustedRoot)
 	}
 
-	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashTreeRoot()
+	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashSSZ()
 	if err != nil {
 		return nil, err
 	}

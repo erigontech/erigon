@@ -21,6 +21,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -79,8 +81,8 @@ type StateTransition struct {
 
 // Message represents a message sent to a contract.
 type Message interface {
-	From() common.Address
-	To() *common.Address
+	From() libcommon.Address
+	To() *libcommon.Address
 
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
@@ -97,7 +99,7 @@ type Message interface {
 
 	IsFree() bool
 
-	DataHashes() []common.Hash
+	DataHashes() []libcommon.Hash
 }
 
 // ExecutionResult includes all output after executing given evm
@@ -253,9 +255,9 @@ func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, ga
 }
 
 // to returns the recipient of the message.
-func (st *StateTransition) to() common.Address {
+func (st *StateTransition) to() libcommon.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
-		return common.Address{}
+		return libcommon.Address{}
 	}
 	return *st.msg.To()
 }
@@ -271,9 +273,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	// compute data fee for eip-4844 data blobs if any
 	dgval := new(big.Int)
-	timestamp := new(big.Int).SetUint64(st.evm.Context().Time)
 	var dataGasUsed uint64
-	if st.evm.ChainConfig().IsSharding(timestamp) {
+	if st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
 		dataGasUsed = st.dataGasUsed()
 		if st.evm.Context().ExcessDataGas == nil {
 			return fmt.Errorf("%w: sharding is active but ExcessDataGas is nil. Time: %v", ErrInternalFailure, st.evm.Context().Time)
@@ -321,7 +322,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	return nil
 }
 
-func CheckEip1559TxGasFeeCap(from common.Address, gasFeeCap, tip, baseFee *uint256.Int, isFree bool) error {
+func CheckEip1559TxGasFeeCap(from libcommon.Address, gasFeeCap, tip, baseFee *uint256.Int, isFree bool) error {
 	if gasFeeCap.Lt(tip) {
 		return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
 			from.Hex(), tip, gasFeeCap)
@@ -350,8 +351,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
-			// common.Hash{} means that the sender is not in the state.
+		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
@@ -367,7 +368,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 			}
 		}
 	}
-	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(new(big.Int).SetUint64(st.evm.Context().Time)) {
+	if st.dataGasUsed() > 0 && st.evm.ChainConfig().IsSharding(st.evm.Context().Time) {
 		dataGasPrice := misc.GetDataGasPrice(st.evm.Context().ExcessDataGas)
 		if dataGasPrice.Cmp(st.msg.MaxFeePerDataGas().ToBig()) > 0 {
 			return fmt.Errorf("%w: address %v, maxFeePerDataGas: %v dataGasPrice: %v, excessDataGas: %v",

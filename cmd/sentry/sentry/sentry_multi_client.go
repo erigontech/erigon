@@ -13,6 +13,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -28,13 +30,11 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -253,12 +253,12 @@ type MultiClient struct {
 	sentries      []direct.SentryClient
 	headHeight    uint64
 	headTime      uint64
-	headHash      common.Hash
+	headHash      libcommon.Hash
 	headTd        *uint256.Int
-	ChainConfig   *params.ChainConfig
+	ChainConfig   *chain.Config
 	heightForks   []uint64
 	timeForks     []uint64
-	genesisHash   common.Hash
+	genesisHash   libcommon.Hash
 	networkId     uint64
 	db            kv.RwDB
 	Engine        consensus.Engine
@@ -272,8 +272,8 @@ type MultiClient struct {
 func NewMultiClient(
 	db kv.RwDB,
 	nodeName string,
-	chainConfig *params.ChainConfig,
-	genesisHash common.Hash,
+	chainConfig *chain.Config,
+	genesisHash libcommon.Hash,
 	engine consensus.Engine,
 	networkID uint64,
 	sentries []direct.SentryClient,
@@ -297,7 +297,7 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
+	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit))
 
 	cs := &MultiClient{
 		nodeName:      nodeName,
