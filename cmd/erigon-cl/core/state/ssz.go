@@ -359,7 +359,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		endOffset = historicalSummariesOffset
 	}
 
-	if len(buf) <= int(endOffset) || executionPayloadOffset > endOffset {
+	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
 		return ssz_utils.ErrLowBufferSize
 	}
 	b.latestExecutionPayloadHeader = new(types.Header)
