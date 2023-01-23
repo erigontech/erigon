@@ -2,6 +2,7 @@ package lightclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -16,7 +17,7 @@ import (
 type ChainTipSubscriber struct {
 	ctx context.Context
 
-	currBlock *cltypes.BeaconBlockBellatrix // Most recent gossipped block
+	currBlock *cltypes.BeaconBlock // Most recent gossipped block
 
 	lastUpdate       *cltypes.LightClientUpdate
 	started          bool
@@ -55,8 +56,9 @@ func (c *ChainTipSubscriber) StartLoop() {
 	for {
 		data, err := stream.Recv()
 		if err != nil {
-
-			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Debug("[Lightclient] could not read gossip :/", "reason", err)
+			}
 			continue
 		}
 		if err := c.handleGossipData(data); err != nil {
@@ -71,8 +73,8 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	defer c.mu.Unlock()
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
-		block := &cltypes.SignedBeaconBlockBellatrix{}
-		if err := block.UnmarshalSSZ(data.Data); err != nil {
+		block := &cltypes.SignedBeaconBlock{}
+		if err := block.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 
@@ -80,7 +82,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		c.lastReceivedSlot = block.Block.Slot
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
-		if err := finalityUpdate.UnmarshalSSZ(data.Data); err != nil {
+		if err := finalityUpdate.DecodeSSZ(data.Data); err != nil {
 			return fmt.Errorf("could not unmarshall finality update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
@@ -99,7 +101,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		}
 
 		optimisticUpdate := &cltypes.LightClientOptimisticUpdate{}
-		if err := optimisticUpdate.UnmarshalSSZ(data.Data); err != nil {
+		if err := optimisticUpdate.DecodeSSZ(data.Data); err != nil {
 			return fmt.Errorf("could not unmarshall optimistic update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
@@ -124,7 +126,7 @@ func (c *ChainTipSubscriber) PopLastUpdate() *cltypes.LightClientUpdate {
 	return update
 }
 
-func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlockBellatrix {
+func (c *ChainTipSubscriber) GetLastBlock() *cltypes.BeaconBlock {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	// Check if we are up to date

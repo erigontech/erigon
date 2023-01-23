@@ -181,14 +181,14 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock) er
 	if block.ProposerIndex != propInd {
 		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
 	}
-	latestRoot, err := state.LatestBlockHeader().HashTreeRoot()
+	latestRoot, err := state.LatestBlockHeader().HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}
 	if block.ParentRoot != latestRoot {
 		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
 	}
-	bodyRoot, err := block.Body.HashTreeRoot()
+	bodyRoot, err := block.Body.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of block body: %v", err)
 	}
@@ -234,22 +234,22 @@ func ProcessRandao(state *state.BeaconState, body *cltypes.BeaconBody) error {
 	for i := range mix {
 		mix[i] = randaoMixes[i] ^ randaoHash[i]
 	}
-	state.RandaoMixes()[epoch%EPOCHS_PER_HISTORICAL_VECTOR] = mix
+	state.SetRandaoMixAt(int(epoch%EPOCHS_PER_HISTORICAL_VECTOR), mix)
 	return nil
 }
 
 func ProcessEth1Data(state *state.BeaconState, body *cltypes.BeaconBody) error {
-	newVotes := append(state.Eth1DataVotes(), body.Eth1Data)
-	state.SetEth1DataVotes(newVotes)
+	state.AddEth1DataVote(body.Eth1Data)
+	newVotes := state.Eth1DataVotes()
 
-	ethDataHash, err := body.Eth1Data.HashTreeRoot()
+	ethDataHash, err := body.Eth1Data.HashSSZ()
 	if err != nil {
 		return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
 	}
 	// Count how many times body.Eth1Data appears in the votes by comparing their hashes.
 	numVotes := 0
 	for i := 0; i < len(newVotes); i++ {
-		candidateHash, err := newVotes[i].HashTreeRoot()
+		candidateHash, err := newVotes[i].HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to get hash tree root of eth1data: %v", err)
 		}

@@ -27,9 +27,9 @@ import (
 func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
-	vin := binary.PutUvarint(lengthBuf, uint64(val.SizeSSZ()))
+	vin := binary.PutUvarint(lengthBuf, uint64(val.EncodingSizeSSZ()))
 	// Create writer size
-	wr := bufio.NewWriterSize(w, 10+val.SizeSSZ())
+	wr := bufio.NewWriterSize(w, 10+val.EncodingSizeSSZ())
 	defer wr.Flush()
 	// Write length of packet
 	wr.Write(prefix)
@@ -38,7 +38,9 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	sw := snappy.NewBufferedWriter(wr)
 	defer sw.Flush()
 	// Marshall and snap it
-	enc, err := val.MarshalSSZ()
+	enc := make([]byte, 0, val.EncodingSizeSSZ())
+	var err error
+	enc, err = val.EncodeSSZ(enc)
 	if err != nil {
 		return err
 	}
@@ -46,7 +48,7 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz_utils.ObjectSSZ) error {
+func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ) error {
 	forkDigest := make([]byte, 4)
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -62,7 +64,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ) error {
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
-	expectedLn := val.SizeSSZ()
+	expectedLn := val.EncodingSizeSSZ()
 	if encodedLn != uint64(expectedLn) {
 		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", expectedLn, encodedLn)
 	}
@@ -73,7 +75,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ) error {
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
-	err = val.UnmarshalSSZ(raw)
+	err = val.DecodeSSZ(raw)
 	if err != nil {
 		return fmt.Errorf("enable to unmarshall message: %v", err)
 	}
@@ -99,8 +101,8 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.ObjectSSZ) error {
-	objSize := list[0].SizeSSZ()
+func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ) error {
+	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)
 	forkDigest := make([]byte, 4)
@@ -129,7 +131,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.ObjectSSZ) error 
 		}
 		pos += uint64(n)
 
-		if err := list[i].UnmarshalSSZ(raw); err != nil {
+		if err := list[i].DecodeSSZ(raw); err != nil {
 			return fmt.Errorf("unmarshalling: %w", err)
 		}
 		r.Reset(data[pos:])

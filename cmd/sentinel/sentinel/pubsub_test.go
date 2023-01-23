@@ -3,7 +3,7 @@ package sentinel
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,7 +21,7 @@ func NewMockGossipManager() *GossipManager {
 	}
 
 	return &GossipManager{
-		ch:            make(chan *communication.GossipContext, 1),
+		ch:            make(chan *pubsub.Message, 1),
 		subscriptions: subs,
 	}
 }

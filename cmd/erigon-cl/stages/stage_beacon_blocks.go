@@ -91,7 +91,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		var lastRootInSegment libcommon.Hash
 		lastBlockInSegment := newBlocks[len(newBlocks)-1]
 		lastSlotInSegment := lastBlockInSegment.Block.Slot
-		lastRootInSegment, err = lastBlockInSegment.Block.HashTreeRoot()
+		lastRootInSegment, err = lastBlockInSegment.Block.HashSSZ()
 		parentRoot := lastBlockInSegment.Block.ParentRoot
 
 		if err != nil {
@@ -100,7 +100,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 
 		for i := len(newBlocks) - 2; i >= 0; i-- {
 			var blockRoot libcommon.Hash
-			blockRoot, err = newBlocks[i].Block.HashTreeRoot()
+			blockRoot, err = newBlocks[i].Block.HashSSZ()
 			if err != nil {
 				return
 			}

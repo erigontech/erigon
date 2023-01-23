@@ -49,7 +49,7 @@ var (
 	// recent version. This problem will not exist in erigon3, but until then, a workaround will be used to access code of such contracts through this structure
 	// Lookup is performed first by chain name, then by contract address. The value in the map is the list of CodeRecords, with increasing block numbers,
 	// to be used in binary search to determine correct historical code
-	SystemContractCodeLookup = map[string]map[libcommon.Address][]state.CodeRecord{}
+	SystemContractCodeLookup = map[string]map[libcommon.Address][]libcommon.CodeRecord{}
 )
 
 func init() {

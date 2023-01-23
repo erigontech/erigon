@@ -31,12 +31,10 @@ func TestValidatorsVectorRoot(t *testing.T) {
 	expected := libcommon.HexToHash("0xdd9a73f49804c05654ae7a57cff4fd877f290f4a00d7cd2e7af058624fb7a369")
 	validators := []*cltypes.Validator{
 		{
-			WithdrawalCredentials: make([]byte, 32),
-			EffectiveBalance:      69,
+			EffectiveBalance: 69,
 		},
 		{
-			WithdrawalCredentials: make([]byte, 32),
-			EffectiveBalance:      96,
+			EffectiveBalance: 96,
 		},
 	}
 	root, err := state_encoding.ValidatorsVectorRoot(validators)

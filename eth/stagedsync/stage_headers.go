@@ -783,12 +783,12 @@ func HeadersPOW(
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
-	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
+	var sentToPeer bool
 Loop:
 	for !stopped {
 
@@ -806,12 +806,12 @@ Loop:
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			var peer [64]byte
+			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				cfg.hd.UpdateStats(req, false /* skeleton */)
+				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
-			// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-			cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -820,12 +820,12 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				var peer [64]byte
+				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.UpdateStats(req, false /* skeleton */)
+					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
+					cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				}
-				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
@@ -837,16 +837,17 @@ Loop:
 		if time.Since(lastSkeletonTime) > 1*time.Second {
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				var peer [64]byte
+				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.UpdateStats(req, true /* skeleton */)
+					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
 				}
 			}
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
 			return err
 		}
 
@@ -860,10 +861,6 @@ Loop:
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
-			if !initialCycle {
-				// if this is not an initial cycle, we need to react quickly when new headers are coming in
-				break
-			}
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
 				break
