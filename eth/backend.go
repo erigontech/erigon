@@ -571,7 +571,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		if err != nil {
 			return nil, err
 		}
-		bs, err := clcore.RetrieveBeaconState(ctx,
+		bs, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
 
 		if err != nil {

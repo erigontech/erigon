@@ -71,10 +71,14 @@ func (c *ChainTipSubscriber) StartLoop() {
 func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	currentEpoch := utils.GetCurrentEpoch(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot, c.beaconConfig.SlotsPerEpoch)
+	version := c.beaconConfig.GetCurrentStateVersion(currentEpoch)
+
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
 		block := &cltypes.SignedBeaconBlock{}
-		if err := block.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+		if err := block.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 
