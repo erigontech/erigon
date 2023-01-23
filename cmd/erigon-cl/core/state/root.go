@@ -3,21 +3,17 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
-func (b *BeaconState) HashTreeRoot() ([32]byte, error) {
+func (b *BeaconState) HashSSZ() ([32]byte, error) {
 	if err := b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
-
-	currentLayer := b.leaves
 	// Pad to 32 of length
-	for len(currentLayer) != 32 {
-		currentLayer = append(currentLayer, [32]byte{})
-	}
-	return merkle_tree.MerkleRootFromLeaves(currentLayer)
+	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])
 }
 
 func (b *BeaconState) computeDirtyLeaves() error {
@@ -50,7 +46,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(4): LatestBlockHeader
 	if b.isLeafDirty(LatestBlockHeaderLeafIndex) {
-		headerRoot, err := b.latestBlockHeader.HashTreeRoot()
+		headerRoot, err := b.latestBlockHeader.HashSSZ()
 		if err != nil {
 			return err
 		}
@@ -221,6 +217,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(NextSyncCommitteeLeafIndex, committeeRoot)
 	}
 
+	if b.version < clparams.BellatrixVersion {
+		return nil
+	}
 	// Field(24): LatestExecutionPayloadHeader
 	if b.isLeafDirty(LatestExecutionPayloadHeaderLeafIndex) {
 		headerRoot, err := b.latestExecutionPayloadHeader.HashSSZ()
@@ -228,6 +227,29 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(LatestExecutionPayloadHeaderLeafIndex, headerRoot)
+	}
+
+	if b.version < clparams.CapellaVersion {
+		return nil
+	}
+
+	// Field(25): NextWithdrawalIndex
+	if b.isLeafDirty(NextWithdrawalIndexLeafIndex) {
+		b.updateLeaf(NextWithdrawalIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalIndex))
+	}
+
+	// Field(26): NextWithdrawalValidatorIndex
+	if b.isLeafDirty(NextWithdrawalValidatorIndexLeafIndex) {
+		b.updateLeaf(NextWithdrawalValidatorIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalValidatorIndex))
+	}
+
+	// Field(27): HistoricalSummaries
+	if b.isLeafDirty(HistoricalSummariesLeafIndex) {
+		root, err := merkle_tree.ListObjectSSZRoot(b.historicalSummaries, state_encoding.HistoricalRootsLength)
+		if err != nil {
+			return err
+		}
+		b.updateLeaf(HistoricalSummariesLeafIndex, root)
 	}
 	return nil
 }

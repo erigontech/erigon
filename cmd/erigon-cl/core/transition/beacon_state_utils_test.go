@@ -27,6 +27,7 @@ var (
 			Bloom:     types.Bloom{},
 			TxHashSSZ: txHashEmpty,
 		},
+		Body: &types.RawBody{},
 	}
 )
 
@@ -39,20 +40,16 @@ func getTestState(t *testing.T) *state.BeaconState {
 			ExitEpoch:       10000,
 		}
 	}
-	return state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Slot: 19,
-		LatestBlockHeader: &cltypes.BeaconBlockHeader{
-			Slot: 18,
-		},
-		Fork: &cltypes.Fork{
-			Epoch:           0,
-			PreviousVersion: [4]byte{0, 1, 2, 3},
-			CurrentVersion:  [4]byte{3, 2, 1, 0},
-		},
-		Validators:        validators,
-		JustificationBits: []byte{0},
-		RandaoMixes:       make([][32]byte, EPOCHS_PER_HISTORICAL_VECTOR),
+	b := state.GetEmptyBeaconState()
+	b.SetValidators(validators)
+	b.SetSlot(19)
+	b.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 18})
+	b.SetFork(&cltypes.Fork{
+		Epoch:           0,
+		PreviousVersion: [4]byte{0, 1, 2, 3},
+		CurrentVersion:  [4]byte{3, 2, 1, 0},
 	})
+	return b
 }
 
 func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
@@ -74,6 +71,14 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 			Version:          clparams.BellatrixVersion,
 		},
 	}
+}
+
+func generateBeaconStateWithValidators(n int) *state.BeaconState {
+	b := state.GetEmptyBeaconState()
+	for i := 0; i < n; i++ {
+		b.AddValidator(&cltypes.Validator{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance})
+	}
+	return b
 }
 
 func TestComputeShuffledIndex(t *testing.T) {
@@ -120,56 +125,24 @@ func TestComputeProposerIndex(t *testing.T) {
 	}{
 		{
 			description: "success",
-			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-				Validators: []*cltypes.Validator{
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-				},
-				JustificationBits: []byte{0},
-			}),
-			indices:  []uint64{0, 1, 2, 3, 4},
-			seed:     seed,
-			expected: 2,
+			state:       generateBeaconStateWithValidators(5),
+			indices:     []uint64{0, 1, 2, 3, 4},
+			seed:        seed,
+			expected:    2,
 		},
 		{
 			description: "single_active_index",
-			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-				Validators: []*cltypes.Validator{
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-				},
-				JustificationBits: []byte{0},
-			}),
-			indices:  []uint64{3},
-			seed:     seed,
-			expected: 3,
+			state:       generateBeaconStateWithValidators(5),
+			indices:     []uint64{3},
+			seed:        seed,
+			expected:    3,
 		},
 		{
 			description: "second_half_active",
-			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-				Validators: []*cltypes.Validator{
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-				},
-				JustificationBits: []byte{0},
-			}),
-			indices:  []uint64{5, 6, 7, 8, 9},
-			seed:     seed,
-			expected: 7,
+			state:       generateBeaconStateWithValidators(10),
+			indices:     []uint64{5, 6, 7, 8, 9},
+			seed:        seed,
+			expected:    7,
 		},
 		{
 			description: "zero_active_indices",
@@ -180,14 +153,9 @@ func TestComputeProposerIndex(t *testing.T) {
 		{
 			description: "active_index_out_of_range",
 			indices:     []uint64{100},
-			state: state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-				Validators: []*cltypes.Validator{
-					{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance},
-				},
-				JustificationBits: []byte{0},
-			}),
-			seed:    seed,
-			wantErr: true,
+			state:       generateBeaconStateWithValidators(1),
+			seed:        seed,
+			wantErr:     true,
 		},
 	}
 
@@ -450,11 +418,9 @@ func TestProcessEth1Data(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to hash expected eth1data: %v", err)
 	}
-	successState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Eth1DataVotes:     []*cltypes.Eth1Data{},
-		Eth1Data:          Eth1DataB,
-		JustificationBits: []byte{0},
-	})
+	successState := state.GetEmptyBeaconState()
+	successState.SetEth1Data(Eth1DataB)
+
 	// Fill all votes.
 	for i := 0; i < int(EPOCHS_PER_ETH1_VOTING_PERIOD)*int(SLOTS_PER_EPOCH)-1; i++ {
 		successState.AddEth1DataVote(Eth1DataA)
@@ -463,11 +429,8 @@ func TestProcessEth1Data(t *testing.T) {
 		Eth1Data: Eth1DataA,
 	}
 
-	noUpdateState := state.FromBellatrixState(&cltypes.BeaconStateBellatrix{
-		Eth1DataVotes:     []*cltypes.Eth1Data{},
-		Eth1Data:          Eth1DataB,
-		JustificationBits: []byte{0},
-	})
+	noUpdateState := state.GetEmptyBeaconState()
+	noUpdateState.SetEth1Data(Eth1DataB)
 
 	testCases := []struct {
 		description  string

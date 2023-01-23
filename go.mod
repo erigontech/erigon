@@ -32,7 +32,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/emicklei/dot v1.0.0
 	github.com/emirpasic/gods v1.18.1
-	github.com/ferranbt/fastssz v0.0.0-20210120143747-11b9eff30ea9
 	github.com/fjl/gencodec v0.0.0-20220412091415-8bb9e558978c
 	github.com/gballet/go-verkle v0.0.0-20221121182333-31427a1f2d35
 	github.com/goccy/go-json v0.9.7
@@ -93,11 +92,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.20.2
 	pgregory.net/rapid v0.5.3
-)
-
-require (
-	github.com/ledgerwatch/interfaces v0.0.0-20230120145059-26c0bf72eacc // indirect
-	github.com/matryer/moq v0.3.0 // indirect
 )
 
 require (

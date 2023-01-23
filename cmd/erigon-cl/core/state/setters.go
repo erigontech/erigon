@@ -80,6 +80,11 @@ func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
 	b.validators = validators
 }
 
+func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	b.validators = append(b.validators, validator)
+}
+
 func (b *BeaconState) SetBalances(balances []uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances = balances
@@ -138,4 +143,16 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
+}
+
+func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.nextWithdrawalIndex = index
+}
+
+func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.nextWithdrawalValidatorIndex = index
+}
+
+func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.historicalSummaries = append(b.historicalSummaries, summary)
 }

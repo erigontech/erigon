@@ -5,9 +5,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -16,7 +14,7 @@ import (
 func init() {
 	// Initialise systemContractCodeLookup
 	for _, chainName := range []string{networkname.BSCChainName, networkname.ChapelChainName, networkname.RialtoChainName} {
-		byChain := map[libcommon.Address][]state.CodeRecord{}
+		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
 		genesisBlock := DefaultGenesisBlockByChainName(chainName)
@@ -27,7 +25,7 @@ func init() {
 				if err != nil {
 					panic(fmt.Errorf("failed to hash system contract code: %s", err.Error()))
 				}
-				list = append(list, state.CodeRecord{BlockNumber: 0, CodeHash: codeHash})
+				list = append(list, libcommon.CodeRecord{BlockNumber: 0, CodeHash: codeHash})
 				byChain[addr] = list
 			}
 		}
@@ -78,7 +76,7 @@ func init() {
 	}
 }
 
-func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain map[libcommon.Address][]state.CodeRecord) {
+func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain map[libcommon.Address][]libcommon.CodeRecord) {
 	for _, config := range upgrade.Configs {
 		list := byChain[config.ContractAddr]
 		code, err := hex.DecodeString(config.Code)
@@ -89,7 +87,7 @@ func addCodeRecords(upgrade *systemcontracts.Upgrade, blockNum uint64, byChain m
 		if err != nil {
 			panic(fmt.Errorf("failed to hash system contract code: %s", err.Error()))
 		}
-		list = append(list, state.CodeRecord{BlockNumber: blockNum, CodeHash: codeHash})
+		list = append(list, libcommon.CodeRecord{BlockNumber: blockNum, CodeHash: codeHash})
 		byChain[config.ContractAddr] = list
 	}
 }

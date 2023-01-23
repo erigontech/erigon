@@ -44,7 +44,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 
 	// Verify that the `finality_branch`, if present, confirms `finalized_header`
 	if update.IsFinalityUpdate() {
-		finalizedRoot, err := update.FinalizedHeader.HashTreeRoot()
+		finalizedRoot, err := update.FinalizedHeader.HashSSZ()
 		if err != nil {
 			return false, err
 		}

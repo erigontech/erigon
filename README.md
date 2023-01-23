@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
+    + [Grafana dashboar god](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -104,6 +104,15 @@ Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-ma
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
 
 ### Logging
 

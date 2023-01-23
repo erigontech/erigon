@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -145,13 +146,13 @@ func ExecV3(ctx context.Context,
 			defer agg.StartWrites().FinishWrites()
 		}
 
-		_maxTxNum, err := rawdb.TxNums.Max(applyTx, maxBlockNum)
+		_maxTxNum, err := rawdbv3.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
 		}
 		maxTxNum.Store(_maxTxNum)
 		if block > 0 {
-			_outputTxNum, err := rawdb.TxNums.Max(applyTx, execStage.BlockNumber)
+			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
 			if err != nil {
 				return err
 			}
@@ -161,13 +162,13 @@ func ExecV3(ctx context.Context,
 		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
-			_maxTxNum, err := rawdb.TxNums.Max(tx, maxBlockNum)
+			_maxTxNum, err := rawdbv3.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
 			}
 			maxTxNum.Store(_maxTxNum)
 			if block > 0 {
-				_outputTxNum, err := rawdb.TxNums.Max(tx, execStage.BlockNumber)
+				_outputTxNum, err := rawdbv3.TxNums.Max(tx, execStage.BlockNumber)
 				if err != nil {
 					return err
 				}
@@ -799,18 +800,18 @@ func reconstituteStep(last bool,
 	startTxNum, endTxNum := as.TxNumRange()
 	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		startOk, startBlockNum, err = rawdb.TxNums.FindBlockNum(tx, startTxNum)
+		startOk, startBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, startTxNum)
 		if err != nil {
 			return err
 		}
 		if startBlockNum > 0 {
 			startBlockNum--
-			startTxNum, err = rawdb.TxNums.Min(tx, startBlockNum)
+			startTxNum, err = rawdbv3.TxNums.Min(tx, startBlockNum)
 			if err != nil {
 				return err
 			}
 		}
-		endOk, endBlockNum, err = rawdb.TxNums.FindBlockNum(tx, endTxNum)
+		endOk, endBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, endTxNum)
 		if err != nil {
 			return err
 		}
@@ -1264,7 +1265,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	var blockNum uint64 // First block which is not covered by the history snapshot files
 	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		ok, blockNum, err = rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 		if err != nil {
 			return err
 		}
@@ -1275,7 +1276,7 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return fmt.Errorf("not enough transactions in the history data")
 		}
 		blockNum--
-		txNum, err = rawdb.TxNums.Max(tx, blockNum)
+		txNum, err = rawdbv3.TxNums.Max(tx, blockNum)
 		if err != nil {
 			return err
 		}

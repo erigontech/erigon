@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -403,7 +404,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		execProgress, _ := stages.GetStageProgress(tx, stages.Execution)
-		lastTxNum, err := rawdb.TxNums.Max(tx, execProgress)
+		lastTxNum, err := rawdbv3.TxNums.Max(tx, execProgress)
 		if err != nil {
 			return err
 		}

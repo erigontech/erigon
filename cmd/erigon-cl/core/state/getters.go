@@ -3,9 +3,7 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -115,40 +113,14 @@ func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
 	return b.latestExecutionPayloadHeader
 }
 
-// GetStateSSZObject allows us to use ssz methods.
-func (b *BeaconState) GetStateSSZObject() ssz_utils.ObjectSSZ {
-	switch b.version {
-	case clparams.BellatrixVersion:
-		return &cltypes.BeaconStateBellatrix{
-			GenesisTime:                  b.genesisTime,
-			GenesisValidatorsRoot:        b.genesisValidatorsRoot,
-			Slot:                         b.slot,
-			Fork:                         b.fork,
-			LatestBlockHeader:            b.latestBlockHeader,
-			BlockRoots:                   preparateRootsForHashing(b.blockRoots[:]),
-			StateRoots:                   preparateRootsForHashing(b.stateRoots[:]),
-			HistoricalRoots:              preparateRootsForHashing(b.historicalRoots),
-			Eth1Data:                     b.eth1Data,
-			Eth1DataVotes:                b.eth1DataVotes,
-			Eth1DepositIndex:             b.eth1DepositIndex,
-			Validators:                   b.validators,
-			Balances:                     b.balances,
-			RandaoMixes:                  preparateRootsForHashing(b.randaoMixes[:]),
-			Slashings:                    b.slashings[:],
-			PreviousEpochParticipation:   b.previousEpochParticipation,
-			CurrentEpochParticipation:    b.currentEpochParticipation,
-			JustificationBits:            []byte{b.justificationBits},
-			FinalizedCheckpoint:          b.finalizedCheckpoint,
-			CurrentJustifiedCheckpoint:   b.currentJustifiedCheckpoint,
-			PreviousJustifiedCheckpoint:  b.previousJustifiedCheckpoint,
-			InactivityScores:             b.inactivityScores,
-			CurrentSyncCommittee:         b.currentSyncCommittee,
-			NextSyncCommittee:            b.nextSyncCommittee,
-			LatestExecutionPayloadHeader: b.latestExecutionPayloadHeader,
-		}
-	case clparams.CapellaVersion:
-		panic("not implemented")
-	default:
-		panic("not a valid version")
-	}
+func (b *BeaconState) NextWithdrawalIndex() uint64 {
+	return b.nextWithdrawalIndex
+}
+
+func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
+	return b.nextWithdrawalValidatorIndex
+}
+
+func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
+	return b.historicalSummaries
 }
