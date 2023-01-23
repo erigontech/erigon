@@ -346,9 +346,9 @@ func (c *Bor) VerifyHeaders(chain consensus.ChainHeaderReader, headers []*types.
 }
 
 func (c *Bor) WithExecutionContext(ctx context.Context) *Bor {
-	subclient := c
+	subclient := *c
 	subclient.execCtx = ctx
-	return subclient
+	return &subclient
 }
 
 // verifyHeader checks whether a header conforms to the consensus rules.The
@@ -954,7 +954,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 	copy(header.Extra[len(header.Extra)-extraSeal:], sighash)
 
 	// Wait until sealing is terminated or delay timeout.
-	log.Info("Waiting for slot to sign and propagate", "delay", common.PrettyDuration(delay))
+	log.Info("Waiting for slot to sign and propagate", "number", number, "hash", header.Hash, "delay-in-sec", uint(delay), "delay", common.PrettyDuration(delay))
 
 	go func() {
 		select {

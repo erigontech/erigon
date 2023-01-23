@@ -77,12 +77,14 @@ func CreateConsensusEngine(chainConfig *chain.Config, logger log.Logger, config 
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
 	case *chain.BorConfig:
-		genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract)
-		spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
-		borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
-		db := db.OpenDatabase(borDbPath, logger, false, readonly)
-
-		if chainConfig.Bor != nil {
+		// If Matic bor consensus is requested, set it up
+		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
+		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
+		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
+			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract)
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
+			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
+			db := db.OpenDatabase(borDbPath, logger, false, readonly)
 
 			var heimdallClient bor.IHeimdallClient
 			if WithoutHeimdall {

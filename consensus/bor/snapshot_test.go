@@ -8,7 +8,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -98,11 +97,11 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 	signer := snap.ValidatorSet.Validators[3].Address
 
 	_, err := snap.GetSignerSuccessionNumber(signer)
-	assert.NotNil(t, err)
+	require.NotNil(t, err)
 
 	e, ok := err.(*UnauthorizedProposerError)
-	assert.True(t, ok)
-	assert.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
+	require.True(t, ok)
+	require.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
 }
 
 func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {

@@ -34,7 +34,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 
 	data, err := c.validatorSet.Pack(method)
 	if err != nil {
-		log.Error("Unable to pack tx for getCurrentSpan", "err", err)
+		log.Error("Unable to pack tx for getCurrentSpan", "error", err)
 		return nil, err
 	}
 
@@ -87,9 +87,11 @@ func (c *ChainSpanner) GetCurrentValidators(blockNumber uint64, signer libcommon
 	return span.ValidatorSet.Validators, nil
 }
 
-const method = "commitSpan"
-
 func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.SystemCall) error {
+
+	// method
+	const method = "commitSpan"
+
 	// get validators bytes
 	validators := make([]valset.MinimalVal, 0, len(heimdallSpan.ValidatorSet.Validators))
 	for _, val := range heimdallSpan.ValidatorSet.Validators {
@@ -127,11 +129,11 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		producerBytes,
 	)
 	if err != nil {
-		log.Error("Unable to pack tx for commitSpan", "err", err)
+		log.Error("Unable to pack tx for commitSpan", "error", err)
 		return err
 	}
 
 	_, err = syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
-	// apply message
+
 	return err
 }
