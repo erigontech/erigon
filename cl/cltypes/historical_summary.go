@@ -25,6 +25,10 @@ func (h *HistoricalSummary) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (h *HistoricalSummary) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return h.DecodeSSZ(buf)
+}
+
 func (h *HistoricalSummary) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot([][32]byte{h.BlockSummaryRoot, h.StateSummaryRoot}, 2)
 }

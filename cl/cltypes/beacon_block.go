@@ -357,15 +357,12 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
 			return ssz_utils.ErrBadOffset
 		}
-		fmt.Println(len(buf[offsetExecution:endOffset]))
 		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], b.Version); err != nil {
 			return err
 		}
 	}
 
 	if b.Version >= clparams.CapellaVersion {
-		fmt.Println(blsChangesOffset)
-		fmt.Println(uint32(len(buf)))
 		if b.ExecutionChanges, err = ssz_utils.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(len(buf)), 172, MaxExecutionChanges); err != nil {
 			return err
 		}
