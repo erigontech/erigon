@@ -121,6 +121,10 @@ func (tx StarknetTransaction) Cost() *uint256.Int {
 	panic("implement me")
 }
 
+func (tx *StarknetTransaction) Unwrap() Transaction {
+	return tx
+}
+
 func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,

@@ -104,6 +104,10 @@ func (tx AccessListTx) Protected() bool {
 	return true
 }
 
+func (tx *AccessListTx) Unwrap() Transaction {
+	return tx
+}
+
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
 func (tx AccessListTx) EncodingSize() int {
 	payloadSize, _, _, _ := tx.payloadSize()

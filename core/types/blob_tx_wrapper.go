@@ -391,6 +391,7 @@ func (txw *BlobTxWrapper) GetSender() (libcommon.Address, bool)       { return t
 func (txw *BlobTxWrapper) SetSender(address libcommon.Address)        { txw.Tx.SetSender(address) }
 func (txw *BlobTxWrapper) IsContractDeploy() bool                     { return txw.Tx.IsContractDeploy() }
 func (txw *BlobTxWrapper) IsStarkNet() bool                           { return false }
+func (txw *BlobTxWrapper) Unwrap() Transaction                        { return &txw.Tx }
 
 func (txw BlobTxWrapper) EncodingSize() int {
 	envelopeSize := int(codec.ContainerLength(&txw.Tx, &txw.BlobKzgs, &txw.Blobs, &txw.KzgAggregatedProof))

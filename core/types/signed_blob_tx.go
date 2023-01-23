@@ -466,6 +466,10 @@ func (stx *SignedBlobTx) IsStarkNet() bool {
 	return false
 }
 
+func (stx *SignedBlobTx) Unwrap() Transaction {
+	return stx
+}
+
 func (stx SignedBlobTx) Protected() bool {
 	return true
 }
