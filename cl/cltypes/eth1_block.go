@@ -139,6 +139,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 		}
 		b.Body.Withdrawals = make([]*types.Withdrawal, withdrawalsCount)
 		for i := range b.Body.Withdrawals {
+			b.Body.Withdrawals[i] = new(types.Withdrawal)
 			b.Body.Withdrawals[i].DecodeSSZ(buf[(*withdrawalOffset)+uint32(i)*44:])
 		}
 		// Cache withdrawal root.

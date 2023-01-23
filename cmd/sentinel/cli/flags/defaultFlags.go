@@ -17,4 +17,5 @@ var CLDefaultFlags = []cli.Flag{
 	&BootnodesFlag,
 	&BeaconConfigFlag,
 	&GenesisSSZFlag,
+	&CheckpointSyncUrlFlag,
 }

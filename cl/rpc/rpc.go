@@ -204,7 +204,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		if respForkDigest == 0 {
 			return nil, fmt.Errorf("null fork digest")
 		}
-		var phase0ForkDigest, altairForkDigest, bellatrixForkDigest [4]byte
+		var phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest [4]byte
 		phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
 			utils.Uint32ToBytes4(b.beaconConfig.GenesisForkVersion),
 			b.genesisConfig.GenesisValidatorRoot,
@@ -229,6 +229,14 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 			return nil, err
 		}
 
+		capellaForkDigest, err = fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(b.beaconConfig.CapellaForkVersion),
+			b.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return nil, err
+		}
+
 		responseChunk := &cltypes.SignedBeaconBlock{}
 
 		switch respForkDigest {
@@ -238,6 +246,9 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.AltairVersion))
 		case utils.Bytes4ToUint32(bellatrixForkDigest):
 			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.BellatrixVersion))
+		case utils.Bytes4ToUint32(capellaForkDigest):
+			err = responseChunk.DecodeSSZWithVersion(raw, int(clparams.CapellaVersion))
+
 		default:
 			return nil, fmt.Errorf("received invalid fork digest")
 		}

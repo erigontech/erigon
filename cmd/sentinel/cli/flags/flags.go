@@ -73,4 +73,9 @@ var (
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
 		Value: "full",
 	}
+	CheckpointSyncUrlFlag = cli.StringFlag{
+		Name:  "checkpoint-sync-url",
+		Usage: "checkpoint sync endpoint",
+		Value: "",
+	}
 )

@@ -192,7 +192,7 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
 var CheckpointSyncEndpoints = map[NetworkType][]string{
 	MainnetNetwork: {
-		"https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate.ethstaker.cc",
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",

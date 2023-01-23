@@ -59,7 +59,11 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 
 	cfg.LogLvl = ctx.Uint(flags.Verbosity.Name)
 	cfg.NoDiscovery = ctx.Bool(flags.NoDiscovery.Name)
-	cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+	if ctx.String(flags.CheckpointSyncUrlFlag.Name) != "" {
+		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
+	} else {
+		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
 	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
