@@ -10,10 +10,9 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -569,12 +568,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
-		fromTxNum, err = rawdb.TxNums.Min(dbtx, fromBlock)
+		fromTxNum, err = rawdbv3.TxNums.Min(dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = rawdbv3.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
@@ -614,7 +613,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
 
-	stateReader := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 
@@ -644,6 +643,18 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
+			if lastHeader == nil {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(fmt.Errorf("header not found: %d", blockNum), stream)
+				stream.WriteObjectEnd()
+				continue
+			}
+
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)

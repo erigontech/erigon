@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -261,7 +262,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		// Internal search code considers blockNum [including], so adjust the value
 		fromBlockNum--
 	}
-	from, err := rawdb.TxNums.Max(tx, fromBlockNum)
+	from, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
 	if err != nil {
 		return nil, err
 	}

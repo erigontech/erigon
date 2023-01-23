@@ -16,7 +16,8 @@ import (
 type Eth1Block struct {
 	Header *types.Header
 	// Transactions can be kept in bytes.
-	Body *types.RawBody
+	Body    *types.RawBody
+	version clparams.StateVersion
 }
 
 func (b *Eth1Block) NumberU64() uint64 {

@@ -13,10 +13,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -306,12 +306,12 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	var fromTxNum, toTxNum uint64
 	var err error
 	if begin > 0 {
-		fromTxNum, err = rawdb.TxNums.Min(tx, begin)
+		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(tx, end)
+	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
 	if err != nil {
 		return err
 	}
@@ -440,7 +440,7 @@ type intraBlockExec struct {
 }
 
 func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader) *intraBlockExec {
-	stateReader := state.NewHistoryReaderV3(systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 	return &intraBlockExec{
 		engine:      engine,
@@ -809,22 +809,23 @@ func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isF
 		blockNumChanged = true
 
 		var ok bool
-		ok, blockNum, err = rawdb.TxNums.FindBlockNum(i.tx, txNum)
+		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
 		if err != nil {
 			return
 		}
 		if !ok {
-			return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
+			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
 		}
 	}
+	blockNum = i.blockNum
 
 	// if block number changed, calculate all related field
 	if blockNumChanged {
-		i.minTxNumInBlock, err = rawdb.TxNums.Min(i.tx, blockNum)
+		i.minTxNumInBlock, err = rawdbv3.TxNums.Min(i.tx, blockNum)
 		if err != nil {
 			return
 		}
-		i.maxTxNumInBlock, err = rawdb.TxNums.Max(i.tx, blockNum)
+		i.maxTxNumInBlock, err = rawdbv3.TxNums.Max(i.tx, blockNum)
 		if err != nil {
 			return
 		}
