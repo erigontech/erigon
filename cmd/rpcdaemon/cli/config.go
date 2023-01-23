@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -406,7 +407,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			stateCache = kvcache.NewDummy()
 		} else {
-			blockReader = snapshotsync.NewBlockReader()
+			blockReader = snapshotsync.NewBlockReader(false)
 			stateCache = kvcache.NewDummy()
 		}
 	}

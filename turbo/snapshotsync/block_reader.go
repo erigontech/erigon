@@ -20,10 +20,11 @@ import (
 
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
+	TransactionsV3 bool
 }
 
-func NewBlockReader() *BlockReader {
-	return &BlockReader{}
+func NewBlockReader(transactionsV3 bool) *BlockReader {
+	return &BlockReader{TransactionsV3: transactionsV3}
 }
 
 func (back *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (libcommon.Hash, error) {
@@ -109,7 +110,7 @@ func (back *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 		return nil, nil
 	}
 
-	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash, back.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}
@@ -763,7 +764,7 @@ func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv
 		return nil, nil
 	}
 
-	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash, false)
 	if err != nil {
 		return nil, err
 	}
