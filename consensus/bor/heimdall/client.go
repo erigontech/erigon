@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/metrics"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -214,15 +213,16 @@ retryLoop:
 	}
 }
 
+// TODO: Uncomment once metrics are added
 // Fetch fetches response from heimdall
 func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
-	isSuccessful := false
+	// isSuccessful := false
 
-	defer func() {
-		if metrics.EnabledExpensive {
-			sendMetrics(ctx, request.start, isSuccessful)
-		}
-	}()
+	// defer func() {
+	// 	if metrics.EnabledExpensive {
+	// 		sendMetrics(ctx, request.start, isSuccessful)
+	// 	}
+	// }()
 
 	result := new(T)
 
@@ -240,7 +240,7 @@ func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 		return nil, err
 	}
 
-	isSuccessful = true
+	// isSuccessful = true
 
 	return result, nil
 }
