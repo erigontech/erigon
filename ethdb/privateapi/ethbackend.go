@@ -319,7 +319,10 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
 		log.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
-		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
+		return &remote.EnginePayloadStatus{
+			Status:          remote.EngineStatus_INVALID,
+			ValidationError: "invalid block hash",
+		}, nil
 	}
 
 	for _, txn := range req.Transactions {
@@ -327,7 +330,6 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 			log.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
-				LatestValidHash: nil,
 				ValidationError: "typed txn marshalled as RLP string",
 			}, nil
 		}
@@ -338,7 +340,6 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		log.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
-			LatestValidHash: nil,
 			ValidationError: err.Error(),
 		}, nil
 	}
