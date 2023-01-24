@@ -98,7 +98,6 @@ var genesisDBLock *sync.Mutex
 
 func init() {
 	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
-	//genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(os.TempDir()).MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
 	genesisDBLock = &sync.Mutex{}
 }
 
