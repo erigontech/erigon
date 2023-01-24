@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
@@ -267,19 +268,43 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	for i := 0; i < 20; i++ {
-		if !s.hd.BeaconRequestList.IsWaiting() {
-			// This might happen, for example, in the following scenario:
-			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
-			// 2) We happily process NewPayload and stage loop is at the end.
-			// 3) We start processing ForkChoiceUpdated,
-			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
-			// and thus requestList.WaitForRequest() is not called yet.
-
-			// TODO(yperbasis): find a more elegant solution
-			time.Sleep(5 * time.Millisecond)
-		}
+	if s.hd.BeaconRequestList.IsWaiting() {
+		fmt.Println("returning early")
+		return false
 	}
+
+	waiter := make(chan struct{})
+
+	s.hd.BeaconRequestList.AddWaiter(waiter)
+
+	wg := sync.WaitGroup{}
+	ticker := time.NewTicker(1 * time.Second)
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				// timeout just exit
+				fmt.Println("hexo: timed out")
+				close(waiter)
+				wg.Done()
+				return
+			case <-waiter:
+				// now check if we're in the state we want, otherwise re-add the watcher and keep going
+				if s.hd.BeaconRequestList.IsWaiting() {
+					fmt.Println("hexo: now waiting")
+					close(waiter)
+					wg.Done()
+					return
+				} else {
+					fmt.Println("hexo: adding new waiter")
+					s.hd.BeaconRequestList.AddWaiter(waiter)
+				}
+			}
+		}
+	}()
+	wg.Wait()
+	ticker.Stop()
+
 	return !s.hd.BeaconRequestList.IsWaiting()
 }
 

@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
@@ -54,12 +55,16 @@ type RequestList struct {
 	interrupt Interrupt
 	waiting   uint32
 	syncCond  *sync.Cond
+	waiterMtx sync.Mutex
+	waiters   []chan struct{}
 }
 
 func NewRequestList() *RequestList {
 	rl := &RequestList{
-		requests: treemap.NewWithIntComparator(),
-		syncCond: sync.NewCond(&sync.Mutex{}),
+		requests:  treemap.NewWithIntComparator(),
+		syncCond:  sync.NewCond(&sync.Mutex{}),
+		waiterMtx: sync.Mutex{},
+		waiters:   make([]chan struct{}, 0),
 	}
 	return rl
 }
@@ -118,7 +123,11 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 	defer rl.syncCond.L.Unlock()
 
 	atomic.StoreUint32(&rl.waiting, 1)
-	defer atomic.StoreUint32(&rl.waiting, 0)
+	rl.notifyWaiters()
+	defer func() {
+		atomic.StoreUint32(&rl.waiting, 0)
+		rl.notifyWaiters()
+	}()
 
 	for {
 		interrupt = rl.interrupt
@@ -139,6 +148,21 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 
 func (rl *RequestList) IsWaiting() bool {
 	return atomic.LoadUint32(&rl.waiting) != 0
+}
+
+func (rl *RequestList) AddWaiter(c chan struct{}) {
+	rl.waiterMtx.Lock()
+	defer rl.waiterMtx.Unlock()
+	rl.waiters = append(rl.waiters, c)
+}
+
+func (rl *RequestList) notifyWaiters() {
+	rl.waiterMtx.Lock()
+	defer rl.waiterMtx.Unlock()
+	for _, c := range rl.waiters {
+		c <- struct{}{}
+	}
+	rl.waiters = make([]chan struct{}, 0)
 }
 
 func (rl *RequestList) Interrupt(kind Interrupt) {
