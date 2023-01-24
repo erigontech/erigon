@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -71,13 +72,12 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ, version 
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
-	expectedLn := val.EncodingSizeSSZ()
-	if encodedLn != uint64(expectedLn) {
-		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", expectedLn, encodedLn)
+	if encodedLn > uint64(16*datasize.MB) {
+		return fmt.Errorf("payload too big")
 	}
 
 	sr := snappy.NewReader(r)
-	raw := make([]byte, expectedLn)
+	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}

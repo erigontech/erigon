@@ -492,7 +492,7 @@ func (l *LightClientFinalityUpdate) DecodeSSZWithVersion(buf []byte, version int
 
 	var offsetAttested, offsetFinalized uint32
 	if l.version < clparams.CapellaVersion {
-		if err = l.AttestedHeader.DecodeSSZ(buf); err != nil {
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf, int(l.version)); err != nil {
 			return err
 		}
 		pos += l.AttestedHeader.EncodingSizeSSZ()
