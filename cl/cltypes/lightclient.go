@@ -47,7 +47,7 @@ func (l *LightClientHeader) DecodeSSZWithVersion(buf []byte, v int) error {
 		pos += length.Hash
 	}
 	l.HeaderEth1 = new(types.Header)
-	return l.HeaderEth1.DecodeSSZ(buf[pos:])
+	return l.HeaderEth1.DecodeSSZ(buf[pos:], l.version)
 }
 
 func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -78,7 +78,7 @@ func (l *LightClientHeader) EncodingSize() int {
 			l.HeaderEth1 = new(types.Header)
 		}
 		size += l.HeaderEth1.EncodingSize() + 4
-		size += length.Hash * 5
+		size += length.Hash * len(l.ExecutionBranch)
 	}
 	return size
 }
