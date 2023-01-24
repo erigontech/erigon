@@ -4,14 +4,84 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (
 	SyncCommitteeBranchLength = 5
 	FinalityBranchLength      = 6
+	ExecutionBranchLength     = 4
 )
+
+type LightClientHeader struct {
+	HeaderEth2      *BeaconBlockHeader
+	HeaderEth1      *types.Header
+	ExecutionBranch [ExecutionBranchLength]libcommon.Hash
+	version         clparams.StateVersion
+}
+
+func (l *LightClientHeader) DecodeSSZ([]byte) error {
+	panic("not implemnted")
+}
+
+func (l *LightClientHeader) DecodeSSZWithVersion(buf []byte, v int) error {
+	var (
+		err error
+	)
+	l.version = clparams.StateVersion(v)
+	l.HeaderEth2 = new(BeaconBlockHeader)
+	if err = l.HeaderEth2.DecodeSSZ(buf); err != nil {
+		return err
+	}
+	if l.version <= clparams.BellatrixVersion {
+		return nil
+	}
+	pos := l.HeaderEth2.EncodingSizeSSZ() + 4 // Skip the offset, assume it is at the end.
+	// Decode branch
+	for i := range l.ExecutionBranch {
+		copy(l.ExecutionBranch[i][:], buf[pos:])
+		pos += length.Hash
+	}
+	l.HeaderEth1 = new(types.Header)
+	return l.HeaderEth1.DecodeSSZ(buf[pos:])
+}
+
+func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
+	var (
+		err error
+		dst = buf
+	)
+	if dst, err = l.HeaderEth2.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
+	// Pre-capella is easy, encode only header.
+	if l.version < clparams.CapellaVersion {
+		return dst, nil
+	}
+	// Post-Capella
+	offset := uint32(l.HeaderEth2.EncodingSizeSSZ() + len(l.ExecutionBranch)*length.Hash + 4)
+	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
+	for _, root := range l.ExecutionBranch {
+		dst = append(dst, root[:]...)
+	}
+	return l.HeaderEth1.EncodeSSZ(dst)
+}
+
+func (l *LightClientHeader) EncodingSize() int {
+	size := 112
+	if l.version >= clparams.CapellaVersion {
+		if l.HeaderEth1 == nil {
+			l.HeaderEth1 = new(types.Header)
+		}
+		size += l.HeaderEth1.EncodingSize() + 4
+		size += length.Hash * 5
+	}
+	return size
+}
 
 // LightClientBootstrap is used to bootstrap the lightclient from checkpoint sync.
 type LightClientBootstrap struct {
