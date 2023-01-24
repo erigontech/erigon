@@ -32,10 +32,7 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	var enc []byte
-	var ok bool
-	var err error
-	enc, ok, err = hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -77,7 +74,27 @@ func (hr *HistoryReaderV3) ReadAccountCodeSize(address libcommon.Address, incarn
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
-	return 0, nil
+	enc, ok, err := hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	if err != nil || !ok || len(enc) == 0 {
+		if hr.trace {
+			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)
+		}
+		return 0, err
+	}
+	var a accounts.Account
+	if err := a.DecodeForStorage(enc); err != nil {
+		return 0, fmt.Errorf("ReadAccountIncarnation(%x): %w", address, err)
+	}
+	if a.Incarnation == 0 {
+		if hr.trace {
+			fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, 0)
+		}
+		return 0, nil
+	}
+	if hr.trace {
+		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, a.Incarnation-1)
+	}
+	return a.Incarnation - 1, nil
 }
 
 /*

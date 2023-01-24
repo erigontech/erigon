@@ -116,16 +116,16 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, historyV3 bool, chainName string) (state.StateReader, error) {
 	if !historyV3 {
 		r := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainName])
-		r.SetTrace(true)
+		//r.SetTrace(true)
 		return r, nil
 	}
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
-	r.SetTrace(true)
+	//r.SetTrace(true)
 	minTxNum, err := rawdbv3.TxNums.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(minTxNum + txnIndex)
+	r.SetTxNum(minTxNum + txnIndex + 1)
 	return r, nil
 }

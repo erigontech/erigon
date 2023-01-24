@@ -248,6 +248,9 @@ func (s *PlainState) ReadAccountIncarnation(address libcommon.Address) (uint64, 
 		return 0, err
 	}
 	if len(enc) == 0 {
+		if s.trace {
+			fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, 0)
+		}
 		return 0, nil
 	}
 	var acc accounts.Account
@@ -255,7 +258,13 @@ func (s *PlainState) ReadAccountIncarnation(address libcommon.Address) (uint64, 
 		return 0, err
 	}
 	if acc.Incarnation == 0 {
+		if s.trace {
+			fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, 0)
+		}
 		return 0, nil
+	}
+	if s.trace {
+		fmt.Printf("ReadAccountIncarnation [%x] => [%d]\n", address, acc.Incarnation-1)
 	}
 	return acc.Incarnation - 1, nil
 }
