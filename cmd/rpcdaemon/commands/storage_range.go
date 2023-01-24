@@ -35,7 +35,6 @@ func storageRangeAt(stateReader walker, contractAddress libcommon.Address, start
 
 	if err := stateReader.ForEachStorage(contractAddress, libcommon.BytesToHash(start), func(key, seckey libcommon.Hash, value uint256.Int) bool {
 		if resultCount < maxResult {
-			fmt.Printf("res: %x, %x\n", key, value.Bytes32())
 			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 		} else {
 			result.NextKey = &key
