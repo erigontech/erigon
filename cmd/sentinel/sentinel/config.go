@@ -59,7 +59,7 @@ func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 		if err != nil {
 			return err
 		}
-		log.Debug("ECDSA private key generated")
+		log.Debug("[Sentinel] ECDSA private key generated")
 		return cfg.Apply(libp2p.Identity(ifaceKey))
 	}
 }

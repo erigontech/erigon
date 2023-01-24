@@ -6,22 +6,27 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/rpc/consensusrpc"
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+const maxMessageSize = 437323800
+
 type ServerConfig struct {
 	Network string
 	Addr    string
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig, creds credentials.TransportCredentials) (consensusrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, rule handshake.RuleFunc) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := sentinel.New(context.Background(), cfg)
+	sent, err := sentinel.New(context.Background(), cfg, db, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +35,8 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig, cr
 	}
 	gossip_topics := []sentinel.GossipTopic{
 		sentinel.BeaconBlockSsz,
-		sentinel.BeaconAggregateAndProofSsz,
+		// Cause problem due to buggy msg id will uncomment in the future.
+		//sentinel.BeaconAggregateAndProofSsz,
 		sentinel.VoluntaryExitSsz,
 		sentinel.ProposerSlashingSsz,
 		sentinel.AttesterSlashingSsz,
@@ -41,16 +47,18 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, srvCfg *ServerConfig, cr
 		// now lets separately connect to the gossip topics. this joins the room
 		subscriber, err := sent.SubscribeGossip(v)
 		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		err = subscriber.Listen()
 		if err != nil {
-			log.Error("failed to start sentinel", "err", err)
+			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	log.Info("Sentinel started", "enr", sent.String())
-
+	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
+	if initialStatus != nil {
+		sent.SetStatus(initialStatus)
+	}
 	server := NewSentinelServer(ctx, sent)
 	if creds == nil {
 		creds = insecure.NewCredentials()
@@ -64,18 +72,18 @@ WaitingLoop:
 		case <-timeOutTimer.C:
 			return nil, fmt.Errorf("[Server] timeout beginning server")
 		default:
-			if _, err := server.GetPeers(ctx, &consensusrpc.EmptyRequest{}); err == nil {
+			if _, err := server.GetPeers(ctx, &sentinelrpc.EmptyMessage{}); err == nil {
 				break WaitingLoop
 			}
 		}
 	}
 
-	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds))
+	conn, err := grpc.DialContext(ctx, srvCfg.Addr, grpc.WithTransportCredentials(creds), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize)))
 	if err != nil {
 		return nil, err
 	}
 
-	return consensusrpc.NewSentinelClient(conn), nil
+	return sentinelrpc.NewSentinelClient(conn), nil
 }
 
 func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.TransportCredentials) {
@@ -87,7 +95,7 @@ func StartServe(server *SentinelServer, srvCfg *ServerConfig, creds credentials.
 	gRPCserver := grpc.NewServer(grpc.Creds(creds))
 	go server.ListenToGossip()
 	// Regiser our server as a gRPC server
-	consensusrpc.RegisterSentinelServer(gRPCserver, server)
+	sentinelrpc.RegisterSentinelServer(gRPCserver, server)
 	if err := gRPCserver.Serve(lis); err != nil {
 		log.Warn("[Sentinel] could not serve service", "reason", err)
 	}

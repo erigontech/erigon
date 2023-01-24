@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 
 	jsoniter "github.com/json-iterator/go"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -16,14 +17,14 @@ import (
 type TraceAPI interface {
 	// Ad-hoc (see ./trace_adhoc.go)
 	ReplayBlockTransactions(ctx context.Context, blockNr rpc.BlockNumberOrHash, traceTypes []string) ([]*TraceCallResult, error)
-	ReplayTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) (*TraceCallResult, error)
+	ReplayTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) (*TraceCallResult, error)
 	Call(ctx context.Context, call TraceCallParam, types []string, blockNr *rpc.BlockNumberOrHash) (*TraceCallResult, error)
 	CallMany(ctx context.Context, calls json.RawMessage, blockNr *rpc.BlockNumberOrHash) ([]*TraceCallResult, error)
-	RawTransaction(ctx context.Context, txHash common.Hash, traceTypes []string) ([]interface{}, error)
+	RawTransaction(ctx context.Context, txHash libcommon.Hash, traceTypes []string) ([]interface{}, error)
 
 	// Filtering (see ./trace_filtering.go)
-	Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error)
-	Get(ctx context.Context, txHash common.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
+	Transaction(ctx context.Context, txHash libcommon.Hash) (ParityTraces, error)
+	Get(ctx context.Context, txHash libcommon.Hash, txIndicies []hexutil.Uint64) (*ParityTrace, error)
 	Block(ctx context.Context, blockNr rpc.BlockNumber) (ParityTraces, error)
 	Filter(ctx context.Context, req TraceFilterRequest, stream *jsoniter.Stream) error
 }

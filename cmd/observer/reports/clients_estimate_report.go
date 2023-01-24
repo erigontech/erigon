@@ -88,6 +88,7 @@ func waldInterval(n uint, ns uint, z float64) (float64, float64) {
 
 func (report *ClientsEstimateReport) String() string {
 	var builder strings.Builder
+	builder.Grow(2 * len(report.Clients))
 	for _, client := range report.Clients {
 		builder.WriteString(fmt.Sprintf("%6d - %-6d %s", client.CountLow, client.CountHigh, client.Name))
 		builder.WriteRune('\n')

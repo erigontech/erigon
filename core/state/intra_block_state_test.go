@@ -32,8 +32,9 @@ import (
 	"testing/quick"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -60,10 +61,10 @@ func TestSnapshotRandom(t *testing.T) {
 // accessor methods on the reverted state must match the return value of the equivalent
 // methods on the replayed state.
 type snapshotTest struct {
-	addrs     []common.Address // all account addresses
-	actions   []testAction     // modifications to the state
-	snapshots []int            // actions indexes at which snapshot is taken
-	err       error            // failure details are reported through this field
+	addrs     []libcommon.Address // all account addresses
+	actions   []testAction        // modifications to the state
+	snapshots []int               // actions indexes at which snapshot is taken
+	err       error               // failure details are reported through this field
 }
 
 type testAction struct {
@@ -74,7 +75,7 @@ type testAction struct {
 }
 
 // newTestAction creates a random action that changes state.
-func newTestAction(addr common.Address, r *rand.Rand) testAction {
+func newTestAction(addr libcommon.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
@@ -100,7 +101,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		{
 			name: "SetState",
 			fn: func(a testAction, s *IntraBlockState) {
-				var key common.Hash
+				var key libcommon.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
 				s.SetState(addr, &key, *val)
@@ -124,9 +125,9 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			},
 		},
 		{
-			name: "Suicide",
+			name: "Selfdestruct",
 			fn: func(a testAction, s *IntraBlockState) {
-				s.Suicide(addr)
+				s.Selfdestruct(addr)
 			},
 		},
 		{
@@ -156,7 +157,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 			name: "AddSlotToAccessList",
 			fn: func(a testAction, s *IntraBlockState) {
 				s.AddSlotToAccessList(addr,
-					common.Hash{byte(a.args[0])})
+					libcommon.Hash{byte(a.args[0])})
 			},
 			args: make([]int64, 1),
 		},
@@ -178,7 +179,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 // derived from r.
 func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	// Generate random actions.
-	addrs := make([]common.Address, 50)
+	addrs := make([]libcommon.Address, 50)
 	for i := range addrs {
 		addrs[i][0] = byte(i)
 	}
@@ -225,7 +226,7 @@ func (test *snapshotTest) run() bool {
 	}
 	defer tx.Rollback()
 	var (
-		ds           = NewPlainState(tx, 1)
+		ds           = NewPlainState(tx, 1, nil)
 		state        = New(ds)
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
@@ -240,7 +241,7 @@ func (test *snapshotTest) run() bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkds := NewPlainState(tx, 1)
+		checkds := NewPlainState(tx, 1, nil)
 		checkstate := New(checkds)
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
@@ -277,7 +278,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		if !checkeq("Exist", state.Exist(addr), checkstate.Exist(addr)) {
 			return err
 		}
-		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
+		checkeq("HasSelfdestructed", state.HasSelfdestructed(addr), checkstate.HasSelfdestructed(addr))
 		checkeqBigInt("GetBalance", state.GetBalance(addr).ToBig(), checkstate.GetBalance(addr).ToBig())
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
 		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))
@@ -308,9 +309,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 		return fmt.Errorf("got GetRefund() == %d, want GetRefund() == %d",
 			state.GetRefund(), checkstate.GetRefund())
 	}
-	if !reflect.DeepEqual(state.GetLogs(common.Hash{}), checkstate.GetLogs(common.Hash{})) {
-		return fmt.Errorf("got GetLogs(common.Hash{}) == %v, want GetLogs(common.Hash{}) == %v",
-			state.GetLogs(common.Hash{}), checkstate.GetLogs(common.Hash{}))
+	if !reflect.DeepEqual(state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{})) {
+		return fmt.Errorf("got GetLogs(libcommon.Hash{}) == %v, want GetLogs(libcommon.Hash{}) == %v",
+			state.GetLogs(libcommon.Hash{}), checkstate.GetLogs(libcommon.Hash{}))
 	}
 	return nil
 }

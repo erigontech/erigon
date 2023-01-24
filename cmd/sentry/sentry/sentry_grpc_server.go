@@ -19,27 +19,27 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	proto_types "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/debug"
-	"github.com/ledgerwatch/erigon/core/forkid"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
-	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/common/debug"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/dnsdisc"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 const (
@@ -105,6 +105,7 @@ func (bp *PeersByMinBlock) Pop() interface{} {
 	old := *bp
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = PeerRef{}
 	*bp = old[0 : n-1]
 	return x
 }
@@ -243,7 +244,7 @@ func ConvertH512ToPeerID(h512 *proto_types.H512) [64]byte {
 
 func makeP2PServer(
 	p2pConfig p2p.Config,
-	genesisHash common.Hash,
+	genesisHash libcommon.Hash,
 	protocol p2p.Protocol,
 ) (*p2p.Server, error) {
 	var urls []string
@@ -270,7 +271,7 @@ func handShake(
 	rw p2p.MsgReadWriter,
 	version uint,
 	minVersion uint,
-	startSync func(bestHash common.Hash) error,
+	startSync func(bestHash libcommon.Hash) error,
 ) error {
 	if status == nil {
 		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
@@ -291,7 +292,7 @@ func handShake(
 			TD:              ourTD.ToBig(),
 			Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 			Genesis:         genesisHash,
-			ForkID:          forkid.NewIDFromForks(status.ForkData.Forks, genesisHash, status.MaxBlock),
+			ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
 		}
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
@@ -503,8 +504,11 @@ func runPeer(
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
+		case 11:
+			// Ignore
+			// TODO: Investigate why BSC peers for eth/67 send these messages
 		default:
-			log.Error(fmt.Sprintf("[%s] Unknown message code: %d", peerID, msg.Code))
+			log.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%x", msg.Code, peerID))
 		}
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -572,7 +576,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
-			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash common.Hash) error {
+			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return ss.startSync(ctx, bestHash, peerID)
@@ -689,7 +693,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 	})
 }
 
-func (ss *GrpcServer) startSync(ctx context.Context, bestHash common.Hash, peerID [64]byte) error {
+func (ss *GrpcServer) startSync(ctx context.Context, bestHash libcommon.Hash, peerID [64]byte) error {
 	switch ss.Protocol.Version {
 	case eth.ETH66, eth.ETH67:
 		b, err := rlp.EncodeToBytes(&eth.GetBlockHeadersPacket66{
@@ -732,6 +736,16 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	return &emptypb.Empty{}, nil
 }
 
+func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUselessRequest) (*emptypb.Empty, error) {
+	peerID := ConvertH512ToPeerID(req.PeerId)
+	peerInfo := ss.getPeer(peerID)
+	if ss.statusData != nil && !ss.statusData.PassivePeers && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+		ss.removePeer(peerID)
+		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID)[:8], "name", peerInfo.peer.Name())
+	}
+	return &emptypb.Empty{}, nil
+}
+
 func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	// Choose peer(s) that we can send this request to, with maximum number of permits
 	now := time.Now()
@@ -769,6 +783,28 @@ func (ss *GrpcServer) findBestPeersWithPermit(peerCount int) []*PeerInfo {
 	return foundPeers
 }
 
+func (ss *GrpcServer) findPeerByMinBlock(minBlock uint64) (*PeerInfo, bool) {
+	// Choose a peer that we can send this request to, with maximum number of permits
+	var foundPeerInfo *PeerInfo
+	var maxPermits int
+	now := time.Now()
+	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+		if peerInfo.Height() >= minBlock {
+			deadlines := peerInfo.ClearDeadlines(now, false /* givePermit */)
+			//fmt.Printf("%d deadlines for peer %s\n", deadlines, peerID)
+			if deadlines < maxPermitsPerPeer {
+				permits := maxPermitsPerPeer - deadlines
+				if permits > maxPermits {
+					maxPermits = permits
+					foundPeerInfo = peerInfo
+				}
+			}
+		}
+		return true
+	})
+	return foundPeerInfo, maxPermits > 0
+}
+
 func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	reply := &proto_sentry.SentPeers{}
 	msgcode := eth.FromProto[ss.Protocol.Version][inreq.Data.Id]
@@ -776,6 +812,14 @@ func (ss *GrpcServer) SendMessageByMinBlock(_ context.Context, inreq *proto_sent
 		msgcode != eth.GetBlockBodiesMsg &&
 		msgcode != eth.GetPooledTransactionsMsg {
 		return reply, fmt.Errorf("sendMessageByMinBlock not implemented for message Id: %s", inreq.Data.Id)
+	}
+	if inreq.MaxPeers == 1 {
+		peerInfo, found := ss.findPeerByMinBlock(inreq.MinBlock)
+		if found {
+			ss.writePeer("sendMessageByMinBlock", peerInfo, msgcode, inreq.Data.Data, 30*time.Second)
+			reply.Peers = []*proto_types.H512{gointerfaces.ConvertHashToH512(peerInfo.ID())}
+			return reply, nil
+		}
 	}
 	peerInfos := ss.findBestPeersWithPermit(int(inreq.MaxPeers))
 	reply.Peers = make([]*proto_types.H512, len(peerInfos))
@@ -824,25 +868,27 @@ func (ss *GrpcServer) SendMessageToRandomPeers(ctx context.Context, req *proto_s
 		return reply, fmt.Errorf("sendMessageToRandomPeers not implemented for message Id: %s", req.Data.Id)
 	}
 
-	amount := uint64(0)
+	peerInfos := make([]*PeerInfo, 0, 32) // 32 gives capacity for 1024 peers, well beyond default
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
-		amount++
+		peerInfos = append(peerInfos, peerInfo)
 		return true
 	})
-	if req.MaxPeers < amount {
-		amount = req.MaxPeers
+	rand.Shuffle(len(peerInfos), func(i int, j int) {
+		peerInfos[i], peerInfos[j] = peerInfos[j], peerInfos[i]
+	})
+	peersToSendCount := len(peerInfos)
+	if peersToSendCount > 0 {
+		peerCountConstrained := math.Min(float64(len(peerInfos)), float64(req.MaxPeers))
+		// Ensure we have at least 1 peer during our sqrt operation
+		peersToSendCount = int(math.Max(math.Sqrt(peerCountConstrained), 1.0))
 	}
 
-	// Send the block to a subset of our peers
-	sendToAmount := int(math.Sqrt(float64(amount)))
-	i := 0
 	var lastErr error
-	ss.rangePeers(func(peerInfo *PeerInfo) bool {
+	// Send the block to a subset of our peers at random
+	for _, peerInfo := range peerInfos[:peersToSendCount] {
 		ss.writePeer("sendMessageToRandomPeers", peerInfo, msgcode, req.Data.Data, 0)
 		reply.Peers = append(reply.Peers, gointerfaces.ConvertHashToH512(peerInfo.ID()))
-		i++
-		return i < sendToAmount
-	})
+	}
 	return reply, lastErr
 }
 
@@ -911,8 +957,8 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 		ss.P2pServer = srv
 	}
 
-	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.Forks, genesisHash, statusData.MaxBlock))
-	if ss.statusData == nil || statusData.MaxBlock != 0 {
+	ss.P2pServer.LocalNode().Set(eth.CurrentENREntryFromForks(statusData.ForkData.HeightForks, statusData.ForkData.TimeForks, genesisHash, statusData.MaxBlockHeight, statusData.MaxBlockTime))
+	if ss.statusData == nil || statusData.MaxBlockHeight != 0 {
 		// Not overwrite statusData if the message contains zero MaxBlock (comes from standalone transaction pool)
 		ss.statusData = statusData
 	}

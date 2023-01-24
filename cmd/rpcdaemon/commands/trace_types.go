@@ -3,7 +3,8 @@ package commands
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -37,16 +38,16 @@ type GethTraces []*GethTrace
 // ParityTrace A trace in the desired format (Parity/OpenEtherum) See: https://openethereum.github.io/wiki/JSONRPC-trace-module
 type ParityTrace struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Action              interface{}  `json:"action"` // Can be either CallTraceAction or CreateTraceAction
-	BlockHash           *common.Hash `json:"blockHash,omitempty"`
-	BlockNumber         *uint64      `json:"blockNumber,omitempty"`
-	Error               string       `json:"error,omitempty"`
-	Result              interface{}  `json:"result"`
-	Subtraces           int          `json:"subtraces"`
-	TraceAddress        []int        `json:"traceAddress"`
-	TransactionHash     *common.Hash `json:"transactionHash,omitempty"`
-	TransactionPosition *uint64      `json:"transactionPosition,omitempty"`
-	Type                string       `json:"type"`
+	Action              interface{}     `json:"action"` // Can be either CallTraceAction or CreateTraceAction
+	BlockHash           *libcommon.Hash `json:"blockHash,omitempty"`
+	BlockNumber         *uint64         `json:"blockNumber,omitempty"`
+	Error               string          `json:"error,omitempty"`
+	Result              interface{}     `json:"result"`
+	Subtraces           int             `json:"subtraces"`
+	TraceAddress        []int           `json:"traceAddress"`
+	TransactionHash     *libcommon.Hash `json:"transactionHash,omitempty"`
+	TransactionPosition *uint64         `json:"transactionPosition,omitempty"`
+	Type                string          `json:"type"`
 }
 
 // ParityTraces An array of parity traces
@@ -55,53 +56,53 @@ type ParityTraces []ParityTrace
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Author         string         `json:"author,omitempty"`
-	RewardType     string         `json:"rewardType,omitempty"`
-	SelfDestructed string         `json:"address,omitempty"`
-	Balance        string         `json:"balance,omitempty"`
-	CallType       string         `json:"callType,omitempty"`
-	From           common.Address `json:"from"`
-	Gas            hexutil.Big    `json:"gas"`
-	Init           hexutil.Bytes  `json:"init,omitempty"`
-	Input          hexutil.Bytes  `json:"input,omitempty"`
-	RefundAddress  string         `json:"refundAddress,omitempty"`
-	To             string         `json:"to,omitempty"`
-	Value          string         `json:"value,omitempty"`
+	Author         string            `json:"author,omitempty"`
+	RewardType     string            `json:"rewardType,omitempty"`
+	SelfDestructed string            `json:"address,omitempty"`
+	Balance        string            `json:"balance,omitempty"`
+	CallType       string            `json:"callType,omitempty"`
+	From           libcommon.Address `json:"from"`
+	Gas            hexutil.Big       `json:"gas"`
+	Init           hexutil.Bytes     `json:"init,omitempty"`
+	Input          hexutil.Bytes     `json:"input,omitempty"`
+	RefundAddress  string            `json:"refundAddress,omitempty"`
+	To             string            `json:"to,omitempty"`
+	Value          string            `json:"value,omitempty"`
 }
 
 type CallTraceAction struct {
-	From     common.Address `json:"from"`
-	CallType string         `json:"callType"`
-	Gas      hexutil.Big    `json:"gas"`
-	Input    hexutil.Bytes  `json:"input"`
-	To       common.Address `json:"to"`
-	Value    hexutil.Big    `json:"value"`
+	From     libcommon.Address `json:"from"`
+	CallType string            `json:"callType"`
+	Gas      hexutil.Big       `json:"gas"`
+	Input    hexutil.Bytes     `json:"input"`
+	To       libcommon.Address `json:"to"`
+	Value    hexutil.Big       `json:"value"`
 }
 
 type CreateTraceAction struct {
-	From  common.Address `json:"from"`
-	Gas   hexutil.Big    `json:"gas"`
-	Init  hexutil.Bytes  `json:"init"`
-	Value hexutil.Big    `json:"value"`
+	From  libcommon.Address `json:"from"`
+	Gas   hexutil.Big       `json:"gas"`
+	Init  hexutil.Bytes     `json:"init"`
+	Value hexutil.Big       `json:"value"`
 }
 
 type SuicideTraceAction struct {
-	Address       common.Address `json:"address"`
-	RefundAddress common.Address `json:"refundAddress"`
-	Balance       hexutil.Big    `json:"balance"`
+	Address       libcommon.Address `json:"address"`
+	RefundAddress libcommon.Address `json:"refundAddress"`
+	Balance       hexutil.Big       `json:"balance"`
 }
 
 type RewardTraceAction struct {
-	Author     common.Address `json:"author"`
-	RewardType string         `json:"rewardType"`
-	Value      hexutil.Big    `json:"value,omitempty"`
+	Author     libcommon.Address `json:"author"`
+	RewardType string            `json:"rewardType"`
+	Value      hexutil.Big       `json:"value,omitempty"`
 }
 
 type CreateTraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	Address *common.Address `json:"address,omitempty"`
-	Code    hexutil.Bytes   `json:"code"`
-	GasUsed *hexutil.Big    `json:"gasUsed"`
+	Address *libcommon.Address `json:"address,omitempty"`
+	Code    hexutil.Bytes      `json:"code"`
+	GasUsed *hexutil.Big       `json:"gasUsed"`
 }
 
 // TraceResult A parity formatted trace result
@@ -154,7 +155,7 @@ func (t ParityTrace) String() string {
 
 // Takes a hierarchical Geth trace with fields of different meaning stored in the same named fields depending on 'type'. Parity traces
 // are flattened depth first and each field is put in its proper place
-func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash common.Hash, blockNumber uint64, tx types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
+func (api *TraceAPIImpl) convertToParityTrace(gethTrace GethTrace, blockHash libcommon.Hash, blockNumber uint64, tx types.Transaction, txIndex uint64, depth []int) ParityTraces { //nolint: unused
 	var traces ParityTraces // nolint prealloc
 	return traces
 }

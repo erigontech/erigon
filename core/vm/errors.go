@@ -32,7 +32,6 @@ var (
 	ErrInsufficientBalance      = errors.New("insufficient balance for transfer")
 	ErrContractAddressCollision = errors.New("contract address collision")
 	ErrExecutionReverted        = errors.New("execution reverted")
-	ErrMaxInitCodeSizeExceeded  = errors.New("max initcode size exceeded")
 	ErrMaxCodeSizeExceeded      = errors.New("max code size exceeded")
 	ErrInvalidJump              = errors.New("invalid jump destination")
 	ErrWriteProtection          = errors.New("write protection")
@@ -42,6 +41,10 @@ var (
 	ErrReturnStackExceeded      = errors.New("return stack limit reached")
 	ErrInvalidCode              = errors.New("invalid code")
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
+
+	// errStopToken is an internal token indicating interpreter loop termination,
+	// never returned to outside callers.
+	errStopToken = errors.New("stop token")
 )
 
 // ErrStackUnderflow wraps an evm error when the items on the stack less

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/urfave/cli/v2"
+
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
-
-	"github.com/urfave/cli"
 )
 
 // defining a custom command-line flag, a string
@@ -25,7 +25,7 @@ const (
 func main() {
 	// initializing Erigon application here and providing our custom flag
 	app := erigonapp.MakeApp(runErigon,
-		append(erigoncli.DefaultFlags, flag), // always use DefaultFlags, but add a new one in the end.
+		append(erigoncli.DefaultFlags, &flag), // always use DefaultFlags, but add a new one in the end.
 	)
 	if err := app.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -34,7 +34,7 @@ func main() {
 }
 
 // Erigon main function
-func runErigon(ctx *cli.Context) {
+func runErigon(ctx *cli.Context) error {
 	// running a node and initializing a custom bucket with all default settings
 	//eri := node.New(ctx, node.Params{
 	//	CustomBuckets: map[string]dbutils.BucketConfigItem{
@@ -46,5 +46,7 @@ func runErigon(ctx *cli.Context) {
 
 	//if err != nil {
 	//	log.Error("error while serving a Erigon node", "err", err)
+	//  return err
 	//}
+	return nil
 }

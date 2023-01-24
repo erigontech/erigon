@@ -24,15 +24,16 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/require"
-	"golang.org/x/crypto/sha3"
 )
 
 // Tests block header storage and retrieval operations.
@@ -57,7 +58,7 @@ func TestHeaderStorage(t *testing.T) {
 		hasher := sha3.NewLegacyKeccak256()
 		hasher.Write(entry)
 
-		if hash := common.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
+		if hash := libcommon.BytesToHash(hasher.Sum(nil)); hash != header.Hash() {
 			t.Fatalf("Retrieved RLP header mismatch: have %v, want %v", entry, header)
 		}
 	}
@@ -95,7 +96,7 @@ func TestBodyStorage(t *testing.T) {
 	// Create a test body to move around the database and make sure it's really new
 	hasher := sha3.NewLegacyKeccak256()
 	_ = rlp.Encode(hasher, body)
-	hash := common.BytesToHash(hasher.Sum(nil))
+	hash := libcommon.BytesToHash(hasher.Sum(nil))
 
 	if entry := ReadCanonicalBodyWithTransactions(tx, hash, 0); entry != nil {
 		t.Fatalf("Non existent body returned: %v", entry)
@@ -112,7 +113,7 @@ func TestBodyStorage(t *testing.T) {
 		hasher := sha3.NewLegacyKeccak256()
 		hasher.Write(entry)
 
-		if calc := common.BytesToHash(hasher.Sum(nil)); calc != hash {
+		if calc := libcommon.BytesToHash(hasher.Sum(nil)); calc != hash {
 			t.Fatalf("Retrieved RLP body mismatch: have %v, want %v", entry, body)
 		}
 	}
@@ -238,7 +239,7 @@ func TestTdStorage(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	// Create a test TD to move around the database and make sure it's really new
-	hash, td := common.Hash{}, big.NewInt(314)
+	hash, td := libcommon.Hash{}, big.NewInt(314)
 	entry, err := ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
@@ -279,12 +280,12 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
 	// Create a test canonical number and assinged hash to move around
-	hash, number := common.Hash{0: 0xff}, uint64(314)
+	hash, number := libcommon.Hash{0: 0xff}, uint64(314)
 	entry, err := ReadCanonicalHash(tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry != (common.Hash{}) {
+	if entry != (libcommon.Hash{}) {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
@@ -296,7 +297,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry == (common.Hash{}) {
+	if entry == (libcommon.Hash{}) {
 		t.Fatalf("Stored canonical mapping not found")
 	} else if entry != hash {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
@@ -310,7 +311,7 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if entry != (common.Hash{}) {
+	if entry != (libcommon.Hash{}) {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
 	}
 }
@@ -323,10 +324,10 @@ func TestHeadStorage(t *testing.T) {
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
 
 	// Check that no head entries are in a pristine database
-	if entry := ReadHeadHeaderHash(db); entry != (common.Hash{}) {
+	if entry := ReadHeadHeaderHash(db); entry != (libcommon.Hash{}) {
 		t.Fatalf("Non head header entry returned: %v", entry)
 	}
-	if entry := ReadHeadBlockHash(db); entry != (common.Hash{}) {
+	if entry := ReadHeadBlockHash(db); entry != (libcommon.Hash{}) {
 		t.Fatalf("Non head block entry returned: %v", entry)
 	}
 	// Assign separate entries for the head header and block
@@ -348,8 +349,8 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require := require.New(t)
 
 	// Create a live block since we need metadata to reconstruct the receipt
-	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
-	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
+	tx1 := types.NewTransaction(1, libcommon.HexToAddress("0x1"), u256.Num1, 1, u256.Num1, nil)
+	tx2 := types.NewTransaction(2, libcommon.HexToAddress("0x2"), u256.Num2, 2, u256.Num2, nil)
 
 	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
 
@@ -358,24 +359,24 @@ func TestBlockReceiptStorage(t *testing.T) {
 		Status:            types.ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
 		Logs: []*types.Log{
-			{Address: common.BytesToAddress([]byte{0x11})},
-			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
+			{Address: libcommon.BytesToAddress([]byte{0x11})},
+			{Address: libcommon.BytesToAddress([]byte{0x01, 0x11})},
 		},
 		TxHash:          tx1.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x01, 0x11, 0x11}),
 		GasUsed:         111111,
 	}
 	//receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 
 	receipt2 := &types.Receipt{
-		PostState:         common.Hash{2}.Bytes(),
+		PostState:         libcommon.Hash{2}.Bytes(),
 		CumulativeGasUsed: 2,
 		Logs: []*types.Log{
-			{Address: common.BytesToAddress([]byte{0x22})},
-			{Address: common.BytesToAddress([]byte{0x02, 0x22})},
+			{Address: libcommon.BytesToAddress([]byte{0x22})},
+			{Address: libcommon.BytesToAddress([]byte{0x02, 0x22})},
 		},
 		TxHash:          tx2.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+		ContractAddress: libcommon.BytesToAddress([]byte{0x02, 0x22, 0x22}),
 		GasUsed:         222222,
 	}
 	//receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
@@ -383,7 +384,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	header := &types.Header{Number: big.NewInt(0)}
 
 	// Check that no receipt entries are in a pristine database
-	hash := header.Hash() //common.BytesToHash([]byte{0x03, 0x14})
+	hash := header.Hash() //libcommon.BytesToHash([]byte{0x03, 0x14})
 	b, senders, err := ReadBlockWithSenders(tx, hash, 0)
 	require.NoError(err)
 	//require.NotNil(t, b)
@@ -432,6 +433,185 @@ func TestBlockReceiptStorage(t *testing.T) {
 	if rs := ReadReceipts(tx, b, senders); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
+}
+
+// Tests block storage and retrieval operations with withdrawals.
+func TestBlockWithdrawalsStorage(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+
+	// create fake withdrawals
+	w := types.Withdrawal{
+		Index:     uint64(15),
+		Validator: uint64(5500),
+		Address:   libcommon.Address{0: 0xff},
+		Amount:    1000,
+	}
+
+	w2 := types.Withdrawal{
+		Index:     uint64(16),
+		Validator: uint64(5501),
+		Address:   libcommon.Address{0: 0xff},
+		Amount:    1001,
+	}
+
+	withdrawals := make([]*types.Withdrawal, 0)
+	withdrawals = append(withdrawals, &w)
+	withdrawals = append(withdrawals, &w2)
+
+	// Create a test block to move around the database and make sure it's really new
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:      big.NewInt(1),
+		Extra:       []byte("test block"),
+		UncleHash:   types.EmptyUncleHash,
+		TxHash:      types.EmptyRootHash,
+		ReceiptHash: types.EmptyRootHash,
+	})
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Non existent block returned: %v", entry)
+	}
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Non existent header returned: %v", entry)
+	}
+	if entry := ReadCanonicalBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Non existent body returned: %v", entry)
+	}
+
+	// Write withdrawals to block
+	wBlock := types.NewBlockFromStorage(block.Hash(), block.Header(), block.Transactions(), block.Uncles(), withdrawals)
+
+	if err := WriteBody(tx, wBlock.Hash(), wBlock.NumberU64(), wBlock.Body()); err != nil {
+		t.Fatalf("Could not write body: %v", err)
+	}
+
+	// Write and verify the block in the database
+	err := WriteBlock(tx, wBlock)
+	if err != nil {
+		t.Fatalf("Could not write block: %v", err)
+	}
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry == nil {
+		t.Fatalf("Stored block not found")
+	} else if entry.Hash() != block.Hash() {
+		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
+	}
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry == nil {
+		t.Fatalf("Stored header not found")
+	} else if entry.Hash() != block.Hash() {
+		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
+	}
+	if err := TruncateBlocks(context.Background(), tx, 2); err != nil {
+		t.Fatal(err)
+	}
+	entry := ReadCanonicalBodyWithTransactions(tx, block.Hash(), block.NumberU64())
+	if entry == nil {
+		t.Fatalf("Stored body not found")
+	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
+		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
+	}
+
+	// Verify withdrawals on block
+	readWithdrawals := entry.Withdrawals
+	if len(readWithdrawals) != len(withdrawals) {
+		t.Fatalf("Retrieved withdrawals mismatch: have %v, want %v", readWithdrawals, withdrawals)
+	}
+
+	rw := readWithdrawals[0]
+	rw2 := readWithdrawals[1]
+
+	require.NotNil(rw)
+	require.Equal(uint64(15), rw.Index)
+	require.Equal(uint64(5500), rw.Validator)
+	require.Equal(libcommon.Address{0: 0xff}, rw.Address)
+	require.Equal(uint64(1000), rw.Amount)
+
+	require.NotNil(rw2)
+	require.Equal(uint64(16), rw2.Index)
+	require.Equal(uint64(5501), rw2.Validator)
+	require.Equal(libcommon.Address{0: 0xff}, rw2.Address)
+	require.Equal(uint64(1001), rw2.Amount)
+
+	// Delete the block and verify the execution
+	if err := TruncateBlocks(context.Background(), tx, block.NumberU64()); err != nil {
+		t.Fatal(err)
+	}
+	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
+	//	t.Fatalf("Could not delete block: %v", err)
+	//}
+	if entry := ReadBlock(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Deleted block returned: %v", entry)
+	}
+	if entry := ReadHeader(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Deleted header returned: %v", entry)
+	}
+	if entry := ReadCanonicalBodyWithTransactions(tx, block.Hash(), block.NumberU64()); entry != nil {
+		t.Fatalf("Deleted body returned: %v", entry)
+	}
+
+	// write again and delete it as old one
+	if err := WriteBlock(tx, block); err != nil {
+		t.Fatalf("Could not write block: %v", err)
+	}
+	if _, _, err := DeleteAncientBlocks(tx, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Tests pre-shanghai body to make sure withdrawals doesn't panic
+func TestPreShanghaiBodyNoPanicOnWithdrawals(t *testing.T) {
+	require := require.New(t)
+
+	const bodyRlp = "f902bef8bef85d0101019471562b71999873db5b286df957af199ec94617f701801ca023f4aad9a71341d2990012a732366c3bc8a4ce9ff54c05546a9487445ac67692a0290d3a1411c2a675a4c12c98af60e34ea4d689f0ddfe0250a9e09c0819dfe3bff85d0201029471562b71999873db5b286df957af199ec94617f701801ca0f824d7edc241758aca948ff34d3797e4e31003f76cc9e05fb9c19e967fc48113a070e1389f0fa23fe765a04b23e98f98db6d630e3a035c1c7c968142ababb85a1df901fbf901f8a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080808080808b7465737420686561646572a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+	bstring, _ := hex.DecodeString(bodyRlp)
+
+	body := new(types.Body)
+	rlp.DecodeBytes(bstring, body)
+
+	require.Nil(body.Withdrawals)
+	require.Equal(2, len(body.Transactions))
+}
+
+// Tests pre-shanghai bodyForStorage to make sure withdrawals doesn't panic
+func TestPreShanghaiBodyForStorageNoPanicOnWithdrawals(t *testing.T) {
+	require := require.New(t)
+
+	const bodyForStorageRlp = "c38002c0"
+	bstring, _ := hex.DecodeString(bodyForStorageRlp)
+
+	body := new(types.BodyForStorage)
+	rlp.DecodeBytes(bstring, body)
+
+	require.Nil(body.Withdrawals)
+	require.Equal(uint32(2), body.TxAmount)
+}
+
+// Tests shanghai bodyForStorage to make sure withdrawals are present
+func TestShanghaiBodyForStorageHasWithdrawals(t *testing.T) {
+	require := require.New(t)
+
+	const bodyForStorageRlp = "f83f8002c0f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9"
+	bstring, _ := hex.DecodeString(bodyForStorageRlp)
+
+	body := new(types.BodyForStorage)
+	rlp.DecodeBytes(bstring, body)
+
+	require.NotNil(body.Withdrawals)
+	require.Equal(2, len(body.Withdrawals))
+	require.Equal(uint32(2), body.TxAmount)
+}
+
+// Tests shanghai bodyForStorage to make sure when no withdrawals the slice is empty (not nil)
+func TestShanghaiBodyForStorageNoWithdrawals(t *testing.T) {
+	require := require.New(t)
+
+	const bodyForStorageRlp = "c48002c0c0c0"
+	bstring, _ := hex.DecodeString(bodyForStorageRlp)
+
+	body := new(types.BodyForStorage)
+	rlp.DecodeBytes(bstring, body)
+
+	require.NotNil(body.Withdrawals)
+	require.Equal(0, len(body.Withdrawals))
+	require.Equal(uint32(2), body.TxAmount)
 }
 
 func checkReceiptsRLP(have, want types.Receipts) error {

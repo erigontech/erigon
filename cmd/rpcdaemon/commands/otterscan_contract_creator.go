@@ -6,21 +6,22 @@ import (
 	"fmt"
 	"sort"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type ContractCreatorData struct {
-	Tx      common.Hash    `json:"hash"`
-	Creator common.Address `json:"creator"`
+	Tx      libcommon.Hash    `json:"hash"`
+	Creator libcommon.Address `json:"creator"`
 }
 
-func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error) {
+func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcommon.Address) (*ContractCreatorData, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -62,7 +63,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	defer accCS.Close()
 
 	// Locate shard that contains the block where incarnation changed
-	acs := changeset.Mapper[kv.AccountChangeSet]
+	acs := historyv2.Mapper[kv.AccountChangeSet]
 	k, v, err := accHistory.Seek(acs.IndexChunkKey(addr.Bytes(), 0))
 	if err != nil {
 		return nil, err

@@ -3,9 +3,10 @@ package reports
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
 )
 
 type CommandFlags struct {

@@ -15,20 +15,20 @@ var (
 	block, pruneTo, unwind         uint64
 	unwindEvery                    uint64
 	batchSizeStr                   string
-	reset                          bool
+	reset, warmup                  bool
 	bucket                         string
 	datadirCli, toChaindata        string
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
 	HeimdallURL                    string
-	txtrace                        bool // Whether to trace the execution (should only be used together eith `block`)
+	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
 	pruneH, pruneR, pruneT, pruneC uint64
 	pruneHBefore, pruneRBefore     uint64
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
-	chain                          string // Which chain to use (mainnet, ropsten, rinkeby, goerli, etc.)
+	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
@@ -85,6 +85,7 @@ func withUnwindEvery(cmd *cobra.Command) {
 
 func withReset(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&reset, "reset", false, "reset given stage")
+	cmd.Flags().BoolVar(&warmup, "warmup", false, "warmup relevant tables by parallel random reads")
 }
 
 func withBucket(cmd *cobra.Command) {
@@ -116,7 +117,7 @@ func withBatchSize(cmd *cobra.Command) {
 
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
-	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
+	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
 }
 
 func withMigration(cmd *cobra.Command) {
@@ -128,7 +129,7 @@ func withTxTrace(cmd *cobra.Command) {
 }
 
 func withChain(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, ropsten, etc.)")
+	cmd.Flags().StringVar(&chain, "chain", "mainnet", "pick a chain to assume (mainnet, sepolia, etc.)")
 	must(cmd.MarkFlagRequired("chain"))
 }
 

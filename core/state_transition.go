@@ -20,6 +20,9 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -63,7 +66,7 @@ type StateTransition struct {
 	initialGas uint64
 	value      *uint256.Int
 	data       []byte
-	state      vm.IntraBlockState
+	state      evmtypes.IntraBlockState
 	evm        vm.VMInterface
 
 	//some pre-allocated intermediate variables
@@ -76,8 +79,8 @@ type StateTransition struct {
 
 // Message represents a message sent to a contract.
 type Message interface {
-	From() common.Address
-	To() *common.Address
+	From() libcommon.Address
+	To() *libcommon.Address
 
 	GasPrice() *uint256.Int
 	FeeCap() *uint256.Int
@@ -245,9 +248,9 @@ func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, ga
 }
 
 // to returns the recipient of the message.
-func (st *StateTransition) to() common.Address {
+func (st *StateTransition) to() libcommon.Address {
 	if st.msg == nil || st.msg.To() == nil /* contract creation */ {
-		return common.Address{}
+		return libcommon.Address{}
 	}
 	return *st.msg.To()
 }
@@ -293,7 +296,7 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 	return nil
 }
 
-func CheckEip1559TxGasFeeCap(from common.Address, gasFeeCap, tip, baseFee *uint256.Int, isFree bool) error {
+func CheckEip1559TxGasFeeCap(from libcommon.Address, gasFeeCap, tip, baseFee *uint256.Int, isFree bool) error {
 	if gasFeeCap.Lt(tip) {
 		return fmt.Errorf("%w: address %v, tip: %s, gasFeeCap: %s", ErrTipAboveFeeCap,
 			from.Hex(), tip, gasFeeCap)
@@ -322,8 +325,8 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 		}
 
 		// Make sure the sender is an EOA (EIP-3607)
-		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (common.Hash{}) {
-			// common.Hash{} means that the sender is not in the state.
+		if codeHash := st.state.GetCodeHash(st.msg.From()); codeHash != emptyCodeHash && codeHash != (libcommon.Hash{}) {
+			// libcommon.Hash{} means that the sender is not in the state.
 			// Historically there were transactions with 0 gas price and non-existing sender,
 			// so we have to allow that.
 			return fmt.Errorf("%w: address %v, codehash: %s", ErrSenderNoEOA,
@@ -384,10 +387,19 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	if err := st.preCheck(gasBailout); err != nil {
 		return nil, err
 	}
+	if st.evm.Config().Debug {
+		st.evm.Config().Tracer.CaptureTxStart(st.initialGas)
+		defer func() {
+			st.evm.Config().Tracer.CaptureTxEnd(st.gas)
+		}()
+	}
+
 	msg := st.msg
 	sender := vm.AccountRef(msg.From())
 	contractCreation := msg.To() == nil
 	rules := st.evm.ChainRules()
+	vmConfig := st.evm.Config()
+	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	if rules.IsNano {
 		for _, blackListAddr := range types.NanoBlackList {
@@ -401,7 +413,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +431,7 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	// Check whether the init code size has been exceeded.
-	if rules.IsShanghai && contractCreation && len(st.data) > params.MaxInitCodeSize {
+	if isEIP3860 && contractCreation && len(st.data) > params.MaxInitCodeSize {
 		return nil, fmt.Errorf("%w: code size %v limit %v", ErrMaxInitCodeSizeExceeded, len(st.data), params.MaxInitCodeSize)
 	}
 

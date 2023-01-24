@@ -68,6 +68,7 @@ func (mi *MutationItem) Less(than btree.Item) bool {
 	return bytes.Compare(mi.key, i.key) < 0
 }
 
+func (m *mutation) ReadOnly() bool { return false }
 func (m *mutation) RwKV() kv.RwDB {
 	if casted, ok := m.db.(ethdb.HasRwKV); ok {
 		return casted.RwKV()

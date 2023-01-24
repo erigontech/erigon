@@ -22,15 +22,17 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/turbo/stages"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenerateChain(t *testing.T) {
@@ -51,11 +53,10 @@ func TestGenerateChain(t *testing.T) {
 
 	// Ensure that key1 has some funds in the genesis block.
 	gspec := &core.Genesis{
-		Config: &params.ChainConfig{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
+		Config: &chain.Config{HomesteadBlock: new(big.Int), ChainID: big.NewInt(1)},
 		Alloc:  core.GenesisAlloc{addr1: {Balance: big.NewInt(1000000)}},
 	}
 	m := stages.MockWithGenesis(t, gspec, key1, false)
-	db := olddb.NewObjectDatabase(m.DB)
 
 	// This call generates a chain of 5 blocks. The function runs for
 	// each block and adds different features to gen based on the
@@ -98,7 +99,14 @@ func TestGenerateChain(t *testing.T) {
 		return
 	}
 
-	st := state.New(state.NewDbStateReader(db))
+	tx, err := m.DB.BeginRo(m.Ctx)
+	if err != nil {
+		fmt.Printf("beginro error: %v\n", err)
+		return
+	}
+	defer tx.Rollback()
+
+	st := state.New(state.NewPlainStateReader(tx))
 	if big.NewInt(5).Cmp(current(m.DB).Number()) != 0 {
 		t.Errorf("wrong block number: %d", current(m.DB).Number())
 	}

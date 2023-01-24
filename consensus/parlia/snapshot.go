@@ -19,54 +19,54 @@ package parlia
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"sort"
 
+	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	lru "github.com/hashicorp/golang-lru"
-
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // Snapshot is the state of the validatorSet at a given point.
 type Snapshot struct {
-	config   *params.ParliaConfig // Consensus engine parameters to fine tune behavior
-	sigCache *lru.ARCCache        // Cache of recent block signatures to speed up ecrecover
+	config   *chain.ParliaConfig // Consensus engine parameters to fine tune behavior
+	sigCache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
 
-	Number           uint64                      `json:"number"`             // Block number where the snapshot was created
-	Hash             common.Hash                 `json:"hash"`               // Block hash where the snapshot was created
-	Validators       map[common.Address]struct{} `json:"validators"`         // Set of authorized validators at this moment
-	Recents          map[uint64]common.Address   `json:"recents"`            // Set of recent validators for spam protections
-	RecentForkHashes map[uint64]string           `json:"recent_fork_hashes"` // Set of recent forkHash
+	Number           uint64                         `json:"number"`             // Block number where the snapshot was created
+	Hash             libcommon.Hash                 `json:"hash"`               // Block hash where the snapshot was created
+	Validators       map[libcommon.Address]struct{} `json:"validators"`         // Set of authorized validators at this moment
+	Recents          map[uint64]libcommon.Address   `json:"recents"`            // Set of recent validators for spam protections
+	RecentForkHashes map[uint64]string              `json:"recent_fork_hashes"` // Set of recent forkHash
 }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
 // method does not initialize the set of recent validators, so only ever use it for
 // the genesis block.
 func newSnapshot(
-	config *params.ParliaConfig,
+	config *chain.ParliaConfig,
 	sigCache *lru.ARCCache,
 	number uint64,
-	hash common.Hash,
-	validators []common.Address,
+	hash libcommon.Hash,
+	validators []libcommon.Address,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:           config,
 		sigCache:         sigCache,
 		Number:           number,
 		Hash:             hash,
-		Recents:          make(map[uint64]common.Address),
+		Recents:          make(map[uint64]libcommon.Address),
 		RecentForkHashes: make(map[uint64]string),
-		Validators:       make(map[common.Address]struct{}),
+		Validators:       make(map[libcommon.Address]struct{}),
 	}
 	for _, v := range validators {
 		snap.Validators[v] = struct{}{}
@@ -75,28 +75,21 @@ func newSnapshot(
 }
 
 // validatorsAscending implements the sort interface to allow sorting a list of addresses
-type validatorsAscending []common.Address
+type validatorsAscending []libcommon.Address
 
 func (s validatorsAscending) Len() int           { return len(s) }
 func (s validatorsAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
 func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
-const NumberLength = 8
-
-// EncodeBlockNumber encodes a block number as big endian uint64
-func EncodeBlockNumber(number uint64) []byte {
-	enc := make([]byte, NumberLength)
-	binary.BigEndian.PutUint64(enc, number)
-	return enc
-}
-
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
-func SnapshotFullKey(number uint64, hash common.Hash) []byte {
-	return append(EncodeBlockNumber(number), hash.Bytes()...)
+func SnapshotFullKey(number uint64, hash libcommon.Hash) []byte {
+	return append(hexutility.EncodeTs(number), hash.Bytes()...)
 }
+
+var ErrNoSnapsnot = fmt.Errorf("no parlia snapshot")
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -105,6 +98,10 @@ func loadSnapshot(config *params.ParliaConfig, sigCache *lru.ARCCache, db kv.RwD
 	blob, err := tx.GetOne(kv.ParliaSnapshot, SnapshotFullKey(num, hash))
 	if err != nil {
 		return nil, err
+	}
+
+	if len(blob) == 0 {
+		return nil, ErrNoSnapsnot
 	}
 	snap := new(Snapshot)
 	if err := json.Unmarshal(blob, snap); err != nil {
@@ -121,7 +118,7 @@ func (s *Snapshot) store(db kv.RwDB) error {
 	if err != nil {
 		return err
 	}
-	return db.Update(context.Background(), func(tx kv.RwTx) error {
+	return db.UpdateAsync(context.Background(), func(tx kv.RwTx) error {
 		return tx.Put(kv.ParliaSnapshot, SnapshotFullKey(s.Number, s.Hash), blob)
 	})
 }
@@ -133,8 +130,8 @@ func (s *Snapshot) copy() *Snapshot {
 		sigCache:         s.sigCache,
 		Number:           s.Number,
 		Hash:             s.Hash,
-		Validators:       make(map[common.Address]struct{}),
-		Recents:          make(map[uint64]common.Address),
+		Validators:       make(map[libcommon.Address]struct{}),
+		Recents:          make(map[uint64]libcommon.Address),
 		RecentForkHashes: make(map[uint64]string),
 	}
 
@@ -201,9 +198,13 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 		if err != nil {
 			return nil, err
 		}
-		if _, ok := snap.Validators[validator]; !ok {
-			return nil, errUnauthorizedValidator
-		}
+		// Disabling this validation due to issues with BEP-131 looks like is breaks the property that used to allow Erigon to sync Parlia without knowning the contract state
+		// Further investigation is required
+		/*
+			if _, ok := snap.Validators[validator]; !ok {
+				return nil, errUnauthorizedValidator
+			}
+		*/
 		for _, recent := range snap.Recents {
 			if recent == validator {
 				return nil, errRecentlySigned
@@ -223,7 +224,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			if err != nil {
 				return nil, err
 			}
-			newVals := make(map[common.Address]struct{}, len(newValArr))
+			newVals := make(map[libcommon.Address]struct{}, len(newValArr))
 			for _, val := range newValArr {
 				newVals[val] = struct{}{}
 			}
@@ -251,8 +252,8 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 }
 
 // validators retrieves the list of validators in ascending order.
-func (s *Snapshot) validators() []common.Address {
-	validators := make([]common.Address, 0, len(s.Validators))
+func (s *Snapshot) validators() []libcommon.Address {
+	validators := make([]libcommon.Address, 0, len(s.Validators))
 	for v := range s.Validators {
 		validators = append(validators, v)
 	}
@@ -261,13 +262,13 @@ func (s *Snapshot) validators() []common.Address {
 }
 
 // inturn returns if a validator at a given block height is in-turn or not.
-func (s *Snapshot) inturn(validator common.Address) bool {
+func (s *Snapshot) inturn(validator libcommon.Address) bool {
 	validators := s.validators()
 	offset := (s.Number + 1) % uint64(len(validators))
 	return validators[offset] == validator
 }
 
-func (s *Snapshot) enoughDistance(validator common.Address, header *types.Header) bool {
+func (s *Snapshot) enoughDistance(validator libcommon.Address, header *types.Header) bool {
 	idx := s.indexOfVal(validator)
 	if idx < 0 {
 		return true
@@ -287,7 +288,7 @@ func (s *Snapshot) enoughDistance(validator common.Address, header *types.Header
 	}
 }
 
-func (s *Snapshot) indexOfVal(validator common.Address) int {
+func (s *Snapshot) indexOfVal(validator libcommon.Address) int {
 	validators := s.validators()
 	for idx, val := range validators {
 		if val == validator {
@@ -297,22 +298,22 @@ func (s *Snapshot) indexOfVal(validator common.Address) int {
 	return -1
 }
 
-func (s *Snapshot) supposeValidator() common.Address {
+func (s *Snapshot) supposeValidator() libcommon.Address {
 	validators := s.validators()
 	index := (s.Number + 1) % uint64(len(validators))
 	return validators[index]
 }
 
-func ParseValidators(validatorsBytes []byte) ([]common.Address, error) {
+func ParseValidators(validatorsBytes []byte) ([]libcommon.Address, error) {
 	if len(validatorsBytes)%validatorBytesLength != 0 {
 		return nil, errors.New("invalid validators bytes")
 	}
 	n := len(validatorsBytes) / validatorBytesLength
-	result := make([]common.Address, n)
+	result := make([]libcommon.Address, n)
 	for i := 0; i < n; i++ {
 		address := make([]byte, validatorBytesLength)
 		copy(address, validatorsBytes[i*validatorBytesLength:(i+1)*validatorBytesLength])
-		result[i] = common.BytesToAddress(address)
+		result[i] = libcommon.BytesToAddress(address)
 	}
 	return result, nil
 }

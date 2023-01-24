@@ -6,14 +6,13 @@ import (
 	"sort"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestValidatorSetSort(t *testing.T) {
 	size := 100
-	validators := make([]common.Address, size)
+	validators := make([]libcommon.Address, size)
 	for i := 0; i < size; i++ {
 		validators[i] = randomAddress()
 	}
@@ -23,8 +22,8 @@ func TestValidatorSetSort(t *testing.T) {
 	}
 }
 
-func randomAddress() common.Address {
+func randomAddress() libcommon.Address {
 	addrBytes := make([]byte, 20)
 	rand.Read(addrBytes)
-	return common.BytesToAddress(addrBytes)
+	return libcommon.BytesToAddress(addrBytes)
 }

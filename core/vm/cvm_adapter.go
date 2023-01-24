@@ -4,7 +4,10 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -14,11 +17,11 @@ type CVMAdapter struct {
 	Cvm *CVM
 }
 
-func (c *CVMAdapter) Reset(txCtx TxContext, ibs IntraBlockState) {
+func (c *CVMAdapter) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 	c.Cvm.intraBlockState = ibs
 }
 
-func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
+func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error) {
 	leftOverGas = 0
 
 	ret, contractAddr, err = c.Cvm.Create(caller, code)
@@ -26,7 +29,7 @@ func (c *CVMAdapter) Create(caller ContractRef, code []byte, gas uint64, value *
 	return ret, contractAddr, leftOverGas, err
 }
 
-func (cvm *CVMAdapter) Call(caller ContractRef, addr common.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
+func (cvm *CVMAdapter) Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
 	return nil, 0, fmt.Errorf(CairoNotImplemented, "Call")
 }
 
@@ -34,22 +37,26 @@ func (cvm *CVMAdapter) Config() Config {
 	return cvm.Cvm.Config()
 }
 
-func (cvm *CVMAdapter) ChainConfig() *params.ChainConfig {
-	return params.FermionChainConfig
+func (cvm *CVMAdapter) Cancel() {
+	// no-op
 }
 
-func (cvm *CVMAdapter) ChainRules() *params.Rules {
-	return &params.Rules{}
+func (cvm *CVMAdapter) ChainConfig() *chain.Config {
+	return params.AllProtocolChanges
 }
 
-func (cvm *CVMAdapter) Context() BlockContext {
-	return BlockContext{}
+func (cvm *CVMAdapter) ChainRules() *chain.Rules {
+	return &chain.Rules{}
 }
 
-func (cvm *CVMAdapter) IntraBlockState() IntraBlockState {
+func (cvm *CVMAdapter) Context() evmtypes.BlockContext {
+	return evmtypes.BlockContext{}
+}
+
+func (cvm *CVMAdapter) IntraBlockState() evmtypes.IntraBlockState {
 	return cvm.Cvm.IntraBlockState()
 }
 
-func (cvm *CVMAdapter) TxContext() TxContext {
-	return TxContext{}
+func (cvm *CVMAdapter) TxContext() evmtypes.TxContext {
+	return evmtypes.TxContext{}
 }

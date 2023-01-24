@@ -1,0 +1,19 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: erigon
+  name: eth66-peering-udp
+spec:
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - name: eth66-pr-udp
+      port: 30303
+      protocol: UDP
+      targetPort: 30303
+  selector:
+    app: erigon
+  type: LoadBalancer

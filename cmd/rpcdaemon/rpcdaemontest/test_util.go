@@ -10,25 +10,29 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands/contracts"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/test/bufconn"
 )
 
 func CreateTestKV(t *testing.T) kv.RwDB {
@@ -40,9 +44,9 @@ type testAddresses struct {
 	key      *ecdsa.PrivateKey
 	key1     *ecdsa.PrivateKey
 	key2     *ecdsa.PrivateKey
-	address  common.Address
-	address1 common.Address
-	address2 common.Address
+	address  libcommon.Address
+	address1 libcommon.Address
+	address2 libcommon.Address
 }
 
 func makeTestAddresses() testAddresses {
@@ -116,7 +120,7 @@ var chainInstance *core.ChainPack
 
 func getChainInstance(
 	addresses *testAddresses,
-	config *params.ChainConfig,
+	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
 	db kv.RwDB,
@@ -131,7 +135,7 @@ func getChainInstance(
 
 func generateChain(
 	addresses *testAddresses,
-	config *params.ChainConfig,
+	config *chain.Config,
 	parent *types.Block,
 	engine consensus.Engine,
 	db kv.RwDB,
@@ -144,7 +148,7 @@ func generateChain(
 		address  = addresses.address
 		address1 = addresses.address1
 		address2 = addresses.address2
-		theAddr  = common.Address{1}
+		theAddr  = libcommon.Address{1}
 		chainId  = big.NewInt(1337)
 		// this code generates a log
 		signer = types.LatestSignerForChainID(nil)
@@ -193,7 +197,7 @@ func generateChain(
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
@@ -221,7 +225,7 @@ func generateChain(
 			txs = append(txs, txn)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
 				txn, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
@@ -231,7 +235,7 @@ func generateChain(
 				txs = append(txs, txn)
 			}
 		case 7:
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
 			txn, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)
@@ -318,4 +322,114 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 		server.Stop()
 	})
 	return ctx, conn
+}
+
+func CreateTestSentryForTraces(t *testing.T) *stages.MockSentry {
+	var (
+		a0 = libcommon.HexToAddress("0x00000000000000000000000000000000000000ff")
+		a1 = libcommon.HexToAddress("0x00000000000000000000000000000000000001ff")
+		a2 = libcommon.HexToAddress("0x00000000000000000000000000000000000002ff")
+		// Generate a canonical chain to act as the main dataset
+
+		// A sender who makes transactions, has some funds
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: params.TestChainConfig,
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+				// The address 0x00ff
+				a0: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						byte(vm.CALLDATASIZE), // call data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+				// The address 0x01ff
+				a1: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						// Prepare arguments for the CALL
+						byte(vm.CALLDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,  // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.CALLDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+						byte(vm.RETURNDATASIZE), // return data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+				// The address 0x02ff
+				a2: {
+					Code: []byte{
+						byte(vm.CALLDATASIZE),
+						byte(vm.PUSH1), 0x00,
+						byte(vm.PUSH1), 0x00,
+						byte(vm.CALLDATACOPY), // Copy all call data into memory
+						// Prepare arguments for the CALL
+						byte(vm.CALLDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,  // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.CALLDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+
+						// Prepare arguments for the CALL
+						byte(vm.RETURNDATASIZE), // retLength == call data length
+						byte(vm.PUSH1), 0x00,    // retOffset == 0
+						byte(vm.PUSH1), 0x01, byte(vm.RETURNDATASIZE), byte(vm.SUB), // argLength == call data length - 1
+						byte(vm.PUSH1), 0x01, // argOffset == 1
+						byte(vm.PUSH1), 0x00, // value == 0
+						// take first byte from the input, shift 240 bits to the right, and add 0xff, to form the address
+						byte(vm.PUSH1), 0x00, byte(vm.MLOAD), byte(vm.PUSH1), 240, byte(vm.SHR), byte(vm.PUSH1), 0xff, byte(vm.OR),
+						byte(vm.GAS),
+						byte(vm.CALL),
+
+						byte(vm.RETURNDATASIZE), // return data size becomes length of the return value
+						byte(vm.PUSH1), 0x00,
+						byte(vm.RETURN),
+					},
+					Nonce:   1,
+					Balance: big.NewInt(0),
+				},
+			},
+		}
+	)
+	m := stages.MockWithGenesis(t, gspec, key, false)
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
+		b.SetCoinbase(libcommon.Address{1})
+		// One transaction to AAAA
+		tx, _ := types.SignTx(types.NewTransaction(0, a2,
+			u256.Num0, 50000, u256.Num1, []byte{0x01, 0x00, 0x01, 0x00}), *types.LatestSignerForChainID(nil), key)
+		b.AddTx(tx)
+	}, false /* intermediateHashes */)
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	if err := m.InsertChain(chain); err != nil {
+		t.Fatalf("failed to insert into chain: %v", err)
+	}
+	return m
 }

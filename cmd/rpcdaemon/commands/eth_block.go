@@ -6,8 +6,12 @@ import (
 	"math/big"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -15,15 +19,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 )
 
-func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
+func (api *APIImpl) CallBundle(ctx context.Context, txHashes []libcommon.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -34,6 +37,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if len(txHashes) == 0 {
 		return nil, nil
@@ -82,12 +86,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber, 0, api._agg, api.historyV3(tx))
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api.historyV3(tx), chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}
 	}
-	st := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	parent := rawdb.ReadHeader(tx, hash, stateBlockNumber)
 	if parent == nil {
@@ -96,7 +100,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	blockNumber := stateBlockNumber + 1
 
-	timestamp := parent.Time // Dont care about the timestamp
+	timestamp := parent.Time + clparams.MainnetBeaconConfig.SecondsPerSlot
 
 	coinbase := parent.Coinbase
 	header := &types.Header{
@@ -108,16 +112,17 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Coinbase:   coinbase,
 	}
 
-	// Get a new instance of the EVM
 	signer := types.MakeSigner(chainConfig, blockNumber)
-	rules := chainConfig.Rules(blockNumber)
+	rules := chainConfig.Rules(blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
-	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	txCtx := core.NewEVMTxContext(firstMsg)
+	// Get a new instance of the EVM
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
@@ -149,9 +154,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	results := []map[string]interface{}{}
 
-	bundleHash := sha3.NewLegacyKeccak256()
+	bundleHash := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
+
 	for _, txn := range txs {
 		msg, err := txn.AsMessage(*signer, nil, rules)
+		msg.SetCheckNonce(false)
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +182,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
-			jsonResult["value"] = common.BytesToHash(result.Return())
+			jsonResult["value"] = libcommon.BytesToHash(result.Return())
 		}
 
 		results = append(results, jsonResult)
@@ -182,7 +190,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	ret := map[string]interface{}{}
 	ret["results"] = results
-	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutility.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
@@ -214,7 +222,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash common.Hash
+	var borTxHash libcommon.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
 		if borTx != nil {
@@ -223,7 +231,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
-
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(b.Header(), chainConfig.Bor)
+	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -274,7 +284,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash common.Hash
+	var borTxHash libcommon.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
@@ -283,6 +293,10 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
+
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(block.Header(), chainConfig.Bor)
+	}
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
@@ -330,7 +344,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 }
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
-func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
+func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash libcommon.Hash) (*hexutil.Uint, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

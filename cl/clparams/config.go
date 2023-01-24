@@ -18,10 +18,14 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"gopkg.in/yaml.v2"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
 
@@ -34,10 +38,10 @@ const (
 )
 
 const (
-	MaxDialTimeout               = 10 * time.Second
+	MaxDialTimeout               = 2 * time.Second
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
-	ReqTimeout     time.Duration = 5 * time.Second
+	ReqTimeout     time.Duration = 1 * time.Second
 	RespTimeout    time.Duration = 15 * time.Second
 )
 
@@ -104,8 +108,8 @@ type NetworkConfig struct {
 }
 
 type GenesisConfig struct {
-	GenesisValidatorRoot common.Hash // Merkle Root at Genesis
-	GenesisTime          uint64      // Unix time at Genesis
+	GenesisValidatorRoot libcommon.Hash // Merkle Root at Genesis
+	GenesisTime          uint64         // Unix time at Genesis
 }
 
 var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig{
@@ -172,15 +176,15 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
 	MainnetNetwork: {
-		GenesisValidatorRoot: common.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
+		GenesisValidatorRoot: libcommon.HexToHash("4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95"),
 		GenesisTime:          1606824023,
 	},
 	SepoliaNetwork: {
-		GenesisValidatorRoot: common.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
+		GenesisValidatorRoot: libcommon.HexToHash("d8ea171f3c94aea21ebc42a1ed61052acf3f9209c00e4efbaaddac09ed9b8078"),
 		GenesisTime:          1655733600,
 	},
 	GoerliNetwork: {
-		GenesisValidatorRoot: common.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
+		GenesisValidatorRoot: libcommon.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
 	},
 }
@@ -188,7 +192,7 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
 var CheckpointSyncEndpoints = map[NetworkType][]string{
 	MainnetNetwork: {
-		"https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate.ethstaker.cc",
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
@@ -210,15 +214,6 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
-	// Constants (non-configurable)
-	GenesisSlot              uint64 `yaml:"GENESIS_SLOT"`                // GenesisSlot represents the first canonical slot number of the beacon chain.
-	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH"`               // GenesisEpoch represents the first canonical epoch number of the beacon chain.
-	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH"`            // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
-	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT"`             // FarFutureSlot represents a slot extremely far away in the future.
-	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH"`      // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
-	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
-	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH"`   // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
-
 	// Misc constants.
 	PresetBase                     string `yaml:"PRESET_BASE" spec:"true"`                        // PresetBase represents the underlying spec preset this config is based on.
 	ConfigName                     string `yaml:"CONFIG_NAME" spec:"true"`                        // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
@@ -338,14 +333,14 @@ type BeaconChainConfig struct {
 	SlashingProtectionPruningEpochs uint64 // SlashingProtectionPruningEpochs defines a period after which all prior epochs are pruned in the validator database.
 
 	// Fork-related values.
-	GenesisForkVersion   []byte `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
-	AltairForkVersion    []byte `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for altair.
+	GenesisForkVersion   uint32 `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
+	AltairForkVersion    uint32 `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for altair.
 	AltairForkEpoch      uint64 `yaml:"ALTAIR_FORK_EPOCH" spec:"true"`      // AltairForkEpoch is used to represent the assigned fork epoch for altair.
-	BellatrixForkVersion []byte `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for bellatrix.
+	BellatrixForkVersion uint32 `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for bellatrix.
 	BellatrixForkEpoch   uint64 `yaml:"BELLATRIX_FORK_EPOCH" spec:"true"`   // BellatrixForkEpoch is used to represent the assigned fork epoch for bellatrix.
-	ShardingForkVersion  []byte `yaml:"SHARDING_FORK_VERSION" spec:"true"`  // ShardingForkVersion is used to represent the fork version for sharding.
+	ShardingForkVersion  uint32 `yaml:"SHARDING_FORK_VERSION" spec:"true"`  // ShardingForkVersion is used to represent the fork version for sharding.
 	ShardingForkEpoch    uint64 `yaml:"SHARDING_FORK_EPOCH" spec:"true"`    // ShardingForkEpoch is used to represent the assigned fork epoch for sharding.
-	CapellaForkVersion   []byte `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for capella.
+	CapellaForkVersion   uint32 `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for capella.
 	CapellaForkEpoch     uint64 `yaml:"CAPELLA_FORK_EPOCH" spec:"true"`     // CapellaForkEpoch is used to represent the assigned fork epoch for capella.
 
 	ForkVersionSchedule map[[VersionLength]byte]uint64 // Schedule of fork epochs by version.
@@ -391,16 +386,28 @@ type BeaconChainConfig struct {
 	MinSyncCommitteeParticipants uint64 `yaml:"MIN_SYNC_COMMITTEE_PARTICIPANTS" spec:"true"` // MinSyncCommitteeParticipants defines the minimum amount of sync committee participants for which the light client acknowledges the signature.
 
 	// Bellatrix
-	TerminalBlockHash                common.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true"`                  // TerminalBlockHash of beacon chain.
-	TerminalBlockHashActivationEpoch uint64         `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true"` // TerminalBlockHashActivationEpoch of beacon chain.
-	TerminalTotalDifficulty          string         `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"`            // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
-	DefaultFeeRecipient              common.Address // DefaultFeeRecipient where the transaction fee goes to.
-	EthBurnAddressHex                string         // EthBurnAddressHex is the constant eth address written in hex format to burn fees in that network. the default is 0x0
-	DefaultBuilderGasLimit           uint64         // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
+	TerminalBlockHash                libcommon.Hash    `yaml:"TERMINAL_BLOCK_HASH" spec:"true"`                  // TerminalBlockHash of beacon chain.
+	TerminalBlockHashActivationEpoch uint64            `yaml:"TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH" spec:"true"` // TerminalBlockHashActivationEpoch of beacon chain.
+	TerminalTotalDifficulty          string            `yaml:"TERMINAL_TOTAL_DIFFICULTY" spec:"true"`            // TerminalTotalDifficulty is part of the experimental Bellatrix spec. This value is type is currently TBD.
+	DefaultFeeRecipient              libcommon.Address // DefaultFeeRecipient where the transaction fee goes to.
+	EthBurnAddressHex                string            // EthBurnAddressHex is the constant eth address written in hex format to burn fees in that network. the default is 0x0
+	DefaultBuilderGasLimit           uint64            // DefaultBuilderGasLimit is the default used to set the gaslimit for the Builder APIs, typically at around 30M wei.
 
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
+}
+
+func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
+	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch}
+	stateVersion := Phase0Version
+	for _, forkEpoch := range forkEpochList {
+		if forkEpoch > epoch {
+			return stateVersion
+		}
+		stateVersion++
+	}
+	return stateVersion
 }
 
 // InitializeForkSchedule initializes the schedules forks baked into the config.
@@ -416,27 +423,29 @@ func toBytes4(in []byte) (ret [4]byte) {
 
 func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	fvs := map[[VersionLength]byte]uint64{}
-	fvs[toBytes4(b.GenesisForkVersion)] = b.GenesisEpoch
-	fvs[toBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
-	fvs[toBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
+	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
+	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
+	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
+	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
 	return fvs
 }
 
 func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn := map[[VersionLength]byte]string{}
-	fvn[toBytes4(b.GenesisForkVersion)] = "phase0"
-	fvn[toBytes4(b.AltairForkVersion)] = "altair"
-	fvn[toBytes4(b.BellatrixForkVersion)] = "bellatrix"
+	fvn[utils.Uint32ToBytes4(b.GenesisForkVersion)] = "phase0"
+	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
+	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
+	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
 	return fvn
 }
 
-var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
+var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Constants (Non-configurable)
-	FarFutureEpoch:           math.MaxUint64,
+	/*FarFutureEpoch:           math.MaxUint64,
 	FarFutureSlot:            math.MaxUint64,
 	BaseRewardsPerEpoch:      4,
-	DepositContractTreeDepth: 32,
-	GenesisDelay:             604800, // 1 week.
+	DepositContractTreeDepth: 32,*/
+	GenesisDelay: 604800, // 1 week.
 
 	// Misc constant.
 	TargetCommitteeSize:            128,
@@ -563,15 +572,14 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	SafetyDecay: 10,
 
 	// Fork related values.
-	GenesisEpoch:         0,
-	GenesisForkVersion:   []byte{0, 0, 0, 0},
-	AltairForkVersion:    []byte{1, 0, 0, 0},
+	GenesisForkVersion:   0,
+	AltairForkVersion:    0x01000000,
 	AltairForkEpoch:      74240,
-	BellatrixForkVersion: []byte{2, 0, 0, 0},
+	BellatrixForkVersion: 0x02000000,
 	BellatrixForkEpoch:   144869,
-	CapellaForkVersion:   []byte{3, 0, 0, 0},
+	CapellaForkVersion:   0x03000000,
 	CapellaForkEpoch:     math.MaxUint64,
-	ShardingForkVersion:  []byte{4, 0, 0, 0},
+	ShardingForkVersion:  0x04000000,
 	ShardingForkEpoch:    math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
@@ -622,25 +630,49 @@ var mainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 }
 
 func mainnetConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	return cfg
 }
 
+func CustomConfig(configFile string) (BeaconChainConfig, error) {
+	cfg := MainnetBeaconConfig
+	b, err := os.ReadFile(configFile) // just pass the file name
+	if err != nil {
+		return BeaconChainConfig{}, nil
+	}
+	err = yaml.Unmarshal(b, &cfg)
+	cfg.InitializeForkSchedule()
+	return cfg, err
+}
+
+func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
+	cfg := GenesisConfig{}
+	b, err := os.ReadFile(genesisFile) // just pass the file name
+	if err != nil {
+		return GenesisConfig{}, nil
+	}
+	// Read first 2 fields of SSZ
+	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
+	copy(cfg.GenesisValidatorRoot[:], b[8:])
+	return cfg, nil
+}
+
 func sepoliaConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1655647200
 	cfg.GenesisDelay = 86400
 	cfg.MinGenesisActiveValidatorCount = 1300
 	cfg.ConfigName = "sepolia"
-	cfg.GenesisForkVersion = []byte{0x90, 0x00, 0x00, 0x69}
+
+	cfg.GenesisForkVersion = 0x90000069
 	cfg.SecondsPerETH1Block = 14
 	cfg.DepositChainID = uint64(SepoliaNetwork)
 	cfg.DepositNetworkID = uint64(SepoliaNetwork)
 	cfg.AltairForkEpoch = 50
-	cfg.AltairForkVersion = []byte{0x90, 0x00, 0x00, 0x70}
+	cfg.AltairForkVersion = 0x90000070
 	cfg.BellatrixForkEpoch = 100
-	cfg.BellatrixForkVersion = []byte{0x90, 0x00, 0x00, 0x71}
+	cfg.BellatrixForkVersion = 0x90000071
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -648,20 +680,20 @@ func sepoliaConfig() BeaconChainConfig {
 }
 
 func goerliConfig() BeaconChainConfig {
-	cfg := mainnetBeaconConfig
+	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1614588812
 	cfg.GenesisDelay = 1919188
 	cfg.ConfigName = "prater"
-	cfg.GenesisForkVersion = []byte{0x00, 0x00, 0x10, 0x20}
+	cfg.GenesisForkVersion = 0x00001020
 	cfg.SecondsPerETH1Block = 14
 	cfg.DepositChainID = uint64(GoerliNetwork)
 	cfg.DepositNetworkID = uint64(GoerliNetwork)
 	cfg.AltairForkEpoch = 36660
-	cfg.AltairForkVersion = []byte{0x1, 0x0, 0x10, 0x20}
-	cfg.CapellaForkVersion = []byte{0x3, 0x0, 0x10, 0x20}
-	cfg.ShardingForkVersion = []byte{0x4, 0x0, 0x10, 0x20}
+	cfg.AltairForkVersion = 0x1001020
+	cfg.CapellaForkVersion = 0x03001020
+	cfg.ShardingForkVersion = 0x40001020
 	cfg.BellatrixForkEpoch = 112260
-	cfg.BellatrixForkVersion = []byte{0x2, 0x0, 0x10, 0x20}
+	cfg.BellatrixForkVersion = 0x02001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
@@ -713,6 +745,6 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 1 is Ethereum Mainnet
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
-func Supported(id uint64) bool {
+func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
 }

@@ -30,8 +30,9 @@ import (
 	"text/template"
 	"unicode"
 
-	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/accounts/abi"
 )
 
 // Lang is a target programming language selector to generate bindings for.
@@ -259,7 +260,7 @@ var bindType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct) stri
 func bindBasicTypeGo(kind abi.Type) string {
 	switch kind.T {
 	case abi.AddressTy:
-		return "common.Address"
+		return "libcommon.Address"
 	case abi.IntTy, abi.UintTy:
 		parts := regexp.MustCompile(`(u)?int([0-9]*)`).FindStringSubmatch(kind.String())
 		switch parts[2] {
@@ -389,7 +390,7 @@ func bindTopicTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 	// We only convert stringS and bytes to hash, still need to deal with
 	// array(both fixed-size and dynamic-size) and struct.
 	if bound == "string" || bound == typeBytes {
-		bound = "common.Hash"
+		bound = "libcommon.Hash"
 	}
 	return bound
 }

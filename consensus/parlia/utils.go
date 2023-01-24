@@ -3,10 +3,10 @@ package parlia
 import (
 	"math/rand"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-func backOffTime(snap *Snapshot, val common.Address) uint64 {
+func backOffTime(snap *Snapshot, val libcommon.Address) uint64 {
 	if snap.inturn(val) {
 		return 0
 	} else {

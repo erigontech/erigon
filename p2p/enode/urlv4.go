@@ -174,7 +174,7 @@ func (n *Node) URLv4() string {
 	n.Load((*Secp256k1)(&key))
 	switch {
 	case scheme == "v4" || key != ecdsa.PublicKey{}:
-		nodeid = fmt.Sprintf("%x", crypto.MarshalPubkey(&key))
+		nodeid = hex.EncodeToString(crypto.MarshalPubkey(&key))
 	default:
 		nodeid = fmt.Sprintf("%s.%x", scheme, n.id[:])
 	}

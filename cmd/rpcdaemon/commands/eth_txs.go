@@ -5,10 +5,11 @@ import (
 	"context"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
@@ -18,7 +19,7 @@ import (
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash libcommon.Hash) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -34,7 +35,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	if err != nil {
 		return nil, err
 	}
-	if ok {
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+		if err != nil {
+			return nil, err
+		}
+		if blockNumPtr == nil {
+			return nil, nil
+		}
+		blockNum = *blockNumPtr
+	}
+	if ok || (chainConfig.Bor != nil && blockNum != 0) {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -55,7 +67,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
-		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
+		if chainConfig.IsLondon(blockNum) && blockHash != (libcommon.Hash{}) {
 			baseFee = block.BaseFee()
 		}
 
@@ -68,7 +80,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if borTx == nil {
 				return nil, nil
 			}
-			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -104,7 +116,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 }
 
 // GetRawTransactionByHash returns the bytes of the transaction for the given hash.
-func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash libcommon.Hash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -152,7 +164,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 }
 
 // GetTransactionByBlockHashAndIndex implements eth_getTransactionByBlockHashAndIndex. Returns information about a transaction given the block's hash and a transaction index.
-func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -184,14 +196,14 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 			return nil, nil // not error
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
-func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error) {
+func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, index hexutil.Uint) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -248,7 +260,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 			return nil, nil
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil

@@ -44,11 +44,11 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 
 	// Verify that the `finality_branch`, if present, confirms `finalized_header`
 	if update.IsFinalityUpdate() {
-		finalizedRoot, err := update.FinalizedHeader.HashTreeRoot()
+		finalizedRoot, err := update.FinalizedHeader.HashSSZ()
 		if err != nil {
 			return false, err
 		}
-		if !isValidMerkleBranch(
+		if !utils.IsValidMerkleBranch(
 			finalizedRoot,
 			update.FinalityBranch,
 			6,  // floorlog2(FINALIZED_ROOT_INDEX)
@@ -63,11 +63,11 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 			!update.NextSyncCommitee.Equal(l.store.nextSyncCommittee) {
 			return false, fmt.Errorf("mismatching sync committee")
 		}
-		syncRoot, err := update.NextSyncCommitee.HashTreeRoot()
+		syncRoot, err := update.NextSyncCommitee.HashSSZ()
 		if err != nil {
 			return false, err
 		}
-		if !isValidMerkleBranch(
+		if !utils.IsValidMerkleBranch(
 			syncRoot,
 			update.NextSyncCommitteeBranch,
 			5,  // floorlog2(NEXT_SYNC_COMMITTEE_INDEX)
@@ -97,7 +97,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	}
 	// Support only post-bellatrix forks
 	forkVersion := fork.GetLastFork(l.beaconConfig, l.genesisConfig)
-	domain, err := fork.ComputeDomain(DomainSyncCommittee, forkVersion, l.genesisConfig)
+	domain, err := fork.ComputeDomain(DomainSyncCommittee, forkVersion, l.genesisConfig.GenesisValidatorRoot)
 	if err != nil {
 		return false, err
 	}

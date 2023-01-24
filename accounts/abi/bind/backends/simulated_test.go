@@ -28,6 +28,7 @@ import (
 
 	"github.com/holiman/uint256"
 	ethereum "github.com/ledgerwatch/erigon"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -51,7 +52,7 @@ func TestSimulatedBackend(t *testing.T) {
 	sim := NewSimulatedBackend(t, genAlloc, gasLimit)
 
 	// should return an error if the tx is not found
-	txHash := common.HexToHash("2")
+	txHash := libcommon.HexToHash("2")
 	_, isPending, err := sim.TransactionByHash(context.Background(), txHash)
 
 	if isPending {
@@ -112,7 +113,7 @@ const deployedCode = `60806040526004361061003b576000357c010000000000000000000000
 // expected return value contains "hello world"
 var expectedReturn = []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 11, 104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 
-func simTestBackend(t *testing.T, testAddr common.Address) *SimulatedBackend {
+func simTestBackend(t *testing.T, testAddr libcommon.Address) *SimulatedBackend {
 	expectedBal := uint256.NewInt(10000000000)
 	return NewSimulatedBackend(t,
 		core.GenesisAlloc{
@@ -146,7 +147,9 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	statedb := state.New(state.NewPlainState(tx, num+1))
+
+	//statedb := sim.stateByBlockNumber(tx, big.NewInt(int64(num+1)))
+	statedb := state.New(state.NewPlainState(tx, num+1, nil))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)
@@ -495,7 +498,7 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 			GasPrice: u256.Num0,
 			Value:    nil,
 			Data:     common.Hex2Bytes("b9b046f9"),
-		}, 0, errors.New("invalid opcode: opcode 0xfe not defined"), nil},
+		}, 0, errors.New("invalid opcode: INVALID"), nil},
 
 		{"Valid", ethereum.CallMsg{
 			From:     addr,
@@ -536,7 +539,7 @@ func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 
 	sim := NewSimulatedBackend(t, core.GenesisAlloc{addr: {Balance: big.NewInt(params.Ether*2 + 2e17)}}, 10000000)
 
-	recipient := common.HexToAddress("deadbeef")
+	recipient := libcommon.HexToAddress("deadbeef")
 	var cases = []struct {
 		name        string
 		message     ethereum.CallMsg

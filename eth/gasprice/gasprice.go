@@ -23,9 +23,10 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -52,22 +53,22 @@ type Config struct {
 type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
-	ChainConfig() *params.ChainConfig
+	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 }
 
 type Cache interface {
-	GetLatest() (common.Hash, *big.Int)
-	SetLatest(hash common.Hash, price *big.Int)
+	GetLatest() (libcommon.Hash, *big.Int)
+	SetLatest(hash libcommon.Hash, price *big.Int)
 }
 
 // Oracle recommends gas prices based on the content of recent
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
 	backend     OracleBackend
-	lastHead    common.Hash
+	lastHead    libcommon.Hash
 	lastPrice   *big.Int
 	maxPrice    *big.Int
 	ignorePrice *big.Int
@@ -211,6 +212,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -254,7 +256,8 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
 
-	for txs.Len() > 0 {
+	count := 0
+	for count < limit && txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
 		tip := tx.GetEffectiveGasTip(baseFee)
 		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
@@ -263,9 +266,7 @@ func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit
 		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
 			heap.Push(s, tip)
-			if s.Len() >= limit {
-				break
-			}
+			count = count + 1
 		}
 	}
 	return nil
@@ -290,6 +291,7 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*s = old[0 : n-1]
 	return x
 }

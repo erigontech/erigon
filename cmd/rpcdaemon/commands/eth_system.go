@@ -4,16 +4,16 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -197,11 +197,11 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 type GasPriceOracleBackend struct {
 	tx      kv.Tx
-	cc      *params.ChainConfig
+	cc      *chain.Config
 	baseApi *BaseAPI
 }
 
-func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI) *GasPriceOracleBackend {
+func NewGasPriceOracleBackend(tx kv.Tx, cc *chain.Config, baseApi *BaseAPI) *GasPriceOracleBackend {
 	return &GasPriceOracleBackend{tx: tx, cc: cc, baseApi: baseApi}
 }
 
@@ -218,10 +218,10 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(number, b.tx)
 }
-func (b *GasPriceOracleBackend) ChainConfig() *params.ChainConfig {
+func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc
 }
-func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
+func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
 	return rawdb.ReadReceiptsByHash(b.tx, hash)
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {

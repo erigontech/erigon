@@ -30,9 +30,12 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/urfave/cli"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -41,8 +44,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var runCommand = cli.Command{
@@ -117,34 +120,34 @@ func runCmd(ctx *cli.Context) error {
 	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
 	//log.Root().SetHandler(glogger)
-	logconfig := &vm.LogConfig{
-		DisableMemory:     ctx.GlobalBool(DisableMemoryFlag.Name),
-		DisableStack:      ctx.GlobalBool(DisableStackFlag.Name),
-		DisableStorage:    ctx.GlobalBool(DisableStorageFlag.Name),
-		DisableReturnData: ctx.GlobalBool(DisableReturnDataFlag.Name),
-		Debug:             ctx.GlobalBool(DebugFlag.Name),
+	logconfig := &logger.LogConfig{
+		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
+		DisableStack:      ctx.Bool(DisableStackFlag.Name),
+		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
+		DisableReturnData: ctx.Bool(DisableReturnDataFlag.Name),
+		Debug:             ctx.Bool(DebugFlag.Name),
 	}
 
 	var (
-		tracer        vm.Tracer
-		debugLogger   *vm.StructLogger
+		tracer        vm.EVMLogger
+		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
-		chainConfig   *params.ChainConfig
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		chainConfig   *chain.Config
+		sender        = libcommon.BytesToAddress([]byte("sender"))
+		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *core.Genesis
 	)
-	if ctx.GlobalBool(MachineFlag.Name) {
-		tracer = vm.NewJSONLogger(logconfig, os.Stdout)
-	} else if ctx.GlobalBool(DebugFlag.Name) {
-		debugLogger = vm.NewStructLogger(logconfig)
+	if ctx.Bool(MachineFlag.Name) {
+		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
+	} else if ctx.Bool(DebugFlag.Name) {
+		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger
 	} else {
-		debugLogger = vm.NewStructLogger(logconfig)
+		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	db := memdb.New()
-	if ctx.GlobalString(GenesisFlag.Name) != "" {
-		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
+	if ctx.String(GenesisFlag.Name) != "" {
+		gen := readGenesis(ctx.String(GenesisFlag.Name))
 		gen.MustCommit(db)
 		genesisConfig = gen
 		chainConfig = gen.Config
@@ -158,18 +161,18 @@ func runCmd(ctx *cli.Context) error {
 	defer tx.Rollback()
 
 	statedb = state.New(state.NewPlainStateReader(tx))
-	if ctx.GlobalString(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.GlobalString(SenderFlag.Name))
+	if ctx.String(SenderFlag.Name) != "" {
+		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
 	}
 	statedb.CreateAccount(sender, true)
 
-	if ctx.GlobalString(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.GlobalString(ReceiverFlag.Name))
+	if ctx.String(ReceiverFlag.Name) != "" {
+		receiver = libcommon.HexToAddress(ctx.String(ReceiverFlag.Name))
 	}
 
 	var code []byte
-	codeFileFlag := ctx.GlobalString(CodeFileFlag.Name)
-	codeFlag := ctx.GlobalString(CodeFlag.Name)
+	codeFileFlag := ctx.String(CodeFileFlag.Name)
+	codeFlag := ctx.String(CodeFlag.Name)
 
 	// The '--code' or '--codefile' flag overrides code in state
 	if codeFileFlag != "" || codeFlag != "" {
@@ -211,16 +214,17 @@ func runCmd(ctx *cli.Context) error {
 		}
 		code = common.Hex2Bytes(bin)
 	}
-	initialGas := ctx.GlobalUint64(GasFlag.Name)
+	initialGas := ctx.Uint64(GasFlag.Name)
 	if genesisConfig.GasLimit != 0 {
 		initialGas = genesisConfig.GasLimit
 	}
-	value, _ := uint256.FromBig(utils.GlobalBig(ctx, ValueFlag.Name))
+	value, _ := uint256.FromBig(utils.BigFlagValue(ctx, ValueFlag.Name))
+	gasPrice, _ := uint256.FromBig(utils.BigFlagValue(ctx, PriceFlag.Name))
 	runtimeConfig := runtime.Config{
 		Origin:      sender,
 		State:       statedb,
 		GasLimit:    initialGas,
-		GasPrice:    utils.GlobalBig(ctx, PriceFlag.Name),
+		GasPrice:    gasPrice,
 		Value:       value,
 		Difficulty:  genesisConfig.Difficulty,
 		Time:        new(big.Int).SetUint64(genesisConfig.Timestamp),
@@ -228,11 +232,11 @@ func runCmd(ctx *cli.Context) error {
 		BlockNumber: new(big.Int).SetUint64(genesisConfig.Number),
 		EVMConfig: vm.Config{
 			Tracer: tracer,
-			Debug:  ctx.GlobalBool(DebugFlag.Name) || ctx.GlobalBool(MachineFlag.Name),
+			Debug:  ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 		},
 	}
 
-	if cpuProfilePath := ctx.GlobalString(CPUProfileFlag.Name); cpuProfilePath != "" {
+	if cpuProfilePath := ctx.String(CPUProfileFlag.Name); cpuProfilePath != "" {
 		f, err := os.Create(cpuProfilePath)
 		if err != nil {
 			fmt.Println("could not create CPU profile: ", err)
@@ -248,23 +252,23 @@ func runCmd(ctx *cli.Context) error {
 	if chainConfig != nil {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
-		runtimeConfig.ChainConfig = params.AllEthashProtocolChanges
+		runtimeConfig.ChainConfig = params.AllProtocolChanges
 	}
 
 	var hexInput []byte
-	if inputFileFlag := ctx.GlobalString(InputFileFlag.Name); inputFileFlag != "" {
+	if inputFileFlag := ctx.String(InputFileFlag.Name); inputFileFlag != "" {
 		var err error
 		if hexInput, err = os.ReadFile(inputFileFlag); err != nil {
 			fmt.Printf("could not load input from file: %v\n", err)
 			os.Exit(1)
 		}
 	} else {
-		hexInput = []byte(ctx.GlobalString(InputFlag.Name))
+		hexInput = []byte(ctx.String(InputFlag.Name))
 	}
 	input := common.FromHex(string(bytes.TrimSpace(hexInput)))
 
 	var execFunc func() ([]byte, uint64, error)
-	if ctx.GlobalBool(CreateFlag.Name) {
+	if ctx.Bool(CreateFlag.Name) {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig, 0)
@@ -279,13 +283,13 @@ func runCmd(ctx *cli.Context) error {
 		}
 	}
 
-	bench := ctx.GlobalBool(BenchFlag.Name)
+	bench := ctx.Bool(BenchFlag.Name)
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
-	if ctx.GlobalBool(DumpFlag.Name) {
-		rules := &params.Rules{}
+	if ctx.Bool(DumpFlag.Name) {
+		rules := &chain.Rules{}
 		if chainConfig != nil {
-			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64())
+			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
 		}
 		if err = statedb.CommitBlock(rules, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
@@ -294,7 +298,7 @@ func runCmd(ctx *cli.Context) error {
 		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
 	}
 
-	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {
+	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
 		f, err := os.Create(memProfilePath)
 		if err != nil {
 			fmt.Println("could not create memory profile: ", err)
@@ -310,22 +314,22 @@ func runCmd(ctx *cli.Context) error {
 		}
 	}
 
-	if ctx.GlobalBool(DebugFlag.Name) {
+	if ctx.Bool(DebugFlag.Name) {
 		if debugLogger != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, "#### TRACE ####")
 			if printErr != nil {
 				log.Warn("Failed to print to stderr", "err", printErr)
 			}
-			vm.WriteTrace(os.Stderr, debugLogger.StructLogs())
+			logger.WriteTrace(os.Stderr, debugLogger.StructLogs())
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, "#### LOGS ####")
 		if printErr != nil {
 			log.Warn("Failed to print to stderr", "err", printErr)
 		}
-		vm.WriteLogs(os.Stderr, statedb.Logs())
+		logger.WriteLogs(os.Stderr, statedb.Logs())
 	}
 
-	if bench || ctx.GlobalBool(StatDumpFlag.Name) {
+	if bench || ctx.Bool(StatDumpFlag.Name) {
 		_, printErr := fmt.Fprintf(os.Stderr, `EVM gas used:    %d
 execution time:  %v
 allocations:     %d

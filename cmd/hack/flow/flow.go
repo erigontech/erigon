@@ -14,7 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -94,7 +95,7 @@ func worker(code []byte) {
 		defer debug.LogPanic()
 		for {
 			var m runtime.MemStats
-			common.ReadMemStats(&m)
+			dbg.ReadMemStats(&m)
 			// For info on each, see: https://golang.org/pkg/runtime/#MemStats
 			if !*quiet {
 				fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
@@ -587,15 +588,15 @@ type dummyAccount struct{}
 
 func (dummyAccount) SubBalance(amount *big.Int)                          {}
 func (dummyAccount) AddBalance(amount *big.Int)                          {}
-func (dummyAccount) SetAddress(common.Address)                           {}
+func (dummyAccount) SetAddress(libcommon.Address)                           {}
 func (dummyAccount) Value() *big.Int                                     { return nil }
 func (dummyAccount) SetBalance(*big.Int)                                 {}
 func (dummyAccount) SetNonce(uint64)                                     {}
 func (dummyAccount) Balance() *big.Int                                   { return nil }
-func (dummyAccount) Address() common.Address                             { return common.Address{} }
+func (dummyAccount) Address() libcommon.Address                             { return libcommon.Address{} }
 func (dummyAccount) ReturnGas(*big.Int)                                  {}
-func (dummyAccount) SetCode(common.Hash, []byte)                         {}
-func (dummyAccount) ForEachStorage(cb func(key, value common.Hash) bool) {}
+func (dummyAccount) SetCode(libcommon.Hash, []byte)                         {}
+func (dummyAccount) ForEachStorage(cb func(key, value libcommon.Hash) bool) {}
 
 func testGenCfg() error {
 	env := vm.NewEVM(vm.Context{BlockNumber: big.NewInt(1)}, &dummyStatedb{}, params.TestChainConfig,

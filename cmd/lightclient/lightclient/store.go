@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 type LightClientStore struct {
@@ -30,7 +31,7 @@ type LightClientStore struct {
  *	received LightClientBootstrap derived from a given trusted_block_root.
  */
 func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBootstrap) (*LightClientStore, error) {
-	headerRoot, err := bootstrap.Header.HashTreeRoot()
+	headerRoot, err := bootstrap.Header.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
@@ -39,11 +40,11 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 			headerRoot, trustedRoot)
 	}
 
-	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashTreeRoot()
+	syncCommitteeRoot, err := bootstrap.CurrentSyncCommittee.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
-	if !isValidMerkleBranch(
+	if !utils.IsValidMerkleBranch(
 		syncCommitteeRoot,
 		bootstrap.CurrentSyncCommitteeBranch,
 		5,  // floorlog2(CURRENT_SYNC_COMMITTEE_INDEX)

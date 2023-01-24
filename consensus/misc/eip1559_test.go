@@ -20,6 +20,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -27,8 +29,8 @@ import (
 
 // copyConfig does a _shallow_ copy of a given config. Safe to set new values, but
 // do not use e.g. SetInt() on the numbers. For testing only
-func copyConfig(original *params.ChainConfig) *params.ChainConfig {
-	return &params.ChainConfig{
+func copyConfig(original *chain.Config) *chain.Config {
+	return &chain.Config{
 		ChainName:                     original.ChainName,
 		ChainID:                       original.ChainID,
 		Consensus:                     original.Consensus,
@@ -50,8 +52,8 @@ func copyConfig(original *params.ChainConfig) *params.ChainConfig {
 		TerminalTotalDifficulty:       original.TerminalTotalDifficulty,
 		TerminalTotalDifficultyPassed: original.TerminalTotalDifficultyPassed,
 		MergeNetsplitBlock:            original.MergeNetsplitBlock,
-		ShanghaiBlock:                 original.ShanghaiBlock,
-		CancunBlock:                   original.CancunBlock,
+		ShanghaiTime:                  original.ShanghaiTime,
+		CancunTime:                    original.CancunTime,
 		RamanujanBlock:                original.RamanujanBlock,
 		NielsBlock:                    original.NielsBlock,
 		MirrorSyncBlock:               original.MirrorSyncBlock,
@@ -67,7 +69,7 @@ func copyConfig(original *params.ChainConfig) *params.ChainConfig {
 	}
 }
 
-func config() *params.ChainConfig {
+func config() *chain.Config {
 	config := copyConfig(params.TestChainConfig)
 	config.LondonBlock = big.NewInt(5)
 	return config

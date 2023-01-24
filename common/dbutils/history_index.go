@@ -1,40 +1,20 @@
 package dbutils
 
 import (
-	"encoding/binary"
-
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
-func AccountIndexChunkKey(key []byte, blockNumber uint64) []byte {
-	blockNumBytes := make([]byte, common.AddressLength+8)
-	copy(blockNumBytes, key)
-	binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength:], blockNumber)
-
-	return blockNumBytes
-}
-
-func StorageIndexChunkKey(key []byte, blockNumber uint64) []byte {
-	//remove incarnation and add block number
-	blockNumBytes := make([]byte, common.AddressLength+common.HashLength+8)
-	copy(blockNumBytes, key[:common.AddressLength])
-	copy(blockNumBytes[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
-	binary.BigEndian.PutUint64(blockNumBytes[common.AddressLength+common.HashLength:], blockNumber)
-
-	return blockNumBytes
-}
-
 func CompositeKeyWithoutIncarnation(key []byte) []byte {
-	if len(key) == common.HashLength*2+common.IncarnationLength {
-		kk := make([]byte, common.HashLength*2)
-		copy(kk, key[:common.HashLength])
-		copy(kk[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+	if len(key) == length.Hash*2+length.Incarnation {
+		kk := make([]byte, length.Hash*2)
+		copy(kk, key[:length.Hash])
+		copy(kk[length.Hash:], key[length.Hash+length.Incarnation:])
 		return kk
 	}
-	if len(key) == common.AddressLength+common.HashLength+common.IncarnationLength {
-		kk := make([]byte, common.AddressLength+common.HashLength)
-		copy(kk, key[:common.AddressLength])
-		copy(kk[common.AddressLength:], key[common.AddressLength+common.IncarnationLength:])
+	if len(key) == length.Addr+length.Hash+length.Incarnation {
+		kk := make([]byte, length.Addr+length.Hash)
+		copy(kk, key[:length.Addr])
+		copy(kk[length.Addr:], key[length.Addr+length.Incarnation:])
 		return kk
 	}
 	return key

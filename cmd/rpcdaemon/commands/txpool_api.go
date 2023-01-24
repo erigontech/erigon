@@ -5,10 +5,11 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -48,9 +49,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		"queued":  make(map[string]map[string]*RPCTransaction),
 	}
 
-	pending := make(map[common.Address][]types.Transaction, 8)
-	baseFee := make(map[common.Address][]types.Transaction, 8)
-	queued := make(map[common.Address][]types.Transaction, 8)
+	pending := make(map[libcommon.Address][]types.Transaction, 8)
+	baseFee := make(map[libcommon.Address][]types.Transaction, 8)
+	queued := make(map[libcommon.Address][]types.Transaction, 8)
 	for i := range reply.Txs {
 		stream := rlp.NewStream(bytes.NewReader(reply.Txs[i].RlpTx), 0)
 		txn, err := types.DecodeTransaction(stream)

@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
@@ -19,7 +21,7 @@ import (
 var (
 	genesisPath string
 	genesis     *core.Genesis
-	chainConfig *params.ChainConfig
+	chainConfig *chain2.Config
 )
 
 func init() {
@@ -71,7 +73,7 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 	return genesis
 }
 
-func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *params.ChainConfig) {
+func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *chain2.Config) {
 	if chain == "" {
 		genesis, chainConfig = core.DefaultGenesisBlock(), params.MainnetChainConfig
 	} else {

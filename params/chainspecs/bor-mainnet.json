@@ -20,8 +20,14 @@
     "period": {
       "0": 2
     },
-    "producerDelay": 6,
-    "sprint": 64,
+    "producerDelay": {
+      "0": 6,
+      "38189056": 4
+    },
+    "sprint": {
+      "0": 64,
+      "38189056": 16
+    },
     "backupMultiplier": {
       "0": 2
     },
@@ -46,6 +52,7 @@
         }
       }
     },
-    "jaipurBlock": 23850000
+    "jaipurBlock": 23850000,
+    "delhiBlock": 38189056
   }
 }

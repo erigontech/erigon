@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 )
 
@@ -36,10 +37,10 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 	fmt.Printf("Last block: %d\n", lastBlock)
 	// Go back 256 blocks
 	bn := uint64(lastBlock) - 256
-	page := common.Hash{}.Bytes()
+	page := libcommon.Hash{}.Bytes()
 
 	for len(page) > 0 {
-		accRangeTG := make(map[common.Address]state.DumpAccount)
+		accRangeTG := make(map[libcommon.Address]state.DumpAccount)
 		var sr DebugAccountRange
 		reqGen.reqID++
 		res = reqGen.Erigon("debug_accountRange", reqGen.accountRange(bn, page, 256), &sr)
@@ -61,11 +62,11 @@ func Bench9(erigonURL, gethURL string, needCompare bool) {
 		for address, dumpAcc := range accRangeTG {
 			var proof EthGetProof
 			reqGen.reqID++
-			var storageList []common.Hash
+			var storageList []libcommon.Hash
 			// And now with the storage, if present
 			if len(dumpAcc.Storage) > 0 {
 				for key := range dumpAcc.Storage {
-					storageList = append(storageList, common.HexToHash(key))
+					storageList = append(storageList, libcommon.HexToHash(key))
 					if len(storageList) > 100 {
 						break
 					}

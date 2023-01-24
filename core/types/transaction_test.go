@@ -29,21 +29,23 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/stretchr/testify/assert"
 )
 
 // The values in those tests are from the Transaction Tests
 // at github.com/ethereum/tests.
 var (
-	testAddr = common.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+	testAddr = libcommon.HexToAddress("b94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 
 	emptyTx = NewTransaction(
 		0,
-		common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
+		libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87"),
 		uint256.NewInt(0), 0, uint256.NewInt(0),
 		nil,
 	)
@@ -115,10 +117,10 @@ func TestDecodeEmptyTypedTx(t *testing.T) {
 }
 
 func TestTransactionSigHash(t *testing.T) {
-	if emptyTx.SigningHash(nil) != common.HexToHash("c775b99e7ad12f50d819fcd602390467e28141316969f4b57f0626f74fe3b386") {
+	if emptyTx.SigningHash(nil) != libcommon.HexToHash("c775b99e7ad12f50d819fcd602390467e28141316969f4b57f0626f74fe3b386") {
 		t.Errorf("empty transaction hash mismatch, got %x", emptyTx.SigningHash(nil))
 	}
-	if rightvrsTx.SigningHash(nil) != common.HexToHash("fe7a79529ed5f7c3375d06b26b186a8644e0e16c373d7a12be41c62d6042b77a") {
+	if rightvrsTx.SigningHash(nil) != libcommon.HexToHash("fe7a79529ed5f7c3375d06b26b186a8644e0e16c373d7a12be41c62d6042b77a") {
 		t.Errorf("RightVRS transaction hash mismatch, got %x", rightvrsTx.SigningHash(nil))
 	}
 }
@@ -136,10 +138,10 @@ func TestTransactionEncode(t *testing.T) {
 }
 
 func TestEIP2718TransactionSigHash(t *testing.T) {
-	if emptyEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+	if emptyEip2718Tx.SigningHash(big.NewInt(1)) != libcommon.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
 		t.Errorf("empty EIP-2718 transaction hash mismatch, got %x", emptyEip2718Tx.SigningHash(big.NewInt(1)))
 	}
-	if signedEip2718Tx.SigningHash(big.NewInt(1)) != common.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
+	if signedEip2718Tx.SigningHash(big.NewInt(1)) != libcommon.HexToHash("49b486f0ec0a60dfbbca2d30cb07c9e8ffb2a2ff41f29a1ab6737475f6ff69f3") {
 		t.Errorf("signed EIP-2718 transaction hash mismatch, got %x", signedEip2718Tx.SigningHash(big.NewInt(1)))
 	}
 }
@@ -161,26 +163,26 @@ func TestEIP2930Signer(t *testing.T) {
 		tx             Transaction
 		chainID        *big.Int
 		signer         *Signer
-		wantSignerHash common.Hash
+		wantSignerHash libcommon.Hash
 		wantSenderErr  error
 		wantSignErr    error
-		wantHash       common.Hash // after signing
+		wantHash       libcommon.Hash // after signing
 	}{
 		{
 			tx:             tx0,
 			signer:         signer1,
 			chainID:        big.NewInt(1),
-			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
+			wantSignerHash: libcommon.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSenderErr:  ErrInvalidChainId,
-			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
+			wantHash:       libcommon.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
 		},
 		{
 			tx:             tx1,
 			signer:         signer1,
 			chainID:        big.NewInt(1),
 			wantSenderErr:  ErrInvalidSig,
-			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
-			wantHash:       common.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
+			wantSignerHash: libcommon.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
+			wantHash:       libcommon.HexToHash("1ccd12d8bbdb96ea391af49a35ab641e219b2dd638dea375f2bc94dd290f2549"),
 		},
 		{
 			// This checks what happens when trying to sign an unsigned tx for the wrong chain.
@@ -188,7 +190,7 @@ func TestEIP2930Signer(t *testing.T) {
 			signer:         signer2,
 			chainID:        big.NewInt(2),
 			wantSenderErr:  ErrInvalidChainId,
-			wantSignerHash: common.HexToHash("367967247499343401261d718ed5aa4c9486583e4d89251afce47f4a33c33362"),
+			wantSignerHash: libcommon.HexToHash("367967247499343401261d718ed5aa4c9486583e4d89251afce47f4a33c33362"),
 			wantSignErr:    ErrInvalidChainId,
 		},
 		{
@@ -197,7 +199,7 @@ func TestEIP2930Signer(t *testing.T) {
 			signer:         signer1,
 			chainID:        big.NewInt(1),
 			wantSenderErr:  ErrInvalidChainId,
-			wantSignerHash: common.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
+			wantSignerHash: libcommon.HexToHash("846ad7672f2a3a40c1f959cd4a8ad21786d620077084d84c8d7c077714caa139"),
 			wantSignErr:    ErrInvalidChainId,
 		},
 	}
@@ -276,7 +278,7 @@ func decodeTx(data []byte) (Transaction, error) {
 	return DecodeTransaction(rlp.NewStream(bytes.NewReader(data), 0))
 }
 
-func defaultTestKey() (*ecdsa.PrivateKey, common.Address) {
+func defaultTestKey() (*ecdsa.PrivateKey, libcommon.Address) {
 	key, _ := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	return key, addr
@@ -327,12 +329,12 @@ func TestTransactionPriceNonceSort(t *testing.T) {
 	signer := LatestSignerForChainID(nil)
 
 	// Generate a batch of transactions with overlapping values, but shifted nonces
-	idx := map[common.Address]int{}
+	idx := map[libcommon.Address]int{}
 	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		for i := 0; i < 25; i++ {
-			tx, _ := SignTx(NewTransaction(uint64(start+i), common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
+			tx, _ := SignTx(NewTransaction(uint64(start+i), libcommon.Address{}, uint256.NewInt(100), 100, uint256.NewInt(uint64(start+i)), nil), *signer, key)
 
 			j, ok := idx[addr]
 			if ok {
@@ -386,12 +388,12 @@ func TestTransactionTimeSort(t *testing.T) {
 	signer := LatestSignerForChainID(nil)
 
 	// Generate a batch of transactions with overlapping prices, but different creation times
-	idx := map[common.Address]int{}
+	idx := map[libcommon.Address]int{}
 	groups := TransactionsGroupedBySender{}
 	for start, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 
-		tx, _ := SignTx(NewTransaction(0, common.Address{}, uint256.NewInt(100), 100, uint256.NewInt(1), nil), *signer, key)
+		tx, _ := SignTx(NewTransaction(0, libcommon.Address{}, uint256.NewInt(100), 100, uint256.NewInt(1), nil), *signer, key)
 		tx.(*LegacyTx).time = time.Unix(0, int64(len(keys)-start))
 		i, ok := idx[addr]
 		if ok {
@@ -437,9 +439,9 @@ func TestTransactionCoding(t *testing.T) {
 	}
 	var (
 		signer    = LatestSignerForChainID(common.Big1)
-		addr      = common.HexToAddress("0x0000000000000000000000000000000000000001")
-		recipient = common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-		accesses  = AccessList{{Address: addr, StorageKeys: []common.Hash{{0}}}}
+		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
+		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
+		accesses  = AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
