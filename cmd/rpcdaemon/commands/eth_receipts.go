@@ -329,10 +329,17 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 		return out, err
 	}
 	if addrBitmap != nil {
-		out = iter.Intersect[uint64](out, addrBitmap)
+		if out == nil {
+			out = addrBitmap
+		} else {
+			out = iter.Intersect[uint64](out, addrBitmap)
+		}
 		//out.And(addrBitmap)
 	}
-	return nil, nil
+	if out == nil {
+		out = iter.Range[uint64](fromTxNum, toTxNum)
+	}
+	return out, nil
 }
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
