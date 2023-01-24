@@ -34,6 +34,25 @@ func (it *ArrStream[V]) NextBatch() ([]V, error) {
 	return v, nil
 }
 
+func Range[T constraints.Integer](from, to T) *RangeIter[T] {
+	if from == to {
+		to++
+	}
+	return &RangeIter[T]{i: from, to: to}
+}
+
+type RangeIter[T constraints.Integer] struct {
+	i, to T
+}
+
+func (it *RangeIter[T]) HasNext() bool { return it.i < it.to }
+func (it *RangeIter[T]) Close()        {}
+func (it *RangeIter[T]) Next() (T, error) {
+	v := it.i
+	it.i++
+	return v, nil
+}
+
 func ExpectEqual[V comparable](tb testing.TB, s1, s2 Unary[V]) {
 	tb.Helper()
 	for s1.HasNext() && s2.HasNext() {
@@ -129,22 +148,18 @@ type UnionStream[T constraints.Ordered] struct {
 	x, y           Unary[T]
 	xHas, yHas     bool
 	xNextK, yNextK T
-	limit          int
 	err            error
 }
 
-func UnionLimit[T constraints.Ordered](x, y Unary[T], limit int) *UnionStream[T] {
-	m := &UnionStream[T]{x: x, y: y, limit: limit}
+func Union[T constraints.Ordered](x, y Unary[T]) *UnionStream[T] {
+	m := &UnionStream[T]{x: x, y: y}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
-func Union[T constraints.Ordered](x, y Unary[T]) *UnionStream[T] {
-	return UnionLimit[T](x, y, -1)
-}
 
 func (m *UnionStream[T]) HasNext() bool {
-	return (m.err != nil || m.xHas || m.yHas) && m.limit != 0
+	return m.err != nil || m.xHas || m.yHas
 }
 func (m *UnionStream[T]) advanceX() {
 	if m.err != nil {

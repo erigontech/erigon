@@ -763,7 +763,6 @@ func (it *InvertedIterator1) Close() {
 	if it.cursor != nil {
 		it.cursor.Close()
 	}
-
 }
 
 func (it *InvertedIterator1) advanceInFiles() {
