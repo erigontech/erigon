@@ -331,7 +331,7 @@ func runPeer(
 	protocol uint,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
-	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte),
+	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte, protocol uint),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 ) error {
 	printTime := time.Now().Add(time.Minute)
@@ -382,7 +382,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.BlockHeadersMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -392,7 +392,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.GetBlockBodiesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -401,7 +401,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.BlockBodiesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -411,7 +411,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.GetNodeDataMsg:
 			if protocol >= eth.ETH67 {
 				msg.Discard()
@@ -424,7 +424,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -434,7 +434,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -444,7 +444,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -454,7 +454,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.NewBlockMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -463,7 +463,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -473,7 +473,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.GetPooledTransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -483,7 +483,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.TransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -493,7 +493,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case eth.PooledTransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -503,7 +503,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
 		case 11:
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
@@ -1047,13 +1047,14 @@ func (ss *GrpcServer) GetStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *GrpcServer) send(msgID proto_sentry.MessageId, peerID [64]byte, b []byte) {
+func (ss *GrpcServer) send(msgID proto_sentry.MessageId, peerID [64]byte, b []byte, protocol uint) {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	req := &proto_sentry.InboundMessage{
-		PeerId: gointerfaces.ConvertHashToH512(peerID),
-		Id:     msgID,
-		Data:   b,
+		PeerId:   gointerfaces.ConvertHashToH512(peerID),
+		Id:       msgID,
+		Data:     b,
+		Protocol: proto_sentry.Protocol(protocol),
 	}
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
