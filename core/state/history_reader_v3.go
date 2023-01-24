@@ -54,6 +54,9 @@ func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), hexutility.EncodeTs(incarnation)...), key.Bytes(), hr.txNum)
+	if hr.trace {
+		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
+	}
 	return enc, err
 }
 
@@ -61,8 +64,11 @@ func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnatio
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
-	return enc, err
+	code, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	if hr.trace {
+		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
+	}
+	return code, err
 }
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {

@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -135,9 +136,6 @@ func TestTraceBlockByHash(t *testing.T) {
 
 func TestTraceTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	if m.HistoryV3 {
-		t.Skip("TODO: FIXME")
-	}
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
@@ -146,6 +144,7 @@ func TestTraceTransaction(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
+		fmt.Printf("--- loop\n")
 		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
