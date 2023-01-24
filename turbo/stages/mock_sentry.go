@@ -15,7 +15,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
@@ -30,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -672,19 +672,12 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 	return ms.sentriesClient.Hd
 }
 
-func (ms *MockSentry) NewHistoricalStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
-	if ms.HistoryV3 {
-		r := state.NewHistoryReaderV3()
-		r.SetTx(tx)
-		minTxNum, err := rawdbv3.TxNums.Min(tx, blockNum)
-		if err != nil {
-			panic(err)
-		}
-		r.SetTxNum(minTxNum)
-		return r
+func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
+	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.HistoryV3, ms.ChainConfig.ChainName)
+	if err != nil {
+		panic(err)
 	}
-
-	return state.NewPlainState(tx, blockNum, systemcontracts.SystemContractCodeLookup[ms.ChainConfig.ChainName])
+	return r
 }
 
 func (ms *MockSentry) NewStateReader(tx kv.Tx) state.StateReader {
