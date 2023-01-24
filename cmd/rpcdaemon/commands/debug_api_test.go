@@ -3,7 +3,6 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 
@@ -144,7 +143,6 @@ func TestTraceTransaction(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		fmt.Printf("--- loop\n")
 		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
@@ -170,9 +168,6 @@ func TestTraceTransaction(t *testing.T) {
 
 func TestTraceTransactionNoRefund(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	if m.HistoryV3 {
-		t.Skip("TODO: FIXME")
-	}
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
 	api := NewPrivateDebugAPI(
@@ -207,9 +202,6 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 
 func TestStorageRangeAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	if m.HistoryV3 {
-		t.Skip()
-	}
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
 	api := NewPrivateDebugAPI(

@@ -214,7 +214,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash libco
 		stream.WriteNil()
 		return err
 	}
-	fmt.Printf("after ComputeTxEnv: %d\n", blockNum)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
