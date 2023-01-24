@@ -512,7 +512,6 @@ func (l *LightClientFinalityUpdate) DecodeSSZWithVersion(buf []byte, version int
 	if err != nil {
 		return err
 	}
-	pos += l.SyncAggregate.EncodingSizeSSZ() + 8
 	if l.version >= clparams.CapellaVersion {
 		if offsetAttested > offsetFinalized || offsetFinalized > uint32(len(buf)) {
 			return ssz_utils.ErrBadOffset
