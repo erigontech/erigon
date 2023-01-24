@@ -147,7 +147,6 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 	case AccountsDomain:
 		panic("not implemented yet")
 	case StorageDomain:
-		//it := tx.agg.StorageHistoryRIterateChanged(asOfTs, math.MaxUint64, tx)
 		toKey, _ := kv.NextSubtree(k1)
 		fromKey2 := append(common.Copy(k1), fromKey...)
 		it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
