@@ -69,6 +69,11 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big   `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
+type ExecutionPayloadBodyV1 struct {
+	Transactions [][]byte            `json:"transactions" gencodec:"required"`
+	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+}
+
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
@@ -78,6 +83,8 @@ type EngineAPI interface {
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
+	GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error)
+	GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -356,6 +363,46 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		TerminalBlockHash:       libcommon.Hash{},
 		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
 	}, nil
+}
+
+func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error) {
+	h := make([]*types2.H256, len(hashes))
+	for i, hash := range hashes {
+		h[i] = gointerfaces.ConvertHashToH256(hash)
+	}
+
+	apiRes, err := e.api.EngineGetPayloadBodiesByHashV1(ctx, &remote.EngineGetPayloadBodiesByHashV1Request{Hashes: h})
+	if err != nil {
+		return nil, err
+	}
+
+	return convertExecutionPayloadV1(apiRes), nil
+}
+
+func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
+	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
+	if err != nil {
+		return nil, err
+	}
+
+	return convertExecutionPayloadV1(apiRes), nil
+}
+
+func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response) []*ExecutionPayloadBodyV1 {
+	result := make([]*ExecutionPayloadBodyV1, len(response.Bodies))
+	for idx, body := range response.Bodies {
+		if body == nil {
+			result[idx] = nil
+		} else {
+			pl := &ExecutionPayloadBodyV1{
+				Transactions: body.Transactions,
+				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			}
+			result[idx] = pl
+		}
+	}
+
+	return result
 }
 
 // NewEngineAPI returns EngineImpl instance
