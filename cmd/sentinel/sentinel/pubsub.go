@@ -129,6 +129,16 @@ func (s *GossipManager) CloseTopic(topic string) {
 	}
 }
 
+// reset'em
+func (s *GossipManager) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, val := range s.subscriptions {
+		val.Close() // Close all.
+	}
+	s.subscriptions = map[string]*GossipSubscription{}
+}
+
 // get a specific topic
 func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
 	s.mu.Lock()
@@ -192,6 +202,14 @@ func (s *GossipManager) String() string {
 	return sb.String()
 }
 
+func (s *Sentinel) RestartTopics() {
+	// Reset all topics
+	s.subManager.Reset()
+	for _, topic := range s.gossipTopics {
+		s.SubscribeGossip(topic)
+	}
+}
+
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	sub = &GossipSubscription{
 		gossip_topic: topic,
@@ -205,6 +223,12 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
 	s.subManager.AddSubscription(path, sub)
+	for _, t := range s.gossipTopics {
+		if t.CodecStr == topic.CodecStr {
+			return sub, nil
+		}
+	}
+	s.gossipTopics = append(s.gossipTopics, topic)
 	return sub, nil
 }
 
