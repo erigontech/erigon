@@ -272,9 +272,9 @@ func handShake(
 	version uint,
 	minVersion uint,
 	startSync func(bestHash libcommon.Hash) error,
-) error {
+) (uint32, error) {
 	if status == nil {
-		return fmt.Errorf("could not get status message from core for peer %s connection", peerID)
+		return 0, fmt.Errorf("could not get status message from core for peer %s connection", peerID)
 	}
 
 	// Send out own handshake in a new thread
@@ -297,10 +297,12 @@ func handShake(
 		errc <- p2p.Send(rw, eth.StatusMsg, s)
 	}()
 
+	reply, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
+	if err != nil {
+		return 0, err
+	}
 	go func() {
-		reply, err := readAndValidatePeerStatusMessage(rw, status, version, minVersion)
-
-		if (err == nil) && (startSync != nil) {
+		if startSync != nil {
 			err = startSync(reply.Head)
 		}
 
@@ -313,16 +315,16 @@ func handShake(
 		select {
 		case err := <-errc:
 			if err != nil {
-				return err
+				return 0, err
 			}
 		case <-timeout.C:
-			return p2p.DiscReadTimeout
+			return 0, p2p.DiscReadTimeout
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, ctx.Err()
 		}
 	}
 
-	return nil
+	return reply.ProtocolVersion, nil
 }
 
 func runPeer(
@@ -331,9 +333,18 @@ func runPeer(
 	protocol uint,
 	rw p2p.MsgReadWriter,
 	peerInfo *PeerInfo,
-	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte, protocol uint),
+	send func(msgId proto_sentry.MessageId, peerID [64]byte, b []byte, prt proto_sentry.Protocol),
 	hasSubscribers func(msgId proto_sentry.MessageId) bool,
 ) error {
+	var prt proto_sentry.Protocol
+	switch protocol {
+	case eth.ETH66:
+		prt = proto_sentry.Protocol_ETH66
+	case eth.ETH67:
+		prt = proto_sentry.Protocol_ETH67
+	case eth.ETH68:
+		prt = proto_sentry.Protocol_ETH68
+	}
 	printTime := time.Now().Add(time.Minute)
 	peerPrinted := false
 	defer func() {
@@ -382,7 +393,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.BlockHeadersMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -392,7 +403,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.GetBlockBodiesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -401,7 +412,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.BlockBodiesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -411,7 +422,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.GetNodeDataMsg:
 			if protocol >= eth.ETH67 {
 				msg.Discard()
@@ -424,7 +435,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 			//log.Info(fmt.Sprintf("[%s] GetNodeData", peerID))
 		case eth.GetReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -434,7 +445,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
 		case eth.ReceiptsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -444,7 +455,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
 		case eth.NewBlockHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -454,7 +465,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.NewBlockMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -463,7 +474,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -473,7 +484,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.GetPooledTransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -483,7 +494,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.TransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -493,7 +504,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case eth.PooledTransactionsMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
 				continue
@@ -503,7 +514,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
-			send(eth.ToProto[protocol][msg.Code], peerID, b, protocol)
+			send(eth.ToProto[protocol][msg.Code], peerID, b, prt)
 		case 11:
 			// Ignore
 			// TODO: Investigate why BSC peers for eth/67 send these messages
@@ -554,7 +565,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 		peersStreams: NewPeersStreams(),
 	}
 
-	if protocol != eth.ETH66 && protocol != eth.ETH67 {
+	if protocol != eth.ETH66 && protocol != eth.ETH67 && protocol != eth.ETH68 {
 		panic(fmt.Errorf("unexpected p2p protocol: %d", protocol))
 	}
 
@@ -576,7 +587,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			defer peerInfo.Close()
 
 			defer ss.GoodPeers.Delete(peerID)
-			err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
+			peerProtocol, err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, eth.ETH66, func(bestHash libcommon.Hash) error {
 				ss.GoodPeers.Store(peerID, peerInfo)
 				ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return ss.startSync(ctx, bestHash, peerID)
@@ -589,7 +600,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			err = runPeer(
 				ctx,
 				peerID,
-				protocol,
+				uint(peerProtocol),
 				rw,
 				peerInfo,
 				ss.send,
@@ -1047,14 +1058,14 @@ func (ss *GrpcServer) GetStatus() *proto_sentry.StatusData {
 	return ss.statusData
 }
 
-func (ss *GrpcServer) send(msgID proto_sentry.MessageId, peerID [64]byte, b []byte, protocol uint) {
+func (ss *GrpcServer) send(msgID proto_sentry.MessageId, peerID [64]byte, b []byte, prt proto_sentry.Protocol) {
 	ss.messageStreamsLock.RLock()
 	defer ss.messageStreamsLock.RUnlock()
 	req := &proto_sentry.InboundMessage{
 		PeerId:   gointerfaces.ConvertHashToH512(peerID),
 		Id:       msgID,
 		Data:     b,
-		Protocol: proto_sentry.Protocol(protocol),
+		Protocol: prt,
 	}
 	for i := range ss.messageStreams[msgID] {
 		ch := ss.messageStreams[msgID][i]
