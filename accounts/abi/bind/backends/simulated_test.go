@@ -148,6 +148,7 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
 	statedb := state.New(state.NewPlainState(tx, num+1, nil))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {

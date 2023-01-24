@@ -1024,15 +1024,15 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := state.New(m.NewHistoricalStateReader(1, tx))
+	st := state.New(m.NewHistoryStateReader(1, tx))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(m.NewHistoricalStateReader(2, tx))
+	st = state.New(m.NewHistoryStateReader(2, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(m.NewHistoricalStateReader(3, tx))
+	st = state.New(m.NewHistoryStateReader(3, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -1387,7 +1387,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := libcommon.HexToHash("01")
@@ -1495,7 +1495,8 @@ func TestCVE2020_26265(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		reader := m.NewHistoryStateReader(2, tx)
+		statedb := state.New(reader)
 
 		got := statedb.GetBalance(aa)
 		if !got.Eq(new(uint256.Int).SetUint64(5)) {
