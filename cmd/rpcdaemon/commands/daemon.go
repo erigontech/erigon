@@ -120,7 +120,7 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 			})
 		case "bsc":
 			list = append(list, rpc.API{
-				Namespace: "eth",
+				Namespace: "bsc",
 				Public:    true,
 				Service:   BscAPI(bscImpl),
 				Version:   "1.0",

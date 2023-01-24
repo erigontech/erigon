@@ -463,8 +463,15 @@ func RegisterApisFromWhitelist(apis []rpc.API, modules []string, srv *rpc.Server
 	// Register all the APIs exposed by the services
 	for _, api := range apis {
 		if exposeAll || whitelist[api.Namespace] || (len(whitelist) == 0 && api.Public) {
-			if err := srv.RegisterName(api.Namespace, api.Service); err != nil {
-				return err
+			// set exception for "bsc" API module and register it under "eth" namespace
+			if api.Namespace == "bsc" {
+				if err := srv.RegisterName("eth", api.Service); err != nil {
+					return err
+				}
+			} else {
+				if err := srv.RegisterName(api.Namespace, api.Service); err != nil {
+					return err
+				}
 			}
 		}
 	}
