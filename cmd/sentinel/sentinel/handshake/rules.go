@@ -1,8 +1,6 @@
 package handshake
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -40,9 +38,6 @@ func LightClientRule(status *cltypes.Status, ourStatus *cltypes.Status, genesisC
 	forkDigest, err := fork.ComputeForkDigest(beaconConfig, genesisConfig)
 	if err != nil {
 		return false
-	}
-	if status.ForkDigest == forkDigest {
-		fmt.Println("AAAAA")
 	}
 	return status.ForkDigest == forkDigest &&
 		status.HeadSlot == utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot)
