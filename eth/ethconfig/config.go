@@ -224,9 +224,6 @@ type Config struct {
 
 	StateStream bool
 
-	// Enable WatchTheBurn stage
-	EnabledIssuance bool
-
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 
