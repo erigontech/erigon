@@ -8,7 +8,6 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -301,51 +300,53 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
-func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
+func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
-	var err error
 	if begin > 0 {
 		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
 		if err != nil {
-			return err
+			return out, err
 		}
 	}
 	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
 	if err != nil {
-		return err
+		return out, err
 	}
 	toTxNum++
 
-	out.AddRange(fromTxNum, toTxNum) // [from,to)
+	//out.AddRange(fromTxNum, toTxNum) // [from,to)
 	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
 	if err != nil {
-		return err
+		return out, err
 	}
 	if topicsBitmap != nil {
-		out.And(topicsBitmap)
+		out = topicsBitmap
+		//out.And(topicsBitmap)
 	}
 	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
 	if err != nil {
-		return err
+		return out, err
 	}
 	if addrBitmap != nil {
-		out.And(addrBitmap)
+		out = iter.Intersect[uint64](out, addrBitmap)
+		//out.And(addrBitmap)
 	}
-	return nil
+	return nil, nil
 }
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	txNumbers := bitmapdb.NewBitmap64()
-	defer bitmapdb.ReturnToPool64(txNumbers)
-	if err := applyFiltersV3(txNumbers, tx, begin, end, crit); err != nil {
+	//txNumbers := bitmapdb.NewBitmap64()
+	//defer bitmapdb.ReturnToPool64(txNumbers)
+	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
+	if err != nil {
 		return logs, err
 	}
-	if txNumbers.IsEmpty() {
-		return logs, nil
-	}
+	//if txNumbers.IsEmpty() {
+	//	return logs, nil
+	//}
 
 	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
@@ -361,7 +362,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash libcommon.Hash
 	var header *types.Header
 
-	iter := MapTxNum2BlockNum(tx, bitmapdb.ToIter(txNumbers.Iterator()))
+	iter := MapTxNum2BlockNum(tx, txNumbers)
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -492,57 +493,63 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (*roaring64.Bitmap, error) {
-	var result *roaring64.Bitmap
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (iter.U64, error) {
+	var result iter.U64
+	//var result *roaring64.Bitmap
 	for _, sub := range topics {
-		bitmapForORing := bitmapdb.NewBitmap64()
-		defer bitmapdb.ReturnToPool64(bitmapForORing)
+		var bitmapForORing iter.U64 = iter.Array[uint64]([]uint64{})
+		//defer bitmapdb.ReturnToPool64(bitmapForORing)
 
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to, true, -1)
 			if err != nil {
 				return nil, err
 			}
-			bm, err := it.(bitmapdb.ToBitmap).ToBitmap()
-			if err != nil {
-				return nil, err
-			}
-			bitmapForORing.Or(bm)
+			bitmapForORing = iter.Union[uint64](bitmapForORing, it)
+			//bitmapForORing.Or(bm)
 		}
 
-		if bitmapForORing.GetCardinality() == 0 {
-			continue
-		}
+		//if bitmapForORing.GetCardinality() == 0 {
+		//	continue
+		//}
 		if result == nil {
-			result = bitmapForORing.Clone()
+			result = bitmapForORing
+			//result = bitmapForORing.Clone()
 			continue
 		}
-		result = roaring64.And(bitmapForORing, result)
+		result = iter.Intersect[uint64](result, bitmapForORing)
+		//result = roaring64.And(bitmapForORing, result)
 	}
 	return result, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (*roaring64.Bitmap, error) {
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (iter.U64, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
-	rx := make([]*roaring64.Bitmap, len(addrs))
-	defer func() {
-		for _, bm := range rx {
-			bitmapdb.ReturnToPool64(bm)
-		}
-	}()
-	for idx, addr := range addrs {
+	//rx := make([]*roaring64.Bitmap, len(addrs))
+	//defer func() {
+	//	for _, bm := range rx {
+	//		bitmapdb.ReturnToPool64(bm)
+	//	}
+	//}()
+	var rx iter.U64
+	for _, addr := range addrs {
 		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to, true, -1)
 		if err != nil {
 			return nil, err
 		}
-		rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
-		if err != nil {
-			return nil, err
+		//rx[idx], err = it.(bitmapdb.ToBitmap).ToBitmap()
+		//if err != nil {
+		//	return nil, err
+		//}
+		if rx == nil {
+			rx = it
+		} else {
+			rx = iter.Union[uint64](rx, it)
 		}
 	}
-	return roaring64.FastOr(rx...), nil
+	return rx, nil
 }
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
