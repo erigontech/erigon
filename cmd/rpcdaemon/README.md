@@ -317,7 +317,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_getHeaderByNumber                   | Yes     | Erigon only                          |
 | erigon_getLogsByHash                       | Yes     | Erigon only                          |
 | erigon_forks                               | Yes     | Erigon only                          |
-| erigon_issuance                            | Yes     | Erigon only                          |
 | erigon_getBlockByTimestamp                 | Yes     | Erigon only                          |
 | erigon_BlockNumber                         | Yes     | Erigon only                          |
 | erigon_getLatestLogs                       | Yes     | Erigon only                          |
