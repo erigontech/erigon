@@ -415,7 +415,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("header is nil", "blockNum", blockNum)
+				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
 			blockHash = header.Hash()

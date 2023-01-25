@@ -298,7 +298,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("header is nil", "blockNum", blockNum)
+				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
 			blockHash = header.Hash()
