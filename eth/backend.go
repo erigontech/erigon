@@ -963,6 +963,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	if !snConfig.Enabled {
+		fmt.Printf("dbg21: %s\n", dbg.Stack())
 		blockReader := snapshotsync.NewBlockReader()
 		return blockReader, nil, nil, nil
 	}
@@ -992,6 +993,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 
 			s.downloaderClient = direct.NewDownloaderClient(bittorrentServer)
 		}
+		fmt.Printf("dbg22: %s\n", dbg.Stack())
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -1002,6 +1004,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	fmt.Printf("dbg23: %s\n", dbg.Stack())
 	if err = agg.ReopenFiles(); err != nil {
 		return nil, nil, nil, err
 	}
