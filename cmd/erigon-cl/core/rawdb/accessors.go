@@ -5,7 +5,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	ssz "github.com/prysmaticlabs/fastssz"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -34,24 +33,24 @@ func ReadBeaconState(tx kv.Getter, slot uint64) (*state.BeaconState, error) {
 	if err != nil {
 		return nil, err
 	}
-	bellatrixState := &cltypes.BeaconStateBellatrix{}
+	state := &state.BeaconState{}
 
 	if len(data) == 0 {
 		return nil, nil
 	}
 
-	if err := utils.DecodeSSZSnappy(bellatrixState, data); err != nil {
+	if err := utils.DecodeSSZSnappy(state, data); err != nil {
 		return nil, err
 	}
 
-	return state.FromBellatrixState(bellatrixState), nil
+	return state, nil
 }
 
 func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error {
 	key := make([]byte, 4)
 	binary.BigEndian.PutUint32(key, uint32(update.SignatureSlot/8192))
 
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -59,7 +58,7 @@ func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error
 }
 
 func WriteLightClientFinalityUpdate(tx kv.RwTx, update *cltypes.LightClientFinalityUpdate) error {
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -67,7 +66,7 @@ func WriteLightClientFinalityUpdate(tx kv.RwTx, update *cltypes.LightClientFinal
 }
 
 func WriteLightClientOptimisticUpdate(tx kv.RwTx, update *cltypes.LightClientOptimisticUpdate) error {
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -83,7 +82,7 @@ func ReadLightClientUpdate(tx kv.RwTx, period uint32) (*cltypes.LightClientUpdat
 		return nil, err
 	}
 	update := &cltypes.LightClientUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
@@ -98,7 +97,7 @@ func ReadLightClientFinalityUpdate(tx kv.Tx) (*cltypes.LightClientFinalityUpdate
 		return nil, nil
 	}
 	update := &cltypes.LightClientFinalityUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
@@ -113,18 +112,10 @@ func ReadLightClientOptimisticUpdate(tx kv.Tx) (*cltypes.LightClientOptimisticUp
 		return nil, nil
 	}
 	update := &cltypes.LightClientOptimisticUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
-}
-
-func EncodeSSZ(prefix []byte, object ssz.Marshaler) ([]byte, error) {
-	enc, err := object.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return append(prefix, enc...), nil
 }
 
 // Bytes2FromLength convert length to 2 bytes repressentation

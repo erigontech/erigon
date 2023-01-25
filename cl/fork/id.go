@@ -87,7 +87,7 @@ func getLastForkEpoch(
 ) uint64 {
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentForkEpoch := beaconConfig.GenesisEpoch
+	var currentForkEpoch uint64
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentForkEpoch = fork.epoch

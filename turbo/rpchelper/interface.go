@@ -25,13 +25,12 @@ type ApiBackend interface {
 	Subscribe(ctx context.Context, cb func(*remote.SubscribeReply)) error
 	SubscribeLogs(ctx context.Context, cb func(*remote.SubscribeLogsReply), requestor *atomic.Value) error
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error)
-	EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
-	EngineNewPayloadV2(ctx context.Context, payload *types2.ExecutionPayloadV2) (*remote.EnginePayloadStatus, error)
-	EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error)
-	EngineForkchoiceUpdatedV2(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequestV2) (*remote.EngineForkChoiceUpdatedReply, error)
-	EngineGetPayloadV1(ctx context.Context, payloadId uint64) (*types2.ExecutionPayload, error)
-	EngineGetPayloadV2(ctx context.Context, payloadId uint64) (*types2.ExecutionPayloadV2, error)
+	EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error)
+	EngineForkchoiceUpdated(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedResponse, error)
+	EngineGetPayload(ctx context.Context, payloadId uint64) (*remote.EngineGetPayloadResponse, error)
 	NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error)
 	Peers(ctx context.Context) ([]*p2p.PeerInfo, error)
 	PendingBlock(ctx context.Context) (*types.Block, error)
+	EngineGetPayloadBodiesByHashV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByHashV1Request) (*remote.EngineGetPayloadBodiesV1Response, error)
+	EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByRangeV1Request) (*remote.EngineGetPayloadBodiesV1Response, error)
 }

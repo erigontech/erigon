@@ -36,11 +36,6 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common/paths"
@@ -57,6 +52,10 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli"
 )
 
 // These are all the command line flags we support.
@@ -193,10 +192,6 @@ var (
 		Name:  "txpool.trace.senders",
 		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
 		Value: "",
-	}
-	EnabledIssuance = cli.BoolFlag{
-		Name:  "watch-the-burn",
-		Usage: "Enable WatchTheBurn stage to keep track of ETH issuance",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -1524,7 +1519,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
-	cfg.EnabledIssuance = ctx.Bool(EnabledIssuance.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)

@@ -20,6 +20,7 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
@@ -30,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p-core/network"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -54,6 +54,7 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
+	gossipTopics   []GossipTopic
 }
 
 func (s *Sentinel) createLocalNode(
@@ -217,6 +218,10 @@ func New(
 	}
 
 	return s, nil
+}
+
+func (s *Sentinel) ChainConfigs() (clparams.BeaconChainConfig, clparams.GenesisConfig) {
+	return *s.cfg.BeaconConfig, *s.cfg.GenesisConfig
 }
 
 func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {

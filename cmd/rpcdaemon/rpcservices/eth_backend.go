@@ -198,32 +198,26 @@ func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, bl
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
 
-func (back *RemoteBackend) EngineNewPayloadV1(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {
-	return back.remoteEthBackend.EngineNewPayloadV1(ctx, payload)
+func (back *RemoteBackend) EngineNewPayload(ctx context.Context, payload *types2.ExecutionPayload) (res *remote.EnginePayloadStatus, err error) {
+	return back.remoteEthBackend.EngineNewPayload(ctx, payload)
 }
 
-func (back *RemoteBackend) EngineNewPayloadV2(ctx context.Context, payload *types2.ExecutionPayloadV2) (res *remote.EnginePayloadStatus, err error) {
-	return back.remoteEthBackend.EngineNewPayloadV2(ctx, payload)
+func (back *RemoteBackend) EngineForkchoiceUpdated(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedResponse, error) {
+	return back.remoteEthBackend.EngineForkChoiceUpdated(ctx, request)
 }
 
-func (back *RemoteBackend) EngineForkchoiceUpdatedV1(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequest) (*remote.EngineForkChoiceUpdatedReply, error) {
-	return back.remoteEthBackend.EngineForkChoiceUpdatedV1(ctx, request)
-}
-
-func (back *RemoteBackend) EngineForkchoiceUpdatedV2(ctx context.Context, request *remote.EngineForkChoiceUpdatedRequestV2) (*remote.EngineForkChoiceUpdatedReply, error) {
-	return back.remoteEthBackend.EngineForkChoiceUpdatedV2(ctx, request)
-}
-
-func (back *RemoteBackend) EngineGetPayloadV1(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayload, err error) {
-	return back.remoteEthBackend.EngineGetPayloadV1(ctx, &remote.EngineGetPayloadRequest{
+func (back *RemoteBackend) EngineGetPayload(ctx context.Context, payloadId uint64) (res *remote.EngineGetPayloadResponse, err error) {
+	return back.remoteEthBackend.EngineGetPayload(ctx, &remote.EngineGetPayloadRequest{
 		PayloadId: payloadId,
 	})
 }
 
-func (back *RemoteBackend) EngineGetPayloadV2(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayloadV2, err error) {
-	return back.remoteEthBackend.EngineGetPayloadV2(ctx, &remote.EngineGetPayloadRequest{
-		PayloadId: payloadId,
-	})
+func (back *RemoteBackend) EngineGetPayloadBodiesByHashV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByHashV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
+	return back.remoteEthBackend.EngineGetPayloadBodiesByHashV1(ctx, request)
+}
+
+func (back *RemoteBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByRangeV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
+	return back.remoteEthBackend.EngineGetPayloadBodiesByRangeV1(ctx, request)
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

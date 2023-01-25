@@ -2,7 +2,6 @@ package commands
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -11,9 +10,11 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -58,15 +59,15 @@ func TestTraceBlockByNumber(t *testing.T) {
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		tx, err := ethApi.GetTransactionByHash(context.Background(), libcommon.HexToHash(tt.txHash))
+		tx, err := ethApi.GetTransactionByHash(m.Ctx, libcommon.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		txcount, err := ethApi.GetBlockTransactionCountByHash(context.Background(), *tx.BlockHash)
+		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
-		err = api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
+		err = api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64()), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
@@ -83,7 +84,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-	err := api.TraceBlockByNumber(context.Background(), rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracers.TraceConfig{}, stream)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
 	}
@@ -137,13 +138,12 @@ func TestTraceTransaction(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewPrivateDebugAPI(
-		NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
-		m.DB, 0)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
-		err := api.TraceTransaction(context.Background(), libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
+		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -177,7 +177,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 		var buf bytes.Buffer
 		stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
 		var norefunds = true
-		err := api.TraceTransaction(context.Background(), libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
+		err := api.TraceTransaction(m.Ctx, libcommon.HexToHash(tt.txHash), &tracers.TraceConfig{NoRefunds: &norefunds}, stream)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
 		}
@@ -207,6 +207,19 @@ func TestStorageRangeAt(t *testing.T) {
 	api := NewPrivateDebugAPI(
 		NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine),
 		m.DB, 0)
+	t.Run("invalid addr", func(t *testing.T) {
+		var block4 *types.Block
+		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
+			block4, _ = rawdb.ReadBlockByNumber(tx, 4)
+			return nil
+		})
+		require.NoError(t, err)
+		addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+		expect := StorageRangeResult{storageMap{}, nil}
+		result, err := api.StorageRangeAt(m.Ctx, block4.Hash(), 0, addr, nil, 100)
+		require.NoError(t, err)
+		require.Equal(t, expect, result)
+	})
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
@@ -282,4 +295,57 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 	})
 
+}
+
+func TestMapTxNum2BlockNum(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	if !m.HistoryV3 {
+		t.Skip()
+	}
+
+	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	checkIter := func(t *testing.T, expectTxNums iter.U64, txNumsIter *MapTxNum2BlockNumIter) {
+		for expectTxNums.HasNext() {
+			require.True(t, txNumsIter.HasNext())
+			expectTxNum, _ := expectTxNums.Next()
+			txNum, _, _, _, _, _ := txNumsIter.Next()
+			require.Equal(t, expectTxNum, txNum)
+		}
+	}
+	t.Run("descend", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, 0, false, -1)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 1024, 0, false, -1)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
+	t.Run("ascend", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, -1)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, -1)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
+	t.Run("ascend limit", func(t *testing.T) {
+		tx, err := m.DB.(kv.TemporalRoDb).BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		txNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, 2)
+		require.NoError(t, err)
+		txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, true, 2)
+		require.NoError(t, err)
+		checkIter(t, expectTxNums, txNumsIter)
+	})
 }

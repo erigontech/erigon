@@ -1,6 +1,8 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/urfave/cli"
+)
 
 var (
 	SentinelDiscoveryPort = cli.IntFlag{
@@ -33,6 +35,21 @@ var (
 		Usage: "sets the lightclient server host addr",
 		Value: "localhost",
 	}
+	BootnodesFlag = cli.StringFlag{
+		Name:  "sentinel.bootnodes",
+		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Value: "",
+	}
+	BeaconConfigFlag = cli.StringFlag{
+		Name:  "beacon-config",
+		Usage: "Path to beacon config",
+		Value: "",
+	}
+	GenesisSSZFlag = cli.StringFlag{
+		Name:  "genesis-ssz",
+		Usage: "Path to genesis ssz",
+		Value: "",
+	}
 	Chain = cli.StringFlag{
 		Name:  "chain",
 		Usage: "sets the chain specs for the lightclient",
@@ -57,5 +74,10 @@ var (
 		Name:  "beacon-db-mode",
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",
 		Value: "full",
+	}
+	CheckpointSyncUrlFlag = cli.StringFlag{
+		Name:  "checkpoint-sync-url",
+		Usage: "checkpoint sync endpoint",
+		Value: "",
 	}
 )

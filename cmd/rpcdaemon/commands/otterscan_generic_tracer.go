@@ -6,11 +6,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -31,7 +31,10 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return nil
 	}
 
-	reader := state.NewPlainState(dbtx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api.historyV3(dbtx), chainConfig.ChainName)
+	if err != nil {
+		return err
+	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(reader, stateCache)
 	noop := state.NewNoopWriter()

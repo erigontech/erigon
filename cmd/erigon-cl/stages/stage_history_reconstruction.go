@@ -111,8 +111,8 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			if foundLatestEth1ValidHash {
 				return slot <= destinationSlot, nil
 			}
-			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
-			encodedPayload, err = payload.EncodeSSZ(encodedPayload)
+			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ(blk.Version()))
+			encodedPayload, err = payload.EncodeSSZ(encodedPayload, blk.Version())
 			if err != nil {
 				return false, err
 			}

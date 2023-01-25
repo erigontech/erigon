@@ -1,6 +1,8 @@
 package flags
 
-import "github.com/urfave/cli/v2"
+import (
+	"github.com/urfave/cli"
+)
 
 var CLDefaultFlags = []cli.Flag{
 	&SentinelDiscoveryPort,
@@ -14,4 +16,8 @@ var CLDefaultFlags = []cli.Flag{
 	&ChaindataFlag,
 	&ELEnabledFlag,
 	&BeaconDBModeFlag,
+	&BootnodesFlag,
+	&BeaconConfigFlag,
+	&GenesisSSZFlag,
+	&CheckpointSyncUrlFlag,
 }

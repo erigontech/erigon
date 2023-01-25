@@ -9,6 +9,7 @@ import (
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -25,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli"
 )
 
 func main() {
@@ -58,7 +59,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		return err
 	}
 	// Fetch the checkpoint state.
-	cpState, err := getCheckpointState(ctx, db, cfg.CheckpointUri)
+	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
 		log.Error("Could not get checkpoint", "err", err)
 		return err
@@ -137,8 +138,8 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 	return s, nil
 }
 
-func getCheckpointState(ctx context.Context, db kv.RwDB, uri string) (*state.BeaconState, error) {
-	state, err := core.RetrieveBeaconState(ctx, uri)
+func getCheckpointState(ctx context.Context, db kv.RwDB, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string) (*state.BeaconState, error) {
+	state, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, uri)
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return nil, err
