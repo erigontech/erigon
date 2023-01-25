@@ -40,26 +40,7 @@ type ExecutionPayload struct {
 	BlockHash     libcommon.Hash      `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
-}
-
-// ExecutionPayloadV3 represents an execution payload (aka block) with withdrawals & excess data gas
-type ExecutionPayloadV3 struct {
-	ParentHash    libcommon.Hash      `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  libcommon.Address   `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     libcommon.Hash      `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  libcommon.Hash      `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    libcommon.Hash      `json:"prevRandao"    gencodec:"required"`
-	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
-	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
-	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
-	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
-	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
-	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	ExcessDataGas *hexutil.Big        `json:"excessDataGas" gencodec:"required"`
-	BlockHash     libcommon.Hash      `json:"blockHash"     gencodec:"required"`
-	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
-	Withdrawals   []*types.Withdrawal `json:"withdrawals"   gencodec:"required"`
+	ExcessDataGas *hexutil.Big        `json:"withdrawals"`
 }
 
 // GetPayloadV2Response represents the response of the getPayloadV2 method
@@ -70,8 +51,8 @@ type GetPayloadV2Response struct {
 
 // GetPayloadV3Response represents the response of the getPayloadV3 method
 type GetPayloadV3Response struct {
-	ExecutionPayload ExecutionPayload `json:"executionPayload" gencodec:"required"`
-	BlockValue       *hexutil.Big     `json:"blockValue" gencodec:"required"`
+	ExecutionPayload *ExecutionPayload `json:"executionPayload" gencodec:"required"`
+	BlockValue       *hexutil.Big      `json:"blockValue" gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
@@ -290,6 +271,7 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
 	if version >= 3 && payload.ExcessDataGas != nil {
+		ep.Version = 3
 		var excessDataGas *uint256.Int
 		var overflow bool
 		excessDataGas, overflow = uint256.FromBig((*big.Int)(payload.ExcessDataGas))
@@ -338,7 +320,8 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 		res.Withdrawals = privateapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
 	if payload.Version >= 3 {
-		res.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(payload.ExcessDataGas).ToBig()
+		edg := gointerfaces.ConvertH256ToUint256Int(payload.ExcessDataGas).ToBig()
+		res.ExcessDataGas = (*hexutil.Big)(edg)
 	}
 	return res
 }

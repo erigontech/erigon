@@ -220,12 +220,6 @@ func (back *RemoteBackend) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	return back.remoteEthBackend.EngineGetPayloadBodiesByRangeV1(ctx, request)
 }
 
-func (back *RemoteBackend) EngineGetPayloadV3(ctx context.Context, payloadId uint64) (res *types2.ExecutionPayloadV3, err error) {
-	return back.remoteEthBackend.EngineGetPayloadV3(ctx, &remote.EngineGetPayloadRequest{
-		PayloadId: payloadId,
-	})
-}
-
 func (back *RemoteBackend) EngineGetBlobsBundleV1(ctx context.Context, payloadId uint64) (*types2.BlobsBundleV1, error) {
 	return back.remoteEthBackend.EngineGetBlobsBundleV1(ctx, &remote.EngineGetBlobsBundleRequest{
 		PayloadId: payloadId,
