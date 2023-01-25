@@ -273,17 +273,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, balance *uint256.I
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
-	if hb.accProofResult != nil {
-		// The 'Initialized' and 'Incarnation' fields are presently ignored
-		hb.accProofResult.Balance = (*hexutil.Big)(a.Balance.ToBig())
-		hb.accProofResult.CodeHash = a.CodeHash
-		hb.accProofResult.Nonce = hexutil.Uint64(a.Nonce)
-		if a.storage != nil {
-			hb.accProofResult.StorageHash = libcommon.BytesToHash(a.storage.reference())
-		} else {
-			hb.accProofResult.StorageHash = EmptyRoot
-		}
-	}
 	return nil
 }
 

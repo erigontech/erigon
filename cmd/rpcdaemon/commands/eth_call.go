@@ -341,8 +341,26 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 
 		var accProof accounts.AccProofResult
 		accProof.Address = address
-		loader.SetProofReturn(&accProof)
 
+		// Fill in the Account fields here to reduce the code changes
+		// needed in turbo/trie/hashbuilder.go
+		reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
+		if err != nil {
+			return nil, err
+		}
+		a, err := reader.ReadAccountData(address)
+		log.Debug("MMDBG ReadAccountData", "err", err, "a", a)
+		if err != nil {
+			return nil, err
+		}
+		if a != nil {
+			accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
+			accProof.CodeHash = a.CodeHash
+			accProof.Nonce = hexutil.Uint64(a.Nonce)
+			accProof.StorageHash = a.Root
+		}
+
+		loader.SetProofReturn(&accProof)
 		_, err = loader.CalcTrieRoot(tx, nil, nil)
 		if err != nil {
 			return nil, err
