@@ -113,7 +113,7 @@ var resetBlocks4 = Migration{
 		}
 
 		cc := tool.ChainConfig(tx)
-		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, dirs, *cc, nil); err != nil {
+		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, nil, dirs, *cc, nil); err != nil {
 			return err
 		}
 

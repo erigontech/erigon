@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
@@ -55,7 +56,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br services.FullBlockReader, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3, br services.FullBlockReader, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -105,7 +106,7 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, br
 	}
 
 	if snapshots != nil && snapshots.Cfg().Enabled && snapshots.BlocksAvailable() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine); err != nil {
+		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine, agg); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())

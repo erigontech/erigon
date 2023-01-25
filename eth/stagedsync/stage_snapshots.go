@@ -183,13 +183,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = blocksAvailable
 	}
 
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine, cfg.agg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine, agg *state.AggregatorV3) error {
 	blocksAvailable := sn.BlocksAvailable()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -326,6 +326,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 				}
+			}
+			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
+				return err
 			}
 		}
 	}
