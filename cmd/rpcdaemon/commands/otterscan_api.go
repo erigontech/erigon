@@ -277,7 +277,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	txNums := iter.Union[uint64](itFrom, itTo)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
-	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+	exec := newIntraBlockExec(tx, chainConfig, api.engine(), api._blockReader)
 	var blockHash libcommon.Hash
 	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)

@@ -391,7 +391,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+	exec := newIntraBlockExec(tx, chainConfig, api.engine(), api._blockReader)
 
 	var blockHash libcommon.Hash
 	var header *types.Header
@@ -474,12 +474,13 @@ type intraBlockExec struct {
 	vmConfig  *vm.Config
 }
 
-func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader) *intraBlockExec {
+func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader, br services.FullBlockReader) *intraBlockExec {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
 	return &intraBlockExec{
 		engine:      engine,
 		chainConfig: chainConfig,
+		br:          br,
 		stateReader: stateReader,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
