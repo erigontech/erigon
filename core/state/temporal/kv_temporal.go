@@ -173,7 +173,7 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		if err != nil {
 			return nil, err
 		}
-		it3 := iter.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
 		//TODO: seems MergePairs can't handle "amount" request
