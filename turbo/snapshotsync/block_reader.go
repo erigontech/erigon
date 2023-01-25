@@ -262,7 +262,6 @@ func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapsho
 func (back *BlockReaderWithSnapshots) Snapshots() *RoSnapshots { return back.sn }
 
 func (back *BlockReaderWithSnapshots) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	fmt.Printf("dbg: %d, %d, %d\n", back.sn.SegmentsMax(), back.sn.idxAvailability(), blockHeight)
 	ok, err := back.sn.ViewHeaders(blockHeight, func(segment *HeaderSegment) error {
 		h, _, err = back.headerFromSnapshot(blockHeight, segment, nil)
 		if err != nil {
