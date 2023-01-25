@@ -648,6 +648,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	}
 
 	if block.ExcessDataGas() != nil {
+		payload.Version = 3
 		var excessDataGas uint256.Int
 		excessDataGas.SetFromBig(block.Header().BaseFee)
 		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
