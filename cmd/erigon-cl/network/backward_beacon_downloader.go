@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -88,7 +87,6 @@ func (b *BackwardBeaconDownloader) RequestMore() {
 	}
 	responses, err := b.rpc.SendBeaconBlocksByRangeReq(start, count)
 	if err != nil {
-		fmt.Println(err)
 		return
 	}
 	// Import new blocks, order is forward so reverse the whole packet

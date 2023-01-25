@@ -7,12 +7,13 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -69,6 +70,11 @@ type TransitionConfiguration struct {
 	TerminalBlockNumber     *hexutil.Big   `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
+type ExecutionPayloadBodyV1 struct {
+	Transactions [][]byte            `json:"transactions" gencodec:"required"`
+	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
+}
+
 // EngineAPI Beacon chain communication endpoint
 type EngineAPI interface {
 	NewPayloadV1(context.Context, *ExecutionPayload) (map[string]interface{}, error)
@@ -78,6 +84,8 @@ type EngineAPI interface {
 	GetPayloadV1(ctx context.Context, payloadID hexutil.Bytes) (*ExecutionPayload, error)
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
+	GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error)
+	GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -356,6 +364,87 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 		TerminalBlockHash:       libcommon.Hash{},
 		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
 	}, nil
+}
+
+func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error) {
+	h := make([]*types2.H256, len(hashes))
+	for i, hash := range hashes {
+		h[i] = gointerfaces.ConvertHashToH256(hash)
+	}
+
+	apiRes, err := e.api.EngineGetPayloadBodiesByHashV1(ctx, &remote.EngineGetPayloadBodiesByHashV1Request{Hashes: h})
+	if err != nil {
+		return nil, err
+	}
+
+	return convertExecutionPayloadV1(apiRes), nil
+}
+
+func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
+	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
+	if err != nil {
+		return nil, err
+	}
+
+	return convertExecutionPayloadV1(apiRes), nil
+}
+
+var ourCapabilities = []string{
+	"engine_forkchoiceUpdatedV1",
+	"engine_forkchoiceUpdatedV2",
+	"engine_newPayloadV1",
+	"engine_newPayloadV2",
+	"engine_getPayloadV1",
+	"engine_getPayloadV2",
+	"engine_exchangeTransitionConfigurationV1",
+	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByRangeV1",
+}
+
+func (e *EngineImpl) ExchangeCapabilities(fromCl []string) []string {
+	missingOurs := compareCapabilities(fromCl, ourCapabilities)
+	missingCl := compareCapabilities(ourCapabilities, fromCl)
+
+	if len(missingCl) > 0 || len(missingOurs) > 0 {
+		log.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
+	}
+
+	return ourCapabilities
+}
+
+func compareCapabilities(from []string, to []string) []string {
+	result := make([]string, 0)
+	for _, f := range from {
+		found := false
+		for _, t := range to {
+			if f == t {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, f)
+		}
+	}
+
+	return result
+}
+
+func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response) []*ExecutionPayloadBodyV1 {
+	result := make([]*ExecutionPayloadBodyV1, len(response.Bodies))
+	for idx, body := range response.Bodies {
+		if body == nil {
+			result[idx] = nil
+		} else {
+			pl := &ExecutionPayloadBodyV1{
+				Transactions: body.Transactions,
+				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			}
+			result[idx] = pl
+		}
+	}
+
+	return result
 }
 
 // NewEngineAPI returns EngineImpl instance

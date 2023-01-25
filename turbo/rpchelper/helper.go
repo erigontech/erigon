@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -115,14 +115,17 @@ func CreateStateReaderFromBlockNumber(ctx context.Context, tx kv.Tx, blockNumber
 
 func CreateHistoryStateReader(tx kv.Tx, blockNumber, txnIndex uint64, historyV3 bool, chainName string) (state.StateReader, error) {
 	if !historyV3 {
-		return state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainName]), nil
+		r := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainName])
+		//r.SetTrace(true)
+		return r, nil
 	}
 	r := state.NewHistoryReaderV3()
 	r.SetTx(tx)
+	//r.SetTrace(true)
 	minTxNum, err := rawdbv3.TxNums.Min(tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	r.SetTxNum(minTxNum + txnIndex)
+	r.SetTxNum(minTxNum + txnIndex + 1)
 	return r, nil
 }

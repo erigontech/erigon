@@ -30,8 +30,8 @@ type Worker struct {
 	background  bool // if true - worker does manage RoTx (begin/rollback) in .ResetTx()
 	blockReader services.FullBlockReader
 	rs          *state.StateV3
-	stateWriter *state.StateWriter22
-	stateReader *state.StateReader22
+	stateWriter *state.StateWriterV3
+	stateReader *state.StateReaderV3
 	chainConfig *chain.Config
 	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
 

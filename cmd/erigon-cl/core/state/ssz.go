@@ -354,12 +354,13 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.version <= clparams.AltairVersion {
 		return nil
 	}
-	if len(buf) <= int(executionPayloadOffset) {
-		return ssz_utils.ErrLowBufferSize
-	}
 	endOffset = uint32(len(buf))
 	if historicalSummariesOffset != 0 {
 		endOffset = historicalSummariesOffset
+	}
+
+	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
+		return ssz_utils.ErrLowBufferSize
 	}
 	b.latestExecutionPayloadHeader = new(types.Header)
 	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], b.version); err != nil {

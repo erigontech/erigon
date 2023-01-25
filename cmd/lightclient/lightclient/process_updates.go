@@ -27,9 +27,9 @@ func (l *LightClient) isBetterUpdate(oldUpdate *cltypes.LightClientUpdate, newUp
 
 	// Compare presence of relevant sync committee
 	isNewUpdateRelevant := newUpdate.HasNextSyncCommittee() &&
-		utils.SlotToPeriod(newUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(newUpdate.SignatureSlot)
+		utils.SlotToPeriod(newUpdate.AttestedHeader.HeaderEth2.Slot) == utils.SlotToPeriod(newUpdate.SignatureSlot)
 	isOldUpdateRelevant := oldUpdate.HasNextSyncCommittee() &&
-		utils.SlotToPeriod(oldUpdate.AttestedHeader.Slot) == utils.SlotToPeriod(oldUpdate.SignatureSlot)
+		utils.SlotToPeriod(oldUpdate.AttestedHeader.HeaderEth2.Slot) == utils.SlotToPeriod(oldUpdate.SignatureSlot)
 
 	if isNewUpdateRelevant != isOldUpdateRelevant {
 		return isNewUpdateRelevant
@@ -51,15 +51,15 @@ func (l *LightClient) isBetterUpdate(oldUpdate *cltypes.LightClientUpdate, newUp
 	if newActiveParticipants != oldActiveParticipants {
 		return newActiveParticipants > oldActiveParticipants
 	}
-	if newUpdate.AttestedHeader.Slot != oldUpdate.AttestedHeader.Slot {
-		return newUpdate.AttestedHeader.Slot < oldUpdate.AttestedHeader.Slot
+	if newUpdate.AttestedHeader.HeaderEth2.Slot != oldUpdate.AttestedHeader.HeaderEth2.Slot {
+		return newUpdate.AttestedHeader.HeaderEth2.Slot < oldUpdate.AttestedHeader.HeaderEth2.Slot
 	}
 	return newUpdate.SignatureSlot < oldUpdate.SignatureSlot
 }
 
 func (l *LightClient) applyLightClientUpdate(update *cltypes.LightClientUpdate) error {
 	storePeriod := utils.SlotToPeriod(l.store.finalizedHeader.Slot)
-	finalizedPeriod := utils.SlotToPeriod(update.FinalizedHeader.Slot)
+	finalizedPeriod := utils.SlotToPeriod(update.FinalizedHeader.HeaderEth2.Slot)
 	if l.store.nextSyncCommittee == nil {
 		if storePeriod != finalizedPeriod {
 			return fmt.Errorf("periods shall be matching")
@@ -71,10 +71,10 @@ func (l *LightClient) applyLightClientUpdate(update *cltypes.LightClientUpdate) 
 		l.store.previousMaxActivePartecipants = l.store.currentMaxActivePartecipants
 		l.store.currentMaxActivePartecipants = 0
 	}
-	if update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot {
-		l.store.finalizedHeader = update.FinalizedHeader
-		if update.FinalizedHeader.Slot > l.store.optimisticHeader.Slot {
-			l.store.optimisticHeader = update.FinalizedHeader
+	if update.FinalizedHeader.HeaderEth2.Slot > l.store.finalizedHeader.Slot {
+		l.store.finalizedHeader = update.FinalizedHeader.HeaderEth2
+		if update.FinalizedHeader.HeaderEth2.Slot > l.store.optimisticHeader.Slot {
+			l.store.optimisticHeader = update.FinalizedHeader.HeaderEth2
 		}
 	}
 	return nil
@@ -99,7 +99,7 @@ func (l *LightClient) processLightClientUpdate(update *cltypes.LightClientUpdate
 
 	// Apply lc update (should happen when every 27 hours)
 	if update.SyncAggregate.Sum()*3 >= len(update.SyncAggregate.SyncCommiteeBits)*16 &&
-		((update.IsFinalityUpdate() && update.FinalizedHeader.Slot > l.store.finalizedHeader.Slot) ||
+		((update.IsFinalityUpdate() && update.FinalizedHeader.HeaderEth2.Slot > l.store.finalizedHeader.Slot) ||
 			l.store.nextSyncCommittee == nil && update.HasNextSyncCommittee() &&
 				update.IsFinalityUpdate() && update.HasSyncFinality()) {
 		// Conditions are met so we can make all changes

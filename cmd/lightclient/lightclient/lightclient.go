@@ -150,8 +150,8 @@ func (l *LightClient) Start() {
 		// log new validated segment
 		if len(updates) > 0 {
 			lastValidated := updates[len(updates)-1]
-			l.highestValidated = lastValidated.AttestedHeader.Slot
-			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HashSSZ()
+			l.highestValidated = lastValidated.AttestedHeader.HeaderEth2.Slot
+			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HeaderEth2.HashSSZ()
 			if err != nil {
 				log.Warn("could not compute root", "err", err)
 				continue
@@ -196,8 +196,8 @@ func (l *LightClient) Start() {
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
 				log.Info("[LightClient] Validated Chain Segments",
-					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", lastValidated.AttestedHeader.Slot, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.HeaderEth2.Slot-1,
+					"to", lastValidated.AttestedHeader.HeaderEth2.Slot, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 		}
 		l.importBlockIfPossible()

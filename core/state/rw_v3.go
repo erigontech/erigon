@@ -276,6 +276,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 				k = nil
 			}
 			if psChanges != nil {
+				//TODO: try full-scan, then can replace btree by map
 				iter := psChanges.Iter()
 				for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
 					key := []byte(iter.Key())
@@ -581,7 +582,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	return true
 }
 
-type StateWriter22 struct {
+type StateWriterV3 struct {
 	rs           *StateV3
 	txNum        uint64
 	writeLists   map[string]*exec22.KvList
@@ -591,8 +592,8 @@ type StateWriter22 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriter22(rs *StateV3) *StateWriter22 {
-	return &StateWriter22{
+func NewStateWriter22(rs *StateV3) *StateWriterV3 {
+	return &StateWriterV3{
 		rs:           rs,
 		writeLists:   newWriteList(),
 		accountPrevs: map[string][]byte{},
@@ -602,11 +603,11 @@ func NewStateWriter22(rs *StateV3) *StateWriter22 {
 	}
 }
 
-func (w *StateWriter22) SetTxNum(txNum uint64) {
+func (w *StateWriterV3) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 }
 
-func (w *StateWriter22) ResetWriteSet() {
+func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = map[string]*accounts.Account{}
@@ -614,15 +615,15 @@ func (w *StateWriter22) ResetWriteSet() {
 	w.codePrevs = map[string]uint64{}
 }
 
-func (w *StateWriter22) WriteSet() map[string]*exec22.KvList {
+func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriter22) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
+func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
 
-func (w *StateWriter22) UpdateAccountData(address common2.Address, original, account *accounts.Account) error {
+func (w *StateWriterV3) UpdateAccountData(address common2.Address, original, account *accounts.Account) error {
 	addressBytes := address.Bytes()
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
@@ -637,7 +638,7 @@ func (w *StateWriter22) UpdateAccountData(address common2.Address, original, acc
 	return nil
 }
 
-func (w *StateWriter22) UpdateAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash, code []byte) error {
+func (w *StateWriterV3) UpdateAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash, code []byte) error {
 	addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHashBytes)
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
@@ -650,7 +651,7 @@ func (w *StateWriter22) UpdateAccountCode(address common2.Address, incarnation u
 	return nil
 }
 
-func (w *StateWriter22) DeleteAccount(address common2.Address, original *accounts.Account) error {
+func (w *StateWriterV3) DeleteAccount(address common2.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, addressBytes)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
@@ -666,7 +667,7 @@ func (w *StateWriter22) DeleteAccount(address common2.Address, original *account
 	return nil
 }
 
-func (w *StateWriter22) WriteAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash, original, value *uint256.Int) error {
+func (w *StateWriterV3) WriteAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash, original, value *uint256.Int) error {
 	if *original == *value {
 		return nil
 	}
@@ -678,11 +679,11 @@ func (w *StateWriter22) WriteAccountStorage(address common2.Address, incarnation
 	return nil
 }
 
-func (w *StateWriter22) CreateContract(address common2.Address) error {
+func (w *StateWriterV3) CreateContract(address common2.Address) error {
 	return nil
 }
 
-type StateReader22 struct {
+type StateReaderV3 struct {
 	tx        kv.Tx
 	txNum     uint64
 	trace     bool
@@ -691,34 +692,34 @@ type StateReader22 struct {
 	readLists map[string]*exec22.KvList
 }
 
-func NewStateReader22(rs *StateV3) *StateReader22 {
-	return &StateReader22{
+func NewStateReader22(rs *StateV3) *StateReaderV3 {
+	return &StateReaderV3{
 		rs:        rs,
 		readLists: newReadList(),
 	}
 }
 
-func (r *StateReader22) SetTxNum(txNum uint64) {
+func (r *StateReaderV3) SetTxNum(txNum uint64) {
 	r.txNum = txNum
 }
 
-func (r *StateReader22) SetTx(tx kv.Tx) {
+func (r *StateReaderV3) SetTx(tx kv.Tx) {
 	r.tx = tx
 }
 
-func (r *StateReader22) ResetReadSet() {
+func (r *StateReaderV3) ResetReadSet() {
 	r.readLists = newReadList()
 }
 
-func (r *StateReader22) ReadSet() map[string]*exec22.KvList {
+func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList {
 	return r.readLists
 }
 
-func (r *StateReader22) SetTrace(trace bool) {
+func (r *StateReaderV3) SetTrace(trace bool) {
 	r.trace = trace
 }
 
-func (r *StateReader22) ReadAccountData(address common2.Address) (*accounts.Account, error) {
+func (r *StateReaderV3) ReadAccountData(address common2.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
 	enc := r.rs.Get(kv.PlainState, addr)
 	if enc == nil {
@@ -744,7 +745,7 @@ func (r *StateReader22) ReadAccountData(address common2.Address) (*accounts.Acco
 	return &a, nil
 }
 
-func (r *StateReader22) ReadAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash) ([]byte, error) {
+func (r *StateReaderV3) ReadAccountStorage(address common2.Address, incarnation uint64, key *common2.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc := r.rs.Get(kv.PlainState, composite)
 	if enc == nil {
@@ -769,7 +770,7 @@ func (r *StateReader22) ReadAccountStorage(address common2.Address, incarnation 
 	return enc, nil
 }
 
-func (r *StateReader22) ReadAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash) ([]byte, error) {
+func (r *StateReaderV3) ReadAccountCode(address common2.Address, incarnation uint64, codeHash common2.Hash) ([]byte, error) {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
@@ -787,7 +788,7 @@ func (r *StateReader22) ReadAccountCode(address common2.Address, incarnation uin
 	return enc, nil
 }
 
-func (r *StateReader22) ReadAccountCodeSize(address common2.Address, incarnation uint64, codeHash common2.Hash) (int, error) {
+func (r *StateReaderV3) ReadAccountCodeSize(address common2.Address, incarnation uint64, codeHash common2.Hash) (int, error) {
 	codeHashBytes := codeHash.Bytes()
 	enc := r.rs.Get(kv.Code, codeHashBytes)
 	if enc == nil {
@@ -808,7 +809,7 @@ func (r *StateReader22) ReadAccountCodeSize(address common2.Address, incarnation
 	return size, nil
 }
 
-func (r *StateReader22) ReadAccountIncarnation(address common2.Address) (uint64, error) {
+func (r *StateReaderV3) ReadAccountIncarnation(address common2.Address) (uint64, error) {
 	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
 	if enc == nil {
 		var err error
