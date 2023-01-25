@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
@@ -49,17 +50,19 @@ const ( // Interrupt values
 )
 
 type RequestList struct {
-	requestId int
-	requests  *treemap.Map // map[int]*RequestWithStatus
-	interrupt Interrupt
-	waiting   uint32
-	syncCond  *sync.Cond
+	requestId   int
+	requests    *treemap.Map // map[int]*RequestWithStatus
+	interrupt   Interrupt
+	waiting     uint32
+	syncCond    *sync.Cond
+	waitingCond *sync.Cond
 }
 
 func NewRequestList() *RequestList {
 	rl := &RequestList{
-		requests: treemap.NewWithIntComparator(),
-		syncCond: sync.NewCond(&sync.Mutex{}),
+		requests:    treemap.NewWithIntComparator(),
+		syncCond:    sync.NewCond(&sync.Mutex{}),
+		waitingCond: sync.NewCond(&sync.Mutex{}),
 	}
 	return rl
 }
@@ -117,8 +120,10 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	atomic.StoreUint32(&rl.waiting, 1)
-	defer atomic.StoreUint32(&rl.waiting, 0)
+	rl.updateWaiting(1)
+	defer func() {
+		rl.updateWaiting(0)
+	}()
 
 	for {
 		interrupt = rl.interrupt
@@ -134,6 +139,20 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 			return
 		}
 		rl.syncCond.Wait()
+	}
+}
+
+func (rl *RequestList) updateWaiting(newVal uint32) {
+	atomic.StoreUint32(&rl.waiting, newVal)
+	rl.waitingCond.Broadcast()
+}
+
+func (rl *RequestList) WaitForReady() {
+	rl.waitingCond.L.Lock()
+	defer rl.waitingCond.L.Unlock()
+
+	for r := atomic.LoadUint32(&rl.waiting); r != 0; r = atomic.LoadUint32(&rl.waiting) {
+		rl.waitingCond.Wait()
 	}
 }
 
