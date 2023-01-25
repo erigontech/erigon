@@ -235,7 +235,8 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	}); err != nil {
 		panic(err)
 	}
-	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
+
+	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) || config.Sync.UseSnapshots
 
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
@@ -962,6 +963,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+	fmt.Printf("dbg21: %s\n", dbg.Stack())
 	if !snConfig.Enabled {
 		fmt.Printf("dbg21: %s\n", dbg.Stack())
 		blockReader := snapshotsync.NewBlockReader()
