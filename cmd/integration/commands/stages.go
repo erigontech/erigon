@@ -13,9 +13,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -487,7 +487,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, agg, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
 			return nil
@@ -1149,7 +1149,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}

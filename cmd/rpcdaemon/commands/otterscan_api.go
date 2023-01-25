@@ -10,9 +10,9 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 
@@ -277,7 +277,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	txNums := iter.Union[uint64](itFrom, itTo)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
-	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+	exec := newIntraBlockExec(tx, chainConfig, api.engine(), api._blockReader)
 	var blockHash libcommon.Hash
 	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)
@@ -298,7 +298,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("header is nil", "blockNum", blockNum)
+				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
 			blockHash = header.Hash()
