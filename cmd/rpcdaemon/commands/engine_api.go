@@ -7,12 +7,13 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -386,6 +387,47 @@ func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64
 	}
 
 	return convertExecutionPayloadV1(apiRes), nil
+}
+
+var ourCapabilities = []string{
+	"engine_forkchoiceUpdatedV1",
+	"engine_forkchoiceUpdatedV2",
+	"engine_newPayloadV1",
+	"engine_newPayloadV2",
+	"engine_getPayloadV1",
+	"engine_getPayloadV2",
+	"engine_exchangeTransitionConfigurationV1",
+	"engine_getPayloadBodiesByHashV1",
+	"engine_getPayloadBodiesByRangeV1",
+}
+
+func (e *EngineImpl) ExchangeCapabilities(fromCl []string) []string {
+	missingOurs := compareCapabilities(fromCl, ourCapabilities)
+	missingCl := compareCapabilities(ourCapabilities, fromCl)
+
+	if len(missingCl) > 0 || len(missingOurs) > 0 {
+		log.Debug("ExchangeCapabilities mismatches", "cl_unsupported", missingCl, "erigon_unsupported", missingOurs)
+	}
+
+	return ourCapabilities
+}
+
+func compareCapabilities(from []string, to []string) []string {
+	result := make([]string, 0)
+	for _, f := range from {
+		found := false
+		for _, t := range to {
+			if f == t {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, f)
+		}
+	}
+
+	return result
 }
 
 func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response) []*ExecutionPayloadBodyV1 {
