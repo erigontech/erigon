@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
@@ -296,11 +297,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			Accumulator: shards.NewAccumulator(),
 		},
 	}
+	fmt.Printf("dbg1: %s\n", dbg.Stack())
 	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
 	if err != nil {
 		return nil, err
 	}
 	backend.agg, backend.blockSnapshots, backend.blockReader = agg, allSnapshots, blockReader
+	fmt.Printf("dbg2: %s\n", dbg.Stack())
 
 	if config.HistoryV3 {
 		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
@@ -309,6 +312,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		}
 		chainKv = backend.chainDB
 	}
+	fmt.Printf("dbg3: %s\n", dbg.Stack())
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
 	backend.notifications.StateChangesConsumer = kvRPC
