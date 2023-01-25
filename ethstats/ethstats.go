@@ -679,7 +679,10 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	// TODO(Giulio2002): peer tracking
 	peerCount := 0
 	for _, srv := range s.servers {
-		peerCount += srv.SimplePeerCount()
+		counts := srv.SimplePeerCount()
+		for _, count := range counts {
+			peerCount += count
+		}
 	}
 	stats := map[string]interface{}{
 		"id": s.node,

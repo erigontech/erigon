@@ -390,8 +390,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					return
 				case <-logEvery.C:
 					logItems = logItems[:0]
+					peerCountMap := map[uint]int{}
 					for _, srv := range backend.sentryServers {
-						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
+						counts := srv.SimplePeerCount()
+						for protocol, count := range counts {
+							peerCountMap[protocol] += count
+						}
+					}
+					for protocol, count := range peerCountMap {
+						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
 					}
 					log.Info("[p2p] GoodPeers", logItems...)
 				}
