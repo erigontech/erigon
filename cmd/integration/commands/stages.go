@@ -487,7 +487,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, agg, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
 			return nil
