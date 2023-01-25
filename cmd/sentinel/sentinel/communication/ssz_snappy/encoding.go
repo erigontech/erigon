@@ -20,8 +20,12 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
 func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error {
@@ -48,34 +52,37 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ) error {
-	forkDigest := make([]byte, 4)
+func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
-	if _, err := r.Read(forkDigest); err != nil {
+	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
-	return DecodeAndReadNoForkDigest(r, val)
+	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	if err != nil {
+		return err
+	}
+	return DecodeAndReadNoForkDigest(r, val, version)
 }
 
-func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ) error {
+func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ, version clparams.StateVersion) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
-	expectedLn := val.EncodingSizeSSZ()
-	if encodedLn != uint64(expectedLn) {
-		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", expectedLn, encodedLn)
+	if encodedLn > uint64(16*datasize.MB) {
+		return fmt.Errorf("payload too big")
 	}
 
 	sr := snappy.NewReader(r)
-	raw := make([]byte, expectedLn)
+	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
 		return fmt.Errorf("unable to readPacket: %w", err)
 	}
 
-	err = val.DecodeSSZ(raw)
+	err = val.DecodeSSZWithVersion(raw, int(version))
 	if err != nil {
 		return fmt.Errorf("enable to unmarshall message: %v", err)
 	}
@@ -101,17 +108,21 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
 	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)
-	forkDigest := make([]byte, 4)
+	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
-	if _, err := r.Read(forkDigest); err != nil {
+	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
 
+	version, err := fork.ForkDigestVersion(forkDigest, b, genesisValidatorRoot)
+	if err != nil {
+		return err
+	}
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := ReadUvarint(r)
 	if err != nil {
@@ -131,7 +142,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ) err
 		}
 		pos += uint64(n)
 
-		if err := list[i].DecodeSSZ(raw); err != nil {
+		if err := list[i].DecodeSSZWithVersion(raw, int(version)); err != nil {
 			return fmt.Errorf("unmarshalling: %w", err)
 		}
 		r.Reset(data[pos:])
