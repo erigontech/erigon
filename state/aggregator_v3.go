@@ -28,6 +28,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
@@ -67,7 +68,7 @@ type AggregatorV3 struct {
 	ctxCancel              context.CancelFunc
 }
 
-func NewAggregator22(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
+func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	return a, nil
@@ -775,7 +776,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 	a.maxTxNum.Store(min)
 }
 
-type Ranges22 struct {
+type RangesV3 struct {
 	accounts             HistoryRanges
 	storage              HistoryRanges
 	code                 HistoryRanges
@@ -793,12 +794,12 @@ type Ranges22 struct {
 	tracesTo             bool
 }
 
-func (r Ranges22) any() bool {
+func (r RangesV3) any() bool {
 	return r.accounts.any() || r.storage.any() || r.code.any() || r.logAddrs || r.logTopics || r.tracesFrom || r.tracesTo
 }
 
-func (a *AggregatorV3) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
-	var r Ranges22
+func (a *AggregatorV3) findMergeRange(maxEndTxNum, maxSpan uint64) RangesV3 {
+	var r RangesV3
 	r.accounts = a.accounts.findMergeRange(maxEndTxNum, maxSpan)
 	r.storage = a.storage.findMergeRange(maxEndTxNum, maxSpan)
 	r.code = a.code.findMergeRange(maxEndTxNum, maxSpan)
@@ -810,7 +811,7 @@ func (a *AggregatorV3) findMergeRange(maxEndTxNum, maxSpan uint64) Ranges22 {
 	return r
 }
 
-type SelectedStaticFiles22 struct {
+type SelectedStaticFilesV3 struct {
 	logTopics    []*filesItem
 	accountsHist []*filesItem
 	tracesTo     []*filesItem
@@ -830,7 +831,7 @@ type SelectedStaticFiles22 struct {
 	tracesToI    int
 }
 
-func (sf SelectedStaticFiles22) Close() {
+func (sf SelectedStaticFilesV3) Close() {
 	for _, group := range [][]*filesItem{sf.accountsIdx, sf.accountsHist, sf.storageIdx, sf.accountsHist, sf.codeIdx, sf.codeHist,
 		sf.logAddrs, sf.logTopics, sf.tracesFrom, sf.tracesTo} {
 		for _, item := range group {
@@ -846,8 +847,8 @@ func (sf SelectedStaticFiles22) Close() {
 	}
 }
 
-func (a *AggregatorV3) staticFilesInRange(r Ranges22) SelectedStaticFiles22 {
-	var sf SelectedStaticFiles22
+func (a *AggregatorV3) staticFilesInRange(r RangesV3) SelectedStaticFilesV3 {
+	var sf SelectedStaticFilesV3
 	if r.accounts.any() {
 		sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
 	}
@@ -872,7 +873,7 @@ func (a *AggregatorV3) staticFilesInRange(r Ranges22) SelectedStaticFiles22 {
 	return sf
 }
 
-type MergedFiles22 struct {
+type MergedFilesV3 struct {
 	accountsIdx, accountsHist *filesItem
 	storageIdx, storageHist   *filesItem
 	codeIdx, codeHist         *filesItem
@@ -882,7 +883,7 @@ type MergedFiles22 struct {
 	tracesTo                  *filesItem
 }
 
-func (mf MergedFiles22) Close() {
+func (mf MergedFilesV3) Close() {
 	for _, item := range []*filesItem{mf.accountsIdx, mf.accountsHist, mf.storageIdx, mf.storageHist, mf.codeIdx, mf.codeHist,
 		mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo} {
 		if item != nil {
@@ -896,8 +897,8 @@ func (mf MergedFiles22) Close() {
 	}
 }
 
-func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles22, r Ranges22, maxSpan uint64, workers int) (MergedFiles22, error) {
-	var mf MergedFiles22
+func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, maxSpan uint64, workers int) (MergedFilesV3, error) {
+	var mf MergedFilesV3
 	closeFiles := true
 	defer func() {
 		if closeFiles {
@@ -984,7 +985,7 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 	return mf, lastError
 }
 
-func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFiles22, in MergedFiles22) {
+func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {
 	a.accounts.integrateMergedFiles(outs.accountsIdx, outs.accountsHist, in.accountsIdx, in.accountsHist)
 	a.storage.integrateMergedFiles(outs.storageIdx, outs.storageHist, in.storageIdx, in.storageHist)
 	a.code.integrateMergedFiles(outs.codeIdx, outs.codeHist, in.codeIdx, in.codeHist)
@@ -994,7 +995,7 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFiles22, in Merge
 	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
 }
 
-func (a *AggregatorV3) deleteFiles(outs SelectedStaticFiles22) error {
+func (a *AggregatorV3) deleteFiles(outs SelectedStaticFilesV3) error {
 	if err := a.accounts.deleteFiles(outs.accountsIdx, outs.accountsHist); err != nil {
 		return err
 	}
@@ -1158,20 +1159,20 @@ func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 	return a
 }
 
-func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
-	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, orderAscend, limit, roTx)
+func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
-	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, orderAscend, limit, roTx)
+func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
-	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, orderAscend, limit, roTx)
+func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
-	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, orderAscend, limit, roTx)
+func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
 
 func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {

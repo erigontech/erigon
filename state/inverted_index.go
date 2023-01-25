@@ -36,6 +36,7 @@ import (
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
@@ -456,7 +457,7 @@ type InvertedIterator struct {
 	key                  []byte
 	startTxNum, endTxNum uint64
 	limit                int
-	orderAscend          bool
+	orderAscend          order.By
 
 	roTx       kv.Tx
 	cursor     kv.CursorDupSort
@@ -692,11 +693,11 @@ type InvertedIndexContext struct {
 // IterateRange is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum uint64, orderAscend bool, limit int, roTx kv.Tx) (*InvertedIterator, error) {
-	if orderAscend && startTxNum > endTxNum {
+func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	if asc && startTxNum > endTxNum {
 		return nil, fmt.Errorf("startTxNum=%d epected to be lower than endTxNum=%d", startTxNum, endTxNum)
 	}
-	if !orderAscend && startTxNum < endTxNum {
+	if !asc && startTxNum < endTxNum {
 		return nil, fmt.Errorf("startTxNum=%d epected to be bigger than endTxNum=%d", startTxNum, endTxNum)
 	}
 
@@ -707,10 +708,10 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum ui
 		indexTable:  ic.ii.indexTable,
 		roTx:        roTx,
 		hasNextInDb: true,
-		orderAscend: orderAscend,
+		orderAscend: asc,
 		limit:       limit,
 	}
-	if orderAscend {
+	if asc {
 		var search ctxItem
 		search.startTxNum = 0
 		search.endTxNum = startTxNum

@@ -201,14 +201,15 @@ func TestRemoteKvVersion(t *testing.T) {
 	require.True(t, a.EnsureVersionCompatibility())
 }
 
-func TestRemoteKvStream(t *testing.T) {
+func TestRemoteKvRange(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
 	ctx, writeDB := context.Background(), memdb.NewTestDB(t)
 	grpcServer, conn := grpc.NewServer(), bufconn.Listen(1024*1024)
 	go func() {
-		remote.RegisterKVServer(grpcServer, remotedbserver.NewKvServer(ctx, writeDB, nil, nil))
+		kvServer := remotedbserver.NewKvServer(ctx, writeDB, nil, nil)
+		remote.RegisterKVServer(grpcServer, kvServer)
 		if err := grpcServer.Serve(conn); err != nil {
 			log.Error("private RPC server fail", "err", err)
 		}
@@ -269,7 +270,7 @@ func TestRemoteKvStream(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.Stream(kv.PlainState, from, to)
+			it, err := tx.Range(kv.PlainState, from, to)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err = it.Next()
@@ -290,7 +291,7 @@ func TestRemoteKvStream(t *testing.T) {
 	// Limit
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.StreamAscend(kv.PlainState, from, to, 2)
+			it, err := tx.RangeAscend(kv.PlainState, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()
@@ -310,7 +311,7 @@ func TestRemoteKvStream(t *testing.T) {
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		cntRange := func(from, to []byte) (i int) {
-			it, err := tx.StreamDescend(kv.PlainState, from, to, 2)
+			it, err := tx.RangeDescend(kv.PlainState, from, to, 2)
 			require.NoError(err)
 			for it.HasNext() {
 				_, _, err := it.Next()

@@ -2,6 +2,7 @@ package iter_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -56,8 +57,8 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.AccountsHistory, []byte{4}, []byte{1})
 		_ = tx.Put(kv.PlainState, []byte{2}, []byte{9})
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
-		it, _ := tx.Stream(kv.AccountsHistory, nil, nil)
-		it2, _ := tx.Stream(kv.PlainState, nil, nil)
+		it, _ := tx.Range(kv.AccountsHistory, nil, nil)
+		it2, _ := tx.Range(kv.PlainState, nil, nil)
 		keys, values, err := iter.UnionPairs(it, it2).ToArray()
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {2}, {3}, {4}}, keys)
@@ -69,8 +70,8 @@ func TestUnionPairs(t *testing.T) {
 		defer tx.Rollback()
 		_ = tx.Put(kv.PlainState, []byte{2}, []byte{9})
 		_ = tx.Put(kv.PlainState, []byte{3}, []byte{9})
-		it, _ := tx.Stream(kv.AccountsHistory, nil, nil)
-		it2, _ := tx.Stream(kv.PlainState, nil, nil)
+		it, _ := tx.Range(kv.AccountsHistory, nil, nil)
+		it2, _ := tx.Range(kv.PlainState, nil, nil)
 		keys, _, err := iter.UnionPairs(it, it2).ToArray()
 		require.NoError(err)
 		require.Equal([][]byte{{2}, {3}}, keys)
@@ -82,8 +83,8 @@ func TestUnionPairs(t *testing.T) {
 		_ = tx.Put(kv.AccountsHistory, []byte{1}, []byte{1})
 		_ = tx.Put(kv.AccountsHistory, []byte{3}, []byte{1})
 		_ = tx.Put(kv.AccountsHistory, []byte{4}, []byte{1})
-		it, _ := tx.Stream(kv.AccountsHistory, nil, nil)
-		it2, _ := tx.Stream(kv.PlainState, nil, nil)
+		it, _ := tx.Range(kv.AccountsHistory, nil, nil)
+		it2, _ := tx.Range(kv.PlainState, nil, nil)
 		keys, _, err := iter.UnionPairs(it, it2).ToArray()
 		require.NoError(err)
 		require.Equal([][]byte{{1}, {3}, {4}}, keys)
@@ -92,8 +93,8 @@ func TestUnionPairs(t *testing.T) {
 		require := require.New(t)
 		tx, _ := db.BeginRw(ctx)
 		defer tx.Rollback()
-		it, _ := tx.Stream(kv.AccountsHistory, nil, nil)
-		it2, _ := tx.Stream(kv.PlainState, nil, nil)
+		it, _ := tx.Range(kv.AccountsHistory, nil, nil)
+		it2, _ := tx.Range(kv.PlainState, nil, nil)
 		m := iter.UnionPairs(it, it2)
 		require.False(m.HasNext())
 	})
@@ -156,5 +157,137 @@ func TestRange(t *testing.T) {
 		res, err := iter.ToArr[uint64](s1)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1}, res)
+	})
+}
+
+func TestPaginated(t *testing.T) {
+	t.Run("paginated", func(t *testing.T) {
+		i := 0
+		s1 := iter.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+			i++
+			switch i {
+			case 1:
+				return []uint64{1, 2, 3}, "test", nil
+			case 2:
+				return []uint64{4, 5, 6}, "test", nil
+			case 3:
+				return []uint64{7}, "", nil
+			case 4:
+				panic("must not happen")
+			}
+			return
+		})
+		res, err := iter.ToArr[uint64](s1)
+		require.NoError(t, err)
+		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7}, res)
+
+		//idempotency
+		require.False(t, s1.HasNext())
+		require.False(t, s1.HasNext())
+	})
+	t.Run("error", func(t *testing.T) {
+		i := 0
+		testErr := fmt.Errorf("test")
+		s1 := iter.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+			i++
+			switch i {
+			case 1:
+				return []uint64{1, 2, 3}, "test", nil
+			case 2:
+				return nil, "test", testErr
+			case 3:
+				panic("must not happen")
+			}
+			return
+		})
+		res, err := iter.ToArr[uint64](s1)
+		require.ErrorIs(t, err, testErr)
+		require.Equal(t, []uint64{1, 2, 3}, res)
+
+		//idempotency
+		require.True(t, s1.HasNext())
+		require.True(t, s1.HasNext())
+		_, err = s1.Next()
+		require.ErrorIs(t, err, testErr)
+	})
+	t.Run("empty", func(t *testing.T) {
+		s1 := iter.Paginate[uint64](func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+			return []uint64{}, "", nil
+		})
+		res, err := iter.ToArr[uint64](s1)
+		require.NoError(t, err)
+		require.Equal(t, []uint64{}, res)
+
+		//idempotency
+		require.False(t, s1.HasNext())
+		require.False(t, s1.HasNext())
+	})
+}
+
+func TestPaginatedDual(t *testing.T) {
+	t.Run("paginated", func(t *testing.T) {
+		i := 0
+		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
+			i++
+			switch i {
+			case 1:
+				return [][]byte{{1}, {2}, {3}}, [][]byte{{1}, {2}, {3}}, "test", nil
+			case 2:
+				return [][]byte{{4}, {5}, {6}}, [][]byte{{4}, {5}, {6}}, "test", nil
+			case 3:
+				return [][]byte{{7}}, [][]byte{{7}}, "", nil
+			case 4:
+				panic("must not happen")
+			}
+			return
+		})
+
+		keys, values, err := iter.ToKVArray(s1)
+		require.NoError(t, err)
+		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, keys)
+		require.Equal(t, [][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}}, values)
+
+		//idempotency
+		require.False(t, s1.HasNext())
+		require.False(t, s1.HasNext())
+	})
+	t.Run("error", func(t *testing.T) {
+		i := 0
+		testErr := fmt.Errorf("test")
+		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
+			i++
+			switch i {
+			case 1:
+				return [][]byte{{1}, {2}, {3}}, [][]byte{{1}, {2}, {3}}, "test", nil
+			case 2:
+				return nil, nil, "test", testErr
+			case 3:
+				panic("must not happen")
+			}
+			return
+		})
+		keys, values, err := iter.ToKVArray(s1)
+		require.ErrorIs(t, err, testErr)
+		require.Equal(t, [][]byte{{1}, {2}, {3}}, keys)
+		require.Equal(t, [][]byte{{1}, {2}, {3}}, values)
+
+		//idempotency
+		require.True(t, s1.HasNext())
+		require.True(t, s1.HasNext())
+		_, _, err = s1.Next()
+		require.ErrorIs(t, err, testErr)
+	})
+	t.Run("empty", func(t *testing.T) {
+		s1 := iter.PaginateKV(func(pageToken string) (keys, values [][]byte, nextPageToken string, err error) {
+			return [][]byte{}, [][]byte{}, "", nil
+		})
+		keys, values, err := iter.ToKVArray(s1)
+		require.NoError(t, err)
+		require.Nil(t, keys)
+		require.Nil(t, values)
+
+		//idempotency
+		require.False(t, s1.HasNext())
+		require.False(t, s1.HasNext())
 	})
 }

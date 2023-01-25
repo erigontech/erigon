@@ -22,6 +22,7 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 )
 
 //Variables Naming:
@@ -321,15 +322,15 @@ type Tx interface {
 	// Range(nil, to)   means [StartOfTable, to)
 	Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
 	// Stream is like Range, but for requesting huge data (Example: full table scan). Client can't stop it.
-	Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
+	//Stream(table string, fromPrefix, toPrefix []byte) (iter.KV, error)
 	// RangeAscend - like Range [from, to) but also allow pass Limit parameters
 	// Limit -1 means Unlimited
 	RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	//StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
 	// RangeDescend - is like Range [from, to), but expecing `from`<`to`
 	// example: RangeDescend("Table", "B", "A", -1)
 	RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
-	StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
+	//StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error)
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (iter.KV, error)
 
@@ -459,8 +460,7 @@ type TemporalTx interface {
 	DomainGet(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
-	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error)
-	IndexStream(name InvertedIdx, k []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error)
+	IndexRange(name InvertedIdx, k []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error)
 }
 
 type TemporalRwDB interface {

@@ -1659,7 +1659,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if err != nil {
 		return err
 	}
-	it, err := tx.Stream(kv.RecentLocalTransaction, nil, nil)
+	it, err := tx.Range(kv.RecentLocalTransaction, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -1676,7 +1676,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	parseCtx.WithSender(false)
 
 	i := 0
-	it, err = tx.Stream(kv.PoolTransaction, nil, nil)
+	it, err = tx.Range(kv.PoolTransaction, nil, nil)
 	if err != nil {
 		return err
 	}

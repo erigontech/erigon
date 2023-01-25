@@ -31,9 +31,6 @@ var _ KVClient = &KVClientMock{}
 //			IndexRangeFunc: func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
 //				panic("mock out the IndexRange method")
 //			},
-//			IndexStreamFunc: func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexStreamClient, error) {
-//				panic("mock out the IndexStream method")
-//			},
 //			RangeFunc: func(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 //				panic("mock out the Range method")
 //			},
@@ -42,9 +39,6 @@ var _ KVClient = &KVClientMock{}
 //			},
 //			StateChangesFunc: func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error) {
 //				panic("mock out the StateChanges method")
-//			},
-//			StreamFunc: func(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_StreamClient, error) {
-//				panic("mock out the Stream method")
 //			},
 //			TxFunc: func(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error) {
 //				panic("mock out the Tx method")
@@ -68,9 +62,6 @@ type KVClientMock struct {
 	// IndexRangeFunc mocks the IndexRange method.
 	IndexRangeFunc func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 
-	// IndexStreamFunc mocks the IndexStream method.
-	IndexStreamFunc func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexStreamClient, error)
-
 	// RangeFunc mocks the Range method.
 	RangeFunc func(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
 
@@ -79,9 +70,6 @@ type KVClientMock struct {
 
 	// StateChangesFunc mocks the StateChanges method.
 	StateChangesFunc func(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
-
-	// StreamFunc mocks the Stream method.
-	StreamFunc func(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_StreamClient, error)
 
 	// TxFunc mocks the Tx method.
 	TxFunc func(ctx context.Context, opts ...grpc.CallOption) (KV_TxClient, error)
@@ -118,15 +106,6 @@ type KVClientMock struct {
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
-		// IndexStream holds details about calls to the IndexStream method.
-		IndexStream []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// In is the in argument value.
-			In *IndexRangeReq
-			// Opts is the opts argument value.
-			Opts []grpc.CallOption
-		}
 		// Range holds details about calls to the Range method.
 		Range []struct {
 			// Ctx is the ctx argument value.
@@ -154,15 +133,6 @@ type KVClientMock struct {
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
-		// Stream holds details about calls to the Stream method.
-		Stream []struct {
-			// Ctx is the ctx argument value.
-			Ctx context.Context
-			// In is the in argument value.
-			In *RangeReq
-			// Opts is the opts argument value.
-			Opts []grpc.CallOption
-		}
 		// Tx holds details about calls to the Tx method.
 		Tx []struct {
 			// Ctx is the ctx argument value.
@@ -183,11 +153,9 @@ type KVClientMock struct {
 	lockDomainGet    sync.RWMutex
 	lockHistoryGet   sync.RWMutex
 	lockIndexRange   sync.RWMutex
-	lockIndexStream  sync.RWMutex
 	lockRange        sync.RWMutex
 	lockSnapshots    sync.RWMutex
 	lockStateChanges sync.RWMutex
-	lockStream       sync.RWMutex
 	lockTx           sync.RWMutex
 	lockVersion      sync.RWMutex
 }
@@ -324,50 +292,6 @@ func (mock *KVClientMock) IndexRangeCalls() []struct {
 	return calls
 }
 
-// IndexStream calls IndexStreamFunc.
-func (mock *KVClientMock) IndexStream(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (KV_IndexStreamClient, error) {
-	callInfo := struct {
-		Ctx  context.Context
-		In   *IndexRangeReq
-		Opts []grpc.CallOption
-	}{
-		Ctx:  ctx,
-		In:   in,
-		Opts: opts,
-	}
-	mock.lockIndexStream.Lock()
-	mock.calls.IndexStream = append(mock.calls.IndexStream, callInfo)
-	mock.lockIndexStream.Unlock()
-	if mock.IndexStreamFunc == nil {
-		var (
-			kV_IndexStreamClientOut KV_IndexStreamClient
-			errOut                  error
-		)
-		return kV_IndexStreamClientOut, errOut
-	}
-	return mock.IndexStreamFunc(ctx, in, opts...)
-}
-
-// IndexStreamCalls gets all the calls that were made to IndexStream.
-// Check the length with:
-//
-//	len(mockedKVClient.IndexStreamCalls())
-func (mock *KVClientMock) IndexStreamCalls() []struct {
-	Ctx  context.Context
-	In   *IndexRangeReq
-	Opts []grpc.CallOption
-} {
-	var calls []struct {
-		Ctx  context.Context
-		In   *IndexRangeReq
-		Opts []grpc.CallOption
-	}
-	mock.lockIndexStream.RLock()
-	calls = mock.calls.IndexStream
-	mock.lockIndexStream.RUnlock()
-	return calls
-}
-
 // Range calls RangeFunc.
 func (mock *KVClientMock) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	callInfo := struct {
@@ -497,50 +421,6 @@ func (mock *KVClientMock) StateChangesCalls() []struct {
 	mock.lockStateChanges.RLock()
 	calls = mock.calls.StateChanges
 	mock.lockStateChanges.RUnlock()
-	return calls
-}
-
-// Stream calls StreamFunc.
-func (mock *KVClientMock) Stream(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (KV_StreamClient, error) {
-	callInfo := struct {
-		Ctx  context.Context
-		In   *RangeReq
-		Opts []grpc.CallOption
-	}{
-		Ctx:  ctx,
-		In:   in,
-		Opts: opts,
-	}
-	mock.lockStream.Lock()
-	mock.calls.Stream = append(mock.calls.Stream, callInfo)
-	mock.lockStream.Unlock()
-	if mock.StreamFunc == nil {
-		var (
-			kV_StreamClientOut KV_StreamClient
-			errOut             error
-		)
-		return kV_StreamClientOut, errOut
-	}
-	return mock.StreamFunc(ctx, in, opts...)
-}
-
-// StreamCalls gets all the calls that were made to Stream.
-// Check the length with:
-//
-//	len(mockedKVClient.StreamCalls())
-func (mock *KVClientMock) StreamCalls() []struct {
-	Ctx  context.Context
-	In   *RangeReq
-	Opts []grpc.CallOption
-} {
-	var calls []struct {
-		Ctx  context.Context
-		In   *RangeReq
-		Opts []grpc.CallOption
-	}
-	mock.lockStream.RLock()
-	calls = mock.calls.Stream
-	mock.lockStream.RUnlock()
 	return calls
 }
 

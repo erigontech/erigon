@@ -4,14 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
-	"io"
 	"runtime"
 
-	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
@@ -233,7 +230,7 @@ func (tx *remoteTx) statelessCursor(bucket string) (kv.Cursor, error) {
 func (tx *remoteTx) BucketSize(name string) (uint64, error) { panic("not implemented") }
 
 func (tx *remoteTx) ForEach(bucket string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	it, err := tx.Stream(bucket, fromPrefix, nil)
+	it, err := tx.Range(bucket, fromPrefix, nil)
 	if err != nil {
 		return err
 	}
@@ -615,21 +612,28 @@ func (tx *remoteTx) HistoryGet(name kv.History, k []byte, ts uint64) (v []byte, 
 }
 
 func (tx *remoteTx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs, limit int) (timestamps iter.U64, err error) {
-	//TODO: auto-paginate it
-	req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), PageSize: int32(limit)}
-	reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	bm := bitmapdb.NewBitmap64()
-	bm.AddMany(reply.Timestamps)
-	return bitmapdb.NewBitmapStream(bm), nil
+	return iter.PaginateU64(func(pageToken string) (arr []uint64, nextPageToken string, err error) {
+		req := &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), Limit: int64(limit)}
+		reply, err := tx.db.remoteKV.IndexRange(tx.ctx, req)
+		if err != nil {
+			return nil, "", err
+		}
+		return reply.Timestamps, reply.NextPageToken, nil
+	}), nil
 }
 
+func (tx *remoteTx) Prefix(table string, prefix []byte) (iter.KV, error) {
+	nextPrefix, ok := kv.NextSubtree(prefix)
+	if !ok {
+		return tx.Range(table, prefix, nil)
+	}
+	return tx.Range(table, prefix, nextPrefix)
+}
+
+/*
 func (tx *remoteTx) IndexStream(name kv.InvertedIdx, k []byte, fromTs, toTs, limit int) (timestamps iter.U64, err error) {
 	//TODO: maybe add ctx.WithCancel
-	stream, err := tx.db.remoteKV.IndexStream(tx.ctx, &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), PageSize: int32(limit)})
+	stream, err := tx.db.remoteKV.IndexStream(tx.ctx, &remote.IndexRangeReq{TxId: tx.id, Table: string(name), K: k, FromTs: int64(fromTs), ToTs: int64(toTs), Limit: int32(limit)})
 	if err != nil {
 		return nil, err
 	}
@@ -640,15 +644,9 @@ func (tx *remoteTx) IndexStream(name kv.InvertedIdx, k []byte, fromTs, toTs, lim
 	return it, nil
 }
 
-func (tx *remoteTx) Prefix(table string, prefix []byte) (iter.KV, error) {
-	nextPrefix, ok := kv.NextSubtree(prefix)
-	if !ok {
-		return tx.Stream(table, prefix, nil)
-	}
-	return tx.Stream(table, prefix, nextPrefix)
-}
-func (tx *remoteTx) streamOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend bool, limit int) (iter.KV, error) {
-	req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: orderAscend, PageSize: int32(limit)}
+/*
+func (tx *remoteTx) streamOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+	req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int32(limit)}
 	stream, err := tx.db.remoteKV.Stream(tx.ctx, req)
 	if err != nil {
 		return nil, err
@@ -667,16 +665,29 @@ func (tx *remoteTx) StreamAscend(table string, fromPrefix, toPrefix []byte, limi
 func (tx *remoteTx) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.streamOrderLimit(table, fromPrefix, toPrefix, false, limit)
 }
+*/
+
+func (tx *remoteTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+	return iter.PaginateKV(func(pageToken string) (keys [][]byte, values [][]byte, nextPageToken string, err error) {
+		req := &remote.RangeReq{TxId: tx.id, Table: table, FromPrefix: fromPrefix, ToPrefix: toPrefix, OrderAscend: bool(asc), Limit: int64(limit)}
+		reply, err := tx.db.remoteKV.Range(tx.ctx, req)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return reply.Keys, reply.Values, reply.NextPageToken, nil
+	}), nil
+}
 func (tx *remoteTx) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
-	return tx.Stream(table, fromPrefix, toPrefix)
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, -1)
 }
 func (tx *remoteTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
-	return tx.StreamAscend(table, fromPrefix, toPrefix, limit)
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Asc, limit)
 }
 func (tx *remoteTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
-	return tx.StreamDescend(table, fromPrefix, toPrefix, limit)
+	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
 
+/*
 type grpcStream[Msg any] interface {
 	Recv() (Msg, error)
 	CloseSend() error
@@ -791,3 +802,4 @@ func (it *grpc2UnaryStream[Msg, Res]) Next() (Res, error) {
 	it.i++
 	return v, nil
 }
+*/
