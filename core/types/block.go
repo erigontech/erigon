@@ -610,7 +610,7 @@ func (h *Header) EncodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]
 	return buf, nil
 }
 
-func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
+func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	buf = dst
 	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
 
@@ -618,7 +618,10 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
 		offset += 32
 	}
 
-	h.EncodeHeaderMetadataForSSZ(buf, offset)
+	buf, err = h.EncodeHeaderMetadataForSSZ(buf, offset)
+	if err != nil {
+		return nil, err
+	}
 	buf = append(buf, h.TxHashSSZ[:]...)
 
 	if h.WithdrawalsHash != nil {
@@ -688,7 +691,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	return nil
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the Header object
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object
 func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 	size := 536
 

@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
@@ -39,6 +40,7 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -264,6 +266,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			Accumulator: shards.NewAccumulator(),
 		},
 	}
+	fmt.Printf("dbg1: %s\n", dbg.Stack())
 	var (
 		allSnapshots *snapshotsync.RoSnapshots
 		agg          *libstate.AggregatorV3
@@ -273,11 +276,16 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		return nil, err
 	}
 	backend.agg = agg
+	fmt.Printf("dbg2: %s\n", dbg.Stack())
 
 	if config.HistoryV3 {
-		backend.chainDB = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage)
+		backend.chainDB, err = temporal.New(backend.chainDB, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+		if err != nil {
+			return nil, err
+		}
 		chainKv = backend.chainDB
 	}
+	fmt.Printf("dbg3: %s\n", dbg.Stack())
 
 	kvRPC := remotedbserver.NewKvServer(ctx, chainKv, allSnapshots, agg)
 	backend.notifications.StateChangesConsumer = kvRPC
@@ -884,6 +892,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	fmt.Printf("dbg reop: %s\n", dbg.Stack())
 	if err = agg.ReopenFiles(); err != nil {
 		return nil, nil, nil, err
 	}

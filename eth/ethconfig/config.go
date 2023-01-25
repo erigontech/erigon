@@ -224,9 +224,6 @@ type Config struct {
 
 	StateStream bool
 
-	// Enable WatchTheBurn stage
-	EnabledIssuance bool
-
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 
@@ -261,7 +258,8 @@ type Sync struct {
 
 // Chains where snapshots are enabled by default
 var ChainsWithSnapshots = map[string]struct{}{
-	networkname.MainnetChainName:    {},
+	networkname.MainnetChainName: {},
+	//networkname.SepoliaChainName:    {},
 	networkname.BSCChainName:        {},
 	networkname.GoerliChainName:     {},
 	networkname.MumbaiChainName:     {},

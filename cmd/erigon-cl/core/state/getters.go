@@ -3,9 +3,7 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -31,15 +29,15 @@ func (b *BeaconState) LatestBlockHeader() *cltypes.BeaconBlockHeader {
 	return b.latestBlockHeader
 }
 
-func (b *BeaconState) BlockRoots() [][32]byte {
+func (b *BeaconState) BlockRoots() [blockRootsLength]libcommon.Hash {
 	return b.blockRoots
 }
 
-func (b *BeaconState) StateRoots() [][32]byte {
+func (b *BeaconState) StateRoots() [stateRootsLength]libcommon.Hash {
 	return b.stateRoots
 }
 
-func (b *BeaconState) HistoricalRoots() [][32]byte {
+func (b *BeaconState) HistoricalRoots() []libcommon.Hash {
 	return b.historicalRoots
 }
 
@@ -67,12 +65,16 @@ func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
 
-func (b *BeaconState) RandaoMixes() [][32]byte {
+func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
 	return b.randaoMixes
 }
 
-func (b *BeaconState) Slashings() []uint64 {
+func (b *BeaconState) Slashings() [slashingsLength]uint64 {
 	return b.slashings
+}
+
+func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
+	return b.slashings[pos]
 }
 
 func (b *BeaconState) PreviousEpochParticipation() []byte {
@@ -83,7 +85,7 @@ func (b *BeaconState) CurrentEpochParticipation() []byte {
 	return b.currentEpochParticipation
 }
 
-func (b *BeaconState) JustificationBits() []byte {
+func (b *BeaconState) JustificationBits() byte {
 	return b.justificationBits
 }
 
@@ -111,40 +113,14 @@ func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
 	return b.latestExecutionPayloadHeader
 }
 
-// GetStateSSZObject allows us to use ssz methods.
-func (b *BeaconState) GetStateSSZObject() ssz_utils.ObjectSSZ {
-	switch b.version {
-	case clparams.BellatrixVersion:
-		return &cltypes.BeaconStateBellatrix{
-			GenesisTime:                  b.genesisTime,
-			GenesisValidatorsRoot:        b.genesisValidatorsRoot,
-			Slot:                         b.slot,
-			Fork:                         b.fork,
-			LatestBlockHeader:            b.latestBlockHeader,
-			BlockRoots:                   b.blockRoots,
-			StateRoots:                   b.stateRoots,
-			HistoricalRoots:              b.historicalRoots,
-			Eth1Data:                     b.eth1Data,
-			Eth1DataVotes:                b.eth1DataVotes,
-			Eth1DepositIndex:             b.eth1DepositIndex,
-			Validators:                   b.validators,
-			Balances:                     b.balances,
-			RandaoMixes:                  b.randaoMixes,
-			Slashings:                    b.slashings,
-			PreviousEpochParticipation:   b.previousEpochParticipation,
-			CurrentEpochParticipation:    b.currentEpochParticipation,
-			JustificationBits:            b.justificationBits,
-			FinalizedCheckpoint:          b.finalizedCheckpoint,
-			CurrentJustifiedCheckpoint:   b.currentJustifiedCheckpoint,
-			PreviousJustifiedCheckpoint:  b.previousJustifiedCheckpoint,
-			InactivityScores:             b.inactivityScores,
-			CurrentSyncCommittee:         b.currentSyncCommittee,
-			NextSyncCommittee:            b.nextSyncCommittee,
-			LatestExecutionPayloadHeader: b.latestExecutionPayloadHeader,
-		}
-	case clparams.CapellaVersion:
-		panic("not implemented")
-	default:
-		panic("not a valid version")
-	}
+func (b *BeaconState) NextWithdrawalIndex() uint64 {
+	return b.nextWithdrawalIndex
+}
+
+func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
+	return b.nextWithdrawalValidatorIndex
+}
+
+func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
+	return b.historicalSummaries
 }

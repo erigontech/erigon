@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
+    + [Grafana dashboar god](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -105,6 +105,15 @@ For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) cli
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
+
 ### Logging
 
 _Flags:_ 
@@ -146,13 +155,6 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded Consensus Layer.
 If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
-
-### Optional stages
-
-There is an optional stage that can be enabled through flags:
-
-* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to
-  use `erigon_watchTheBurn`.
 
 ### Testnets
 

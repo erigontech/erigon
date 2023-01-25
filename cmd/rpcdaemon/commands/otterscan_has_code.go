@@ -6,8 +6,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -28,7 +26,10 @@ func (api *OtterscanAPIImpl) HasCode(ctx context.Context, address libcommon.Addr
 		return false, err
 	}
 
-	reader := state.NewPlainState(tx, blockNumber, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	reader, err := rpchelper.CreateHistoryStateReader(tx, blockNumber, 0, api.historyV3(tx), chainConfig.ChainName)
+	if err != nil {
+		return false, err
+	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
 		return false, err

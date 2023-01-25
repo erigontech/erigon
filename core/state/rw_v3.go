@@ -276,6 +276,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 				k = nil
 			}
 			if psChanges != nil {
+				//TODO: try full-scan, then can replace btree by map
 				iter := psChanges.Iter()
 				for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
 					key := []byte(iter.Key())

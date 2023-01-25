@@ -7,6 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+const maxEth1Votes = 2048
+
 // Below are setters. Note that they also dirty the state.
 
 func (b *BeaconState) SetGenesisTime(genesisTime uint64) {
@@ -34,27 +36,17 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.latestBlockHeader = header
 }
 
-func (b *BeaconState) SetBlockRoots(blockRoots [][32]byte) {
-	b.touchedLeaves[BlockRootsLeafIndex] = true
-	b.blockRoots = blockRoots
-}
-
-func (b *BeaconState) SetStateRoots(stateRoots [][32]byte) {
-	b.touchedLeaves[StateRootsLeafIndex] = true
-	b.stateRoots = stateRoots
-}
-
-func (b *BeaconState) SetHistoricalRoots(historicalRoots [][32]byte) {
+func (b *BeaconState) SetHistoricalRoots(historicalRoots []libcommon.Hash) {
 	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	b.historicalRoots = historicalRoots
 }
 
-func (b *BeaconState) SetBlockRootAt(index int, root [32]byte) {
+func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[BlockRootsLeafIndex] = true
 	b.blockRoots[index] = root
 }
 
-func (b *BeaconState) SetStateRootAt(index int, root [32]byte) {
+func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[StateRootsLeafIndex] = true
 	b.stateRoots[index] = root
 }
@@ -73,9 +65,9 @@ func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.eth1Data = eth1Data
 }
 
-func (b *BeaconState) SetEth1DataVotes(eth1DataVotes []*cltypes.Eth1Data) {
+func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataVotesLeafIndex] = true
-	b.eth1DataVotes = eth1DataVotes
+	b.eth1DataVotes = append(b.eth1DataVotes, vote)
 }
 
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
@@ -88,19 +80,24 @@ func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
 	b.validators = validators
 }
 
+func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	b.validators = append(b.validators, validator)
+}
+
 func (b *BeaconState) SetBalances(balances []uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances = balances
 }
 
-func (b *BeaconState) SetRandaoMixes(randaoMixes [][32]byte) {
+func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.touchedLeaves[RandaoMixesLeafIndex] = true
-	b.randaoMixes = randaoMixes
+	b.randaoMixes[index] = mix
 }
 
-func (b *BeaconState) SetSlashings(slashings []uint64) {
+func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 	b.touchedLeaves[SlashingsLeafIndex] = true
-	b.slashings = slashings
+	b.slashings[index] = segment
 }
 
 func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []byte) {
@@ -113,7 +110,7 @@ func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []b
 	b.currentEpochParticipation = currentEpochParticipation
 }
 
-func (b *BeaconState) SetJustificationBits(justificationBits []byte) {
+func (b *BeaconState) SetJustificationBits(justificationBits byte) {
 	b.touchedLeaves[JustificationBitsLeafIndex] = true
 	b.justificationBits = justificationBits
 }
@@ -146,4 +143,16 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
+}
+
+func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.nextWithdrawalIndex = index
+}
+
+func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.nextWithdrawalValidatorIndex = index
+}
+
+func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.historicalSummaries = append(b.historicalSummaries, summary)
 }

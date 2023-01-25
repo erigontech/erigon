@@ -86,7 +86,9 @@ func SlashValidator(state *state.BeaconState, slashedInd, whistleblowerInd uint6
 		newValidator.WithdrawableEpoch = withdrawEpoch
 	}
 	state.SetValidatorAt(int(slashedInd), &newValidator)
-	state.Slashings()[epoch%EPOCHS_PER_SLASHINGS_VECTOR] += newValidator.EffectiveBalance
+	segmentIndex := int(epoch % EPOCHS_PER_SLASHINGS_VECTOR)
+	currentSlashing := state.SlashingSegmentAt(segmentIndex)
+	state.SetSlashingSegmentAt(segmentIndex, currentSlashing+newValidator.EffectiveBalance)
 	DecreaseBalance(state, slashedInd, newValidator.EffectiveBalance/MIN_SLASHING_PENALTY_QUOTIENT)
 
 	proposerInd, err := GetBeaconProposerIndex(state)

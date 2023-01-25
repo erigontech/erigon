@@ -16,8 +16,8 @@ func TestAggregateMarshal(t *testing.T) {
 	}
 	enc, err := agg.EncodedSSZ(nil)
 	require.NoError(t, err)
-	require.Equal(t, agg.SizeSSZ(), len(enc))
+	require.Equal(t, agg.EncodingSizeSSZ(), len(enc))
 	agg2 := &cltypes.SignedAggregateAndProof{}
-	require.NoError(t, agg2.UnmarshalSSZ(enc))
+	require.NoError(t, agg2.DecodeSSZ(enc))
 	require.Equal(t, agg, agg2)
 }

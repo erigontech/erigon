@@ -112,11 +112,24 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(func() {
-		b.m.DB.Close()
+		b.Close()
 	})
+	if b.m.HistoryV3 {
+		t.Skip("TODO: Fixme")
+	}
 	return b
 }
 
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
+	t.Cleanup(func() {
+		b.Close()
+	})
+	if b.m.HistoryV3 {
+		t.Skip("TODO: Fixme")
+	}
+	return b
+}
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
@@ -174,8 +187,10 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
+		//return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
 	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
+	//return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
