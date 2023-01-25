@@ -240,7 +240,7 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 			if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
 				p := sort.Search(len(records), func(i int) bool {
 					return records[i].TxNumber > ts
-				})2
+				})
 				hash := records[p-1].CodeHash
 				force = &hash
 			}
