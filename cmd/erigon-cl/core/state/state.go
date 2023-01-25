@@ -34,9 +34,9 @@ type BeaconState struct {
 	balances                   []uint64
 	randaoMixes                [randoMixesLength]libcommon.Hash
 	slashings                  [slashingsLength]uint64
-	previousEpochParticipation []byte
-	currentEpochParticipation  []byte
-	justificationBits          byte
+	previousEpochParticipation cltypes.ParticipationFlagsList
+	currentEpochParticipation  cltypes.ParticipationFlagsList
+	justificationBits          cltypes.JustificationBits
 	// Altair
 	previousJustifiedCheckpoint *cltypes.Checkpoint
 	currentJustifiedCheckpoint  *cltypes.Checkpoint
@@ -54,6 +54,16 @@ type BeaconState struct {
 	version       clparams.StateVersion   // State version
 	leaves        [32][32]byte            // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	// Configs
+	beaconConfig *clparams.BeaconChainConfig
+}
+
+func New(cfg *clparams.BeaconChainConfig) *BeaconState {
+	state := &BeaconState{
+		beaconConfig: cfg,
+	}
+	state.initBeaconState()
+	return state
 }
 
 func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
