@@ -581,7 +581,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 				log.Trace(fmt.Sprintf("[%s] Peer already has connection", printablePeerID))
 				return nil
 			}
-			log.Trace(fmt.Sprintf("[%s] Start with peer", printablePeerID))
+			log.Debug(fmt.Sprintf("[%s] Start with peer", printablePeerID))
 
 			peerInfo := NewPeerInfo(peer, rw)
 			defer peerInfo.Close()
@@ -593,6 +593,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 				return ss.startSync(ctx, bestHash, peerID)
 			})
 			if err != nil {
+				log.Debug("Handshake failure", "peer", printablePeerID, "err", err)
 				return fmt.Errorf("handshake to peer %s: %w", printablePeerID, err)
 			}
 			peerInfo.protocol = uint(peerProtocol)
@@ -624,7 +625,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 }
 
 // Sentry creates and runs standalone sentry
-func Sentry1(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
+func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
 	dir.MustExist(dirs.DataDir)
 	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
