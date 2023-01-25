@@ -214,6 +214,15 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
+	// Constants (non-configurable)
+	GenesisSlot              uint64 `yaml:"GENESIS_SLOT"`                // GenesisSlot represents the first canonical slot number of the beacon chain.
+	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH"`               // GenesisEpoch represents the first canonical epoch number of the beacon chain.
+	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH"`            // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
+	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT"`             // FarFutureSlot represents a slot extremely far away in the future.
+	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH"`      // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
+	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
+	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH"`   // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
+
 	// Misc constants.
 	PresetBase                     string `yaml:"PRESET_BASE" spec:"true"`                        // PresetBase represents the underlying spec preset this config is based on.
 	ConfigName                     string `yaml:"CONFIG_NAME" spec:"true"`                        // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
@@ -441,11 +450,11 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 
 var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Constants (Non-configurable)
-	/*FarFutureEpoch:           math.MaxUint64,
+	FarFutureEpoch:           math.MaxUint64,
 	FarFutureSlot:            math.MaxUint64,
 	BaseRewardsPerEpoch:      4,
-	DepositContractTreeDepth: 32,*/
-	GenesisDelay: 604800, // 1 week.
+	DepositContractTreeDepth: 32,
+	GenesisDelay:             604800, // 1 week.
 
 	// Misc constant.
 	TargetCommitteeSize:            128,
