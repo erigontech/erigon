@@ -26,7 +26,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"

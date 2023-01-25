@@ -21,6 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
@@ -31,8 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 func main() {

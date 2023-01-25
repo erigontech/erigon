@@ -1,8 +1,6 @@
 package flags
 
-import (
-	"github.com/urfave/cli"
-)
+import "github.com/urfave/cli/v2"
 
 var (
 	SentinelDiscoveryPort = cli.IntFlag{

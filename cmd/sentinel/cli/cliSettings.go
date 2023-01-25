@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
-	"github.com/urfave/cli"
 )
 
 type ConsensusClientCliCfg struct {

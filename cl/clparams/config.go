@@ -22,10 +22,11 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"gopkg.in/yaml.v2"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
-	"gopkg.in/yaml.v3"
 )
 
 type NetworkType int

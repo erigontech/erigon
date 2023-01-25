@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/urfave/cli"
 )
 
 // DefaultFlags contains all flags that are used and supported by Erigon binary.

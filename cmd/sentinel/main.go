@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
 	"go.uber.org/zap/buffer"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
