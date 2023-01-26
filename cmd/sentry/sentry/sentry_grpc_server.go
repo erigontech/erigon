@@ -941,9 +941,11 @@ func (ss *GrpcServer) SetStatus(ctx context.Context, statusData *proto_sentry.St
 					ss.discoveryDNS = []string{url}
 				}
 			}
-			ss.Protocols[len(ss.Protocols)-1].DialCandidates, err = setupDiscovery(ss.discoveryDNS)
-			if err != nil {
-				return nil, err
+			for _, p := range ss.Protocols {
+				p.DialCandidates, err = setupDiscovery(ss.discoveryDNS)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 
