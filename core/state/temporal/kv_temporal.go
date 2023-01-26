@@ -137,6 +137,10 @@ const (
 )
 
 const (
+	AccountsHistoryIdx kv.InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx  kv.InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx     kv.InvertedIdx = "CodeHistoryIdx"
+
 	LogTopicIdx   kv.InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    kv.InvertedIdx = "LogAddrIdx"
 	TracesFromIdx kv.InvertedIdx = "TracesFromIdx"
@@ -272,41 +276,29 @@ type Cursor struct {
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, asc, limit)
-}
-
-// [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
+	case AccountsHistoryIdx:
+		timestamps, err = tx.agg.AccountHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
+	case StorageHistoryIdx:
+		timestamps, err = tx.agg.StorageHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
+	case CodeHistoryIdx:
+		timestamps, err = tx.agg.CodeHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogTopicIterator(key, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogAddrIterator(key, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceFromIterator(key, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceToIterator(key, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := timestamps.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return timestamps, nil
 }

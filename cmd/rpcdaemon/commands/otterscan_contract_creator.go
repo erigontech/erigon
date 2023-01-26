@@ -7,9 +7,13 @@ import (
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/state"
@@ -44,6 +48,69 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		return nil, nil
 	}
 
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	var acc accounts.Account
+	if api.historyV3(tx) {
+		ttx := tx.(kv.TemporalTx)
+		headNumber, err := stages.GetStageProgress(tx, stages.Execution)
+		if err != nil {
+			return nil, err
+		}
+		lastTxNum, _ := rawdbv3.TxNums.Max(tx, headNumber)
+
+		// The sort.Search function finds the first block where the incarnation has
+		// changed to the desired one, so we get the previous block from the bitmap;
+		// however if the creationTxnID block is already the first one from the bitmap, it means
+		// the block we want is the max block from the previous shard.
+		var creationTxnID uint64
+		var searchErr error
+
+		_ = sort.Search(int(lastTxNum), func(i int) bool {
+			v, ok, err := ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, uint64(i))
+			if err != nil {
+				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				panic(err)
+			}
+			if !ok {
+				return false
+			}
+			if len(v) == 0 {
+				creationTxnID = cmp.Max(creationTxnID, uint64(i))
+				return false
+			}
+
+			if err := acc.DecodeForStorage(v); err != nil {
+				searchErr = err
+				return false
+			}
+			if acc.Incarnation < plainStateAcc.Incarnation {
+				creationTxnID = cmp.Max(creationTxnID, uint64(i))
+				return false
+			}
+			return true
+		})
+		if searchErr != nil {
+			return nil, searchErr
+		}
+
+		// Trace block, find tx and contract creator
+		tracer := NewCreateTracer(ctx, addr)
+		_, bn, _ := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+		minTxNum, _ := rawdbv3.TxNums.Min(tx, bn)
+		txIndex := creationTxnID - minTxNum - 1 /* system-contract */
+		if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
+			return nil, err
+		}
+		return &ContractCreatorData{
+			Tx:      tracer.Tx.Hash(),
+			Creator: tracer.Creator,
+		}, nil
+	}
+
 	// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
 	//
 	// We search shards in forward order on purpose because popular contracts may have
@@ -73,7 +140,6 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		return nil, fmt.Errorf("could't find any shard for account history addr=%v", addr)
 	}
 
-	var acc accounts.Account
 	bm := bitmapdb.NewBitmap64()
 	defer bitmapdb.ReturnToPool64(bm)
 	prevShardMaxBl := uint64(0)
@@ -153,14 +219,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 	if r > 0 {
 		blockFound = blocks[r-1]
 	}
-
 	// Trace block, find tx and contract creator
-	chainConfig, err := api.chainConfig(tx)
-	if err != nil {
-		return nil, err
-	}
 	tracer := NewCreateTracer(ctx, addr)
-	if err := api.genericTracer(tx, ctx, blockFound, chainConfig, tracer); err != nil {
+	if err := api.genericTracer(tx, ctx, blockFound, 0, 0, chainConfig, tracer); err != nil {
 		return nil, err
 	}
 
