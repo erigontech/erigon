@@ -181,7 +181,7 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionPairs(it, it3), nil
+		return iter.UnionKV(it, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:

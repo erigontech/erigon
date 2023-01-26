@@ -301,11 +301,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			if allBlocks == nil {
-				allBlocks = it
-			} else {
-				allBlocks = iter.Union[uint64](allBlocks, it)
-			}
+			allBlocks = iter.Union[uint64](allBlocks, it)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -316,36 +312,24 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			if blocksTo == nil {
-				blocksTo = it
-			} else {
-				blocksTo = iter.Union[uint64](blocksTo, it)
-			}
+			blocksTo = iter.Union[uint64](blocksTo, it)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		if allBlocks == nil {
-			allBlocks = blocksTo
-		} else {
-			allBlocks = iter.Intersect[uint64](allBlocks, blocksTo)
-		}
+		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		if allBlocks == nil {
-			allBlocks = blocksTo
-		} else {
-			allBlocks = iter.Union[uint64](allBlocks, blocksTo)
-		}
+		allBlocks = iter.Union[uint64](allBlocks, blocksTo)
 	}
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
 		allBlocks = iter.Range[uint64](from, to)
-	} else {
+		//} else {
 		//allBlocks.RemoveRange(0, from)
 		//allBlocks.RemoveRange(to, uint64(0x100000000))
 	}

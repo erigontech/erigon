@@ -27,37 +27,18 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// go:generate gencodec -type AccessTuple -out gen_access_tuple.go
-
-// AccessList is an EIP-2930 access list.
-type AccessList []AccessTuple
-
-// AccessTuple is the element type of an access list.
-type AccessTuple struct {
-	Address     libcommon.Address `json:"address"        gencodec:"required"`
-	StorageKeys []libcommon.Hash  `json:"storageKeys"    gencodec:"required"`
-}
-
-// StorageKeys returns the total number of storage keys in the access list.
-func (al AccessList) StorageKeys() int {
-	sum := 0
-	for _, tuple := range al {
-		sum += len(tuple.StorageKeys)
-	}
-	return sum
-}
-
 // AccessListTx is the data of EIP-2930 access list transactions.
 type AccessListTx struct {
 	LegacyTx
 	ChainID    *uint256.Int
-	AccessList AccessList // EIP-2930 access list
+	AccessList types2.AccessList // EIP-2930 access list
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -78,7 +59,7 @@ func (tx AccessListTx) copy() *AccessListTx {
 			GasPrice: new(uint256.Int),
 		},
 		ChainID:    new(uint256.Int),
-		AccessList: make(AccessList, len(tx.AccessList)),
+		AccessList: make(types2.AccessList, len(tx.AccessList)),
 	}
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
@@ -96,7 +77,7 @@ func (tx AccessListTx) copy() *AccessListTx {
 	return cpy
 }
 
-func (tx AccessListTx) GetAccessList() AccessList {
+func (tx AccessListTx) GetAccessList() types2.AccessList {
 	return tx.AccessList
 }
 
@@ -173,7 +154,7 @@ func (tx AccessListTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessL
 	return payloadSize, nonceLen, gasLen, accessListLen
 }
 
-func accessListSize(al AccessList) int {
+func accessListSize(al types2.AccessList) int {
 	var accessListLen int
 	for _, tuple := range al {
 		tupleLen := 21 // For the address
@@ -194,7 +175,7 @@ func accessListSize(al AccessList) int {
 	return accessListLen
 }
 
-func encodeAccessList(al AccessList, w io.Writer, b []byte) error {
+func encodeAccessList(al types2.AccessList, w io.Writer, b []byte) error {
 	for _, tuple := range al {
 		tupleLen := 21
 		tupleLen++
@@ -356,7 +337,7 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func decodeAccessList(al *AccessList, s *rlp.Stream) error {
+func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
@@ -365,7 +346,7 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
 		// decode tuple
-		*al = append(*al, AccessTuple{StorageKeys: []libcommon.Hash{}})
+		*al = append(*al, types2.AccessTuple{StorageKeys: []libcommon.Hash{}})
 		tuple := &(*al)[len(*al)-1]
 		if b, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
@@ -444,7 +425,7 @@ func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Data: %w", err)
 	}
 	// decode AccessList
-	tx.AccessList = AccessList{}
+	tx.AccessList = types2.AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return fmt.Errorf("read AccessList: %w", err)
 	}

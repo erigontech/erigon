@@ -27,17 +27,14 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -48,7 +45,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -1952,7 +1951,7 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 				GasPrice: gasPrice,
 			},
-			AccessList: types.AccessList{{
+			AccessList: types2.AccessList{{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}},
@@ -2038,7 +2037,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
-			accesses := types.AccessList{types.AccessTuple{
+			accesses := types2.AccessList{types2.AccessTuple{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}}

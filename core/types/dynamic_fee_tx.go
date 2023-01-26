@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -36,7 +37,7 @@ type DynamicFeeTransaction struct {
 	CommonTx
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
-	AccessList AccessList
+	AccessList types2.AccessList
 }
 
 func (tx DynamicFeeTransaction) GetPrice() *uint256.Int   { return tx.Tip }
@@ -81,7 +82,7 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			// These are copied below.
 			Value: new(uint256.Int),
 		},
-		AccessList: make(AccessList, len(tx.AccessList)),
+		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}
@@ -104,7 +105,7 @@ func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	return cpy
 }
 
-func (tx DynamicFeeTransaction) GetAccessList() AccessList {
+func (tx DynamicFeeTransaction) GetAccessList() types2.AccessList {
 	return tx.AccessList
 }
 
@@ -353,7 +354,7 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	tx.AccessList = AccessList{}
+	tx.AccessList = types2.AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
