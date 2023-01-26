@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230125023217-b5dc69285e6b
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230126024044-2bdce61a77c1
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230120022649-cd9409a200da
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -63,7 +63,7 @@ require (
 	github.com/pkg/errors v0.9.1
 	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
-	github.com/prysmaticlabs/gohashtree v0.0.0-20220517220438-192ee5ae6982
+	github.com/prysmaticlabs/gohashtree v0.0.2-alpha
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.8.2
 	github.com/spf13/cobra v1.6.1

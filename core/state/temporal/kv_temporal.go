@@ -8,10 +8,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -168,11 +169,11 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		copy(toPrefix, k1)
 		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
-		it2, err := tx.StreamAscend(kv.PlainState, startkey, toPrefix, limit)
+		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
 		if err != nil {
 			return nil, err
 		}
-		it3 := iter.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
 		//TODO: seems MergePairs can't handle "amount" request
@@ -270,36 +271,36 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
+	return tx.IndexStream(name, key, fromTs, toTs, asc, limit)
 }
 
 // [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
+func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, orderAscend, limit, tx)
+		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, asc, limit, tx)
 		if err != nil {
 			return nil, err
 		}
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, orderAscend, limit, tx)
+		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, asc, limit, tx)
 		if err != nil {
 			return nil, err
 		}
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, orderAscend, limit, tx)
+		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, asc, limit, tx)
 		if err != nil {
 			return nil, err
 		}
 		tx.resourcesToClose = append(tx.resourcesToClose, t)
 		return t, nil
 	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, orderAscend, limit, tx)
+		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, asc, limit, tx)
 		if err != nil {
 			return nil, err
 		}
