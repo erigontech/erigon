@@ -364,9 +364,6 @@ func (si *LocalityIterator) advance() {
 		}
 
 		inFile := inStep / StepsInBiggestFile
-		if inFile > 64 {
-			panic("this index supports only up to 64 files")
-		}
 
 		if !bytes.Equal(key, si.key) {
 			if si.key == nil {
