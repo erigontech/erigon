@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/maps"
 
@@ -738,7 +739,7 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // - Add the contents of the optional tx access list (2930)
 //
 // This method should only be called if Yolov3/Berlin/2929+2930 is applicable at the current number.
-func (sdb *IntraBlockState) PrepareAccessList(sender libcommon.Address, dst *libcommon.Address, precompiles []libcommon.Address, list types.AccessList) {
+func (sdb *IntraBlockState) PrepareAccessList(sender libcommon.Address, dst *libcommon.Address, precompiles []libcommon.Address, list types2.AccessList) {
 	sdb.AddAddressToAccessList(sender)
 	if dst != nil {
 		sdb.AddAddressToAccessList(*dst)

@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -122,9 +123,9 @@ type CallMsg struct {
 	Value    *uint256.Int       // amount of wei sent along with the call
 	Data     []byte             // input data, usually an ABI-encoded contract method invocation
 
-	FeeCap     *uint256.Int     // EIP-1559 fee cap per gas.
-	Tip        *uint256.Int     // EIP-1559 tip per gas.
-	AccessList types.AccessList // EIP-2930 access list.
+	FeeCap     *uint256.Int      // EIP-1559 fee cap per gas.
+	Tip        *uint256.Int      // EIP-1559 tip per gas.
+	AccessList types2.AccessList // EIP-2930 access list.
 }
 
 // A ContractCaller provides contract calls, essentially transactions that are executed by

@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -124,8 +125,8 @@ func (tx LegacyTx) Cost() *uint256.Int {
 	return total
 }
 
-func (tx LegacyTx) GetAccessList() AccessList {
-	return AccessList{}
+func (tx LegacyTx) GetAccessList() types2.AccessList {
+	return types2.AccessList{}
 }
 
 func (tx LegacyTx) Protected() bool {
