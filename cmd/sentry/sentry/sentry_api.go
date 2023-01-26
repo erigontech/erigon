@@ -110,7 +110,7 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 			minBlock := req.Number
 
 			var maxPeers uint64
-			if cs.passivePeers {
+			if cs.sendHeaderRequestsToMultiplePeers {
 				maxPeers = 5
 			} else {
 				maxPeers = 1
