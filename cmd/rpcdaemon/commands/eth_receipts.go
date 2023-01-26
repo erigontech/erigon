@@ -542,45 +542,36 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (iter.U64, error) {
-	var result iter.U64
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (res iter.U64, err error) {
 	for _, sub := range topics {
-		var bitmapForORing iter.U64 = iter.Array[uint64]([]uint64{})
 
+		var topicsUnion iter.U64
 		for _, topic := range sub {
 			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, -1)
 			if err != nil {
 				return nil, err
 			}
-			bitmapForORing = iter.Union[uint64](bitmapForORing, it)
+			topicsUnion = iter.Union[uint64](topicsUnion, it)
 		}
 
-		if result == nil {
-			result = bitmapForORing
+		if res == nil {
+			res = topicsUnion
 			continue
 		}
-		result = iter.Intersect[uint64](result, bitmapForORing)
+		res = iter.Intersect[uint64](res, topicsUnion)
 	}
-	return result, nil
+	return res, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (iter.U64, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	var rx iter.U64
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (res iter.U64, err error) {
 	for _, addr := range addrs {
 		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, -1)
 		if err != nil {
 			return nil, err
 		}
-		if rx == nil {
-			rx = it
-		} else {
-			rx = iter.Union[uint64](rx, it)
-		}
+		res = iter.Union[uint64](res, it)
 	}
-	return rx, nil
+	return res, nil
 }
 
 /*
