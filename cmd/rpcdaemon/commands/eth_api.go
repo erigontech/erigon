@@ -10,6 +10,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -313,7 +314,7 @@ type RPCTransaction struct {
 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
 	Value            *hexutil.Big       `json:"value"`
 	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types.AccessList  `json:"accessList,omitempty"`
+	Accesses         *types2.AccessList `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
 	V                *hexutil.Big       `json:"v"`
 	R                *hexutil.Big       `json:"r"`
