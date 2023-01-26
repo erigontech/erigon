@@ -121,7 +121,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
 	offset += uint32(len(b.currentEpochParticipation))
 
-	dst = append(dst, b.justificationBits)
+	dst = append(dst, b.justificationBits.Byte())
 
 	// Checkpoints
 	if dst, err = b.previousJustifiedCheckpoint.EncodeSSZ(dst); err != nil {
@@ -179,8 +179,8 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	}
 
 	// Write participations (offset 4 & 5)
-	dst = append(dst, b.previousEpochParticipation...)
-	dst = append(dst, b.currentEpochParticipation...)
+	dst = append(dst, b.previousEpochParticipation.Bytes()...)
+	dst = append(dst, b.currentEpochParticipation.Bytes()...)
 
 	// write inactivity scores (offset 6)
 	for _, score := range b.inactivityScores {
@@ -277,7 +277,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	currentEpochParticipationOffset := ssz_utils.DecodeOffset(buf[pos:])
 	pos += 4
 	// just take that one smol byte
-	b.justificationBits = buf[pos]
+	b.justificationBits.FromByte(buf[pos])
 	pos++
 	// Decode checkpoints
 	b.previousJustifiedCheckpoint = new(cltypes.Checkpoint)
@@ -338,12 +338,14 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.balances, err = ssz_utils.DecodeNumbersList(buf, balancesOffset, previousEpochParticipationOffset, state_encoding.ValidatorRegistryLimit); err != nil {
 		return err
 	}
-	if b.previousEpochParticipation, err = ssz_utils.DecodeString(buf, uint64(previousEpochParticipationOffset), uint64(currentEpochParticipationOffset), state_encoding.ValidatorRegistryLimit); err != nil {
+	var previousEpochParticipation, currentEpochParticipation []byte
+	if previousEpochParticipation, err = ssz_utils.DecodeString(buf, uint64(previousEpochParticipationOffset), uint64(currentEpochParticipationOffset), state_encoding.ValidatorRegistryLimit); err != nil {
 		return err
 	}
-	if b.currentEpochParticipation, err = ssz_utils.DecodeString(buf, uint64(currentEpochParticipationOffset), uint64(inactivityScoresOffset), state_encoding.ValidatorRegistryLimit); err != nil {
+	if currentEpochParticipation, err = ssz_utils.DecodeString(buf, uint64(currentEpochParticipationOffset), uint64(inactivityScoresOffset), state_encoding.ValidatorRegistryLimit); err != nil {
 		return err
 	}
+	b.previousEpochParticipation, b.currentEpochParticipation = cltypes.ParticipationFlagsListFromBytes(previousEpochParticipation), cltypes.ParticipationFlagsListFromBytes(currentEpochParticipation)
 	endOffset := uint32(len(buf))
 	if executionPayloadOffset != 0 {
 		endOffset = executionPayloadOffset

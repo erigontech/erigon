@@ -560,7 +560,10 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 		offset += 32
 	}
 
-	h.EncodeHeaderMetadataForSSZ(buf, offset)
+	buf, err = h.EncodeHeaderMetadataForSSZ(buf, offset)
+	if err != nil {
+		return nil, err
+	}
 	buf = append(buf, h.TxHashSSZ[:]...)
 
 	if h.WithdrawalsHash != nil {

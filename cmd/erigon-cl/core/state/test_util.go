@@ -26,7 +26,8 @@ func GetEmptyBeaconState() *BeaconState {
 			BaseFee: big.NewInt(0),
 			Number:  big.NewInt(0),
 		},
-		version: clparams.BellatrixVersion,
+		version:      clparams.BellatrixVersion,
+		beaconConfig: &clparams.MainnetBeaconConfig,
 	}
 	b.initBeaconState()
 	return b
