@@ -397,23 +397,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			}
 		} else {
 			topTrace.Result = nil
-			switch err {
-			case vm.ErrInvalidJump:
-				topTrace.Error = "Bad jump destination"
-			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
-				topTrace.Error = "Out of gas"
-			case vm.ErrWriteProtection:
-				topTrace.Error = "Mutable Call In Static Context"
-			default:
-				switch err.(type) {
-				case *vm.ErrStackUnderflow:
-					topTrace.Error = "Stack underflow"
-				case *vm.ErrInvalidOpCode:
-					topTrace.Error = "Bad instruction"
-				default:
-					topTrace.Error = err.Error()
-				}
-			}
+			topTrace.Error = err.Error()
 		}
 	} else {
 		if len(output) > 0 {
