@@ -268,44 +268,32 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	if s.hd.BeaconRequestList.IsWaiting() {
-		fmt.Println("returning early")
-		return false
-	}
-
 	waiter := make(chan struct{})
+	defer libcommon.SafeClose(waiter)
 
-	s.hd.BeaconRequestList.AddWaiter(waiter)
-
+	busy := true
 	wg := sync.WaitGroup{}
-	ticker := time.NewTicker(1 * time.Second)
+	wg.Add(1)
+
 	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				// timeout just exit
-				fmt.Println("hexo: timed out")
-				close(waiter)
-				wg.Done()
-				return
-			case <-waiter:
-				// now check if we're in the state we want, otherwise re-add the watcher and keep going
-				if s.hd.BeaconRequestList.IsWaiting() {
-					fmt.Println("hexo: now waiting")
-					close(waiter)
-					wg.Done()
-					return
-				} else {
-					fmt.Println("hexo: adding new waiter")
-					s.hd.BeaconRequestList.AddWaiter(waiter)
-				}
-			}
+		select {
+		case <-time.After(1 * time.Second):
+			// timed out so just call done
+			fmt.Println("hexo: timed out")
+			wg.Done()
+		case <-waiter:
+			// state is now waiting so we're not busy
+			fmt.Println("hexo: finished waiting")
+			busy = false
+			wg.Done()
 		}
 	}()
-	wg.Wait()
-	ticker.Stop()
 
-	return !s.hd.BeaconRequestList.IsWaiting()
+	s.hd.BeaconRequestList.WaitForWaiting(waiter)
+
+	wg.Wait()
+
+	return busy
 }
 
 // EngineNewPayload validates and possibly executes payload

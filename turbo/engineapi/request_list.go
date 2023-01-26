@@ -122,12 +122,8 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	atomic.StoreUint32(&rl.waiting, 1)
-	rl.notifyWaiters()
-	defer func() {
-		atomic.StoreUint32(&rl.waiting, 0)
-		rl.notifyWaiters()
-	}()
+	rl.updateWaiting(1)
+	defer rl.updateWaiting(0)
 
 	for {
 		interrupt = rl.interrupt
@@ -150,19 +146,31 @@ func (rl *RequestList) IsWaiting() bool {
 	return atomic.LoadUint32(&rl.waiting) != 0
 }
 
-func (rl *RequestList) AddWaiter(c chan struct{}) {
+func (rl *RequestList) updateWaiting(val uint32) {
 	rl.waiterMtx.Lock()
 	defer rl.waiterMtx.Unlock()
-	rl.waiters = append(rl.waiters, c)
+	atomic.StoreUint32(&rl.waiting, val)
+
+	if val == 1 {
+		// something might be waiting to be notified of the waiting state being ready
+		for _, c := range rl.waiters {
+			c <- struct{}{}
+		}
+		rl.waiters = make([]chan struct{}, 0)
+	}
 }
 
-func (rl *RequestList) notifyWaiters() {
+func (rl *RequestList) WaitForWaiting(c chan struct{}) {
 	rl.waiterMtx.Lock()
 	defer rl.waiterMtx.Unlock()
-	for _, c := range rl.waiters {
+	val := atomic.LoadUint32(&rl.waiting)
+	if val == 1 {
+		// we are already waiting so just send to the channel and quit
 		c <- struct{}{}
+	} else {
+		// we need to register a waiter now to be notified when we are ready
+		rl.waiters = append(rl.waiters, c)
 	}
-	rl.waiters = make([]chan struct{}, 0)
 }
 
 func (rl *RequestList) Interrupt(kind Interrupt) {
