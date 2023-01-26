@@ -580,7 +580,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 				defer peerInfo.Close()
 
 				defer ss.GoodPeers.Delete(peerID)
-				peerProtocol, err := handShake(ctx, ss.GetStatus(), peerID, rw, p, eth.ETH66, func(bestHash libcommon.Hash) error {
+				peerProtocol, err := handShake(ctx, ss.GetStatus(), peerID, rw, p, p, func(bestHash libcommon.Hash) error {
 					ss.GoodPeers.Store(peerID, peerInfo)
 					ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 					return ss.startSync(ctx, bestHash, peerID)
