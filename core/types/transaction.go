@@ -153,6 +153,18 @@ func DecodeRLPTransaction(s *rlp.Stream) (Transaction, error) {
 	return UnmarshalTransactionFromBinary(b)
 }
 
+func DecodeWrappedTransaction(data []byte) (Transaction, error) {
+	if len(data) == 0 {
+		return nil, io.EOF
+	}
+	if data[0] < 0x80 {
+		// the encoding is canonical, not RLP
+		return UnmarshalWrappedTransactionFromBinary(data)
+	}
+	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	return DecodeRLPTransaction(s)
+}
+
 // DecodeTransaction decodes a transaction either in RLP or canonical format
 func DecodeTransaction(data []byte) (Transaction, error) {
 	if len(data) == 0 {
@@ -205,6 +217,20 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 		}
 		return nil, ErrTxTypeNotSupported
 	}
+}
+
+func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
+	if len(data) <= 1 {
+		return nil, fmt.Errorf("short input: %v", len(data))
+	}
+	if data[0] != BlobTxType {
+		return UnmarshalTransactionFromBinary(data)
+	}
+	t := &BlobTxWrapper{}
+	if err := DecodeSSZ(data[1:], t); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {

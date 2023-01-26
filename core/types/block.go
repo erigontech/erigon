@@ -549,7 +549,7 @@ func (h *Header) Size() common.StorageSize {
 		s += common.StorageSize(32)
 	}
 	if h.ExcessDataGas != nil {
-		s += common.StorageSize(32)
+		s += common.StorageSize(bitsToBytes(h.ExcessDataGas.BitLen()))
 	}
 	return s
 }
@@ -617,6 +617,8 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	if h.WithdrawalsHash != nil {
 		offset += 32
 	}
+
+	// TODO: encode excess data gas
 
 	buf, err = h.EncodeHeaderMetadataForSSZ(buf, offset)
 	if err != nil {
@@ -687,6 +689,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	} else {
 		h.WithdrawalsHash = nil
 	}
+	// TODO: decode excess data gas
 	h.Extra = common.CopyBytes(buf[pos:])
 	return nil
 }
@@ -699,6 +702,7 @@ func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 		size += 32
 	}
 
+	// TODO: excess data gas
 	return size + len(h.Extra)
 }
 
@@ -759,6 +763,7 @@ func (h *Header) HashSSZ() ([32]byte, error) {
 	if h.WithdrawalsHash != nil {
 		leaves = append(leaves, *h.WithdrawalsHash)
 	}
+	// TODO: excess data gas
 	return merkle_tree.ArraysRoot(leaves, 16)
 }
 
@@ -1400,10 +1405,6 @@ func CopyHeader(h *Header) *Header {
 	if len(h.AuRaSeal) > 0 {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
-	}
-	if h.WithdrawalsHash != nil {
-		cpy.WithdrawalsHash = new(libcommon.Hash)
-		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
 	}
 	return &cpy
 }

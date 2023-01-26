@@ -616,6 +616,9 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	baseFee := new(uint256.Int)
 	baseFee.SetFromBig(block.Header().BaseFee)
 
+	// The builder gives us blocks in "Network" (aka wrapped) format. We need to unwrap them &
+	// recompute the block hash for the payload.  TODO: This unwrapping should be performed
+	// by the builder, not here.
 	unwrappedTxs := make(types.Transactions, len(block.Transactions()))
 	for i, tx := range block.Transactions() {
 		unwrappedTxs[i] = tx.Unwrap()
@@ -624,6 +627,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	if err != nil {
 		return nil, err
 	}
+	block.HeaderNoCopy().TxHash = types.DeriveSha(types.Transactions(unwrappedTxs))
 
 	payload := &types2.ExecutionPayload{
 		Version:       1,
@@ -639,7 +643,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.HeaderNoCopy().Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {

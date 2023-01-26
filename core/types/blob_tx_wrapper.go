@@ -357,7 +357,7 @@ func (txw *BlobTxWrapper) GetNonce() uint64         { return txw.Tx.GetNonce() }
 func (txw *BlobTxWrapper) GetPrice() *uint256.Int   { return txw.Tx.GetPrice() }
 func (txw *BlobTxWrapper) GetTip() *uint256.Int     { return txw.Tx.GetTip() }
 func (txw *BlobTxWrapper) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
-	return txw.GetEffectiveGasTip(baseFee)
+	return txw.Tx.GetEffectiveGasTip(baseFee)
 }
 func (txw *BlobTxWrapper) GetFeeCap() *uint256.Int         { return txw.Tx.GetFeeCap() }
 func (txw *BlobTxWrapper) Cost() *uint256.Int              { return txw.Tx.GetFeeCap() }

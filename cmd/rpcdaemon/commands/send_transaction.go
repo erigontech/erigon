@@ -20,7 +20,7 @@ import (
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (libcommon.Hash, error) {
-	txn, err := types.DecodeTransaction(encodedTx)
+	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
