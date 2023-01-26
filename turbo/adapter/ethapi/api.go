@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
@@ -45,7 +46,7 @@ type CallArgs struct {
 	Value                *hexutil.Big       `json:"value"`
 	Nonce                *hexutil.Uint64    `json:"nonce"`
 	Data                 *hexutil.Bytes     `json:"data"`
-	AccessList           *types.AccessList  `json:"accessList"`
+	AccessList           *types2.AccessList `json:"accessList"`
 	ChainID              *hexutil.Big       `json:"chainId,omitempty"`
 }
 
@@ -139,7 +140,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (type
 	if args.Data != nil {
 		data = *args.Data
 	}
-	var accessList types.AccessList
+	var accessList types2.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
@@ -380,7 +381,7 @@ type RPCTransaction struct {
 	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
 	Value            *hexutil.Big       `json:"value"`
 	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types.AccessList  `json:"accessList,omitempty"`
+	Accesses         *types2.AccessList `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
 	V                *hexutil.Big       `json:"v"`
 	R                *hexutil.Big       `json:"r"`

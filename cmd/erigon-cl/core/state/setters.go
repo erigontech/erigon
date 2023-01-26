@@ -100,17 +100,17 @@ func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 	b.slashings[index] = segment
 }
 
-func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []byte) {
+func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = previousEpochParticipation
 }
 
-func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []byte) {
+func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []cltypes.ParticipationFlags) {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = currentEpochParticipation
 }
 
-func (b *BeaconState) SetJustificationBits(justificationBits byte) {
+func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
 	b.touchedLeaves[JustificationBitsLeafIndex] = true
 	b.justificationBits = justificationBits
 }

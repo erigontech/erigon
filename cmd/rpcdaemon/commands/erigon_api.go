@@ -37,9 +37,6 @@ type ErigonAPI interface {
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash libcommon.Hash) ([]map[string]interface{}, error)
 
-	// WatchTheBurn / reward related (see ./erigon_issuance.go)
-	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
-
 	// CumulativeChainTraffic / related to chain traffic (see ./erigon_cumulative_index.go)
 	CumulativeChainTraffic(ctx context.Context, blockNr rpc.BlockNumber) (ChainTraffic, error)
 

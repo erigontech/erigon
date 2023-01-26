@@ -369,7 +369,9 @@ func (s *Service) login(conn *connWrapper) error {
 
 	protocols := make([]string, 0, len(s.servers))
 	for _, srv := range s.servers {
-		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
+		for _, p := range srv.Protocols {
+			protocols = append(protocols, fmt.Sprintf("%s/%d", p.Name, p.Version))
+		}
 	}
 	nodeName := "Erigon"
 	if len(s.servers) > 0 {

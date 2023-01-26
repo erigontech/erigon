@@ -22,16 +22,38 @@ type GenericTracer interface {
 	Found() bool
 }
 
-func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum uint64, chainConfig *chain.Config, tracer GenericTracer) error {
-	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
+func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID, txIndex uint64, chainConfig *chain.Config, tracer GenericTracer) error {
+	if api.historyV3(dbtx) {
+		ttx := dbtx.(kv.TemporalTx)
+		executor := txnExecutor(ttx, chainConfig, api.engine(), api._blockReader, tracer)
+
+		// if block number changed, calculate all related field
+		header, err := api._blockReader.HeaderByNumber(ctx, ttx, blockNum)
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			log.Warn("[rpc] header is nil", "blockNum", blockNum)
+			return nil
+		}
+		executor.changeBlock(header)
+
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, int(txIndex))
+		if err != nil {
+			return err
+		}
+		if txn == nil {
+			log.Warn("[rpc] tx is nil", "blockNum", blockNum, "txIndex", txIndex)
+			return nil
+		}
+		_, _, err = executor.execTx(txnID, int(txIndex), txn)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, 0, api.historyV3(dbtx), chainConfig.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, txIndex, api.historyV3(dbtx), chainConfig.ChainName)
 	if err != nil {
 		return err
 	}
@@ -51,6 +73,13 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return h
 	}
 	engine := api.engine()
+	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
+	if err != nil {
+		return err
+	}
+	if block == nil {
+		return nil
+	}
 
 	header := block.Header()
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)

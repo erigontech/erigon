@@ -8,33 +8,31 @@ import (
 	"math/big"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
-	"github.com/ledgerwatch/erigon/turbo/services"
-
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
@@ -301,6 +299,8 @@ func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters
 	return nil
 }
 
+/*
+
 func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) error {
 	//[from,to)
 	var fromTxNum, toTxNum uint64
@@ -334,17 +334,53 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 	}
 	return nil
 }
+*/
+
+func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
+	//[from,to)
+	var fromTxNum, toTxNum uint64
+	if begin > 0 {
+		fromTxNum, err = rawdbv3.TxNums.Min(tx, begin)
+		if err != nil {
+			return out, err
+		}
+	}
+	toTxNum, err = rawdbv3.TxNums.Max(tx, end)
+	if err != nil {
+		return out, err
+	}
+	toTxNum++
+
+	topicsBitmap, err := getTopicsBitmapV3(tx, crit.Topics, fromTxNum, toTxNum)
+	if err != nil {
+		return out, err
+	}
+	if topicsBitmap != nil {
+		out = topicsBitmap
+	}
+	addrBitmap, err := getAddrsBitmapV3(tx, crit.Addresses, fromTxNum, toTxNum)
+	if err != nil {
+		return out, err
+	}
+	if addrBitmap != nil {
+		if out == nil {
+			out = addrBitmap
+		} else {
+			out = iter.Intersect[uint64](out, addrBitmap)
+		}
+	}
+	if out == nil {
+		out = iter.Range[uint64](fromTxNum, toTxNum)
+	}
+	return out, nil
+}
 
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	txNumbers := bitmapdb.NewBitmap64()
-	defer bitmapdb.ReturnToPool64(txNumbers)
-	if err := applyFiltersV3(txNumbers, tx, begin, end, crit); err != nil {
+	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
+	if err != nil {
 		return logs, err
-	}
-	if txNumbers.IsEmpty() {
-		return logs, nil
 	}
 
 	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
@@ -356,12 +392,12 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-	exec := newIntraBlockExec(tx, chainConfig, api.engine())
+	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 
 	var blockHash libcommon.Hash
 	var header *types.Header
 
-	iter := MapTxNum2BlockNum(tx, bitmapdb.ToIter(txNumbers.Iterator()))
+	iter := MapTxNum2BlockNum(tx, txNumbers)
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -380,7 +416,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				return nil, err
 			}
 			if header == nil {
-				log.Warn("header is nil", "blockNum", blockNum)
+				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
 			blockHash = header.Hash()
@@ -429,6 +465,8 @@ type intraBlockExec struct {
 	chainConfig *chain.Config
 	evm         *vm.EVM
 
+	tracer GenericTracer
+
 	// calculated by .changeBlock()
 	blockHash libcommon.Hash
 	blockNum  uint64
@@ -439,17 +477,24 @@ type intraBlockExec struct {
 	vmConfig  *vm.Config
 }
 
-func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader) *intraBlockExec {
+func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader, br services.FullBlockReader, tracer GenericTracer) *intraBlockExec {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
-	return &intraBlockExec{
+
+	ie := &intraBlockExec{
 		engine:      engine,
 		chainConfig: chainConfig,
+		br:          br,
 		stateReader: stateReader,
+		tracer:      tracer,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
 		ibs:         state.New(stateReader),
 	}
+	if tracer != nil {
+		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
+	}
+	return ie
 }
 
 func (e *intraBlockExec) changeBlock(header *types.Header) {
@@ -478,6 +523,11 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
+	if e.vmConfig.Tracer != nil {
+		if e.tracer.Found() {
+			e.tracer.SetTransaction(txn)
+		}
+	}
 	return e.ibs.GetLogs(txHash), res, nil
 }
 
@@ -492,6 +542,39 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (res iter.U64, err error) {
+	for _, sub := range topics {
+
+		var topicsUnion iter.U64
+		for _, topic := range sub {
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, -1)
+			if err != nil {
+				return nil, err
+			}
+			topicsUnion = iter.Union[uint64](topicsUnion, it)
+		}
+
+		if res == nil {
+			res = topicsUnion
+			continue
+		}
+		res = iter.Intersect[uint64](res, topicsUnion)
+	}
+	return res, nil
+}
+
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (res iter.U64, err error) {
+	for _, addr := range addrs {
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, -1)
+		if err != nil {
+			return nil, err
+		}
+		res = iter.Union[uint64](res, it)
+	}
+	return res, nil
+}
+
+/*
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
@@ -544,6 +627,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint
 	}
 	return roaring64.FastOr(rx...), nil
 }
+*/
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
 func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon.Hash) (map[string]interface{}, error) {

@@ -86,7 +86,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		c.lastReceivedSlot = block.Block.Slot
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
-		if err := finalityUpdate.DecodeSSZ(data.Data); err != nil {
+		if err := finalityUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall finality update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
@@ -105,7 +105,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		}
 
 		optimisticUpdate := &cltypes.LightClientOptimisticUpdate{}
-		if err := optimisticUpdate.DecodeSSZ(data.Data); err != nil {
+		if err := optimisticUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall optimistic update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
