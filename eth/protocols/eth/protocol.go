@@ -42,6 +42,7 @@ const (
 var ProtocolToString = map[uint]string{
 	ETH66: "eth66",
 	ETH67: "eth67",
+	ETH68: "eth68",
 }
 
 // ProtocolName is the official short name of the `eth` protocol used during
@@ -114,7 +115,7 @@ var ToProto = map[uint]map[uint64]proto_sentry.MessageId{
 		NewBlockHashesMsg:             proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
 		NewBlockMsg:                   proto_sentry.MessageId_NEW_BLOCK_66,
 		TransactionsMsg:               proto_sentry.MessageId_TRANSACTIONS_66,
-		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+		NewPooledTransactionHashesMsg: proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68, // Modified since ETH66
 		GetPooledTransactionsMsg:      proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66,
 		PooledTransactionsMsg:         proto_sentry.MessageId_POOLED_TRANSACTIONS_66,
 	},
@@ -161,7 +162,7 @@ var FromProto = map[uint]map[proto_sentry.MessageId]uint64{
 		proto_sentry.MessageId_NEW_BLOCK_HASHES_66:              NewBlockHashesMsg,
 		proto_sentry.MessageId_NEW_BLOCK_66:                     NewBlockMsg,
 		proto_sentry.MessageId_TRANSACTIONS_66:                  TransactionsMsg,
-		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: NewPooledTransactionHashesMsg,
+		proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: NewPooledTransactionHashesMsg,
 		proto_sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       GetPooledTransactionsMsg,
 		proto_sentry.MessageId_POOLED_TRANSACTIONS_66:           PooledTransactionsMsg,
 	},
