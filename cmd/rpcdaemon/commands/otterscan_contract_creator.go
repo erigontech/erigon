@@ -97,11 +97,12 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 			return nil, searchErr
 		}
 
-		// Trace block, find tx and contract creator
-		tracer := NewCreateTracer(ctx, addr)
 		_, bn, _ := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
 		minTxNum, _ := rawdbv3.TxNums.Min(tx, bn)
 		txIndex := creationTxnID - minTxNum - 1 /* system-contract */
+
+		// Trace block, find tx and contract creator
+		tracer := NewCreateTracer(ctx, addr)
 		if err := api.genericTracer(tx, ctx, bn, creationTxnID, txIndex, chainConfig, tracer); err != nil {
 			return nil, err
 		}
