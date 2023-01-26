@@ -327,13 +327,17 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks = iter.Union[uint64](allBlocks, blocksTo)
+		if allBlocks == nil {
+			allBlocks = blocksTo
+		} else {
+			allBlocks = iter.Union[uint64](allBlocks, blocksTo)
+		}
 	}
 
 	// Special case - if no addresses specified, take all traces
 	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
 		allBlocks = iter.Range[uint64](from, to)
-	} else {
+		//} else {
 		//allBlocks.RemoveRange(0, from)
 		//allBlocks.RemoveRange(to, uint64(0x100000000))
 	}
