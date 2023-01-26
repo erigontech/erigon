@@ -72,7 +72,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		// so it is optimal to search from the beginning even if the contract has multiple
 		// incarnations.
 		var prevTxnID, nextTxnID uint64
-		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, lastTxNum+1, order.Asc, 1)
+		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, -1)
 		if err != nil {
 			return nil, err
 		}
@@ -84,7 +84,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 				continue
 			}
 
-			v, ok, err := ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, txnID)
+			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
 				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 				panic(err)

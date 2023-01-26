@@ -275,22 +275,22 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
-		timestamps, err = tx.agg.AccountHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
 	case StorageHistoryIdx:
-		timestamps, err = tx.agg.StorageHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
 	case CodeHistoryIdx:
-		timestamps, err = tx.agg.CodeHistoyIdxIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		timestamps, err = tx.agg.LogTopicIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		timestamps, err = tx.agg.LogAddrIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		timestamps, err = tx.agg.TraceFromIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		timestamps, err = tx.agg.TraceToIterator(key, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
