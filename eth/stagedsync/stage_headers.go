@@ -286,15 +286,23 @@ func startHandlingForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
+	//TODO (yperbasis): move after the no-op check?
 	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
-	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash == headerHash { // no-op
+	canonical, err := rawdb.IsCanonicalHash(tx, headerHash)
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+		return nil, err
+	}
+	if canonical {
+		// FCU points to a canonical header in the past. Treat it as a no-op
+		// to avoid unnecessary unwind of block execution and other stages
+		// with subsequent rewind on a newer FCU.
 		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
+		canonical, err = writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
 			return nil, err
@@ -302,7 +310,7 @@ func startHandlingForkChoice(
 		if canonical {
 			return &engineapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: headerHash,
 			}, nil
 		} else {
 			return &engineapi.PayloadStatus{
@@ -382,7 +390,7 @@ func startHandlingForkChoice(
 		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
 			return nil, err
 		}
-		if err = rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+		if err = rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
 			return nil, err
 		}
 
@@ -394,13 +402,11 @@ func startHandlingForkChoice(
 		if err := s.Update(tx, headerNumber); err != nil {
 			return nil, err
 		}
-		// Referesh currentHeadHash
-		currentHeadHash = rawdb.ReadHeadHeaderHash(tx)
 
 		if canonical {
 			return &engineapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: headerHash,
 			}, nil
 		} else {
 			return &engineapi.PayloadStatus{
