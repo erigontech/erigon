@@ -12,6 +12,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
@@ -266,18 +267,18 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], from, 0, false, -1)
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(from), -1, order.Desc, -1)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], from, 0, false, -1)
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(from), -1, order.Desc, -1)
 	if err != nil {
 		return nil, err
 	}
 	txNums := iter.Union[uint64](itFrom, itTo)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
-	exec := newIntraBlockExec(tx, chainConfig, api.engine(), api._blockReader)
+	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash libcommon.Hash
 	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)
