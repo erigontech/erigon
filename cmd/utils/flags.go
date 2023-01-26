@@ -1468,7 +1468,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 
 	cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
-	fmt.Printf("alex: %t\n", cfg.Sync.UseSnapshots)
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)
 	cfg.Snapshot.Produce = !ctx.Bool(SnapStopFlag.Name)
