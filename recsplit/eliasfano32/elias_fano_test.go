@@ -89,5 +89,5 @@ func TestIterator(t *testing.T) {
 		assert.Equal(t, offsets[i], v, "iter")
 		i++
 	}
-	iter.ExpectEqual[uint64](t, iter.ReverseArray(values), ef.ReverseIterator(0))
+	iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
 }

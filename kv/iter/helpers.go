@@ -31,6 +31,10 @@ func ToDualArray[K, V any](s Dual[K, V]) (keys []K, values []V, err error) {
 	return keys, values, nil
 }
 
+func ExpectEqualU64(tb testing.TB, s1, s2 Unary[uint64]) {
+	tb.Helper()
+	ExpectEqual[uint64](tb, s1, s2)
+}
 func ExpectEqual[V comparable](tb testing.TB, s1, s2 Unary[V]) {
 	tb.Helper()
 	for s1.HasNext() && s2.HasNext() {

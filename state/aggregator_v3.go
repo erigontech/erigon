@@ -1159,21 +1159,36 @@ func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 	return a
 }
 
-func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+// -- range
+func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
 
-func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum uint64, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
 	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
 }
+func (ac *AggregatorV3Context) AccountHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	//TODO: don't create new context by MakeContext
+	return ac.accounts.h.InvertedIndex.MakeContext().IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
+}
+func (ac *AggregatorV3Context) StorageHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	//TODO: don't create new context by MakeContext
+	return ac.storage.h.InvertedIndex.MakeContext().IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
+}
+func (ac *AggregatorV3Context) CodeHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (*InvertedIterator, error) {
+	//TODO: don't create new context by MakeContext
+	return ac.code.h.InvertedIndex.MakeContext().IterateRange(addr, startTxNum, endTxNum, asc, limit, roTx)
+}
+
+// -- range end
 
 func (ac *AggregatorV3Context) ReadAccountDataNoStateWithRecent(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return ac.accounts.GetNoStateWithRecent(addr, txNum, ac.tx)

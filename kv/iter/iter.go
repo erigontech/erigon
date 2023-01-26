@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"golang.org/x/exp/constraints"
+	"golang.org/x/exp/slices"
 )
 
 type ArrStream[V any] struct {
@@ -13,6 +14,7 @@ type ArrStream[V any] struct {
 }
 
 func ReverseArray[V any](arr []V) *ArrStream[V] {
+	arr = slices.Clone(arr)
 	for i, j := 0, len(arr)-1; i < j; i, j = i+1, j-1 {
 		arr[i], arr[j] = arr[j], arr[i]
 	}

@@ -230,7 +230,7 @@ func (ef *EliasFano) Iterator() *EliasFanoIter {
 	it := &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l}
 	return it
 }
-func (ef *EliasFano) ReverseIterator(seek uint64) *iter.ArrStream[uint64] {
+func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 	//TODO: this is very un-optimal, need implement proper reverse-iterator
 	it := ef.Iterator()
 	var values []uint64

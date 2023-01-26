@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -250,7 +251,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
-		it, err := ic.IterateRange(k[:], 0, 976, true, -1, nil)
+		it, err := ic.IterateRange(k[:], 0, 976, order.Asc, -1, nil)
 		require.NoError(t, err)
 		defer it.Close()
 		var values []uint64
@@ -264,10 +265,20 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		}
 		require.False(t, it.HasNext())
 
-		reverseStream, err := ic.IterateRange(k[:], 976, 0, false, -1, nil)
+		reverseStream, err := ic.IterateRange(k[:], 976, 0, order.Desc, -1, nil)
 		require.NoError(t, err)
 		defer it.Close()
-		iter.ExpectEqual[uint64](t, iter.ReverseArray(values), reverseStream)
+		iter.ExpectEqualU64(t, iter.ReverseArray(values), reverseStream)
+
+		forwardLimited, err := ic.IterateRange(k[:], -1, -1, order.Asc, 2, nil)
+		require.NoError(t, err)
+		defer it.Close()
+		iter.ExpectEqualU64(t, iter.Array(values[:2]), forwardLimited)
+
+		reverseLimited, err := ic.IterateRange(k[:], 976, -1, order.Desc, 2, nil)
+		require.NoError(t, err)
+		defer it.Close()
+		iter.ExpectEqualU64(t, iter.ReverseArray(values[len(values)-2:]), reverseLimited)
 	}
 	// Now check ranges that require access to DB
 	roTx, err := db.BeginRo(ctx)
@@ -293,7 +304,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		reverseStream, err := ic.IterateRange(k[:], 1000-1, 400-1, false, -1, roTx)
 		require.NoError(t, err)
 		defer it.Close()
-		iter.ExpectEqual[uint64](t, iter.ReverseArray(values), reverseStream)
+		iter.ExpectEqualU64(t, iter.ReverseArray(values), reverseStream)
 	}
 }
 
