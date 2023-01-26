@@ -12,7 +12,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
@@ -55,22 +54,16 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 			break
 		}
 
-		switch sentry.Protocol() {
-
-		case eth.ETH66, eth.ETH67:
-			if req66 == nil {
-				req66 = &proto_sentry.OutboundMessageData{
-					Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
-					Data: data,
-				}
-
-				_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
-				if err != nil {
-					log.Error("propagateNewBlockHashes", "err", err)
-				}
+		if req66 == nil {
+			req66 = &proto_sentry.OutboundMessageData{
+				Id:   proto_sentry.MessageId_NEW_BLOCK_HASHES_66,
+				Data: data,
 			}
-		default:
-			//??
+
+			_, err = sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
+			if err != nil {
+				log.Error("propagateNewBlockHashes", "err", err)
+			}
 		}
 	}
 }
@@ -104,25 +97,21 @@ func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Head
 			break
 		}
 
-		switch sentry.Protocol() {
-
-		case eth.ETH66, eth.ETH67:
-			if req66 == nil {
-				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
-					MaxPeers: 1024,
-					Data: &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_BLOCK_66,
-						Data: data,
-					},
-				}
+		if req66 == nil {
+			req66 = &proto_sentry.SendMessageToRandomPeersRequest{
+				MaxPeers: 1024,
+				Data: &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_NEW_BLOCK_66,
+					Data: data,
+				},
 			}
-			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-					log.Debug("broadcastNewBlock", "err", err)
-					continue
-				}
-				log.Error("broadcastNewBlock", "err", err)
+		}
+		if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+			if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+				log.Debug("broadcastNewBlock", "err", err)
+				continue
 			}
+			log.Error("broadcastNewBlock", "err", err)
 		}
 	}
 }
@@ -163,24 +152,21 @@ func (cs *MultiClient) BroadcastLocalPooledTxs(ctx context.Context, txs []libcom
 				break
 			}
 
-			switch sentry.Protocol() {
-			case eth.ETH66, eth.ETH67:
-				if req66 == nil {
-					req66 = &proto_sentry.OutboundMessageData{
-						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-						Data: data,
-					}
+			if req66 == nil {
+				req66 = &proto_sentry.OutboundMessageData{
+					Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+					Data: data,
 				}
-				peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
-				if err != nil {
-					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastLocalPooledTxs", "err", err)
-						continue
-					}
-					log.Error("BroadcastLocalPooledTxs", "err", err)
-				}
-				avgPeersPerSent66 += len(peers.GetPeers())
 			}
+			peers, err := sentry.SendMessageToAll(ctx, req66, &grpc.EmptyCallOption{})
+			if err != nil {
+				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+					log.Debug("BroadcastLocalPooledTxs", "err", err)
+					continue
+				}
+				log.Error("BroadcastLocalPooledTxs", "err", err)
+			}
+			avgPeersPerSent66 += len(peers.GetPeers())
 		}
 	}
 	if initialAmount == 1 {
@@ -222,30 +208,27 @@ func (cs *MultiClient) BroadcastRemotePooledTxs(ctx context.Context, txs []libco
 				break
 			}
 
-			switch sentry.Protocol() {
-
-			case eth.ETH66, eth.ETH67:
-				if req66 == nil {
-					req66 = &proto_sentry.SendMessageToRandomPeersRequest{
-						MaxPeers: 1024,
-						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-							Data: data,
-						},
-					}
+			if req66 == nil {
+				req66 = &proto_sentry.SendMessageToRandomPeersRequest{
+					MaxPeers: 1024,
+					Data: &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+						Data: data,
+					},
 				}
-				if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-						log.Debug("BroadcastRemotePooledTxs", "err", err)
-						continue
-					}
-					log.Error("BroadcastRemotePooledTxs", "err", err)
+			}
+			if _, err = sentry.SendMessageToRandomPeers(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+				if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+					log.Debug("BroadcastRemotePooledTxs", "err", err)
+					continue
 				}
+				log.Error("BroadcastRemotePooledTxs", "err", err)
 			}
 		}
 	}
 }
 
+/*
 func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers []*types2.H512, txs []libcommon.Hash) {
 	if len(txs) == 0 {
 		return
@@ -273,28 +256,25 @@ func (cs *MultiClient) PropagatePooledTxsToPeersList(ctx context.Context, peers 
 			}
 
 			for _, peer := range peers {
-				switch sentry.Protocol() {
-
-				case eth.ETH66, eth.ETH67:
-					req66 := &proto_sentry.SendMessageByIdRequest{
-						PeerId: peer,
-						Data: &proto_sentry.OutboundMessageData{
-							Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-							Data: data,
-						},
+				req66 := &proto_sentry.SendMessageByIdRequest{
+					PeerId: peer,
+					Data: &proto_sentry.OutboundMessageData{
+						Id:   proto_sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+						Data: data,
+					},
+				}
+				if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
+					if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
+						log.Debug("PropagatePooledTxsToPeersList", "err", err)
+						continue
 					}
-					if _, err = sentry.SendMessageById(ctx, req66, &grpc.EmptyCallOption{}); err != nil {
-						if isPeerNotFoundErr(err) || networkTemporaryErr(err) {
-							log.Debug("PropagatePooledTxsToPeersList", "err", err)
-							continue
-						}
-						log.Error("PropagatePooledTxsToPeersList", "err", err)
-					}
+					log.Error("PropagatePooledTxsToPeersList", "err", err)
 				}
 			}
 		}
 	}
 }
+*/
 
 func networkTemporaryErr(err error) bool {
 	return errors.Is(err, syscall.EPIPE) || errors.Is(err, p2p.ErrShuttingDown)

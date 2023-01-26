@@ -357,7 +357,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
 				pc := int(refCfg.AllowedPorts[pi])
 				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
-					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
+					log.Warn("bind protocol to port has failed: port is busy", "protocols", fmt.Sprintf("eth/%d", refCfg.ProtocolVersion), "port", pc)
 					continue
 				}
 				if listenPort != pc {
@@ -1029,7 +1029,9 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
 	for i := range s.sentryServers {
-		protocols = append(protocols, s.sentryServers[i].Protocol)
+		for _, p := range s.sentryServers[i].Protocols {
+			protocols = append(protocols, p)
+		}
 	}
 	return protocols
 }
