@@ -301,11 +301,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			if allBlocks == nil {
-				allBlocks = it
-			} else {
-				allBlocks = iter.Union[uint64](allBlocks, it)
-			}
+			allBlocks = iter.Union[uint64](allBlocks, it)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -316,11 +312,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			if blocksTo == nil {
-				blocksTo = it
-			} else {
-				blocksTo = iter.Union[uint64](blocksTo, it)
-			}
+			blocksTo = iter.Union[uint64](blocksTo, it)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
