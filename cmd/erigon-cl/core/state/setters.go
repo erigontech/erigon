@@ -90,6 +90,11 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 	b.balances = balances
 }
 
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
+	b.touchedLeaves[BalancesLeafIndex] = true
+	b.balances[index] = balance
+}
+
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.touchedLeaves[RandaoMixesLeafIndex] = true
 	b.randaoMixes[index] = mix

@@ -73,167 +73,6 @@ func getTestBlock(t *testing.T) *cltypes.BeaconBlock {
 	}
 }
 
-func generateBeaconStateWithValidators(n int) *state.BeaconState {
-	b := state.GetEmptyBeaconState()
-	for i := 0; i < n; i++ {
-		b.AddValidator(&cltypes.Validator{EffectiveBalance: testBeaconConfig.MaxEffectiveBalance})
-	}
-	return b
-}
-
-func TestComputeShuffledIndex(t *testing.T) {
-	testCases := []struct {
-		description  string
-		startInds    []uint64
-		expectedInds []uint64
-		seed         [32]byte
-	}{
-		{
-			description:  "success",
-			startInds:    []uint64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-			expectedInds: []uint64{0, 9, 8, 4, 6, 7, 3, 1, 2, 5},
-			seed:         [32]byte{1, 128, 12},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			for i, val := range tc.startInds {
-				got, err := ComputeShuffledIndex(val, uint64(len(tc.startInds)), tc.seed)
-				// Non-failure case.
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if got != tc.expectedInds[i] {
-					t.Errorf("unexpected result: got %d, want %d", got, tc.expectedInds[i])
-				}
-			}
-		})
-	}
-}
-
-func TestComputeProposerIndex(t *testing.T) {
-	seed := [32]byte{}
-	copy(seed[:], []byte("seed"))
-	testCases := []struct {
-		description string
-		state       *state.BeaconState
-		indices     []uint64
-		seed        [32]byte
-		expected    uint64
-		wantErr     bool
-	}{
-		{
-			description: "success",
-			state:       generateBeaconStateWithValidators(5),
-			indices:     []uint64{0, 1, 2, 3, 4},
-			seed:        seed,
-			expected:    2,
-		},
-		{
-			description: "single_active_index",
-			state:       generateBeaconStateWithValidators(5),
-			indices:     []uint64{3},
-			seed:        seed,
-			expected:    3,
-		},
-		{
-			description: "second_half_active",
-			state:       generateBeaconStateWithValidators(10),
-			indices:     []uint64{5, 6, 7, 8, 9},
-			seed:        seed,
-			expected:    7,
-		},
-		{
-			description: "zero_active_indices",
-			indices:     []uint64{},
-			seed:        seed,
-			wantErr:     true,
-		},
-		{
-			description: "active_index_out_of_range",
-			indices:     []uint64{100},
-			state:       generateBeaconStateWithValidators(1),
-			seed:        seed,
-			wantErr:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			got, err := ComputeProposerIndex(tc.state, tc.indices, tc.seed)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("unexpected success, wanted error")
-				}
-				return
-			}
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if got != tc.expected {
-				t.Errorf("unexpected result: got %d, want %d", got, tc.expected)
-			}
-		})
-	}
-}
-
-func TestGetBeaconProposerIndex(t *testing.T) {
-	state := getTestState(t)
-	numVals := 2048
-	validators := make([]*cltypes.Validator, numVals)
-	for i := 0; i < numVals; i++ {
-		validators[i] = &cltypes.Validator{
-			ActivationEpoch: 0,
-			ExitEpoch:       10000,
-		}
-	}
-	testCases := []struct {
-		description string
-		slot        uint64
-		expected    uint64
-	}{
-		{
-			description: "slot1",
-			slot:        1,
-			expected:    2039,
-		},
-		{
-			description: "slot5",
-			slot:        5,
-			expected:    1895,
-		},
-		{
-			description: "slot19",
-			slot:        19,
-			expected:    1947,
-		},
-		{
-			description: "slot30",
-			slot:        30,
-			expected:    369,
-		},
-		{
-			description: "slot43",
-			slot:        43,
-			expected:    464,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			state.SetSlot(tc.slot)
-			got, err := GetBeaconProposerIndex(state)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if got != tc.expected {
-				t.Errorf("unexpected result: got %d, want %d", got, tc.expected)
-			}
-		})
-	}
-}
-
 func TestProcessBlockHeader(t *testing.T) {
 	testStateSuccess := getTestState(t)
 	testState := getTestState(t)
@@ -309,7 +148,8 @@ func TestProcessBlockHeader(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := ProcessBlockHeader(tc.state, tc.block)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			err := s.ProcessBlockHeader(tc.block)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -325,7 +165,7 @@ func TestProcessBlockHeader(t *testing.T) {
 
 func TestProcessRandao(t *testing.T) {
 	testStateSuccess := getTestState(t)
-	propInd, err := GetBeaconProposerIndex(testStateSuccess)
+	propInd, err := testStateSuccess.GetBeaconProposerIndex()
 	if err != nil {
 		t.Fatalf("unable to get proposer index: %v", err)
 	}
@@ -378,7 +218,8 @@ func TestProcessRandao(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := ProcessRandao(tc.state, tc.body)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			err := s.ProcessRandao(tc.body.RandaoReveal)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -422,7 +263,7 @@ func TestProcessEth1Data(t *testing.T) {
 	successState.SetEth1Data(Eth1DataB)
 
 	// Fill all votes.
-	for i := 0; i < int(EPOCHS_PER_ETH1_VOTING_PERIOD)*int(SLOTS_PER_EPOCH)-1; i++ {
+	for i := 0; i < int(clparams.MainnetBeaconConfig.EpochsPerEth1VotingPeriod)*int(clparams.MainnetBeaconConfig.SlotsPerEpoch)-1; i++ {
 		successState.AddEth1DataVote(Eth1DataA)
 	}
 	successBody := &cltypes.BeaconBody{
@@ -454,7 +295,8 @@ func TestProcessEth1Data(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := ProcessEth1Data(tc.state, tc.body)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, &clparams.GenesisConfig{})
+			err := s.ProcessEth1Data(tc.body.Eth1Data)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
