@@ -103,6 +103,7 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 
 func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	var enc txJSON
+	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
 	enc.AccessList = (*AccessList)(&tx.Message.AccessList)
 	enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)

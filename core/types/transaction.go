@@ -98,30 +98,7 @@ type Transaction interface {
 	// convenience, it should never exceed math.MaxUint64.
 	DataGas() *big.Int
 	// MaxFeePerDataGas returns the max_fee_per_data_gas value for the transaction
-	// MaxFeePerDataGas() *uint256.Int
-}
-
-// TxBlobWrapData returns the blob and kzg data, if any.
-// kzgs and blobs may be empty if the transaction is not wrapped.
-func TxBlobWrapData(tx Transaction) (versionedHashes []libcommon.Hash, kzgs BlobKzgs, blobs Blobs, aggProof KZGProof) {
-
-	// it is temporary solution
-	// TODO: redo this after making better research
-
-	// it is expected that Transaction is SignedBlobTx, so
-	if signedBlobTx, ok := tx.(*SignedBlobTx); ok {
-		return signedBlobTx.Message.BlobVersionedHashes, signedBlobTx.WrapData.kzgs(), signedBlobTx.WrapData.blobs(), signedBlobTx.WrapData.aggregatedProof()
-	}
-
-	// if signedBlobTx, ok := tx.(*SignedBlobTx); ok {
-	// 	return signedBlobTx.Message.BlobVersionedHashes, blobWrap.BlobKzgs, blobWrap.Blobs, blobWrap.KzgAggregatedProof
-	// }
-	// if blobWrap, ok := tx.wrapData.(*BlobTxWrapData); ok {
-	// 	if signedBlobTx, ok := tx.inner.(*SignedBlobTx); ok {
-	// 		return signedBlobTx.Message.BlobVersionedHashes, blobWrap.BlobKzgs, blobWrap.Blobs, blobWrap.KzgAggregatedProof
-	// 	}
-	// }
-	return nil, nil, nil, KZGProof{}
+	MaxFeePerDataGas() *uint256.Int
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete

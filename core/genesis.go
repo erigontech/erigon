@@ -773,6 +773,27 @@ func DefaultChiadoGenesisBlock() *Genesis {
 	}
 }
 
+// DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
+func DefaultEIP4844GenesisBlock() *Genesis {
+
+	return &Genesis{
+		// Config:     params.SepoliaChainConfig,
+		// Nonce:      0,
+		// ExtraData:  []byte("Sepolia, Athens, Attica, Greece!"),
+		// GasLimit:   30000000,
+		// Difficulty: big.NewInt(131072),
+		// Timestamp:  1633267481,
+		// Alloc:      readPrealloc("allocs/sepolia.json"),
+	}
+
+	// g := new(Genesis)
+	// reader := strings.NewReader(eip4844AllocData)
+	// if err := json.NewDecoder(reader).Decode(g); err != nil {
+	// 	panic(err)
+	// }
+	// return g
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))

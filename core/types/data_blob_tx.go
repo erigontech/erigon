@@ -58,10 +58,6 @@ func (*ECDSASignature) FixedLength() uint64 {
 	return 1 + 32 + 32
 }
 
-func (sig *ECDSASignature) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.HashTreeRoot(&sig.V, &sig.R, &sig.S)
-}
-
 type AddressSSZ libcommon.Address
 
 func (addr *AddressSSZ) Deserialize(dr *codec.DecodingReader) error {
@@ -138,14 +134,6 @@ func (*AddressOptionalSSZ) FixedLength() uint64 {
 	return 0
 }
 
-// func (ao *AddressOptionalSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-// 	if ao.Address == nil {
-// 		return hFn(tree.Root{}, tree.Root{0: 0})
-// 	} else {
-// 		return hFn(ao.Address.HashTreeRoot(hFn), tree.Root{0: 1})
-// 	}
-// }
-
 type TxDataView []byte
 
 func (tdv *TxDataView) Deserialize(dr *codec.DecodingReader) error {
@@ -162,10 +150,6 @@ func (tdv TxDataView) ByteLength() (out uint64) {
 
 func (tdv *TxDataView) FixedLength() uint64 {
 	return 0
-}
-
-func (tdv TxDataView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	return hFn.ByteListHTR(tdv, MAX_CALLDATA_SIZE)
 }
 
 func (tdv TxDataView) MarshalText() ([]byte, error) {
@@ -240,16 +224,6 @@ func (vhv *VersionedHashesView) FixedLength() uint64 {
 	return 0 // it's a list, no fixed length
 }
 
-func (vhv VersionedHashesView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(vhv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*tree.Root)(&vhv[i])
-		}
-		return nil
-	}, length, MAX_VERSIONED_HASHES_LIST_SIZE)
-}
-
 type StorageKeysView []libcommon.Hash
 
 func (skv *StorageKeysView) Deserialize(dr *codec.DecodingReader) error {
@@ -295,10 +269,6 @@ func (atv *AccessTupleView) ByteLength() uint64 {
 func (atv *AccessTupleView) FixedLength() uint64 {
 	return 0
 }
-
-// func (atv *AccessTupleView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-// 	return hFn.HashTreeRoot((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
-// }
 
 type AccessListView AccessList
 
@@ -359,10 +329,6 @@ func (tx *BlobTxMessage) FixedLength() uint64 {
 	return 0
 }
 
-// func (tx *BlobTxMessage) HashTreeRoot(hFn tree.HashFn) tree.Root {
-// 	return hFn.HashTreeRoot(&tx.ChainID, &tx.Nonce, &tx.GasTipCap, &tx.GasFeeCap, &tx.Gas, &tx.To, &tx.Value, &tx.Data, &tx.AccessList, &tx.MaxFeePerDataGas, &tx.BlobVersionedHashes)
-// }
-
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (tx *BlobTxMessage) copy() *BlobTxMessage {
 	cpy := &BlobTxMessage{
@@ -387,12 +353,10 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 type SignedBlobTx struct {
 	TransactionMisc
 
-	WrapData  TxWrapData
+	WrapData  TxWrapData // TODO: write all methods
 	Message   BlobTxMessage
 	Signature ECDSASignature
 }
-
-// var _ Transaction = &SignedBlobTx{}
 
 const (
 	MAX_CALLDATA_SIZE              = 1 << 24
@@ -400,6 +364,23 @@ const (
 	MAX_ACCESS_LIST_STORAGE_KEYS   = 1 << 24
 	MAX_VERSIONED_HASHES_LIST_SIZE = 1 << 24
 )
+
+func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
+	err := dr.Container(&stx.Message, &stx.Signature)
+	return err
+}
+
+func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {
+	return w.Container(&stx.Message, &stx.Signature)
+}
+
+func (stx *SignedBlobTx) ByteLength() uint64 {
+	return codec.ContainerLength(&stx.Message, &stx.Signature)
+}
+
+func (stx *SignedBlobTx) FixedLength() uint64 {
+	return 0
+}
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (stx SignedBlobTx) copy() *SignedBlobTx {
@@ -649,23 +630,6 @@ func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 // 	envelopeSize += 2
 // 	return envelopeSize
 // }
-
-func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
-	err := dr.Container(&stx.Message, &stx.Signature)
-	return err
-}
-
-func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) ByteLength() uint64 {
-	return codec.ContainerLength(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) FixedLength() uint64 {
-	return 0
-}
 
 func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
 	return stx.Message.BlobVersionedHashes

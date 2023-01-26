@@ -571,7 +571,13 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 	// Accumulate any block and uncle rewards and commit the final state root
 	accumulateRewards(config, state, header, uncles)
 	// set header.Root?
-	misc.HeaderSetExcessDataGas(chain, header, txs)
+	if chain.Config().IsSharding(header.Time) {
+		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
+			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
+		} else {
+			header.SetExcessDataGas(new(big.Int))
+		}
+	}
 	return txs, r, nil
 }
 

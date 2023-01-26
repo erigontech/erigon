@@ -374,7 +374,13 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	misc.HeaderSetExcessDataGas(chain, header, txs)
+	if chain.Config().IsSharding(header.Time) {
+		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
+			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
+		} else {
+			header.SetExcessDataGas(new(big.Int))
+		}
+	}
 	return txs, r, nil
 }
 
@@ -386,7 +392,13 @@ func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.He
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
-	misc.HeaderSetExcessDataGas(chain, header, txs)
+	if chain.Config().IsSharding(header.Time) {
+		if parent := chain.GetHeaderByHash(header.ParentHash); parent != nil {
+			header.SetExcessDataGas(misc.CalcExcessDataGas(parent.ExcessDataGas, misc.CountBlobs(txs)))
+		} else {
+			header.SetExcessDataGas(new(big.Int))
+		}
+	}
 	// Assemble and return the final block for sealing
 	return types.NewBlock(header, txs, nil, receipts, withdrawals), txs, receipts, nil
 }

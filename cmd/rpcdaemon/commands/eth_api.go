@@ -299,25 +299,27 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *libcommon.Hash    `json:"blockHash"`
-	BlockNumber      *hexutil.Big       `json:"blockNumber"`
-	From             libcommon.Address  `json:"from"`
-	Gas              hexutil.Uint64     `json:"gas"`
-	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
-	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	Hash             libcommon.Hash     `json:"hash"`
-	Input            hexutil.Bytes      `json:"input"`
-	Nonce            hexutil.Uint64     `json:"nonce"`
-	To               *libcommon.Address `json:"to"`
-	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
-	Value            *hexutil.Big       `json:"value"`
-	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types.AccessList  `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
-	V                *hexutil.Big       `json:"v"`
-	R                *hexutil.Big       `json:"r"`
-	S                *hexutil.Big       `json:"s"`
+	BlockHash           *libcommon.Hash    `json:"blockHash"`
+	BlockNumber         *hexutil.Big       `json:"blockNumber"`
+	From                libcommon.Address  `json:"from"`
+	Gas                 hexutil.Uint64     `json:"gas"`
+	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
+	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	Hash                libcommon.Hash     `json:"hash"`
+	Input               hexutil.Bytes      `json:"input"`
+	Nonce               hexutil.Uint64     `json:"nonce"`
+	To                  *libcommon.Address `json:"to"`
+	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
+	Value               *hexutil.Big       `json:"value"`
+	Type                hexutil.Uint64     `json:"type"`
+	Accesses            *types.AccessList  `json:"accessList,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
+	BlobVersionedHashes []libcommon.Hash   `json:"blobVersionedHashes,omitempty"`
+	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
+	V                   *hexutil.Big       `json:"v"`
+	R                   *hexutil.Big       `json:"r"`
+	S                   *hexutil.Big       `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC

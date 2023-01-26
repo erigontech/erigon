@@ -170,6 +170,7 @@ var PrecompiledContractsDanksharding = map[libcommon.Address]PrecompiledContract
 }
 
 var (
+	PrecompiledAddressesDanksharding   []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address
@@ -201,11 +202,16 @@ func init() {
 	for k := range PrecompiledContractsIsMoran {
 		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
 	}
+	for k := range PrecompiledContractsDanksharding {
+		PrecompiledAddressesDanksharding = append(PrecompiledAddressesDanksharding, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsSharding:
+		return PrecompiledAddressesDanksharding
 	case rules.IsMoran:
 		return PrecompiledAddressesMoran
 	case rules.IsNano:

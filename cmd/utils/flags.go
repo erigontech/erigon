@@ -136,6 +136,10 @@ var (
 		Name:  "externalcl",
 		Usage: "enables external consensus",
 	}
+	// Eip4844Flag = cli.BoolFlag{
+	// 	Name:     "eip4844",
+	// 	Usage:    "EIP-4844 (proto-danksharding) network: pre-configured proof-of-authority to proof-of-stake test network",
+	// }
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
