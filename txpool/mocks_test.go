@@ -17,40 +17,40 @@ var _ Pool = &PoolMock{}
 
 // PoolMock is a mock implementation of Pool.
 //
-//	func TestSomethingThatUsesPool(t *testing.T) {
+// 	func TestSomethingThatUsesPool(t *testing.T) {
 //
-//		// make and configure a mocked Pool
-//		mockedPool := &PoolMock{
-//			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
-//				panic("mock out the AddLocalTxs method")
-//			},
-//			AddNewGoodPeerFunc: func(peerID types2.PeerID)  {
-//				panic("mock out the AddNewGoodPeer method")
-//			},
-//			AddRemoteTxsFunc: func(ctx context.Context, newTxs types2.TxSlots)  {
-//				panic("mock out the AddRemoteTxs method")
-//			},
-//			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
-//				panic("mock out the GetRlp method")
-//			},
-//			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
-//				panic("mock out the IdHashKnown method")
-//			},
-//			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
-//				panic("mock out the OnNewBlock method")
-//			},
-//			StartedFunc: func() bool {
-//				panic("mock out the Started method")
-//			},
-//			ValidateSerializedTxnFunc: func(serializedTxn []byte) error {
-//				panic("mock out the ValidateSerializedTxn method")
-//			},
-//		}
+// 		// make and configure a mocked Pool
+// 		mockedPool := &PoolMock{
+// 			AddLocalTxsFunc: func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error) {
+// 				panic("mock out the AddLocalTxs method")
+// 			},
+// 			AddNewGoodPeerFunc: func(peerID types2.PeerID)  {
+// 				panic("mock out the AddNewGoodPeer method")
+// 			},
+// 			AddRemoteTxsFunc: func(ctx context.Context, newTxs types2.TxSlots)  {
+// 				panic("mock out the AddRemoteTxs method")
+// 			},
+// 			GetRlpFunc: func(tx kv.Tx, hash []byte) ([]byte, error) {
+// 				panic("mock out the GetRlp method")
+// 			},
+// 			IdHashKnownFunc: func(tx kv.Tx, hash []byte) (bool, error) {
+// 				panic("mock out the IdHashKnown method")
+// 			},
+// 			OnNewBlockFunc: func(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs types2.TxSlots, minedTxs types2.TxSlots, tx kv.Tx) error {
+// 				panic("mock out the OnNewBlock method")
+// 			},
+// 			StartedFunc: func() bool {
+// 				panic("mock out the Started method")
+// 			},
+// 			ValidateSerializedTxnFunc: func(serializedTxn []byte) error {
+// 				panic("mock out the ValidateSerializedTxn method")
+// 			},
+// 		}
 //
-//		// use mockedPool in code that requires Pool
-//		// and then make assertions.
+// 		// use mockedPool in code that requires Pool
+// 		// and then make assertions.
 //
-//	}
+// 	}
 type PoolMock struct {
 	// AddLocalTxsFunc mocks the AddLocalTxs method.
 	AddLocalTxsFunc func(ctx context.Context, newTxs types2.TxSlots, tx kv.Tx) ([]DiscardReason, error)
@@ -171,8 +171,7 @@ func (mock *PoolMock) AddLocalTxs(ctx context.Context, newTxs types2.TxSlots, tx
 
 // AddLocalTxsCalls gets all the calls that were made to AddLocalTxs.
 // Check the length with:
-//
-//	len(mockedPool.AddLocalTxsCalls())
+//     len(mockedPool.AddLocalTxsCalls())
 func (mock *PoolMock) AddLocalTxsCalls() []struct {
 	Ctx    context.Context
 	NewTxs types2.TxSlots
@@ -207,8 +206,7 @@ func (mock *PoolMock) AddNewGoodPeer(peerID types2.PeerID) {
 
 // AddNewGoodPeerCalls gets all the calls that were made to AddNewGoodPeer.
 // Check the length with:
-//
-//	len(mockedPool.AddNewGoodPeerCalls())
+//     len(mockedPool.AddNewGoodPeerCalls())
 func (mock *PoolMock) AddNewGoodPeerCalls() []struct {
 	PeerID types2.PeerID
 } {
@@ -241,8 +239,7 @@ func (mock *PoolMock) AddRemoteTxs(ctx context.Context, newTxs types2.TxSlots) {
 
 // AddRemoteTxsCalls gets all the calls that were made to AddRemoteTxs.
 // Check the length with:
-//
-//	len(mockedPool.AddRemoteTxsCalls())
+//     len(mockedPool.AddRemoteTxsCalls())
 func (mock *PoolMock) AddRemoteTxsCalls() []struct {
 	Ctx    context.Context
 	NewTxs types2.TxSlots
@@ -281,8 +278,7 @@ func (mock *PoolMock) GetRlp(tx kv.Tx, hash []byte) ([]byte, error) {
 
 // GetRlpCalls gets all the calls that were made to GetRlp.
 // Check the length with:
-//
-//	len(mockedPool.GetRlpCalls())
+//     len(mockedPool.GetRlpCalls())
 func (mock *PoolMock) GetRlpCalls() []struct {
 	Tx   kv.Tx
 	Hash []byte
@@ -321,8 +317,7 @@ func (mock *PoolMock) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 
 // IdHashKnownCalls gets all the calls that were made to IdHashKnown.
 // Check the length with:
-//
-//	len(mockedPool.IdHashKnownCalls())
+//     len(mockedPool.IdHashKnownCalls())
 func (mock *PoolMock) IdHashKnownCalls() []struct {
 	Tx   kv.Tx
 	Hash []byte
@@ -366,8 +361,7 @@ func (mock *PoolMock) OnNewBlock(ctx context.Context, stateChanges *remote.State
 
 // OnNewBlockCalls gets all the calls that were made to OnNewBlock.
 // Check the length with:
-//
-//	len(mockedPool.OnNewBlockCalls())
+//     len(mockedPool.OnNewBlockCalls())
 func (mock *PoolMock) OnNewBlockCalls() []struct {
 	Ctx          context.Context
 	StateChanges *remote.StateChangeBatch
@@ -406,8 +400,7 @@ func (mock *PoolMock) Started() bool {
 
 // StartedCalls gets all the calls that were made to Started.
 // Check the length with:
-//
-//	len(mockedPool.StartedCalls())
+//     len(mockedPool.StartedCalls())
 func (mock *PoolMock) StartedCalls() []struct {
 } {
 	var calls []struct {
@@ -439,8 +432,7 @@ func (mock *PoolMock) ValidateSerializedTxn(serializedTxn []byte) error {
 
 // ValidateSerializedTxnCalls gets all the calls that were made to ValidateSerializedTxn.
 // Check the length with:
-//
-//	len(mockedPool.ValidateSerializedTxnCalls())
+//     len(mockedPool.ValidateSerializedTxnCalls())
 func (mock *PoolMock) ValidateSerializedTxnCalls() []struct {
 	SerializedTxn []byte
 } {
