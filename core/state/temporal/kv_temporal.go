@@ -137,6 +137,10 @@ const (
 )
 
 const (
+	AccountsHistoryIdx kv.InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx  kv.InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx     kv.InvertedIdx = "CodeHistoryIdx"
+
 	LogTopicIdx   kv.InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    kv.InvertedIdx = "LogAddrIdx"
 	TracesFromIdx kv.InvertedIdx = "TracesFromIdx"
@@ -177,7 +181,7 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 			return append(append([]byte{}, k[:20]...), k[28:]...), v
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionPairs(it, it3), nil
+		return iter.UnionKV(it, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -271,42 +275,30 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, asc, limit)
-}
-
-// [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, asc order.By, limit int) (timestamps iter.U64, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
+	case AccountsHistoryIdx:
+		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case StorageHistoryIdx:
+		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case CodeHistoryIdx:
+		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, asc, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := timestamps.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return timestamps, nil
 }

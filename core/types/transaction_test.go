@@ -30,6 +30,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -441,7 +442,7 @@ func TestTransactionCoding(t *testing.T) {
 		signer    = LatestSignerForChainID(common.Big1)
 		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
-		accesses  = AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+		accesses  = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction

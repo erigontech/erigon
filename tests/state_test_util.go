@@ -30,8 +30,10 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -41,8 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
 // StateTest checks transaction processing without block context.
@@ -82,16 +82,16 @@ type stPostState struct {
 }
 
 type stTransaction struct {
-	GasPrice             *big.Int            `json:"gasPrice"`
-	MaxFeePerGas         *big.Int            `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *big.Int            `json:"maxPriorityFeePerGas"`
-	Nonce                uint64              `json:"nonce"`
-	To                   string              `json:"to"`
-	Data                 []string            `json:"data"`
-	AccessLists          []*types.AccessList `json:"accessLists,omitempty"`
-	GasLimit             []uint64            `json:"gasLimit"`
-	Value                []string            `json:"value"`
-	PrivateKey           []byte              `json:"secretKey"`
+	GasPrice             *big.Int             `json:"gasPrice"`
+	MaxFeePerGas         *big.Int             `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *big.Int             `json:"maxPriorityFeePerGas"`
+	Nonce                uint64               `json:"nonce"`
+	To                   string               `json:"to"`
+	Data                 []string             `json:"data"`
+	AccessLists          []*types2.AccessList `json:"accessLists,omitempty"`
+	GasLimit             []uint64             `json:"gasLimit"`
+	Value                []string             `json:"value"`
+	PrivateKey           []byte               `json:"secretKey"`
 }
 
 type stTransactionMarshaling struct {
@@ -104,7 +104,7 @@ type stTransactionMarshaling struct {
 	To                   string                `json:"to"`
 	Data                 []string              `json:"data"`
 	Value                []string              `json:"value"`
-	AccessLists          []*types.AccessList   `json:"accessLists,omitempty"`
+	AccessLists          []*types2.AccessList  `json:"accessLists,omitempty"`
 }
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
@@ -421,7 +421,7 @@ func toMessage(tx stTransactionMarshaling, ps stPostState, baseFee *big.Int) (co
 	if err != nil {
 		return nil, fmt.Errorf("invalid tx data %q", dataHex)
 	}
-	var accessList types.AccessList
+	var accessList types2.AccessList
 	if tx.AccessLists != nil && tx.AccessLists[ps.Indexes.Data] != nil {
 		accessList = *tx.AccessLists[ps.Indexes.Data]
 	}
