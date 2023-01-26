@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -62,6 +63,53 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		}
 		lastTxNum, _ := rawdbv3.TxNums.Max(tx, headNumber)
 
+		// Contract; search for creation tx; navigate forward on AccountsHistory/ChangeSets
+		//
+		// We traversing history Index - because it's cheaper than traversing History
+		// and probe History periodically. In result will have small range of blocks. For binary search or full-scan.
+		//
+		// popular contracts may have dozens of states changes due to ETH deposits/withdraw after contract creation,
+		// so it is optimal to search from the beginning even if the contract has multiple
+		// incarnations.
+		var prevTxnID, nextTxnID uint64
+		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, lastTxNum+1, order.Asc, 1)
+		if err != nil {
+			return nil, err
+		}
+		for i := 0; it.HasNext(); i++ {
+			txnID, _ := it.Next()
+
+			if i%4096 != 0 { // probe history periodically, not on every change
+				nextTxnID = txnID
+				continue
+			}
+
+			v, ok, err := ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, txnID)
+			if err != nil {
+				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				panic(err)
+			}
+			if !ok {
+				err = fmt.Errorf("couldn't find history txnID=%v addr=%v", txnID, addr)
+				log.Error("[rpc] Unexpected error", "err", err)
+				return nil, err
+			}
+			if len(v) == 0 { // creation, but maybe not our Incarnation
+				prevTxnID = txnID
+				continue
+			}
+
+			if err := acc.DecodeForStorage(v); err != nil {
+				return nil, err
+			}
+			// Found the shard where the incarnation change happens; ignore all next index values
+			if acc.Incarnation >= plainStateAcc.Incarnation {
+				nextTxnID = txnID
+				break
+			}
+			prevTxnID = txnID
+		}
+
 		// The sort.Search function finds the first block where the incarnation has
 		// changed to the desired one, so we get the previous block from the bitmap;
 		// however if the creationTxnID block is already the first one from the bitmap, it means
@@ -69,17 +117,23 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		var creationTxnID uint64
 		var searchErr error
 
-		_ = sort.Search(int(lastTxNum), func(i int) bool {
-			v, ok, err := ttx.DomainGet(temporal.AccountsDomain, addr[:], nil, uint64(i))
+		if nextTxnID == 0 {
+			nextTxnID = prevTxnID + 1
+		}
+		// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
+		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
+		_ = sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+			txnID := uint64(i) + prevTxnID
+			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
-				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
 				panic(err)
 			}
 			if !ok {
 				return false
 			}
 			if len(v) == 0 {
-				creationTxnID = cmp.Max(creationTxnID, uint64(i))
+				creationTxnID = cmp.Max(creationTxnID, txnID)
 				return false
 			}
 
@@ -88,7 +142,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 				return false
 			}
 			if acc.Incarnation < plainStateAcc.Incarnation {
-				creationTxnID = cmp.Max(creationTxnID, uint64(i))
+				creationTxnID = cmp.Max(creationTxnID, txnID)
 				return false
 			}
 			return true
