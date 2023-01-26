@@ -513,6 +513,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules
 		data:             stx.Message.Data,
 		accessList:       stx.GetAccessList(),
 		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
+		dataHashes:       stx.GetDataHashes(),
 		checkNonce:       true,
 	}
 
