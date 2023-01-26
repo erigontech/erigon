@@ -792,7 +792,6 @@ func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
 		},
-		PassivePeers: cs.sendHeaderRequestsToMultiplePeers,
 	}
 }
 
