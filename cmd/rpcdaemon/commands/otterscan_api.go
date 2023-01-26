@@ -263,15 +263,15 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		// Internal search code considers blockNum [including], so adjust the value
 		fromBlockNum--
 	}
-	from, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
+	fromTxNum, err := rawdbv3.TxNums.Max(tx, fromBlockNum)
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(from), -1, order.Desc, -1)
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(from), -1, order.Desc, -1)
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
 	if err != nil {
 		return nil, err
 	}
