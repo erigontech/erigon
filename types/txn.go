@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/secp256k1"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/crypto"
@@ -690,8 +691,8 @@ type AccessList []AccessTuple
 
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	StorageKeys [][32]byte `json:"storageKeys"    gencodec:"required"`
-	Address     [20]byte   `json:"address"        gencodec:"required"`
+	Address     common.Address `json:"address"`
+	StorageKeys []common.Hash  `json:"storageKeys"`
 }
 
 // StorageKeys returns the total number of storage keys in the access list.
