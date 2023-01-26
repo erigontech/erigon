@@ -1,8 +1,9 @@
-package transition
+package state_test
 
 import (
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -31,7 +32,7 @@ func getTestStateValidators(t *testing.T, numVals int) *state.BeaconState {
 		}
 	}
 	b := state.GetEmptyBeaconState()
-	b.SetSlot(testExitEpoch * SLOTS_PER_EPOCH)
+	b.SetSlot(testExitEpoch * clparams.MainnetBeaconConfig.SlotsPerEpoch)
 	b.SetValidators(validators)
 	return b
 }
@@ -41,7 +42,7 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance := state.Balances()[testInd]
-	IncreaseBalance(state, testInd, amount)
+	state.IncreaseBalance(int(testInd), amount)
 	afterBalance := state.Balances()[testInd]
 	if afterBalance != beforeBalance+amount {
 		t.Errorf("unepected after balance: %d, before balance: %d, increase: %d", afterBalance, beforeBalance, amount)
@@ -78,7 +79,7 @@ func TestDecreaseBalance(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			state := getTestStateBalances(t)
-			DecreaseBalance(state, testInd, tc.delta)
+			state.DecreaseBalance(testInd, tc.delta)
 			afterBalance := state.Balances()[testInd]
 			if afterBalance != tc.expectedBalance {
 				t.Errorf("unexpected resulting balance: got %d, want %d", afterBalance, tc.expectedBalance)
@@ -88,7 +89,7 @@ func TestDecreaseBalance(t *testing.T) {
 }
 
 func TestInitiatieValidatorExit(t *testing.T) {
-	exitDelay := uint64(testExitEpoch + MAX_SEED_LOOKAHEAD + 1)
+	exitDelay := testExitEpoch + clparams.MainnetBeaconConfig.MaxSeedLookahead + 1
 	testCases := []struct {
 		description                string
 		numValidators              uint64
@@ -100,9 +101,9 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			description:                "success",
 			numValidators:              3,
 			expectedExitEpoch:          testExitEpoch + exitDelay,
-			expectedWithdrawlableEpoch: testExitEpoch + exitDelay + MIN_VALIDATOR_WITHDRAWABILITY_DELAY,
+			expectedWithdrawlableEpoch: testExitEpoch + exitDelay + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay,
 			validator: &cltypes.Validator{
-				ExitEpoch:       FAR_FUTURE_EPOCH,
+				ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
 				ActivationEpoch: 0,
 			},
 		},
@@ -110,10 +111,10 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			description:                "exit_epoch_set",
 			numValidators:              3,
 			expectedExitEpoch:          testExitEpoch,
-			expectedWithdrawlableEpoch: testExitEpoch + MIN_VALIDATOR_WITHDRAWABILITY_DELAY,
+			expectedWithdrawlableEpoch: testExitEpoch + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay,
 			validator: &cltypes.Validator{
 				ExitEpoch:         testExitEpoch,
-				WithdrawableEpoch: testExitEpoch + MIN_VALIDATOR_WITHDRAWABILITY_DELAY,
+				WithdrawableEpoch: testExitEpoch + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay,
 				ActivationEpoch:   0,
 			},
 		},
@@ -123,7 +124,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			state := getTestStateValidators(t, int(tc.numValidators))
 			state.SetValidators(append(state.Validators(), tc.validator))
 			testInd := uint64(len(state.Validators()) - 1)
-			InitiateValidatorExit(state, testInd)
+			state.InitiateValidatorExit(testInd)
 			val := state.ValidatorAt(int(testInd))
 			if val.ExitEpoch != tc.expectedExitEpoch {
 				t.Errorf("unexpected exit epoch: got %d, want %d", val.ExitEpoch, tc.expectedExitEpoch)
@@ -153,16 +154,16 @@ func TestSlashValidator(t *testing.T) {
 	preSlashBalance := uint64(1 << 20)
 	successState.Balances()[slashedInd] = preSlashBalance
 	successState.ValidatorAt(slashedInd).EffectiveBalance = preSlashBalance
-	wantBalances[slashedInd] = preSlashBalance - (preSlashBalance / MIN_SLASHING_PENALTY_QUOTIENT)
+	wantBalances[slashedInd] = preSlashBalance - (preSlashBalance / clparams.MainnetBeaconConfig.MinSlashingPenaltyQuotient)
 
 	// Set up whistleblower & validator balances.
-	wbReward := preSlashBalance / WHISTLEBLOWER_REWARD_QUOTIENT
+	wbReward := preSlashBalance / clparams.MainnetBeaconConfig.WhistleBlowerRewardQuotient
 	wantBalances[whistleblowerInd] += wbReward
-	valInd, err := GetBeaconProposerIndex(successState)
+	valInd, err := successState.GetBeaconProposerIndex()
 	if err != nil {
 		t.Fatalf("unable to get proposer index for test state: %v", err)
 	}
-	wantBalances[valInd] += wbReward / PROPOSER_REWARD_QUOTIENT
+	wantBalances[valInd] += wbReward / clparams.MainnetBeaconConfig.ProposerRewardQuotient
 
 	failState := getTestState(t)
 	for _, v := range failState.Validators() {
@@ -191,7 +192,7 @@ func TestSlashValidator(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := SlashValidator(tc.state, uint64(slashedInd), uint64(whistleblowerInd))
+			err := tc.state.SlashValidator(uint64(slashedInd), uint64(whistleblowerInd))
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wantErr is true")
