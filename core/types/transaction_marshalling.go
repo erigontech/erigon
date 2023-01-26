@@ -34,9 +34,13 @@ type txJSON struct {
 	ChainID    *hexutil.Big `json:"chainId,omitempty"`
 	AccessList *AccessList  `json:"accessList,omitempty"`
 
-	// only  used for signedBlobTx
+	// Blob transaction fields:
 	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
 	BlobVersionedHashes []libcommon.Hash `json:"blobVersionedHashes,omitempty"`
+	// Blob werapper fields:
+	Blobs              Blobs    `json:"blobs,omitempty"`
+	BlobKzgs           BlobKzgs `json:"blobKzgs,omitempty"`
+	KzgAggregatedProof KZGProof `json:"kzgAggregatedProof,omitempty"`
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`
@@ -98,7 +102,7 @@ func (tx DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
-func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
+func toSignedBlobTxJSON(tx *SignedBlobTx) *txJSON {
 	var enc txJSON
 	// These are set for all tx types.
 	enc.Hash = tx.Hash()
@@ -120,7 +124,21 @@ func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	enc.S = (*hexutil.Big)(tx.Signature.GetS().ToBig())
 	enc.MaxFeePerDataGas = (*hexutil.Big)(tx.GetMaxFeePerDataGas().ToBig())
 	enc.BlobVersionedHashes = tx.GetDataHashes()
-	return json.Marshal(&enc)
+	return &enc
+}
+
+func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toSignedBlobTxJSON(&tx))
+}
+
+func (tx BlobTxWrapper) MarshalJSON() ([]byte, error) {
+	enc := toSignedBlobTxJSON(&tx.Tx)
+
+	enc.Blobs = tx.Blobs
+	enc.BlobKzgs = tx.BlobKzgs
+	enc.KzgAggregatedProof = tx.KzgAggregatedProof
+
+	return json.Marshal(enc)
 }
 
 func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
@@ -157,8 +175,8 @@ func UnmarshalTransactionFromJSON(input []byte) (Transaction, error) {
 		}
 		return tx, nil
 	case BlobTxType:
-		tx := &SignedBlobTx{}
-		if err = tx.UnmarshalJSON(input); err != nil {
+		tx, err := UnmarshalBlobTxJSON(input)
+		if err != nil {
 			return nil, err
 		}
 		return tx, nil
@@ -394,21 +412,22 @@ func (tx *DynamicFeeTransaction) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-func (tx *SignedBlobTx) UnmarshalJSON(input []byte) error {
+func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	var dec txJSON
 	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
+		return nil, err
 	}
+	tx := SignedBlobTx{}
 	// Access list is optional for now.
 	if dec.AccessList != nil {
 		tx.Message.AccessList = AccessListView(*dec.AccessList)
 	}
 	if dec.ChainID == nil {
-		return errors.New("missing required field 'chainId' in transaction")
+		return nil, errors.New("missing required field 'chainId' in transaction")
 	}
 	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
 	if overflow {
-		return errors.New("'chainId' in transaction does not fit in 256 bits")
+		return nil, errors.New("'chainId' in transaction does not fit in 256 bits")
 	}
 	tx.Message.ChainID = Uint256View(*chainID)
 	if dec.To != nil {
@@ -416,90 +435,104 @@ func (tx *SignedBlobTx) UnmarshalJSON(input []byte) error {
 		tx.Message.To = AddressOptionalSSZ{Address: &address}
 	}
 	if dec.Nonce == nil {
-		return errors.New("missing required field 'nonce' in transaction")
+		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Message.Nonce = Uint64View(uint64(*dec.Nonce))
-	// if dec.GasPrice == nil {
-	// 	return errors.New("missing required field 'gasPrice' in transaction")
-	// }
 	tip, overflow := uint256.FromBig(dec.Tip.ToInt())
 	if overflow {
-		return errors.New("'tip' in transaction does not fit in 256 bits")
+		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
 	}
 	tx.Message.GasTipCap = Uint256View(*tip)
 	feeCap, overflow := uint256.FromBig(dec.FeeCap.ToInt())
 	if overflow {
-		return errors.New("'feeCap' in transaction does not fit in 256 bits")
+		return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
 	}
 	tx.Message.GasFeeCap = Uint256View(*feeCap)
 	if dec.Gas == nil {
-		return errors.New("missing required field 'gas' in transaction")
+		return nil, errors.New("missing required field 'gas' in transaction")
 	}
 	tx.Message.Gas = Uint64View(uint64(*dec.Gas))
 	if dec.Value == nil {
-		return errors.New("missing required field 'value' in transaction")
+		return nil, errors.New("missing required field 'value' in transaction")
 	}
 	value, overflow := uint256.FromBig(dec.Value.ToInt())
 	if overflow {
-		return errors.New("'value' in transaction does not fit in 256 bits")
+		return nil, errors.New("'value' in transaction does not fit in 256 bits")
 	}
 	tx.Message.Value = Uint256View(*value)
 	if dec.Data == nil {
-		return errors.New("missing required field 'input' in transaction")
+		return nil, errors.New("missing required field 'input' in transaction")
 	}
 	tx.Message.Data = TxDataView(*dec.Data)
 
 	if dec.MaxFeePerDataGas == nil {
-		return errors.New("missing required field 'maxFeePerDataGas' in transaction")
+		return nil, errors.New("missing required field 'maxFeePerDataGas' in transaction")
 	}
 	maxFeePerDataGas, overflow := uint256.FromBig(dec.MaxFeePerDataGas.ToInt())
 	if overflow {
-		return errors.New("'maxFeePerDataGas' in transaction does not fit in 256 bits")
+		return nil, errors.New("'maxFeePerDataGas' in transaction does not fit in 256 bits")
 	}
 	tx.Message.MaxFeePerDataGas = Uint256View(*maxFeePerDataGas)
 
 	tx.Message.BlobVersionedHashes = VersionedHashesView(dec.BlobVersionedHashes)
 
 	if dec.V == nil {
-		return errors.New("missing required field 'v' in transaction")
+		return nil, errors.New("missing required field 'v' in transaction")
 	}
 	var v uint256.Int
 	overflow = v.SetFromBig(dec.V.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.V higher than 2^256-1")
+		return nil, fmt.Errorf("dec.V higher than 2^256-1")
 	}
 	if v.Uint64() > 255 {
-		return fmt.Errorf("dev.V higher than 2^8 - 1")
+		return nil, fmt.Errorf("dev.V higher than 2^8 - 1")
 	}
 
 	tx.Signature.V = Uint8View(v.Uint64())
 
 	if dec.R == nil {
-		return errors.New("missing required field 'r' in transaction")
+		return nil, errors.New("missing required field 'r' in transaction")
 	}
 	var r uint256.Int
 	overflow = r.SetFromBig(dec.R.ToInt())
 	if overflow {
-		return fmt.Errorf("dec.R higher than 2^256-1")
+		return nil, fmt.Errorf("dec.R higher than 2^256-1")
 	}
 	tx.Signature.R = Uint256View(r)
 
 	if dec.S == nil {
-		return errors.New("missing required field 's' in transaction")
+		return nil, errors.New("missing required field 's' in transaction")
 	}
 	var s uint256.Int
 	overflow = s.SetFromBig(dec.S.ToInt())
 	if overflow {
-		return errors.New("'s' in transaction does not fit in 256 bits")
+		return nil, errors.New("'s' in transaction does not fit in 256 bits")
 	}
 	tx.Signature.S = Uint256View(s)
 
 	withSignature := !v.IsZero() || !r.IsZero() || !s.IsZero()
 	if withSignature {
 		if err := sanityCheckSignature(&v, &r, &s, false); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return nil
+	// All blob tx wrappers should have non-zero aggregated proof, even if there are 0 blobs.
+	empty := KZGProof{}
+	if dec.KzgAggregatedProof == empty {
+		return &tx, nil
+	}
+
+	btx := BlobTxWrapper{
+		Tx:                 tx,
+		BlobKzgs:           dec.BlobKzgs,
+		Blobs:              dec.Blobs,
+		KzgAggregatedProof: dec.KzgAggregatedProof,
+	}
+	err := btx.VerifyBlobs()
+	if err != nil {
+		return nil, err
+	}
+	return &btx, nil
+
 }
