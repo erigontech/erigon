@@ -2,11 +2,25 @@ package iter
 
 import (
 	"bytes"
-	"fmt"
 
 	"golang.org/x/exp/constraints"
 	"golang.org/x/exp/slices"
 )
+
+var (
+	EmptyU64 = &EmptyUnary[uint64]{}
+	EmptyKV  = &EmptyDual[[]byte, []byte]{}
+)
+
+type (
+	EmptyUnary[T any]   struct{}
+	EmptyDual[K, V any] struct{}
+)
+
+func (EmptyUnary[T]) HasNext() bool                 { return false }
+func (EmptyUnary[T]) Next() (v T, err error)        { return v, err }
+func (EmptyDual[K, V]) HasNext() bool               { return false }
+func (EmptyDual[K, V]) Next() (k K, v V, err error) { return k, v, err }
 
 type ArrStream[V any] struct {
 	arr []V
@@ -53,9 +67,9 @@ func (it *RangeIter[T]) Next() (T, error) {
 	return v, nil
 }
 
-// UnionPairsStream - merge 2 kv.Pairs streams to 1 in lexicographically order
+// UnionKVIter - merge 2 kv.Pairs streams to 1 in lexicographically order
 // 1-st stream has higher priority - when 2 streams return same key
-type UnionPairsStream struct {
+type UnionKVIter struct {
 	x, y               KV
 	xHasNext, yHasNext bool
 	xNextK, xNextV     []byte
@@ -63,14 +77,23 @@ type UnionPairsStream struct {
 	err                error
 }
 
-func UnionPairs(x, y KV) *UnionPairsStream {
-	m := &UnionPairsStream{x: x, y: y}
+func UnionKV(x, y KV) KV {
+	if x == nil && y == nil {
+		return EmptyKV
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	m := &UnionKVIter{x: x, y: y}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
-func (m *UnionPairsStream) HasNext() bool { return m.xHasNext || m.yHasNext }
-func (m *UnionPairsStream) advanceX() {
+func (m *UnionKVIter) HasNext() bool { return m.xHasNext || m.yHasNext }
+func (m *UnionKVIter) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -79,7 +102,7 @@ func (m *UnionPairsStream) advanceX() {
 		m.xNextK, m.xNextV, m.err = m.x.Next()
 	}
 }
-func (m *UnionPairsStream) advanceY() {
+func (m *UnionKVIter) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -88,7 +111,7 @@ func (m *UnionPairsStream) advanceY() {
 		m.yNextK, m.yNextV, m.err = m.y.Next()
 	}
 }
-func (m *UnionPairsStream) Next() ([]byte, []byte, error) {
+func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
@@ -117,27 +140,36 @@ func (m *UnionPairsStream) Next() ([]byte, []byte, error) {
 	m.advanceY()
 	return k, v, err
 }
-func (m *UnionPairsStream) ToArray() (keys, values [][]byte, err error) { return ToKVArray(m) }
+func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToKVArray(m) }
 
-// UnionStream
-type UnionStream[T constraints.Ordered] struct {
+// UnionIter
+type UnionIter[T constraints.Ordered] struct {
 	x, y           Unary[T]
 	xHas, yHas     bool
 	xNextK, yNextK T
 	err            error
 }
 
-func Union[T constraints.Ordered](x, y Unary[T]) *UnionStream[T] {
-	m := &UnionStream[T]{x: x, y: y}
+func Union[T constraints.Ordered](x, y Unary[T]) Unary[T] {
+	if x == nil && y == nil {
+		return &EmptyUnary[T]{}
+	}
+	if x == nil {
+		return y
+	}
+	if y == nil {
+		return x
+	}
+	m := &UnionIter[T]{x: x, y: y}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
-func (m *UnionStream[T]) HasNext() bool {
+func (m *UnionIter[T]) HasNext() bool {
 	return m.err != nil || m.xHas || m.yHas
 }
-func (m *UnionStream[T]) advanceX() {
+func (m *UnionIter[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -146,7 +178,7 @@ func (m *UnionStream[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *UnionStream[T]) advanceY() {
+func (m *UnionIter[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -155,7 +187,7 @@ func (m *UnionStream[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
-func (m *UnionStream[T]) Next() (res T, err error) {
+func (m *UnionIter[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
@@ -184,21 +216,24 @@ func (m *UnionStream[T]) Next() (res T, err error) {
 	return k, err
 }
 
-// IntersectStream
-type IntersectStream[T constraints.Ordered] struct {
+// IntersectIter
+type IntersectIter[T constraints.Ordered] struct {
 	x, y               Unary[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Unary[T]) *IntersectStream[T] {
-	m := &IntersectStream[T]{x: x, y: y}
+func Intersect[T constraints.Ordered](x, y Unary[T]) Unary[T] {
+	if x == nil || y == nil {
+		return &EmptyUnary[T]{}
+	}
+	m := &IntersectIter[T]{x: x, y: y}
 	m.advance()
 	return m
 }
-func (m *IntersectStream[T]) HasNext() bool { return m.xHasNext && m.yHasNext }
-func (m *IntersectStream[T]) advance() {
+func (m *IntersectIter[T]) HasNext() bool { return m.xHasNext && m.yHasNext }
+func (m *IntersectIter[T]) advance() {
 	m.advanceX()
 	m.advanceY()
 	for m.xHasNext && m.yHasNext {
@@ -218,7 +253,7 @@ func (m *IntersectStream[T]) advance() {
 	m.xHasNext = false
 }
 
-func (m *IntersectStream[T]) advanceX() {
+func (m *IntersectIter[T]) advanceX() {
 	if m.err != nil {
 		return
 	}
@@ -227,7 +262,7 @@ func (m *IntersectStream[T]) advanceX() {
 		m.xNextK, m.err = m.x.Next()
 	}
 }
-func (m *IntersectStream[T]) advanceY() {
+func (m *IntersectIter[T]) advanceY() {
 	if m.err != nil {
 		return
 	}
@@ -236,27 +271,10 @@ func (m *IntersectStream[T]) advanceY() {
 		m.yNextK, m.err = m.y.Next()
 	}
 }
-func (m *IntersectStream[T]) Next() (T, error) {
+func (m *IntersectIter[T]) Next() (T, error) {
 	k, err := m.xNextK, m.err
 	m.advance()
 	return k, err
-}
-
-// PairsWithErrorStream - return N, keys and then error
-type PairsWithErrorStream struct {
-	errorAt, i int
-}
-
-func PairsWithError(errorAt int) *PairsWithErrorStream {
-	return &PairsWithErrorStream{errorAt: errorAt}
-}
-func (m *PairsWithErrorStream) HasNext() bool { return true }
-func (m *PairsWithErrorStream) Next() ([]byte, []byte, error) {
-	if m.i >= m.errorAt {
-		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
-	}
-	m.i++
-	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
 }
 
 // TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
