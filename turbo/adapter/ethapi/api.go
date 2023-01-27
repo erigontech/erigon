@@ -285,6 +285,9 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
 	}
+	if head.ExcessDataGas != nil {
+		result["excessDataGas"] = (*hexutil.Big)(head.ExcessDataGas)
+	}
 
 	return result
 }
@@ -371,26 +374,27 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *libcommon.Hash    `json:"blockHash"`
-	BlockNumber      *hexutil.Big       `json:"blockNumber"`
-	From             libcommon.Address  `json:"from"`
-	Gas              hexutil.Uint64     `json:"gas"`
-	GasPrice         *hexutil.Big       `json:"gasPrice,omitempty"`
-	Tip              *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
-	FeeCap           *hexutil.Big       `json:"maxFeePerGas,omitempty"`
-	MaxFeePerDataGas *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
-	Hash             libcommon.Hash     `json:"hash"`
-	Input            hexutil.Bytes      `json:"input"`
-	Nonce            hexutil.Uint64     `json:"nonce"`
-	To               *libcommon.Address `json:"to"`
-	TransactionIndex *hexutil.Uint64    `json:"transactionIndex"`
-	Value            *hexutil.Big       `json:"value"`
-	Type             hexutil.Uint64     `json:"type"`
-	Accesses         *types.AccessList  `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
-	V                *hexutil.Big       `json:"v"`
-	R                *hexutil.Big       `json:"r"`
-	S                *hexutil.Big       `json:"s"`
+	BlockHash           *libcommon.Hash    `json:"blockHash"`
+	BlockNumber         *hexutil.Big       `json:"blockNumber"`
+	From                libcommon.Address  `json:"from"`
+	Gas                 hexutil.Uint64     `json:"gas"`
+	GasPrice            *hexutil.Big       `json:"gasPrice,omitempty"`
+	Tip                 *hexutil.Big       `json:"maxPriorityFeePerGas,omitempty"`
+	FeeCap              *hexutil.Big       `json:"maxFeePerGas,omitempty"`
+	MaxFeePerDataGas    *hexutil.Big       `json:"maxFeePerDataGas,omitempty"`
+	Hash                libcommon.Hash     `json:"hash"`
+	Input               hexutil.Bytes      `json:"input"`
+	Nonce               hexutil.Uint64     `json:"nonce"`
+	To                  *libcommon.Address `json:"to"`
+	TransactionIndex    *hexutil.Uint64    `json:"transactionIndex"`
+	Value               *hexutil.Big       `json:"value"`
+	Type                hexutil.Uint64     `json:"type"`
+	Accesses            *types.AccessList  `json:"accessList,omitempty"`
+	ChainID             *hexutil.Big       `json:"chainId,omitempty"`
+	BlobVersionedHashes []libcommon.Hash   `json:"blobVersionedHashes,omitempty"`
+	V                   *hexutil.Big       `json:"v"`
+	R                   *hexutil.Big       `json:"r"`
+	S                   *hexutil.Big       `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -446,6 +450,27 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		} else {
 			result.GasPrice = nil
 		}
+	case *types.SignedBlobTx:
+		chainId.Set(t.GetChainID())
+		result.ChainID = (*hexutil.Big)(chainId.ToBig())
+		result.Tip = (*hexutil.Big)(t.GetTip().ToBig())
+		result.FeeCap = (*hexutil.Big)(t.GetFeeCap().ToBig())
+		v, r, s := t.RawSignatureValues()
+		result.V = (*hexutil.Big)(v.ToBig())
+		result.R = (*hexutil.Big)(r.ToBig())
+		result.S = (*hexutil.Big)(s.ToBig())
+		al := t.GetAccessList()
+		result.Accesses = &al
+		// if the transaction has been mined, compute the effective gas price
+		if baseFee != nil && blockHash != (libcommon.Hash{}) {
+			// price = min(tip, gasFeeCap - baseFee) + baseFee
+			price := math.BigMin(new(big.Int).Add(t.GetTip().ToBig(), baseFee), t.GetFeeCap().ToBig())
+			result.GasPrice = (*hexutil.Big)(price)
+		} else {
+			result.GasPrice = nil
+		}
+		result.MaxFeePerDataGas = (*hexutil.Big)(t.GetMaxFeePerDataGas().ToBig())
+		result.BlobVersionedHashes = t.GetDataHashes()
 	}
 	signer := types.LatestSignerForChainID(chainId.ToBig())
 	var err error
