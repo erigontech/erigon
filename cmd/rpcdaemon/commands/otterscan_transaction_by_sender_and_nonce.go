@@ -57,6 +57,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 				log.Error("[rpc] Unexpected error", "err", err)
 				return nil, err
 			}
+
 			if len(v) == 0 { // creation, but maybe not our Incarnation
 				prevTxnID = txnID
 				continue
@@ -116,7 +117,9 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		if searchErr != nil {
 			return nil, searchErr
 		}
-
+		if creationTxnID == 0 {
+			return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		}
 		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
 		if err != nil {
 			return nil, err

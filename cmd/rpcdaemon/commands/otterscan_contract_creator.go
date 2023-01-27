@@ -153,6 +153,9 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		if searchErr != nil {
 			return nil, searchErr
 		}
+		if creationTxnID == 0 {
+			return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		}
 
 		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
 		if err != nil {
