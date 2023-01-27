@@ -14,30 +14,16 @@
    limitations under the License.
 */
 
-package hexutility
+package common
 
-import (
-	"testing"
-)
-
-type marshalTest struct {
-	input interface{}
-	want  string
-}
+import "math/big"
 
 var (
-	encodeBytesTests = []marshalTest{
-		{[]byte{}, "0x"},
-		{[]byte{0}, "0x00"},
-		{[]byte{0, 0, 1, 2}, "0x00000102"},
-	}
+	Big0   = big.NewInt(0)
+	Big1   = big.NewInt(1)
+	Big2   = big.NewInt(2)
+	Big3   = big.NewInt(3)
+	Big32  = big.NewInt(32)
+	Big256 = big.NewInt(256)
+	Big257 = big.NewInt(257)
 )
-
-func TestEncode(t *testing.T) {
-	for _, test := range encodeBytesTests {
-		enc := Encode(test.input.([]byte))
-		if enc != test.want {
-			t.Errorf("input %x: wrong encoding %s", test.input, enc)
-		}
-	}
-}
