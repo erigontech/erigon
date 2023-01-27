@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/params"
@@ -252,7 +253,7 @@ func (skv StorageKeysView) HashTreeRoot(hFn tree.HashFn) tree.Root {
 	}, length, MAX_ACCESS_LIST_STORAGE_KEYS)
 }
 
-type AccessTupleView AccessTuple
+type AccessTupleView types2.AccessTuple
 
 func (atv *AccessTupleView) Deserialize(dr *codec.DecodingReader) error {
 	return dr.Container((*AddressSSZ)(&atv.Address), (*StorageKeysView)(&atv.StorageKeys))
@@ -270,12 +271,12 @@ func (atv *AccessTupleView) FixedLength() uint64 {
 	return 0
 }
 
-type AccessListView AccessList
+type AccessListView types2.AccessList
 
 func (alv *AccessListView) Deserialize(dr *codec.DecodingReader) error {
 	return dr.List(func() codec.Deserializable {
 		i := len(*alv)
-		*alv = append(*alv, AccessTuple{})
+		*alv = append(*alv, types2.AccessTuple{})
 		return (*AccessTupleView)(&((*alv)[i]))
 	}, 0, MAX_ACCESS_LIST_SIZE)
 }
@@ -340,7 +341,7 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 		To:                  AddressOptionalSSZ{Address: (*AddressSSZ)(copyAddressPtr((*libcommon.Address)(tx.To.Address)))},
 		Value:               tx.Value,
 		Data:                common.CopyBytes(tx.Data),
-		AccessList:          make([]AccessTuple, len(tx.AccessList)),
+		AccessList:          make([]types2.AccessTuple, len(tx.AccessList)),
 		MaxFeePerDataGas:    tx.MaxFeePerDataGas,
 		BlobVersionedHashes: make([]libcommon.Hash, len(tx.BlobVersionedHashes)),
 	}
@@ -528,8 +529,8 @@ func (tx *SignedBlobTx) FakeSign(address libcommon.Address) (Transaction, error)
 	return cpy, nil
 }
 
-func (tx *SignedBlobTx) GetAccessList() AccessList {
-	return AccessList(tx.Message.AccessList)
+func (tx *SignedBlobTx) GetAccessList() types2.AccessList {
+	return types2.AccessList(tx.Message.AccessList)
 }
 
 func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {

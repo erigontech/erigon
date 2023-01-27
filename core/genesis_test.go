@@ -1,4 +1,4 @@
-package core
+package core_test
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -23,13 +25,13 @@ import (
 func TestDefaultGenesisBlockHashes(t *testing.T) {
 	db := memdb.NewTestDB(t)
 	check := func(network string) {
-		genesis := DefaultGenesisBlockByChainName(network)
+		genesis := core.DefaultGenesisBlockByChainName(network)
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		_, block, err := WriteGenesisBlock(tx, genesis, nil)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil)
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -44,12 +46,12 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
 
-	block, _, _ := DefaultGenesisBlock().ToBlock()
+	block, _, _ := core.DefaultGenesisBlock().ToBlock()
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = DefaultSokolGenesisBlock().ToBlock()
+	block, _, err = core.DefaultSokolGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.SokolGenesisStateRoot {
 		t.Errorf("wrong Sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
@@ -58,7 +60,7 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
 	}
 
-	block, _, err = DefaultGnosisGenesisBlock().ToBlock()
+	block, _, err = core.DefaultGnosisGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -67,7 +69,7 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = DefaultChiadoGenesisBlock().ToBlock()
+	block, _, err = core.DefaultChiadoGenesisBlock().ToBlock()
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -79,14 +81,14 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 
 func TestCommitGenesisIdempotency(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
-	genesis := DefaultGenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err := WriteGenesisBlock(tx, genesis, nil)
+	genesis := core.DefaultGenesisBlockByChainName(networkname.MainnetChainName)
+	_, _, err := core.WriteGenesisBlock(tx, genesis, nil)
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = WriteGenesisBlock(tx, genesis, nil)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil)
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -97,7 +99,7 @@ func TestSokolHeaderRLP(t *testing.T) {
 	require := require.New(t)
 	{ //sokol
 		expect := common.FromHex("f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
-		block, _, err := DefaultSokolGenesisBlock().ToBlock()
+		block, _, err := core.DefaultSokolGenesisBlock().ToBlock()
 		require.NoError(err)
 		b, err := rlp.EncodeToBytes(block.Header())
 		require.NoError(err)
@@ -152,22 +154,25 @@ func TestAllocConstructor(t *testing.T) {
 
 	funds := big.NewInt(1000000000)
 	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000001")
-	genSpec := &Genesis{
+	genSpec := &core.Genesis{
 		Config: params.AllProtocolChanges,
-		Alloc: GenesisAlloc{
+		Alloc: core.GenesisAlloc{
 			address: {Constructor: deploymentCode, Balance: funds},
 		},
 	}
 	db := memdb.NewTestDB(t)
 	defer db.Close()
-	_, _, err := CommitGenesisBlock(db, genSpec)
+	_, _, err := core.CommitGenesisBlock(db, genSpec)
 	require.NoError(err)
 
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(err)
 	defer tx.Rollback()
 
-	state := state.New(state.NewPlainState(tx, 1, nil))
+	//TODO: support historyV3
+	reader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, false, genSpec.Config.ChainName)
+	require.NoError(err)
+	state := state.New(reader)
 	balance := state.GetBalance(address)
 	assert.Equal(funds, balance.ToBig())
 	code := state.GetCode(address)

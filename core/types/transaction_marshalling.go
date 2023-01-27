@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/protolambda/ztyp/view"
 	"github.com/valyala/fastjson"
@@ -31,8 +32,8 @@ type txJSON struct {
 	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID    *hexutil.Big `json:"chainId,omitempty"`
-	AccessList *AccessList  `json:"accessList,omitempty"`
+	ChainID    *hexutil.Big       `json:"chainId,omitempty"`
+	AccessList *types2.AccessList `json:"accessList,omitempty"`
 
 	// Blob transaction fields:
 	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
@@ -105,7 +106,7 @@ func (tx SignedBlobTx) MarshalJSON() ([]byte, error) {
 	var enc txJSON
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.ChainID = (*hexutil.Big)(u256ToBig(&tx.Message.ChainID))
-	enc.AccessList = (*AccessList)(&tx.Message.AccessList)
+	enc.AccessList = (*types2.AccessList)(&tx.Message.AccessList)
 	enc.Nonce = (*hexutil.Uint64)(&tx.Message.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.Message.Gas)
 	enc.FeeCap = (*hexutil.Big)(u256ToBig(&tx.Message.GasFeeCap)) // MaxFeePerGas

@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -96,7 +95,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 	hd.SetPOSSync(true)
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -155,7 +154,7 @@ func TestMockValidExecution(t *testing.T) {
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
@@ -191,7 +190,7 @@ func TestMockInvalidExecution(t *testing.T) {
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus

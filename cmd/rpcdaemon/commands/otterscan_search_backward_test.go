@@ -150,12 +150,13 @@ func TestBackwardBlockProviderWithMultipleChunksBlockNotFound(t *testing.T) {
 
 func TestSearchTransactionsBefore(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	agg, require := m.HistoryV3Components(), require.New(t)
+	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	t.Run("small page size", func(t *testing.T) {
+		require := require.New(t)
 		results, err := api.SearchTransactionsBefore(m.Ctx, addr, 10, 2)
 		require.NoError(err)
 		require.False(results.FirstPage)
@@ -164,6 +165,7 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(2, len(results.Receipts))
 	})
 	t.Run("big page size", func(t *testing.T) {
+		require := require.New(t)
 		results, err := api.SearchTransactionsBefore(m.Ctx, addr, 10, 10)
 		require.NoError(err)
 		require.False(results.FirstPage)
@@ -172,6 +174,7 @@ func TestSearchTransactionsBefore(t *testing.T) {
 		require.Equal(3, len(results.Receipts))
 	})
 	t.Run("filter last block", func(t *testing.T) {
+		require := require.New(t)
 		results, err := api.SearchTransactionsBefore(m.Ctx, addr, 5, 10)
 
 		require.NoError(err)
