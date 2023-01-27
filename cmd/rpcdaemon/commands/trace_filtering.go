@@ -836,7 +836,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+		traceResult.Output = libcommon.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
 				first = false
