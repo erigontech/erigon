@@ -117,7 +117,7 @@ func (api *APIImpl) GetFilterLogs(_ context.Context, index string) ([]*types.Log
 	cutIndex := strings.TrimPrefix(index, "0x")
 	logs, ok := api.filters.ReadLogs(rpchelper.LogsSubID(cutIndex))
 	if !ok {
-		return nil, nil
+		return []*types.Log{}, nil
 	}
 	return logs, nil
 }
