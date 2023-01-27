@@ -558,35 +558,23 @@ func (it *InvertedIterator) advanceInDb() {
 		//Asc:  [from, to) AND from > to
 		//Desc: [from, to) AND from < to
 		var keyBytes [8]byte
-		if it.startTxNum < 0 {
-			if it.orderAscend {
-				_, v, err = it.cursor.First()
-				if err != nil {
-					// TODO pass error properly around
-					panic(err)
-				}
-			} else {
-				_, v, err = it.cursor.Last()
-				if err != nil {
-					panic(err)
-				}
-			}
-		} else {
+		if it.startTxNum > 0 {
 			binary.BigEndian.PutUint64(keyBytes[:], uint64(it.startTxNum))
-			if v, err = it.cursor.SeekBothRange(it.key, keyBytes[:]); err != nil {
-				panic(err)
+		}
+		k, v, err = it.cursor.SeekExact(it.key)
+		if v, err = it.cursor.SeekBothRange(it.key, keyBytes[:]); err != nil {
+			panic(err)
+		}
+		if v == nil {
+			if !it.orderAscend {
+				_, v, _ = it.cursor.PrevDup()
+				if err != nil {
+					panic(err)
+				}
 			}
 			if v == nil {
-				if !it.orderAscend {
-					_, v, _ = it.cursor.PrevDup()
-					if err != nil {
-						panic(err)
-					}
-				}
-				if v == nil {
-					it.hasNextInDb = false
-					return
-				}
+				it.hasNextInDb = false
+				return
 			}
 		}
 	} else {
