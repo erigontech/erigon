@@ -350,3 +350,66 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		checkIter(t, expectTxNums, txNumsIter)
 	})
 }
+
+func TestAccountAt(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
+
+	blockHash0 := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	blockHash1 := common.HexToHash("0x96c5047b33958408900cb00aa30333861255e5ffadc697b80f156af2322b9f43")
+	blockHash3 := common.HexToHash("0xbec2b2eaf927950102bdce237b186a91db76d059183a984954c02844e42a23c1")
+	blockHash10 := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash11 := common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+	_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash11
+
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	contract := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	t.Run("addr", func(t *testing.T) {
+		require := require.New(t)
+		results, err := api.AccountAt(m.Ctx, blockHash0, 0, addr)
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
+
+		results, err = api.AccountAt(m.Ctx, blockHash1, 0, addr)
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
+
+		results, err = api.AccountAt(m.Ctx, blockHash10, 0, addr)
+		require.NoError(err)
+		require.Equal(1, int(results.Nonce))
+
+		//only 10 blocks in chain
+		results, err = api.AccountAt(m.Ctx, blockHash11, 0, addr)
+		require.NoError(err)
+		require.Nil(results)
+	})
+	t.Run("contract", func(t *testing.T) {
+		require := require.New(t)
+
+		// check contract with more nonces
+		results, err := api.AccountAt(m.Ctx, blockHash10, 0, contract)
+		require.NoError(err)
+		require.Equal(38, int(results.Nonce))
+
+		// and in the middle of block
+		results, err = api.AccountAt(m.Ctx, blockHash10, 1, contract)
+		require.NoError(err)
+		require.Equal(39, int(results.Nonce))
+		require.Equal("0x", results.Code.String())
+
+		// and too big txIndex
+		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
+		require.NoError(err)
+		require.Equal(39, int(results.Nonce))
+	})
+	t.Run("not existing addr", func(t *testing.T) {
+		require := require.New(t)
+		results, err := api.AccountAt(m.Ctx, blockHash10, 0, common.HexToAddress("0x1234"))
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
+	})
+}

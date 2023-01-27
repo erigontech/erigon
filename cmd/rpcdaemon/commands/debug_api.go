@@ -8,11 +8,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -229,6 +230,47 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	if api.historyV3(tx) {
+		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		if number == nil {
+			return nil, nil
+		}
+		canonicalHash, _ := rawdb.ReadCanonicalHash(tx, *number)
+		isCanonical := canonicalHash == blockHash
+		if !isCanonical {
+			return nil, fmt.Errorf("block hash is not canonical")
+		}
+
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+		if err != nil {
+			return nil, err
+		}
+		ttx := tx.(kv.TemporalTx)
+		v, ok, err := ttx.DomainGet(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			return &AccountResult{}, nil
+		}
+
+		var a accounts.Account
+		if err := a.DecodeForStorage(v); err != nil {
+			return nil, err
+		}
+		result := &AccountResult{}
+		result.Balance.ToInt().Set(a.Balance.ToBig())
+		result.Nonce = hexutil.Uint64(a.Nonce)
+		result.CodeHash = a.CodeHash
+
+		code, _, err := ttx.DomainGet(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		if err != nil {
+			return nil, err
+		}
+		result.Code = code
+		return result, nil
+	}
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {

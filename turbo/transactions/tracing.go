@@ -35,7 +35,6 @@ type BlockGetter interface {
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
 func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	header := block.HeaderNoCopy()
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
@@ -43,14 +42,14 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	// Create the parent state database
 	statedb := state.New(reader)
-
-	if txIndex == 0 && len(block.Transactions()) == 0 {
+	if txIndex == 0 {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
+	header := block.HeaderNoCopy()
 	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 
 	// Recompute transactions up to the target index.
@@ -58,7 +57,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Prepare(txn.Hash(), block.Hash(), int(txIndex))
+		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -72,7 +71,9 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	}
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
-
+	if len(block.Transactions()) == 0 {
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
+	}
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
 	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)

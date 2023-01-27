@@ -35,11 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
-func CreateTestKV(t *testing.T) kv.RwDB {
-	s, _, _ := CreateTestSentry(t)
-	return s.DB
-}
-
 type testAddresses struct {
 	key      *ecdsa.PrivateKey
 	key1     *ecdsa.PrivateKey
