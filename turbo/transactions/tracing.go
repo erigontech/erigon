@@ -42,7 +42,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	// Create the parent state database
 	statedb := state.New(reader)
-	if txIndex == 0 {
+
+	if txIndex == 0 && len(block.Transactions()) == 0 {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 	getHeader := func(hash libcommon.Hash, n uint64) *types.Header {
@@ -71,9 +72,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	}
 	vmenv := vm.NewEVM(BlockContext, evmtypes.TxContext{}, statedb, cfg, vm.Config{})
 	rules := vmenv.ChainRules()
-	if len(block.Transactions()) == 0 {
-		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
-	}
+
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
 	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)
