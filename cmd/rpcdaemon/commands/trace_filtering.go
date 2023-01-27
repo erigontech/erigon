@@ -441,7 +441,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		blockNumber := block.NumberU64()
 		if !isPos && api._chainConfig.TerminalTotalDifficulty != nil {
 			header := block.Header()
-			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
+			isPos = header.Difficulty.Cmp(libcommon.Big0) == 0 || header.Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
 		}
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b, block.Time()))

@@ -455,8 +455,8 @@ func MakeEmptyHeader(parent *types.Header, chainConfig *chain.Config, timestamp 
 	header := &types.Header{
 		Root:       parent.Root,
 		ParentHash: parent.Hash(),
-		Number:     new(big.Int).Add(parent.Number, common.Big1),
-		Difficulty: common.Big0,
+		Number:     new(big.Int).Add(parent.Number, libcommon.Big1),
+		Difficulty: libcommon.Big0,
 		Time:       timestamp,
 	}
 

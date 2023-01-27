@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -172,7 +171,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	} else if args.MaxFeePerGas != nil {
 		feeCap = args.MaxFeePerGas.ToInt()
 	} else {
-		feeCap = common.Big0
+		feeCap = libcommon.Big0
 	}
 	// Recap the highest gas limit with account's available balance.
 	if feeCap.Sign() != 0 {

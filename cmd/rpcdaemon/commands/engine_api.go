@@ -15,7 +15,6 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -362,7 +361,7 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 	return &TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
 		TerminalBlockHash:       libcommon.Hash{},
-		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
+		TerminalBlockNumber:     (*hexutil.Big)(libcommon.Big0),
 	}, nil
 }
 
