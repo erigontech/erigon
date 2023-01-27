@@ -95,7 +95,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 
 		TxContext := core.NewEVMTxContext(msg)
-		if idx == int(txIndex) {
+		if idx == txIndex {
 			return msg, BlockContext, TxContext, statedb, reader, nil
 		}
 		vmenv.Reset(TxContext, statedb)
