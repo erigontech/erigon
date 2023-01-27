@@ -95,6 +95,11 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 	b.balances = balances
 }
 
+func (b *BeaconState) AddBalance(balance uint64) {
+	b.touchedLeaves[BalancesLeafIndex] = true
+	b.balances = append(b.balances, balance)
+}
+
 func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances[index] = balance
