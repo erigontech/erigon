@@ -414,7 +414,7 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
-	config, _ := api.BaseAPI.chainConfig(db)
+	config, _ := api.chainConfig(db)
 	snap.config = config.Bor
 
 	// update total voting power
