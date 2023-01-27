@@ -730,64 +730,35 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum in
 		orderAscend: asc,
 		limit:       limit,
 	}
+	search := ctxItem{startTxNum: 0, endTxNum: 0}
 	if asc {
-		var search ctxItem
-		search.startTxNum = 0
-		if startTxNum < 0 {
-			search.endTxNum = 0
-		} else {
+		if startTxNum >= 0 {
 			search.endTxNum = uint64(startTxNum)
 		}
-		if endTxNum < 0 {
-			ic.files.DescendGreaterThan(search, func(item ctxItem) bool {
+		ic.files.DescendGreaterThan(search, func(item ctxItem) bool {
+			if endTxNum < 0 || int(item.startTxNum) < endTxNum {
 				it.stack = append(it.stack, item)
 				it.hasNextInFiles = true
-				if int(item.endTxNum) >= endTxNum {
-					it.hasNextInDb = false
-				}
-				return true
-			})
-		} else {
-			ic.files.DescendGreaterThan(search, func(item ctxItem) bool {
-				if int(item.startTxNum) < endTxNum {
-					it.stack = append(it.stack, item)
-					it.hasNextInFiles = true
-				}
-				if int(item.endTxNum) >= endTxNum {
-					it.hasNextInDb = false
-				}
-				return true
-			})
-		}
+			}
+			if endTxNum >= 0 && int(item.endTxNum) >= endTxNum {
+				it.hasNextInDb = false
+			}
+			return true
+		})
 	} else {
-		var search ctxItem
-		search.startTxNum = 0
-		if startTxNum < 0 {
-			search.endTxNum = 0
-		} else {
+		if startTxNum >= 0 {
 			search.endTxNum = uint64(startTxNum)
 		}
-		if endTxNum < 0 {
-			ic.files.AscendLessThan(search, func(item ctxItem) bool {
+		ic.files.AscendLessThan(search, func(item ctxItem) bool {
+			if startTxNum < 0 || int(item.startTxNum) < startTxNum {
 				it.stack = append(it.stack, item)
 				it.hasNextInFiles = true
-				if int(item.endTxNum) >= startTxNum {
-					it.hasNextInDb = false
-				}
-				return true
-			})
-		} else {
-			ic.files.AscendLessThan(search, func(item ctxItem) bool {
-				if int(item.startTxNum) < startTxNum {
-					it.stack = append(it.stack, item)
-					it.hasNextInFiles = true
-				}
-				if int(item.endTxNum) >= startTxNum {
-					it.hasNextInDb = false
-				}
-				return true
-			})
-		}
+			}
+			if startTxNum > 0 && int(item.endTxNum) >= startTxNum {
+				it.hasNextInDb = false
+			}
+			return true
+		})
 	}
 	it.advance()
 	return it, nil
