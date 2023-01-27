@@ -560,9 +560,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 	}
 
 	for _, p := range protocols {
+		protocol := p
 		ss.Protocols = append(ss.Protocols, p2p.Protocol{
 			Name:           eth.ProtocolName,
-			Version:        p,
+			Version:        protocol,
 			Length:         17,
 			DialCandidates: dialCandidates,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
@@ -575,11 +576,11 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 				log.Debug(fmt.Sprintf("[%s] Start with peer", printablePeerID))
 
 				peerInfo := NewPeerInfo(peer, rw)
-				peerInfo.protocol = p
+				peerInfo.protocol = protocol
 				defer peerInfo.Close()
 
 				defer ss.GoodPeers.Delete(peerID)
-				err := handShake(ctx, ss.GetStatus(), peerID, rw, p, p, func(bestHash libcommon.Hash) error {
+				err := handShake(ctx, ss.GetStatus(), peerID, rw, protocol, protocol, func(bestHash libcommon.Hash) error {
 					ss.GoodPeers.Store(peerID, peerInfo)
 					ss.sendNewPeerToClients(gointerfaces.ConvertHashToH512(peerID))
 					return ss.startSync(ctx, bestHash, peerID)
@@ -593,7 +594,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 				err = runPeer(
 					ctx,
 					peerID,
-					p,
+					protocol,
 					rw,
 					peerInfo,
 					ss.send,
