@@ -22,7 +22,7 @@ type GenericTracer interface {
 	Found() bool
 }
 
-func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID, txIndex uint64, chainConfig *chain.Config, tracer GenericTracer) error {
+func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID uint64, txIndex int, chainConfig *chain.Config, tracer GenericTracer) error {
 	if api.historyV3(dbtx) {
 		ttx := dbtx.(kv.TemporalTx)
 		executor := txnExecutor(ttx, chainConfig, api.engine(), api._blockReader, tracer)
@@ -38,15 +38,15 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		}
 		executor.changeBlock(header)
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, int(txIndex))
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, txIndex)
 		if err != nil {
 			return err
 		}
 		if txn == nil {
-			log.Warn("[rpc] tx is nil", "blockNum", blockNum, "txIndex", txIndex)
+			log.Warn("[rpc genericTracer] tx is nil", "blockNum", blockNum, "txIndex", txIndex)
 			return nil
 		}
-		_, _, err = executor.execTx(txnID, int(txIndex), txn)
+		_, _, err = executor.execTx(txnID, txIndex, txn)
 		if err != nil {
 			return err
 		}
