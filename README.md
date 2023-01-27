@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
+    + [Grafana dashboar god](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -64,9 +64,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.18](https://golang.org/doc/install).
-
-GCC 10+.
+[Golang version >= 1.18](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -106,6 +104,15 @@ Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-ma
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
 
 ### Logging
 
@@ -148,13 +155,6 @@ How to start Erigon's services as separated processes, see in [docker-compose.ym
 By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled in favour of the Erigon native Embedded Consensus Layer.
 If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
-
-### Optional stages
-
-There is an optional stage that can be enabled through flags:
-
-* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to
-  use `erigon_watchTheBurn`.
 
 ### Testnets
 
@@ -242,9 +242,9 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli
+`./build/bin/erigon --config ./config.yaml --chain=goerli`
 
-Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
 flag inside
 of the yaml configuration file and sets the chain to goerli
 

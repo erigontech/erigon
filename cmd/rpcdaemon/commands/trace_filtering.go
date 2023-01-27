@@ -12,7 +12,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -240,63 +242,31 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 	toAddresses = make(map[libcommon.Address]struct{}, len(req.ToAddress))
 	allBlocks = roaring64.New()
 	var blocksTo roaring64.Bitmap
-	if ttx, casted := tx.(kv.TemporalTx); casted {
-		for _, addr := range req.FromAddress {
-			if addr != nil {
-				it, err := ttx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), from, to)
+	for _, addr := range req.FromAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), from, to)
+			if err != nil {
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
-				if err != nil {
-					return nil, nil, nil, err
-				}
-				allBlocks.Or(b)
-				fromAddresses[*addr] = struct{}{}
+				return nil, nil, nil, err
 			}
+			allBlocks.Or(b)
+			fromAddresses[*addr] = struct{}{}
 		}
+	}
 
-		for _, addr := range req.ToAddress {
-			if addr != nil {
-				it, err := ttx.IndexRange(temporal.TracesToIdx, addr.Bytes(), from, to)
+	for _, addr := range req.ToAddress {
+		if addr != nil {
+			b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), from, to)
+			if err != nil {
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
 					continue
 				}
-				b, err := it.ToBitmap()
-				if err != nil {
-					return nil, nil, nil, err
-				}
-				blocksTo.Or(b)
-				toAddresses[*addr] = struct{}{}
+				return nil, nil, nil, err
 			}
-		}
-	} else {
-		for _, addr := range req.FromAddress {
-			if addr != nil {
-				b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), from, to)
-				if err != nil {
-					if errors.Is(err, ethdb.ErrKeyNotFound) {
-						continue
-					}
-					return nil, nil, nil, err
-				}
-				allBlocks.Or(b)
-				fromAddresses[*addr] = struct{}{}
-			}
-		}
-
-		for _, addr := range req.ToAddress {
-			if addr != nil {
-				b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), from, to)
-				if err != nil {
-					if errors.Is(err, ethdb.ErrKeyNotFound) {
-						continue
-					}
-					return nil, nil, nil, err
-				}
-				blocksTo.Or(b)
-				toAddresses[*addr] = struct{}{}
-			}
+			blocksTo.Or(b)
+			toAddresses[*addr] = struct{}{}
 		}
 	}
 
@@ -315,6 +285,53 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 	} else {
 		allBlocks.RemoveRange(0, from)
 		allBlocks.RemoveRange(to, uint64(0x100000000))
+	}
+
+	return fromAddresses, toAddresses, allBlocks, nil
+}
+
+func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[libcommon.Address]struct{}, allBlocks iter.U64, err error) {
+	fromAddresses = make(map[libcommon.Address]struct{}, len(req.FromAddress))
+	toAddresses = make(map[libcommon.Address]struct{}, len(req.ToAddress))
+	var blocksTo iter.U64
+
+	for _, addr := range req.FromAddress {
+		if addr != nil {
+			it, err := tx.IndexRange(temporal.TracesFromIdx, addr.Bytes(), int(from), int(to), order.Asc, -1)
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			allBlocks = iter.Union[uint64](allBlocks, it)
+			fromAddresses[*addr] = struct{}{}
+		}
+	}
+
+	for _, addr := range req.ToAddress {
+		if addr != nil {
+			it, err := tx.IndexRange(temporal.TracesToIdx, addr.Bytes(), int(from), int(to), order.Asc, -1)
+			if errors.Is(err, ethdb.ErrKeyNotFound) {
+				continue
+			}
+			blocksTo = iter.Union[uint64](blocksTo, it)
+			toAddresses[*addr] = struct{}{}
+		}
+	}
+
+	switch req.Mode {
+	case TraceFilterModeIntersection:
+		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo)
+	case TraceFilterModeUnion:
+		fallthrough
+	default:
+		allBlocks = iter.Union[uint64](allBlocks, blocksTo)
+	}
+
+	// Special case - if no addresses specified, take all traces
+	if len(req.FromAddress) == 0 && len(req.ToAddress) == 0 {
+		allBlocks = iter.Range[uint64](from, to)
+		//} else {
+		//allBlocks.RemoveRange(0, from)
+		//allBlocks.RemoveRange(to, uint64(0x100000000))
 	}
 
 	return fromAddresses, toAddresses, allBlocks, nil
@@ -568,17 +585,17 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var fromTxNum, toTxNum uint64
 	var err error
 	if fromBlock > 0 {
-		fromTxNum, err = rawdb.TxNums.Min(dbtx, fromBlock)
+		fromTxNum, err = rawdbv3.TxNums.Min(dbtx, fromBlock)
 		if err != nil {
 			return err
 		}
 	}
-	toTxNum, err = rawdb.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
+	toTxNum, err = rawdbv3.TxNums.Max(dbtx, toBlock) // toBlock is an inclusive bound
 	if err != nil {
 		return err
 	}
 	toTxNum++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
-	fromAddresses, toAddresses, allTxs, err := traceFilterBitmaps(dbtx, req, fromTxNum, toTxNum)
+	fromAddresses, toAddresses, allTxs, err := traceFilterBitmapsV3(dbtx, req, fromTxNum, toTxNum)
 	if err != nil {
 		return err
 	}
@@ -606,28 +623,32 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	nSeen := uint64(0)
 	nExported := uint64(0)
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-	it := allTxs.Iterator()
-	var lastBlockNum uint64
+	it := MapTxNum2BlockNum(dbtx, allTxs)
+
 	var lastBlockHash libcommon.Hash
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
-	var maxTxNum uint64
 
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
+
 	for it.HasNext() {
-		txNum := it.Next()
-		// Find block number
-		ok, blockNum, err := rawdb.TxNums.FindBlockNum(dbtx, txNum)
+		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
 		if err != nil {
-			return err
+			if first {
+				first = false
+			} else {
+				stream.WriteMore()
+			}
+			stream.WriteObjectStart()
+			rpc.HandleError(err, stream)
+			stream.WriteObjectEnd()
+			continue
 		}
-		if !ok {
-			break
-		}
-		if blockNum > lastBlockNum {
+
+		if blockNumChanged {
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
 				if first {
 					first = false
@@ -639,25 +660,23 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
-			lastBlockNum = blockNum
-			lastBlockHash = lastHeader.Hash()
-			lastSigner = types.MakeSigner(chainConfig, blockNum)
-			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
-			maxTxNum, err = rawdb.TxNums.Max(dbtx, blockNum)
-			if err != nil {
+			if lastHeader == nil {
 				if first {
 					first = false
 				} else {
 					stream.WriteMore()
 				}
 				stream.WriteObjectStart()
-				rpc.HandleError(err, stream)
+				rpc.HandleError(fmt.Errorf("header not found: %d", blockNum), stream)
 				stream.WriteObjectEnd()
 				continue
 			}
-		}
 
-		if txNum == maxTxNum {
+			lastBlockHash = lastHeader.Hash()
+			lastSigner = types.MakeSigner(chainConfig, blockNum)
+			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
+		}
+		if isFnalTxn {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -750,19 +769,12 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 			continue
 		}
-		var startTxNum uint64
-		if blockNum > 0 {
-			startTxNum, err = rawdb.TxNums.Min(dbtx, blockNum)
-			if err != nil {
-				return err
-			}
-		}
-		if txNum == startTxNum { //is system tx
+		if txIndex == -1 { //is system tx
 			continue
 		}
-		txIndex := txNum - startTxNum - 1
+		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, int(txIndex))
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
 		if err != nil {
 			if first {
 				first = false
@@ -810,7 +822,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(core.GasPool).AddGas(msg.Gas())
-		ibs.Prepare(txHash, lastBlockHash, int(txIndex))
+		ibs.Prepare(txHash, lastBlockHash, txIndex)
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
@@ -853,7 +865,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
 				pt.TransactionHash = &txHash
-				pt.TransactionPosition = &txIndex
+				pt.TransactionPosition = &txIndexU64
 				b, err := json.Marshal(pt)
 				if err != nil {
 					if first {

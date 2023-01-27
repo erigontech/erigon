@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -21,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 8
+const requestLoopCutOff int = 1
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -106,7 +107,7 @@ func BodiesForward(
 	// do opposite here - without storing any meta-info.
 	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV3 {
-			if err := rawdb.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
 			}
 			//cfg.txNums.Append(blockNum, lastTxnNum)
@@ -199,16 +200,23 @@ func BodiesForward(
 
 		write := true
 		for i := uint64(0); i < toProcess; i++ {
+			if !quiet {
+				select {
+				case <-logEvery.C:
+					logWritingBodies(logPrefix, bodyProgress, headerProgress)
+				default:
+				}
+			}
 			nextBlock := requestedLow + i
-			rawBody := cfg.bd.GetBodyFromCache(nextBlock)
+			rawBody := cfg.bd.GetBodyFromCache(nextBlock, write /* delete */)
 			if rawBody == nil {
-				log.Debug("Body was nil when reading from cache", "block", nextBlock)
 				cfg.bd.NotDelivered(nextBlock)
 				write = false
 			}
 			if !write {
 				continue
 			}
+			cfg.bd.NotDelivered(nextBlock)
 			header, _, err := cfg.bd.GetHeader(nextBlock, cfg.blockReader, tx)
 			if err != nil {
 				return false, err
@@ -232,7 +240,7 @@ func BodiesForward(
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return false, err
 				}
 			}
@@ -244,10 +252,6 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
-		}
-
-		if !quiet && toProcess > 0 {
-			logWritingBodies(logPrefix, bodyProgress, headerProgress)
 		}
 
 		d5 += time.Since(start)
@@ -370,7 +374,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		return err
 	}
 	if cfg.historyV3 {
-		if err := rawdb.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
 			return err
 		}
 	}

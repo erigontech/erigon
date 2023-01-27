@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
@@ -25,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 )
@@ -553,7 +553,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "storage", storage)
 	}
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
 	if err != nil {
 		return err
 	}
@@ -704,7 +704,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo+1)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)
 	if err != nil {
 		return err
 	}

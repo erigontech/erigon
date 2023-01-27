@@ -5,6 +5,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -75,7 +76,6 @@ func getSuccessfulAttesterSlashing() *cltypes.AttesterSlashing {
 
 func TestProcessProposerSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetSlashings([]uint64{0})
 	unchangingState.SetValidatorAt(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
@@ -84,7 +84,6 @@ func TestProcessProposerSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetSlashings([]uint64{0})
 	successState.SetValidatorAt(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
@@ -169,7 +168,8 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := ProcessProposerSlashing(tc.state, tc.slashing)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			err := s.ProcessProposerSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -186,7 +186,6 @@ func TestProcessProposerSlashing(t *testing.T) {
 
 func TestProcessAttesterSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetSlashings([]uint64{0})
 	unchangingState.SetValidatorAt(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
@@ -201,7 +200,6 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetSlashings([]uint64{0})
 	successState.SetValidatorAt(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
@@ -282,7 +280,8 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := ProcessAttesterSlashing(tc.state, tc.slashing)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			err := s.ProcessAttesterSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")

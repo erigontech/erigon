@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	currenttHeaderTime := currentHeader.Time
+	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
 	firstHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -99,7 +99,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	firstHeaderTime := firstHeader.Time
 
-	if currenttHeaderTime <= uintTimestamp {
+	if currentHeaderTime <= uintTimestamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
@@ -139,12 +139,18 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
 	}
 
-	if resultingHeader.Time > uintTimestamp {
-		response, err := buildBlockResponse(tx, uint64(blockNum)-1, fullTx)
+	for resultingHeader.Time > uintTimestamp {
+		beforeHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum)-1)
 		if err != nil {
 			return nil, err
 		}
-		return response, nil
+
+		if beforeHeader == nil || beforeHeader.Time < uintTimestamp {
+			break
+		}
+
+		blockNum--
+		resultingHeader = beforeHeader
 	}
 
 	response, err := buildBlockResponse(tx, uint64(blockNum), fullTx)
@@ -209,7 +215,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	balancesMapping := make(map[libcommon.Address]*hexutil.Big)
 
-	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
 	}

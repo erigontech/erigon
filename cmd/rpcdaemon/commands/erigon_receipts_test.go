@@ -57,7 +57,7 @@ func TestGetLogs(t *testing.T) {
 	//
 	//api := NewErigonAPI(baseApi, m.DB, nil)
 	//logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
-	//assert.NoError(err)
+	//assert.NoError(err)s
 	//assert.Equal(uint64(10), logs[0].BlockNumber)
 	//
 	////filer by wrong address

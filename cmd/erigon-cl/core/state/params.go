@@ -29,7 +29,7 @@ const (
 	CurrentSyncCommitteeLeafIndex         StateLeafIndex = 22
 	NextSyncCommitteeLeafIndex            StateLeafIndex = 23
 	LatestExecutionPayloadHeaderLeafIndex StateLeafIndex = 24
-
-	// Leaves sizes
-	BellatrixLeavesSize = 25
+	NextWithdrawalIndexLeafIndex          StateLeafIndex = 25
+	NextWithdrawalValidatorIndexLeafIndex StateLeafIndex = 26
+	HistoricalSummariesLeafIndex          StateLeafIndex = 27
 )

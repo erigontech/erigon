@@ -11,10 +11,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
-
-	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -26,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
@@ -62,7 +62,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, nil
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		return 0, fmt.Errorf("could not find latest block in cache or db")
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, api.historyV3(dbtx), api._agg, chainConfig.ChainName)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, dbtx, latestCanBlockNumber, isLatest, 0, api.stateCache, api.historyV3(dbtx), chainConfig.ChainName)
 	if err != nil {
 		return 0, err
 	}
@@ -321,9 +321,9 @@ func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 // Its the result of the `eth_createAccessList` RPC call.
 // It contains an error if the transaction itself failed.
 type accessListResult struct {
-	Accesslist *types.AccessList `json:"accessList"`
-	Error      string            `json:"error,omitempty"`
-	GasUsed    hexutil.Uint64    `json:"gasUsed"`
+	Accesslist *types2.AccessList `json:"accessList"`
+	Error      string             `json:"error,omitempty"`
+	GasUsed    hexutil.Uint64     `json:"gasUsed"`
 }
 
 // CreateAccessList implements eth_createAccessList. It creates an access list for the given transaction.
@@ -366,7 +366,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api._agg, api.historyV3(tx), chainConfig.ChainName)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, blockNumber+1, 0, api.historyV3(tx), chainConfig.ChainName)
 		if err != nil {
 			return nil, err
 		}
@@ -490,6 +490,6 @@ func optimizeToInAccessList(accessList *accessListResult, to libcommon.Address) 
 	}
 }
 
-func removeIndex(s types.AccessList, index int) types.AccessList {
+func removeIndex(s types2.AccessList, index int) types2.AccessList {
 	return append(s[:index], s[index+1:]...)
 }

@@ -21,16 +21,16 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon-lib/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/math"
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -91,7 +91,7 @@ type Message interface {
 	Nonce() uint64
 	CheckNonce() bool
 	Data() []byte
-	AccessList() types.AccessList
+	AccessList() types2.AccessList
 
 	IsFree() bool
 }
@@ -132,80 +132,19 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
-	// Set the starting gas for the raw transaction
-	var gas uint64
-	if isContractCreation && isHomestead {
-		gas = params.TxGasContractCreation
-	} else {
-		gas = params.TxGas
-	}
-
+func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation bool, isHomestead, isEIP2028, isEIP3860 bool) (uint64, error) {
+	// Zero and non-zero bytes are priced differently
 	dataLen := uint64(len(data))
-	// Bump the required gas by the amount of transactional data
-	if dataLen > 0 {
-		// Zero and non-zero bytes are priced differently
-		var nz uint64
-		for _, byt := range data {
-			if byt != 0 {
-				nz++
-			}
-		}
-		// Make sure we don't exceed uint64 for all data combinations
-		nonZeroGas := params.TxDataNonZeroGasFrontier
-		if isEIP2028 {
-			nonZeroGas = params.TxDataNonZeroGasEIP2028
-		}
-
-		product, overflow := math.SafeMul(nz, nonZeroGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, product)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-
-		z := dataLen - nz
-		product, overflow = math.SafeMul(z, params.TxDataZeroGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, product)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-
-		if isContractCreation && isEIP3860 {
-			numWords := vm.ToWordSize(dataLen)
-			product, overflow = math.SafeMul(numWords, params.InitCodeWordGas)
-			if overflow {
-				return 0, ErrGasUintOverflow
-			}
-			gas, overflow = math.SafeAdd(gas, product)
-			if overflow {
-				return 0, ErrGasUintOverflow
-			}
+	dataNonZeroLen := uint64(0)
+	for _, byt := range data {
+		if byt != 0 {
+			dataNonZeroLen++
 		}
 	}
-	if accessList != nil {
-		product, overflow := math.SafeMul(uint64(len(accessList)), params.TxAccessListAddressGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, product)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
 
-		product, overflow = math.SafeMul(uint64(accessList.StorageKeys()), params.TxAccessListStorageKeyGas)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
-		gas, overflow = math.SafeAdd(gas, product)
-		if overflow {
-			return 0, ErrGasUintOverflow
-		}
+	gas, status := txpool.CalcIntrinsicGas(dataLen, dataNonZeroLen, accessList, isContractCreation, isHomestead, isEIP2028, isEIP3860)
+	if status != txpool.Success {
+		return 0, ErrGasUintOverflow
 	}
 	return gas, nil
 }
