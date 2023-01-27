@@ -338,3 +338,8 @@ func (v *Validator) HashSSZ() ([32]byte, error) {
 	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
 	return merkle_tree.ArraysRoot(leaves, 8)
 }
+
+// Active returns if validator is active for given epoch
+func (v *Validator) Active(epoch uint64) bool {
+	return v.ActivationEpoch <= epoch && epoch < v.ExitEpoch
+}

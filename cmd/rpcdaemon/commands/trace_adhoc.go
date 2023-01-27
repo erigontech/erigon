@@ -11,6 +11,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -51,7 +52,7 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.Big       `json:"maxFeePerGas"`
 	Value                *hexutil.Big       `json:"value"`
 	Data                 hexutil.Bytes      `json:"data"`
-	AccessList           *types.AccessList  `json:"accessList"`
+	AccessList           *types2.AccessList `json:"accessList"`
 	txHash               *libcommon.Hash
 	traceTypes           []string
 }
@@ -209,7 +210,7 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.Data != nil {
 		data = args.Data
 	}
-	var accessList types.AccessList
+	var accessList types2.AccessList
 	if args.AccessList != nil {
 		accessList = *args.AccessList
 	}
@@ -396,23 +397,7 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 			}
 		} else {
 			topTrace.Result = nil
-			switch err {
-			case vm.ErrInvalidJump:
-				topTrace.Error = "Bad jump destination"
-			case vm.ErrContractAddressCollision, vm.ErrCodeStoreOutOfGas, vm.ErrOutOfGas, vm.ErrGasUintOverflow:
-				topTrace.Error = "Out of gas"
-			case vm.ErrWriteProtection:
-				topTrace.Error = "Mutable Call In Static Context"
-			default:
-				switch err.(type) {
-				case *vm.ErrStackUnderflow:
-					topTrace.Error = "Stack underflow"
-				case *vm.ErrInvalidOpCode:
-					topTrace.Error = "Bad instruction"
-				default:
-					topTrace.Error = err.Error()
-				}
-			}
+			topTrace.Error = err.Error()
 		}
 	} else {
 		if len(output) > 0 {

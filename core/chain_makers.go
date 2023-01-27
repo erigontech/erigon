@@ -394,7 +394,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			c.Close()
 			if GenerateTrace {
 				fmt.Printf("State after %d================\n", b.header.Number)
-				it, err := tx.Stream(kv.HashedAccounts, nil, nil)
+				it, err := tx.Range(kv.HashedAccounts, nil, nil)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -406,7 +406,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 					fmt.Printf("%x: %x\n", k, v)
 				}
 				fmt.Printf("..................\n")
-				it, err = tx.Stream(kv.HashedStorage, nil, nil)
+				it, err = tx.Range(kv.HashedStorage, nil, nil)
 				if err != nil {
 					return nil, nil, err
 				}

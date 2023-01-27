@@ -65,7 +65,7 @@ func IsValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 		pks = append(pks, val.PublicKey[:])
 	}
 
-	domain, err := GetDomain(state, clparams.MainnetBeaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
+	domain, err := state.GetDomain(clparams.MainnetBeaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -85,7 +85,7 @@ func IsValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 	return true, nil
 }
 
-func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
+func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.ProposerSlashing) error {
 	h1 := propSlashing.Header1.Header
 	h2 := propSlashing.Header2.Header
 
@@ -109,13 +109,13 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer := state.ValidatorAt(int(h1.ProposerIndex))
-	if !IsSlashableValidator(proposer, GetEpochAtSlot(state.Slot())) {
+	proposer := s.state.ValidatorAt(int(h1.ProposerIndex))
+	if !IsSlashableValidator(proposer, s.state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
 	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{propSlashing.Header1, propSlashing.Header2} {
-		domain, err := GetDomain(state, clparams.MainnetBeaconConfig.DomainBeaconProposer, GetEpochAtSlot(signedHeader.Header.Slot))
+		domain, err := s.state.GetDomain(s.beaconConfig.DomainBeaconProposer, s.state.GetEpochAtSlot(signedHeader.Header.Slot))
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
@@ -133,11 +133,11 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
-	SlashValidator(state, h1.ProposerIndex, 0)
+	s.state.SlashValidator(h1.ProposerIndex, 0)
 	return nil
 }
 
-func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
+func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterSlashing) error {
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
@@ -149,7 +149,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := IsValidIndexedAttestation(state, att1)
+	valid, err := IsValidIndexedAttestation(s.state, att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -157,7 +157,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = IsValidIndexedAttestation(state, att2)
+	valid, err = IsValidIndexedAttestation(s.state, att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
@@ -168,8 +168,8 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 	slashedAny := false
 	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
 	for _, ind := range indices {
-		if IsSlashableValidator(state.ValidatorAt(int(ind)), GetEpochAtSlot(state.Slot())) {
-			err := SlashValidator(state, ind, 0)
+		if IsSlashableValidator(s.state.ValidatorAt(int(ind)), s.state.GetEpochAtSlot(s.state.Slot())) {
+			err := s.state.SlashValidator(ind, 0)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
 			}
