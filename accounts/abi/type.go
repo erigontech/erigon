@@ -24,7 +24,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Type enumerator
@@ -232,7 +232,7 @@ func (t Type) GetType() reflect.Type {
 	case TupleTy:
 		return t.TupleType
 	case AddressTy:
-		return reflect.TypeOf(common.Address{})
+		return reflect.TypeOf(libcommon.Address{})
 	case FixedBytesTy:
 		return reflect.ArrayOf(t.Size, reflect.TypeOf(byte(0)))
 	case BytesTy:

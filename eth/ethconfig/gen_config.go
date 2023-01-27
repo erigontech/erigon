@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
@@ -24,16 +26,16 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Prune                          prune.Mode
 		BatchSize                      datasize.ByteSize
 		ImportMode                     bool
-		BadBlockHash                   common.Hash
+		BadBlockHash                   libcommon.Hash
 		Snapshot                       Snapshot
 		BlockDownloaderWindow          int
 		ExternalSnapshotDownloaderAddr string
-		Whitelist                      map[uint64]common.Hash `toml:"-"`
+		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
 		Miner                          params.MiningConfig
 		Ethash                         ethash.Config
 		Clique                         params.ConsensusSnapshotConfig
-		Aura                           params.AuRaConfig
-		Parlia                         params.ParliaConfig
+		Aura                           chain.AuRaConfig
+		Parlia                         chain.ParliaConfig
 		TxPool                         core.TxPoolConfig
 		GPO                            gasprice.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
@@ -77,16 +79,16 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Prune                          *prune.Mode
 		BatchSize                      *datasize.ByteSize
 		ImportMode                     *bool
-		BadBlockHash                   *common.Hash
+		BadBlockHash                   *libcommon.Hash
 		Snapshot                       *Snapshot
 		BlockDownloaderWindow          *int
 		ExternalSnapshotDownloaderAddr *string
-		Whitelist                      map[uint64]common.Hash `toml:"-"`
+		Whitelist                      map[uint64]libcommon.Hash `toml:"-"`
 		Miner                          *params.MiningConfig
 		Ethash                         *ethash.Config
 		Clique                         *params.ConsensusSnapshotConfig
-		Aura                           *params.AuRaConfig
-		Parlia                         *params.ParliaConfig
+		Aura                           *chain.AuRaConfig
+		Parlia                         *chain.ParliaConfig
 		TxPool                         *core.TxPoolConfig
 		GPO                            *gasprice.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`

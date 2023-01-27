@@ -13,7 +13,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Getting Started](#getting-started)
     + [Logging](#logging)
     + [Testnets](#testnets)
-    + [Mining](#mining)
+    + [Block Production](#block-production-pow-miner-or-pos-validator)
     + [Windows](#windows)
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
@@ -24,7 +24,7 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboard](#grafana-dashboard)
+    + [Grafana dashboar god](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -53,6 +53,8 @@ System Requirements
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
 
+* Gnosis Chain Archive: 370GB (January 2023).
+
 * BSC Archive: 7TB. BSC Full: 1TB.
 
 * Polygon Mainnet Archive: 5TB. Polygon Mumbai Archive: 1TB.
@@ -62,9 +64,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.18](https://golang.org/doc/install).
-
-GCC 10+.
+[Golang version >= 1.18](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -95,14 +95,24 @@ make erigon
 ./build/bin/erigon
 ```
 
-Default `--snapshots` for `mainnet`, `goerli`, `bsc`. Other networks now have default `--snapshots=false`. Increase
+Default `--snapshots` for `mainnet`, `goerli`, `gnosis`, `bsc`. Other networks now have default `--snapshots=false`. Increase
 download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloader docs](./cmd/downloader/readme.md)</code>
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=bor-mainnet` for Polygon Mainnet and `--chain=mumbai` for Polygon Mumbai.
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, and `--chain=mumbai` for Polygon Mumbai.
+For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
+
+### Datadir structure
+
+- chaindata: recent blocks, state, recent state history. low-latency disk recommended. 
+- snapshots: old blocks, old state history. can symlink/mount it to cheaper disk. mostly immutable.
+- temp: can grow to ~100gb, but usually empty. can symlink/mount it to cheaper disk.
+- txpool: pending transactions. safe to remove.
+- nodes:  p2p peers. safe to remove.
+
 
 ### Logging
 
@@ -146,13 +156,6 @@ By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled
 If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
 
-### Optional stages
-
-There is an optional stage that can be enabled through flags:
-
-* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to
-  use `erigon_watchTheBurn`.
-
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
@@ -169,9 +172,9 @@ Please note the `--datadir` option that allows you to store Erigon files in a no
 in `goerli` subdirectory of the current directory. Name of the directory `--datadir` does not have to match the name of
 the chain in `--chain`.
 
-### Mining
+### Block Production (PoW Miner or PoS Validator)
 
-**Disclaimer: Not supported/tested for Polygon Network (In Progress)**
+**Disclaimer: Not supported/tested for Gnosis Chain and Polygon Network (In Progress)**
 
 Support only remote-miners.
 
@@ -188,7 +191,7 @@ Support only remote-miners.
     + eth_newFilter
     + websocket Logs
 
-<code> 🔬 Detailed mining explanation is [here](/docs/mining.md).</code>
+<code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
 ### Windows
 

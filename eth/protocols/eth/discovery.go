@@ -19,7 +19,8 @@ package eth
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -39,7 +40,7 @@ func (e enrEntry) ENRKey() string {
 }
 
 // CurrentENREntryFromForks constructs an `eth` ENR entry based on the current state of the chain.
-func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash common.Hash, headHeight, headTime uint64) *enrEntry {
+func CurrentENREntryFromForks(heightForks, timeForks []uint64, genesisHash libcommon.Hash, headHeight, headTime uint64) *enrEntry {
 	return &enrEntry{
 		ForkID: forkid.NewIDFromForks(heightForks, timeForks, genesisHash, headHeight, headTime),
 	}

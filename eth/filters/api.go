@@ -22,9 +22,10 @@ import (
 	"fmt"
 	"math/big"
 
-	ethereum "github.com/ledgerwatch/erigon"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/common"
+
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
@@ -51,7 +52,7 @@ func DefaultLogFilterOptions() LogFilterOptions {
 type filter struct {
 	typ      Type
 	deadline *time.Timer // filter is inactiv when deadline triggers
-	hashes   []common.Hash
+	hashes   []libcommon.Hash
 	crit     FilterCriteria
 	logs     []*types.Log
 	s        *Subscription // associated subscription in event system
@@ -133,12 +134,12 @@ func (api *PublicFilterAPI) Close() {
 // https://eth.wiki/json-rpc/API#eth_newpendingtransactionfilter
 func (api *PublicFilterAPI) NewPendingTransactionFilter() rpc.ID {
 	var (
-		pendingTxs   = make(chan []common.Hash)
+		pendingTxs   = make(chan []libcommon.Hash)
 		pendingTxSub = api.events.SubscribePendingTxs(pendingTxs)
 	)
 
 	api.filtersMu.Lock()
-	api.filters[pendingTxSub.ID] = &filter{typ: PendingTransactionsSubscription, deadline: time.NewTimer(api.timeout), hashes: make([]common.Hash, 0), s: pendingTxSub}
+	api.filters[pendingTxSub.ID] = &filter{typ: PendingTransactionsSubscription, deadline: time.NewTimer(api.timeout), hashes: make([]libcommon.Hash, 0), s: pendingTxSub}
 	api.filtersMu.Unlock()
 
 	go func() {
@@ -175,7 +176,7 @@ func (api *PublicFilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Su
 	rpcSub := notifier.CreateSubscription()
 
 	go func() {
-		txHashes := make(chan []common.Hash, 128)
+		txHashes := make(chan []libcommon.Hash, 128)
 		pendingTxSub := api.events.SubscribePendingTxs(txHashes)
 
 		for {
@@ -212,7 +213,7 @@ func (api *PublicFilterAPI) NewBlockFilter() rpc.ID {
 	)
 
 	api.filtersMu.Lock()
-	api.filters[headerSub.ID] = &filter{typ: BlocksSubscription, deadline: time.NewTimer(api.timeout), hashes: make([]common.Hash, 0), s: headerSub}
+	api.filters[headerSub.ID] = &filter{typ: BlocksSubscription, deadline: time.NewTimer(api.timeout), hashes: make([]libcommon.Hash, 0), s: headerSub}
 	api.filtersMu.Unlock()
 
 	go func() {
@@ -444,7 +445,7 @@ func (api *PublicFilterAPI) GetFilterLogs(ctx context.Context, id rpc.ID) ([]*ty
 // GetFilterChanges returns the logs for the filter with the given id since
 // last time it was called. This can be used for polling.
 //
-// For pending transaction and block filters the result is []common.Hash.
+// For pending transaction and block filters the result is []libcommon.Hash.
 // (pending)Log filters return []Log.
 //
 // https://eth.wiki/json-rpc/API#eth_getfilterchanges
@@ -479,7 +480,7 @@ func (api *PublicFilterAPI) GetFilterChanges(id rpc.ID) (interface{}, error) {
 // UnmarshalJSON sets *args fields with given data.
 func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	type input struct {
-		BlockHash *common.Hash     `json:"blockHash"`
+		BlockHash *libcommon.Hash  `json:"blockHash"`
 		FromBlock *rpc.BlockNumber `json:"fromBlock"`
 		ToBlock   *rpc.BlockNumber `json:"toBlock"`
 		Addresses interface{}      `json:"address"`
@@ -507,7 +508,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 		}
 	}
 
-	args.Addresses = []common.Address{}
+	args.Addresses = []libcommon.Address{}
 
 	if raw.Addresses != nil {
 		// raw.Address can contain a single address or an array of addresses
@@ -529,16 +530,16 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 			if err != nil {
 				return fmt.Errorf("invalid address: %w", err)
 			}
-			args.Addresses = []common.Address{addr}
+			args.Addresses = []libcommon.Address{addr}
 		default:
 			return errors.New("invalid addresses in query")
 		}
 	}
 
 	// topics is an array consisting of strings and/or arrays of strings.
-	// JSON null values are converted to common.Hash{} and ignored by the filter manager.
+	// JSON null values are converted to libcommon.Hash{} and ignored by the filter manager.
 	if len(raw.Topics) > 0 {
-		args.Topics = make([][]common.Hash, len(raw.Topics))
+		args.Topics = make([][]libcommon.Hash, len(raw.Topics))
 		for i, t := range raw.Topics {
 			switch topic := t.(type) {
 			case nil:
@@ -550,7 +551,7 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 				if err != nil {
 					return err
 				}
-				args.Topics[i] = []common.Hash{top}
+				args.Topics[i] = []libcommon.Hash{top}
 
 			case []interface{}:
 				// or case e.g. [null, "topic0", "topic1"]
@@ -579,18 +580,18 @@ func (args *FilterCriteria) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func decodeAddress(s string) (common.Address, error) {
+func decodeAddress(s string) (libcommon.Address, error) {
 	b, err := hexutil.Decode(s)
 	if err == nil && len(b) != length.Addr {
 		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for address", len(b), length.Addr)
 	}
-	return common.BytesToAddress(b), err
+	return libcommon.BytesToAddress(b), err
 }
 
-func decodeTopic(s string) (common.Hash, error) {
+func decodeTopic(s string) (libcommon.Hash, error) {
 	b, err := hexutil.Decode(s)
 	if err == nil && len(b) != length.Hash {
 		err = fmt.Errorf("hex has invalid length %d after decoding; expected %d for topic", len(b), length.Hash)
 	}
-	return common.BytesToHash(b), err
+	return libcommon.BytesToHash(b), err
 }

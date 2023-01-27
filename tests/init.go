@@ -21,11 +21,11 @@ import (
 	"math/big"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
 // Forks table defines supported forks and their chain config.
-var Forks = map[string]*params.ChainConfig{
+var Forks = map[string]*chain.Config{
 	"Frontier": {
 		ChainID: big.NewInt(1),
 	},
@@ -258,6 +258,24 @@ var Forks = map[string]*params.ChainConfig{
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
+	},
+	"MergeToShanghaiAtTime15k": {
+		ChainID:                       big.NewInt(1),
+		HomesteadBlock:                big.NewInt(0),
+		TangerineWhistleBlock:         big.NewInt(0),
+		SpuriousDragonBlock:           big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		ShanghaiTime:                  big.NewInt(15_000),
 	},
 }
 

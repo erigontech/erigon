@@ -21,9 +21,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // WaitMined waits for tx to be mined on the blockchain.
@@ -54,16 +55,16 @@ func WaitMined(ctx context.Context, b DeployBackend, tx types.Transaction) (*typ
 
 // WaitDeployed waits for a contract deployment transaction and returns the on-chain
 // contract address when it is mined. It stops waiting when ctx is canceled.
-func WaitDeployed(ctx context.Context, b DeployBackend, tx types.Transaction) (common.Address, error) {
+func WaitDeployed(ctx context.Context, b DeployBackend, tx types.Transaction) (libcommon.Address, error) {
 	if tx.GetTo() != nil {
-		return common.Address{}, errors.New("tx is not contract creation")
+		return libcommon.Address{}, errors.New("tx is not contract creation")
 	}
 	receipt, err := WaitMined(ctx, b, tx)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
-	if receipt.ContractAddress == (common.Address{}) {
-		return common.Address{}, errors.New("zero address")
+	if receipt.ContractAddress == (libcommon.Address{}) {
+		return libcommon.Address{}, errors.New("zero address")
 	}
 	// Check that code has indeed been deployed at the address.
 	// This matters on pre-Homestead chains: OOG in the constructor

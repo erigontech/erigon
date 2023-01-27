@@ -2,14 +2,15 @@ package core
 
 import (
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
-var transferLogSig = common.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
-var transferFeeLogSig = common.HexToHash("0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63")
-var feeAddress = common.HexToAddress("0x0000000000000000000000000000000000001010")
+var transferLogSig = libcommon.HexToHash("0xe6497e3ee548a3372136af2fcb0696db31fc6cf20260707645068bd3fe97f3c4")
+var transferFeeLogSig = libcommon.HexToHash("0x4dfe1bbbcf077ddc3e01291eea2d5c70c2b422b415d95645b9adcfd678cb1d63")
+var feeAddress = libcommon.HexToAddress("0x0000000000000000000000000000000000001010")
 var zero = uint256.NewInt(0)
 
 // AddTransferLog adds transfer log into state
@@ -17,7 +18,7 @@ func AddTransferLog(
 	state evmtypes.IntraBlockState,
 
 	sender,
-	recipient common.Address,
+	recipient libcommon.Address,
 
 	amount,
 	input1,
@@ -46,7 +47,7 @@ func AddFeeTransferLog(
 	state evmtypes.IntraBlockState,
 
 	sender,
-	recipient common.Address,
+	recipient libcommon.Address,
 
 	amount,
 	input1,
@@ -72,10 +73,10 @@ func AddFeeTransferLog(
 // addTransferLog adds transfer log into state
 func addTransferLog(
 	state evmtypes.IntraBlockState,
-	eventSig common.Hash,
+	eventSig libcommon.Hash,
 
 	sender,
-	recipient common.Address,
+	recipient libcommon.Address,
 
 	amount,
 	input1,
@@ -98,7 +99,7 @@ func addTransferLog(
 	// add transfer log
 	state.AddLog(&types.Log{
 		Address: feeAddress,
-		Topics: []common.Hash{
+		Topics: []libcommon.Hash{
 			eventSig,
 			feeAddress.Hash(),
 			sender.Hash(),

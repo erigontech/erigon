@@ -18,7 +18,7 @@ import (
 
 	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
-	ssz "github.com/prysmaticlabs/fastssz"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
@@ -56,9 +56,12 @@ func CompressSnappy(data []byte) []byte {
 	return snappy.Encode(nil, data)
 }
 
-func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
-	enc := make([]byte, data.SizeSSZ())
-	enc, err := data.MarshalSSZTo(enc[:0])
+func EncodeSSZSnappy(data ssz_utils.Marshaler) ([]byte, error) {
+	var (
+		enc = make([]byte, 0, data.EncodingSizeSSZ())
+		err error
+	)
+	enc, err = data.EncodeSSZ(enc)
 	if err != nil {
 		return nil, err
 	}
@@ -66,13 +69,13 @@ func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	return snappy.Encode(nil, enc), nil
 }
 
-func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
+func DecodeSSZSnappy(dst ssz_utils.Unmarshaler, src []byte) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
 	}
 
-	err = dst.UnmarshalSSZ(dec)
+	err = dst.DecodeSSZ(dec)
 	if err != nil {
 		return err
 	}

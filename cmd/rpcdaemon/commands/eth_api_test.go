@@ -6,17 +6,19 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
@@ -32,10 +34,10 @@ func TestGetBalanceChangesInBlock(t *testing.T) {
 	if err != nil {
 		t.Errorf("calling GetBalanceChangesInBlock resulted in an error: %v", err)
 	}
-	expected := map[common.Address]*hexutil.Big{
-		common.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
-		common.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
-		common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
+	expected := map[libcommon.Address]*hexutil.Big{
+		libcommon.HexToAddress("0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e"): (*hexutil.Big)(uint256.NewInt(200000000000000000).ToBig()),
+		libcommon.HexToAddress("0x703c4b2bD70c169f5717101CaeE543299Fc946C7"): (*hexutil.Big)(uint256.NewInt(300000000000000000).ToBig()),
+		libcommon.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7"): (*hexutil.Big)(uint256.NewInt(9000000000000000000).ToBig()),
 	}
 	assert.Equal(len(expected), len(balances))
 	for i := range balances {
@@ -50,9 +52,9 @@ func TestGetTransactionReceipt(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), db, nil, nil, nil, 5000000, 100_000)
 	// Call GetTransactionReceipt for transaction which is not in the database
-	if _, err := api.GetTransactionReceipt(context.Background(), common.Hash{}); err != nil {
+	if _, err := api.GetTransactionReceipt(context.Background(), libcommon.Hash{}); err != nil {
 		t.Errorf("calling GetTransactionReceipt with empty hash: %v", err)
 	}
 }
@@ -62,9 +64,9 @@ func TestGetTransactionReceiptUnprotected(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
 	// Call GetTransactionReceipt for un-protected transaction
-	if _, err := api.GetTransactionReceipt(context.Background(), common.HexToHash("0x3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea")); err != nil {
+	if _, err := api.GetTransactionReceipt(context.Background(), libcommon.HexToHash("0x3f3cb8a0e13ed2481f97f53f7095b9cbc78b6ffb779f2d3e565146371a8830ea")); err != nil {
 		t.Errorf("calling GetTransactionReceipt for unprotected tx: %v", err)
 	}
 }
@@ -77,15 +79,15 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithNumber(0))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(libcommon.HexToHash("0x0").String(), result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
@@ -94,15 +96,15 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), false))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(libcommon.HexToHash("0x0").String(), result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
@@ -111,15 +113,15 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	result, err := api.GetStorageAt(context.Background(), addr, "0x0", rpc.BlockNumberOrHashWithHash(m.Genesis.Hash(), true))
 	if err != nil {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(libcommon.HexToHash("0x0").String(), result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
@@ -127,8 +129,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
 	}, true)
@@ -151,8 +153,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	offChain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *core.BlockGen) {
 	}, true)
@@ -176,8 +178,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
@@ -190,7 +192,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 		t.Error("error expected")
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(libcommon.HexToHash("0x0").String(), result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
@@ -198,8 +200,8 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	addr := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
@@ -217,9 +219,9 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	from := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
@@ -243,9 +245,9 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000)
-	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	from := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 

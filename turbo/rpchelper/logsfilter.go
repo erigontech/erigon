@@ -3,10 +3,10 @@ package rpchelper
 import (
 	"sync"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
-	"github.com/ledgerwatch/erigon/common"
 	types2 "github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -23,11 +23,11 @@ type LogsFilterAggregator struct {
 // how many subscribers have this set on
 type LogsFilter struct {
 	allAddrs       int
-	addrs          map[common.Address]int
+	addrs          map[libcommon.Address]int
 	allTopics      int
-	topics         map[common.Hash]int
-	topicsOriginal [][]common.Hash  // Original topic filters to be applied before distributing to individual subscribers
-	sender         Sub[*types2.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
+	topics         map[libcommon.Hash]int
+	topicsOriginal [][]libcommon.Hash // Original topic filters to be applied before distributing to individual subscribers
+	sender         Sub[*types2.Log]   // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 func (l *LogsFilter) Send(lg *types2.Log) {
@@ -40,8 +40,8 @@ func (l *LogsFilter) Close() {
 func NewLogsFilterAggregator() *LogsFilterAggregator {
 	return &LogsFilterAggregator{
 		aggLogsFilter: LogsFilter{
-			addrs:  make(map[common.Address]int),
-			topics: make(map[common.Hash]int),
+			addrs:  make(map[libcommon.Address]int),
+			topics: make(map[libcommon.Hash]int),
 		},
 		logsFilters: NewSyncMap[LogsSubID, *LogsFilter](),
 	}
@@ -49,7 +49,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 
 func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types2.Log]) (LogsSubID, *LogsFilter) {
 	filterId := LogsSubID(generateSubscriptionID())
-	filter := &LogsFilter{addrs: map[common.Address]int{}, topics: map[common.Hash]int{}, sender: sender}
+	filter := &LogsFilter{addrs: map[libcommon.Address]int{}, topics: map[libcommon.Hash]int{}, sender: sender}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter
 }
@@ -109,14 +109,14 @@ func (a *LogsFilterAggregator) addLogsFilters(f *LogsFilter) {
 	}
 }
 
-func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.Hash]int) {
+func (a *LogsFilterAggregator) getAggMaps() (map[libcommon.Address]int, map[libcommon.Hash]int) {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
-	addresses := make(map[common.Address]int)
+	addresses := make(map[libcommon.Address]int)
 	for k, v := range a.aggLogsFilter.addrs {
 		addresses[k] = v
 	}
-	topics := make(map[common.Hash]int)
+	topics := make(map[libcommon.Hash]int)
 	for k, v := range a.aggLogsFilter.topics {
 		topics[k] = v
 	}
@@ -131,7 +131,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 				return nil
 			}
 		}
-		var topics []common.Hash
+		var topics []libcommon.Hash
 		for _, topic := range eventLog.Topics {
 			topics = append(topics, gointerfaces.ConvertH256ToHash(topic))
 		}
@@ -157,7 +157,7 @@ func (a *LogsFilterAggregator) distributeLog(eventLog *remote.SubscribeLogsReply
 	return nil
 }
 
-func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []common.Hash) bool {
+func (a *LogsFilterAggregator) chooseTopics(filter *LogsFilter, logTopics []libcommon.Hash) bool {
 	var found bool
 	for _, logTopic := range logTopics {
 		if _, ok := filter.topics[logTopic]; ok {

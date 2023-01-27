@@ -44,7 +44,7 @@ func TestState(t *testing.T) {
 	st := new(testMatcher)
 
 	// EOF is not implemented yet
-	st.skipLoad(`^stEIP3540/`)
+	st.skipLoad(`^EIPTests/stEOF/`)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)

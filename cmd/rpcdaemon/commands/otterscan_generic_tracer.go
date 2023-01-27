@@ -3,16 +3,17 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type GenericTracer interface {
@@ -21,16 +22,41 @@ type GenericTracer interface {
 	Found() bool
 }
 
-func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum uint64, chainConfig *params.ChainConfig, tracer GenericTracer) error {
-	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
-	if err != nil {
-		return err
-	}
-	if block == nil {
+func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, blockNum, txnID, txIndex uint64, chainConfig *chain.Config, tracer GenericTracer) error {
+	if api.historyV3(dbtx) {
+		ttx := dbtx.(kv.TemporalTx)
+		executor := txnExecutor(ttx, chainConfig, api.engine(), api._blockReader, tracer)
+
+		// if block number changed, calculate all related field
+		header, err := api._blockReader.HeaderByNumber(ctx, ttx, blockNum)
+		if err != nil {
+			return err
+		}
+		if header == nil {
+			log.Warn("[rpc] header is nil", "blockNum", blockNum)
+			return nil
+		}
+		executor.changeBlock(header)
+
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, int(txIndex))
+		if err != nil {
+			return err
+		}
+		if txn == nil {
+			log.Warn("[rpc] tx is nil", "blockNum", blockNum, "txIndex", txIndex)
+			return nil
+		}
+		_, _, err = executor.execTx(txnID, int(txIndex), txn)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 
-	reader := state.NewPlainState(dbtx, blockNum, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, txIndex, api.historyV3(dbtx), chainConfig.ChainName)
+	if err != nil {
+		return err
+	}
 	stateCache := shards.NewStateCache(32, 0 /* no limit */)
 	cachedReader := state.NewCachedReader(reader, stateCache)
 	noop := state.NewNoopWriter()
@@ -39,7 +65,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum)
 
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
+	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -47,6 +73,13 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return h
 	}
 	engine := api.engine()
+	block, err := api.blockByNumberWithSenders(dbtx, blockNum)
+	if err != nil {
+		return err
+	}
+	if block == nil {
+		return nil
+	}
 
 	header := block.Header()
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)

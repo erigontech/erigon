@@ -4,23 +4,19 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -30,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -43,6 +40,10 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -486,7 +487,7 @@ func stageHeaders(db kv.RwDB, ctx context.Context) error {
 
 		if reset {
 			dirs := datadir.New(datadirCli)
-			if err := reset2.ResetBlocks(tx, db, sn, br, dirs, *chainConfig, engine); err != nil {
+			if err := reset2.ResetBlocks(tx, db, sn, agg, br, dirs, *chainConfig, engine); err != nil {
 				return err
 			}
 			return nil
@@ -560,7 +561,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, 0, sn, getBlockReader(db), historyV3), ctx); err != nil {
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, getBlockReader(db), historyV3), ctx); err != nil {
 				return err
 			}
 
@@ -640,11 +641,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 	var br *snapshotsync.BlockRetire
 	if sn.Cfg().Enabled {
-		workers := runtime.GOMAXPROCS(-1) - 1
-		if workers < 1 {
-			workers = 1
-		}
-		br = snapshotsync.NewBlockRetire(workers, tmpdir, sn, db, nil, nil)
+		br = snapshotsync.NewBlockRetire(estimate.CompressSnapshot.Workers(), tmpdir, sn, db, nil, nil)
 	}
 
 	pm, err := prune.Get(tx)
@@ -1039,7 +1036,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_ = printStages(tx, sn)
+		_ = printStages(tx, sn, agg)
 	} else {
 		if err := stagedsync.SpawnAccountHistoryIndex(stageAcc, tx, cfg, ctx); err != nil {
 			return err
@@ -1107,7 +1104,7 @@ func printAllStages(db kv.RoDB, ctx context.Context) error {
 	sn, agg := allSnapshots(ctx, db)
 	defer sn.Close()
 	defer agg.Close()
-	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) })
+	return db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) })
 }
 
 func printAppliedMigrations(db kv.RwDB, ctx context.Context) error {
@@ -1152,7 +1149,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 
 		var err error
-		_aggSingleton, err = libstate.NewAggregator22(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
+		_aggSingleton, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db)
 		if err != nil {
 			panic(err)
 		}
@@ -1168,7 +1165,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 			_allSnapshotsSingleton.LogStat()
 			db.View(context.Background(), func(tx kv.Tx) error {
 				_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-					_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 					return histBlockNumProgress
 				})
 				return nil
@@ -1201,7 +1198,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
-	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
+	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}
 	//log.Info("Initialised chain configuration", "config", chainConfig)
@@ -1246,10 +1243,9 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	sync, err := stages2.NewStagedSync(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil, engine)
-	if err != nil {
-		panic(err)
-	}
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil, engine)
+	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder)
+
 	miner := stagedsync.NewMiningState(&cfg.Miner)
 	miningCancel := make(chan struct{})
 	go func() {
@@ -1307,7 +1303,7 @@ func overrideStorageMode(db kv.RwDB) error {
 	})
 }
 
-func initConsensusEngine(cc *params.ChainConfig, datadir string, db kv.RwDB) (engine consensus.Engine) {
+func initConsensusEngine(cc *chain2.Config, datadir string, db kv.RwDB) (engine consensus.Engine) {
 	l := log.New()
 	snapshots, _ := allSnapshots(context.Background(), db)
 	config := ethconfig.Defaults

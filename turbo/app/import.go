@@ -64,6 +64,10 @@ func importChain(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	err = ethereum.Init(stack, ethCfg)
+	if err != nil {
+		return err
+	}
 
 	if err := ImportChain(ethereum, ethereum.ChainDB(), ctx.Args().First()); err != nil {
 		return err
@@ -206,7 +210,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack) error {
 
 	for _, b := range chain.Blocks {
 		sentryControlServer.Hd.AddMinedHeader(b.Header())
-		sentryControlServer.Bd.AddToPrefetch(b)
+		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
 	}
 
 	sentryControlServer.Hd.MarkAllVerified()

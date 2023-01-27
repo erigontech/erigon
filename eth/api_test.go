@@ -53,7 +53,7 @@ func accountRangeTest(t *testing.T, trie *trie.Trie, db ethdb.RwKV, blockNumber 
 		t.Fatalf("expected %d results, got %d", expectedNum, len(result.Accounts))
 	}
 	for address := range result.Accounts {
-		if address == (common.Address{}) {
+		if address == (libcommon.Address{}) {
 			t.Fatalf("empty address returned")
 		}
 		if !sdb.Exist(address) {
@@ -73,15 +73,15 @@ func TestAccountRange(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		tds   = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds   = state.NewTrieDbState(libcommon.Hash{}, db, 0)
 		sdb   = state.New(tds)
-		addrs = [eth.AccountRangeMaxResults * 2]common.Address{}
-		m     = map[common.Address]bool{}
+		addrs = [eth.AccountRangeMaxResults * 2]libcommon.Address{}
+		m     = map[libcommon.Address]bool{}
 	)
 
 	for i := range addrs {
-		hash := common.HexToHash(fmt.Sprintf("%x", i))
-		addr := common.BytesToAddress(crypto.Keccak256Hash(hash.Bytes()).Bytes())
+		hash := libcommon.HexToHash(fmt.Sprintf("%x", i))
+		addr := libcommon.BytesToAddress(crypto.Keccak256Hash(hash.Bytes()).Bytes())
 		addrs[i] = addr
 		sdb.SetBalance(addrs[i], u256.Num1)
 		if _, ok := m[addr]; ok {
@@ -111,7 +111,7 @@ func TestAccountRange(t *testing.T) {
 	for addr1 := range firstResult.Accounts {
 		// If address is empty, then it makes no sense to compare
 		// them as they might be two different accounts.
-		if addr1 == (common.Address{}) {
+		if addr1 == (libcommon.Address{}) {
 			continue
 		}
 		if _, duplicate := secondResult.Accounts[addr1]; duplicate {
@@ -149,18 +149,18 @@ func TestEmptyAccountRange(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		tds = state.NewTrieDbState(common.Hash{}, db, 1)
+		tds = state.NewTrieDbState(libcommon.Hash{}, db, 1)
 	)
 	tds.StartNewBuffer()
 	_, err := tds.ComputeTrieRoots()
 	if err != nil {
 		t.Error(err)
 	}
-	results, err1 := state.NewDumper(db.RwKV(), 0).IteratorDump(true, true, true, (common.Hash{}).Bytes(), eth.AccountRangeMaxResults)
+	results, err1 := state.NewDumper(db.RwKV(), 0).IteratorDump(true, true, true, (libcommon.Hash{}).Bytes(), eth.AccountRangeMaxResults)
 	if err1 != nil {
 		t.Fatal(err1)
 	}
-	if bytes.Equal(results.Next, (common.Hash{}).Bytes()) {
+	if bytes.Equal(results.Next, (libcommon.Hash{}).Bytes()) {
 		t.Fatalf("Empty results should not return a second page")
 	}
 	if len(results.Accounts) != 0 {
@@ -175,20 +175,20 @@ func TestStorageRangeAt(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	var (
-		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds     = state.NewTrieDbState(libcommon.Hash{}, db, 0)
 		statedb = state.New(tds)
-		addr    = common.Address{0x01}
-		keys    = []common.Hash{ // hashes of Keys of storage
-			common.HexToHash("340dd630ad21bf010b4e676dbfa9ba9a02175262d1fa356232cfde6cb5b47ef2"),
-			common.HexToHash("426fcb404ab2d5d8e61a3d918108006bbb0a9be65e92235bb10eefbdb6dcd053"),
-			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
-			common.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
+		addr    = libcommon.Address{0x01}
+		keys    = []libcommon.Hash{ // hashes of Keys of storage
+			libcommon.HexToHash("340dd630ad21bf010b4e676dbfa9ba9a02175262d1fa356232cfde6cb5b47ef2"),
+			libcommon.HexToHash("426fcb404ab2d5d8e61a3d918108006bbb0a9be65e92235bb10eefbdb6dcd053"),
+			libcommon.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
+			libcommon.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
 		}
 		storage = commands.StorageMap{
-			keys[0]: {Key: &common.Hash{0x02}, Value: common.Hash{0x01}},
-			keys[1]: {Key: &common.Hash{0x04}, Value: common.Hash{0x02}},
-			keys[2]: {Key: &common.Hash{0x01}, Value: common.Hash{0x03}},
-			keys[3]: {Key: &common.Hash{0x03}, Value: common.Hash{0x04}},
+			keys[0]: {Key: &libcommon.Hash{0x02}, Value: libcommon.Hash{0x01}},
+			keys[1]: {Key: &libcommon.Hash{0x04}, Value: libcommon.Hash{0x02}},
+			keys[2]: {Key: &libcommon.Hash{0x01}, Value: libcommon.Hash{0x03}},
+			keys[3]: {Key: &libcommon.Hash{0x03}, Value: libcommon.Hash{0x04}},
 		}
 	)
 	tds.StartNewBuffer()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -12,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/log/v3"
-	ssz "github.com/prysmaticlabs/fastssz"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
 type SentinelServer struct {
@@ -71,7 +72,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				// Wait a bit to not exhaust CPU and skip.
 				continue
 			}
-			log.Debug("Sent request", "pid", pid)
+			log.Trace("[sentinel] Sent request", "pid", pid)
 			s.sentinel.Peers().PeerDoRequest(pid)
 			go func() {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)
@@ -126,35 +127,32 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-func (s *SentinelServer) handleGossipPacket(pkt *communication.GossipContext) error {
+func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
+	var err error
 	log.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
-	err := pkt.Codec.WritePacket(context.TODO(), pkt.Packet)
-	if err != nil {
-		log.Warn("[Sentinel Gossip] Error Forwarding Packet", "err", err)
+	data := pkt.GetData()
+	// If we use snappy codec then decompress it accordingly.
+	if strings.Contains(*pkt.Topic, sentinel.SSZSnappyCodec) {
+		data, err = utils.DecompressSnappy(data)
+		if err != nil {
+			return err
+		}
 	}
-	// Compute data
-	u := pkt.Packet.(ssz.Marshaler)
-	var data []byte
-	// Make data
-	if data, err = u.MarshalSSZ(); err != nil {
-		return err
-	}
-	switch pkt.Packet.(type) {
-	case *cltypes.SignedBeaconBlockBellatrix:
+	// Check to which gossip it belongs to.
+	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data)
-	case *cltypes.SignedAggregateAndProof:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.BeaconAggregateAndProofTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data)
-	case *cltypes.SignedVoluntaryExit:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.VoluntaryExitTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_VoluntaryExitGossipType, data)
-	case *cltypes.ProposerSlashing:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.ProposerSlashingTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_ProposerSlashingGossipType, data)
-	case *cltypes.AttesterSlashing:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.AttesterSlashingTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AttesterSlashingGossipType, data)
-	case *cltypes.LightClientFinalityUpdate:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.LightClientFinalityUpdateTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_LightClientFinalityUpdateGossipType, data)
-	case *cltypes.LightClientOptimisticUpdate:
+	} else if strings.Contains(*pkt.Topic, string(sentinel.LightClientOptimisticUpdateTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_LightClientOptimisticUpdateGossipType, data)
-	default:
 	}
 	return nil
 }

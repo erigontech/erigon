@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"strings"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -33,15 +35,15 @@ const TokenABI = "[{\"inputs\":[{\"internalType\":\"address\",\"name\":\"_minter
 var TokenBin = "0x608060405234801561001057600080fd5b506040516102cd3803806102cd8339818101604052602081101561003357600080fd5b5051600280546001600160a01b0319166001600160a01b0390921691909117905561026a806100636000396000f3fe608060405234801561001057600080fd5b50600436106100575760003560e01c8063075461721461005c57806318160ddd1461008057806340c10f191461009a57806370a08231146100da578063a9059cbb14610100575b600080fd5b61006461012c565b604080516001600160a01b039092168252519081900360200190f35b61008861013b565b60408051918252519081900360200190f35b6100c6600480360360408110156100b057600080fd5b506001600160a01b038135169060200135610141565b604080519115158252519081900360200190f35b610088600480360360208110156100f057600080fd5b50356001600160a01b03166101b1565b6100c66004803603604081101561011657600080fd5b506001600160a01b0381351690602001356101c3565b6002546001600160a01b031681565b60005481565b6002546000906001600160a01b0316331461015b57600080fd5b6001600160a01b03831660009081526001602052604090205482810181111561018357600080fd5b6001600160a01b03841660009081526001602081905260408220928501909255805484019055905092915050565b60016020526000908152604090205481565b33600090815260016020526040808220546001600160a01b038516835290822054838210156101f157600080fd5b80848201101561020057600080fd5b336000908152600160208190526040808320948790039094556001600160a01b03969096168152919091209201909155509056fea2646970667358221220db4c7b3ba8d073604af68ade92006926639bb4003f2a18929524d580777155fb64736f6c63430007020033"
 
 // DeployToken deploys a new Ethereum contract, binding an instance of Token to it.
-func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter common.Address) (common.Address, types.Transaction, *Token, error) {
+func DeployToken(auth *bind.TransactOpts, backend bind.ContractBackend, _minter libcommon.Address) (libcommon.Address, types.Transaction, *Token, error) {
 	parsed, err := abi.JSON(strings.NewReader(TokenABI))
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 
 	address, tx, contract, err := bind.DeployContract(auth, parsed, common.FromHex(TokenBin), backend, _minter)
 	if err != nil {
-		return common.Address{}, nil, nil, err
+		return libcommon.Address{}, nil, nil, err
 	}
 	return address, tx, &Token{TokenCaller: TokenCaller{contract: contract}, TokenTransactor: TokenTransactor{contract: contract}, TokenFilterer: TokenFilterer{contract: contract}}, nil
 }
@@ -106,7 +108,7 @@ type TokenTransactorRaw struct {
 }
 
 // NewToken creates a new instance of Token, bound to a specific deployed contract.
-func NewToken(address common.Address, backend bind.ContractBackend) (*Token, error) {
+func NewToken(address libcommon.Address, backend bind.ContractBackend) (*Token, error) {
 	contract, err := bindToken(address, backend, backend, backend)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,7 @@ func NewToken(address common.Address, backend bind.ContractBackend) (*Token, err
 }
 
 // NewTokenCaller creates a new read-only instance of Token, bound to a specific deployed contract.
-func NewTokenCaller(address common.Address, caller bind.ContractCaller) (*TokenCaller, error) {
+func NewTokenCaller(address libcommon.Address, caller bind.ContractCaller) (*TokenCaller, error) {
 	contract, err := bindToken(address, caller, nil, nil)
 	if err != nil {
 		return nil, err
@@ -124,7 +126,7 @@ func NewTokenCaller(address common.Address, caller bind.ContractCaller) (*TokenC
 }
 
 // NewTokenTransactor creates a new write-only instance of Token, bound to a specific deployed contract.
-func NewTokenTransactor(address common.Address, transactor bind.ContractTransactor) (*TokenTransactor, error) {
+func NewTokenTransactor(address libcommon.Address, transactor bind.ContractTransactor) (*TokenTransactor, error) {
 	contract, err := bindToken(address, nil, transactor, nil)
 	if err != nil {
 		return nil, err
@@ -133,7 +135,7 @@ func NewTokenTransactor(address common.Address, transactor bind.ContractTransact
 }
 
 // NewTokenFilterer creates a new log filterer instance of Token, bound to a specific deployed contract.
-func NewTokenFilterer(address common.Address, filterer bind.ContractFilterer) (*TokenFilterer, error) {
+func NewTokenFilterer(address libcommon.Address, filterer bind.ContractFilterer) (*TokenFilterer, error) {
 	contract, err := bindToken(address, nil, nil, filterer)
 	if err != nil {
 		return nil, err
@@ -142,7 +144,7 @@ func NewTokenFilterer(address common.Address, filterer bind.ContractFilterer) (*
 }
 
 // bindToken binds a generic wrapper to an already deployed contract.
-func bindToken(address common.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
+func bindToken(address libcommon.Address, caller bind.ContractCaller, transactor bind.ContractTransactor, filterer bind.ContractFilterer) (*bind.BoundContract, error) {
 	parsed, err := abi.JSON(strings.NewReader(TokenABI))
 	if err != nil {
 		return nil, err
@@ -191,7 +193,7 @@ func (_Token *TokenTransactorRaw) Transact(opts *bind.TransactOpts, method strin
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address ) view returns(uint256)
-func (_Token *TokenCaller) BalanceOf(opts *bind.CallOpts, arg0 common.Address) (*big.Int, error) {
+func (_Token *TokenCaller) BalanceOf(opts *bind.CallOpts, arg0 libcommon.Address) (*big.Int, error) {
 	var out []interface{}
 	err := _Token.contract.Call(opts, &out, "balanceOf", arg0)
 
@@ -208,29 +210,29 @@ func (_Token *TokenCaller) BalanceOf(opts *bind.CallOpts, arg0 common.Address) (
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address ) view returns(uint256)
-func (_Token *TokenSession) BalanceOf(arg0 common.Address) (*big.Int, error) {
+func (_Token *TokenSession) BalanceOf(arg0 libcommon.Address) (*big.Int, error) {
 	return _Token.Contract.BalanceOf(&_Token.CallOpts, arg0)
 }
 
 // BalanceOf is a free data retrieval call binding the contract method 0x70a08231.
 //
 // Solidity: function balanceOf(address ) view returns(uint256)
-func (_Token *TokenCallerSession) BalanceOf(arg0 common.Address) (*big.Int, error) {
+func (_Token *TokenCallerSession) BalanceOf(arg0 libcommon.Address) (*big.Int, error) {
 	return _Token.Contract.BalanceOf(&_Token.CallOpts, arg0)
 }
 
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
 // Solidity: function minter() view returns(address)
-func (_Token *TokenCaller) Minter(opts *bind.CallOpts) (common.Address, error) {
+func (_Token *TokenCaller) Minter(opts *bind.CallOpts) (libcommon.Address, error) {
 	var out []interface{}
 	err := _Token.contract.Call(opts, &out, "minter")
 
 	if err != nil {
-		return *new(common.Address), err
+		return *new(libcommon.Address), err
 	}
 
-	out0 := *abi.ConvertType(out[0], new(common.Address)).(*common.Address)
+	out0 := *abi.ConvertType(out[0], new(libcommon.Address)).(*libcommon.Address)
 
 	return out0, err
 
@@ -239,14 +241,14 @@ func (_Token *TokenCaller) Minter(opts *bind.CallOpts) (common.Address, error) {
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
 // Solidity: function minter() view returns(address)
-func (_Token *TokenSession) Minter() (common.Address, error) {
+func (_Token *TokenSession) Minter() (libcommon.Address, error) {
 	return _Token.Contract.Minter(&_Token.CallOpts)
 }
 
 // Minter is a free data retrieval call binding the contract method 0x07546172.
 //
 // Solidity: function minter() view returns(address)
-func (_Token *TokenCallerSession) Minter() (common.Address, error) {
+func (_Token *TokenCallerSession) Minter() (libcommon.Address, error) {
 	return _Token.Contract.Minter(&_Token.CallOpts)
 }
 
@@ -284,41 +286,41 @@ func (_Token *TokenCallerSession) TotalSupply() (*big.Int, error) {
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactor) Mint(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenTransactor) Mint(opts *bind.TransactOpts, _to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.contract.Transact(opts, "mint", _to, _value)
 }
 
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenSession) Mint(_to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenSession) Mint(_to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Mint(&_Token.TransactOpts, _to, _value)
 }
 
 // Mint is a paid mutator transaction binding the contract method 0x40c10f19.
 //
 // Solidity: function mint(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactorSession) Mint(_to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenTransactorSession) Mint(_to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Mint(&_Token.TransactOpts, _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactor) Transfer(opts *bind.TransactOpts, _to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenTransactor) Transfer(opts *bind.TransactOpts, _to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.contract.Transact(opts, "transfer", _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenSession) Transfer(_to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenSession) Transfer(_to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Transfer(&_Token.TransactOpts, _to, _value)
 }
 
 // Transfer is a paid mutator transaction binding the contract method 0xa9059cbb.
 //
 // Solidity: function transfer(address _to, uint256 _value) returns(bool)
-func (_Token *TokenTransactorSession) Transfer(_to common.Address, _value *big.Int) (types.Transaction, error) {
+func (_Token *TokenTransactorSession) Transfer(_to libcommon.Address, _value *big.Int) (types.Transaction, error) {
 	return _Token.Contract.Transfer(&_Token.TransactOpts, _to, _value)
 }

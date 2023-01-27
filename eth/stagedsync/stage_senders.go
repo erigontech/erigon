@@ -9,23 +9,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
 )
 
 type SendersCfg struct {
@@ -38,12 +39,12 @@ type SendersCfg struct {
 	badBlockHalt    bool
 	tmpdir          string
 	prune           prune.Mode
-	chainConfig     *params.ChainConfig
+	chainConfig     *chain.Config
 	blockRetire     *snapshotsync.BlockRetire
 	hd              *headerdownload.HeaderDownload
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *params.ChainConfig, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, br *snapshotsync.BlockRetire, hd *headerdownload.HeaderDownload) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -107,9 +108,9 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 
 	startFrom := s.BlockNumber + 1
 	currentHeaderIdx := uint64(0)
-	canonical := make([]common.Hash, to-s.BlockNumber)
+	canonical := make([]libcommon.Hash, to-s.BlockNumber)
 
-	for k, v, err := canonicalC.Seek(libcommon.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
+	for k, v, err := canonicalC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, v, err = canonicalC.Next() {
 		if err != nil {
 			return err
 		}
@@ -188,10 +189,10 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	}()
 
 	var minBlockNum uint64 = math.MaxUint64
-	var minBlockHash common.Hash
+	var minBlockHash libcommon.Hash
 	var minBlockErr error
 	handleRecoverErr := func(recErr senderRecoveryError) error {
-		if recErr.blockHash == (common.Hash{}) {
+		if recErr.blockHash == (libcommon.Hash{}) {
 			return recErr.err
 		}
 
@@ -210,7 +211,7 @@ func SpawnRecoverSendersStage(cfg SendersCfg, s *StageState, u Unwinder, tx kv.R
 	defer bodiesC.Close()
 
 Loop:
-	for k, _, err := bodiesC.Seek(libcommon.EncodeTs(startFrom)); k != nil; k, _, err = bodiesC.Next() {
+	for k, _, err := bodiesC.Seek(hexutility.EncodeTs(startFrom)); k != nil; k, _, err = bodiesC.Next() {
 		if err != nil {
 			return err
 		}
@@ -219,7 +220,7 @@ Loop:
 		}
 
 		blockNumber := binary.BigEndian.Uint64(k[:8])
-		blockHash := common.BytesToHash(k[8:])
+		blockHash := libcommon.BytesToHash(k[8:])
 
 		if blockNumber > to {
 			break
@@ -293,20 +294,20 @@ Loop:
 type senderRecoveryError struct {
 	err         error
 	blockNumber uint64
-	blockHash   common.Hash
+	blockHash   libcommon.Hash
 }
 
 type senderRecoveryJob struct {
 	body        *types.Body
 	key         []byte
 	senders     []byte
-	blockHash   common.Hash
+	blockHash   libcommon.Hash
 	blockNumber uint64
 	index       int
 	err         error
 }
 
-func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *params.ChainConfig, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
+func recoverSenders(ctx context.Context, logPrefix string, cryptoContext *secp256k1.Context, config *chain.Config, in, out chan *senderRecoveryJob, quit <-chan struct{}) {
 	var job *senderRecoveryJob
 	var ok bool
 	for {

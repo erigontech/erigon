@@ -12,15 +12,17 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 const (
@@ -279,7 +281,7 @@ func unwindLogIndex(logPrefix string, db kv.RwTx, to uint64, cfg LogIndexCfg, qu
 		return err
 	}
 	defer c.Close()
-	for k, v, err := c.Seek(libcommon.EncodeTs(to + 1)); k != nil; k, v, err = c.Next() {
+	for k, v, err := c.Seek(hexutility.EncodeTs(to + 1)); k != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
 		}

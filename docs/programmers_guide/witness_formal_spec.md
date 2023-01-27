@@ -1,6 +1,6 @@
 # Block Witness Formal Specification
 
-The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://tools.ietf.org/html/rfc2119).
+The keywords "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://tools.ietf.org/html/rfc2119).
 
 ## Data Types
 
@@ -58,7 +58,7 @@ type Witness = (Node|Instruction...)
 ```
 
 
-## Execution Enviroment
+## Execution Environment
 
 The witness execution environment MUST contain the following 2 elements:
 
@@ -74,7 +74,7 @@ The witness execution environment MUST contain the following 2 elements:
 Initially, the Witness MUST BE an array of `Instruction`s.
 
 Then, as substitution rules are applied to the witness, some elements of the
-array are replaces with `Node`s.
+array are replaced with `Node`s.
 
 The execution continues until there are no substitution rules left to execute.
 
@@ -125,7 +125,7 @@ witness.
 ### Building a single trie from the witness
 
 If we are building a single trie from the witness, then the only SUCCESS
-executon is when the following are true:
+execution is when the following are true:
 
 - The execution state MUST match the End Criteria
 - There MUST be only one item left in the witness
@@ -340,7 +340,7 @@ CODE(raw_code) |=> CodeNode{raw_code}
 ### `ACCOUNT_LEAF key nonce balance has_code has_storage`
 
 Replaces the instruction and, optionally, up to 2 nodes to the left of the
-instructon with a single `AccountNode` wrapped with a `LeafNode`.
+instruction with a single `AccountNode` wrapped with a `LeafNode`.
 
 **Substitution rules**
 

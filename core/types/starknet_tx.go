@@ -8,8 +8,11 @@ import (
 	"math/bits"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -19,7 +22,7 @@ type StarknetTransaction struct {
 	Salt       []byte // cairo contract address salt
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
-	AccessList AccessList
+	AccessList types2.AccessList
 }
 
 func (tx StarknetTransaction) Type() byte {
@@ -65,7 +68,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("wrong size for To: %d", len(b))
 	}
 	if len(b) > 0 {
-		tx.To = &common.Address{}
+		tx.To = &libcommon.Address{}
 		copy((*tx.To)[:], b)
 	}
 	if b, err = s.Uint256Bytes(); err != nil {
@@ -79,7 +82,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	tx.AccessList = AccessList{}
+	tx.AccessList = types2.AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
@@ -119,7 +122,7 @@ func (tx StarknetTransaction) Cost() *uint256.Int {
 	panic("implement me")
 }
 
-func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int, rules *params.Rules) (Message, error) {
+func (tx StarknetTransaction) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
@@ -165,13 +168,13 @@ func (tx *StarknetTransaction) WithSignature(signer Signer, sig []byte) (Transac
 	return cpy, nil
 }
 
-func (tx StarknetTransaction) FakeSign(address common.Address) (Transaction, error) {
+func (tx StarknetTransaction) FakeSign(address libcommon.Address) (Transaction, error) {
 	panic("implement me")
 }
 
-func (tx StarknetTransaction) Hash() common.Hash {
+func (tx StarknetTransaction) Hash() libcommon.Hash {
 	if hash := tx.hash.Load(); hash != nil {
-		return *hash.(*common.Hash)
+		return *hash.(*libcommon.Hash)
 	}
 	hash := prefixedRlpHash(DynamicFeeTxType, []interface{}{
 		tx.ChainID,
@@ -189,7 +192,7 @@ func (tx StarknetTransaction) Hash() common.Hash {
 	return hash
 }
 
-func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
+func (tx StarknetTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 	return prefixedRlpHash(
 		StarknetType,
 		[]interface{}{
@@ -206,11 +209,7 @@ func (tx StarknetTransaction) SigningHash(chainID *big.Int) common.Hash {
 		})
 }
 
-func (tx StarknetTransaction) Size() common.StorageSize {
-	panic("implement me")
-}
-
-func (tx StarknetTransaction) GetAccessList() AccessList {
+func (tx StarknetTransaction) GetAccessList() types2.AccessList {
 	panic("implement me")
 }
 
@@ -231,13 +230,13 @@ func (tx StarknetTransaction) MarshalBinary(w io.Writer) error {
 	return nil
 }
 
-func (tx *StarknetTransaction) Sender(signer Signer) (common.Address, error) {
+func (tx *StarknetTransaction) Sender(signer Signer) (libcommon.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		return sc.(common.Address), nil
+		return sc.(libcommon.Address), nil
 	}
 	addr, err := signer.Sender(tx)
 	if err != nil {
-		return common.Address{}, err
+		return libcommon.Address{}, err
 	}
 	tx.from.Store(addr)
 	return addr, nil
@@ -439,7 +438,7 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			Value:   new(uint256.Int),
 		},
 		Salt:       common.CopyBytes(tx.Salt),
-		AccessList: make(AccessList, len(tx.AccessList)),
+		AccessList: make(types2.AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}
