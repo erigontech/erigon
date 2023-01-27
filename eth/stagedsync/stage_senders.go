@@ -233,7 +233,7 @@ Loop:
 
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
 		if body == nil {
-			log.Warn("ReadCanonicalBodyWithTransactions can't find block", "num", blockNumber, "hash", blockHash)
+			log.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
 			continue
 		}
 
