@@ -93,7 +93,7 @@ func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
 
 // GetTotalSlashingAmount return the sum of all slashings.
 func (b *BeaconState) GetTotalSlashingAmount() (t uint64) {
-	for _, slash := range b.slashings {
+	for _, slash := range &b.slashings {
 		t += slash
 	}
 	return
