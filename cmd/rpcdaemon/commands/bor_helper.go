@@ -156,6 +156,6 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Valida
 // author returns the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func author(api *BorImpl, tx kv.Tx, header *types.Header) (common.Address, error) {
-	config, _ := api.BaseAPI.chainConfig(tx)
+	config, _ := api.chainConfig(tx)
 	return ecrecover(header, config.Bor)
 }
