@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, wg *sync.WaitGroup, addr libcommon.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, wg *sync.WaitGroup, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
 	defer wg.Done()
 
 	// Trace block for Txs
@@ -39,7 +39,7 @@ func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, wg *sync.Wait
 	results[idx] = result
 }
 
-func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNum uint64, searchAddr libcommon.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
+func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNum uint64, searchAddr common.Address, chainConfig *chain.Config) (bool, *TransactionsWithReceipts, error) {
 	rpcTxs := make([]*RPCTransaction, 0)
 	receipts := make([]map[string]interface{}, 0)
 
@@ -66,7 +66,7 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	ibs := state.New(cachedReader)
 	signer := types.MakeSigner(chainConfig, blockNum)
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
