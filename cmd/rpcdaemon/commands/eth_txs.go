@@ -5,7 +5,7 @@ import (
 	"context"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
@@ -19,7 +19,7 @@ import (
 )
 
 // GetTransactionByHash implements eth_getTransactionByHash. Returns information about a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash libcommon.Hash) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Hash) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash libcommon.
 
 		// Add GasPrice for the DynamicFeeTransaction
 		var baseFee *big.Int
-		if chainConfig.IsLondon(blockNum) && blockHash != (libcommon.Hash{}) {
+		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
 			baseFee = block.BaseFee()
 		}
 
@@ -116,7 +116,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash libcommon.
 }
 
 // GetRawTransactionByHash returns the bytes of the transaction for the given hash.
-func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash libcommon.Hash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -164,7 +164,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash libcommon.
 }
 
 // GetTransactionByBlockHashAndIndex implements eth_getTransactionByBlockHashAndIndex. Returns information about a transaction given the block's hash and a transaction index.
-func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
+func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, txIndex hexutil.Uint64) (*RPCTransaction, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -203,7 +203,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 }
 
 // GetRawTransactionByBlockHashAndIndex returns the bytes of the transaction for the given block hash and index.
-func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash libcommon.Hash, index hexutil.Uint) (hexutil.Bytes, error) {
+func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) (hexutil.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
