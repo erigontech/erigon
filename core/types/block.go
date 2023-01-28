@@ -577,7 +577,7 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 // NOTE: it is skipping extra data
 func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
 	h.UncleHash = EmptyUncleHash
-	h.Difficulty = common.Big0
+	h.Difficulty = libcommon.Big0
 
 	copy(h.ParentHash[:], buf)
 	pos = len(h.ParentHash)

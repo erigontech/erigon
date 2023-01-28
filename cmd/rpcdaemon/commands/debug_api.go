@@ -5,14 +5,15 @@ import (
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -25,15 +26,15 @@ const AccountRangeMaxResults = 256
 
 // PrivateDebugAPI Exposed RPC endpoints for debugging use
 type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash libcommon.Hash, txIndex uint64, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
-	TraceTransaction(ctx context.Context, hash libcommon.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
-	TraceBlockByHash(ctx context.Context, hash libcommon.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error)
+	TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
+	TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *tracers.TraceConfig, stream *jsoniter.Stream) error
 	AccountRange(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, start []byte, maxResults int, nocode, nostorage bool) (state.IteratorDump, error)
-	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]libcommon.Address, error)
-	GetModifiedAccountsByHash(_ context.Context, startHash libcommon.Hash, endHash *libcommon.Hash) ([]libcommon.Address, error)
+	GetModifiedAccountsByNumber(ctx context.Context, startNum rpc.BlockNumber, endNum *rpc.BlockNumber) ([]common.Address, error)
+	GetModifiedAccountsByHash(_ context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error)
 	TraceCall(ctx context.Context, args ethapi.CallArgs, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error
-	AccountAt(ctx context.Context, blockHash libcommon.Hash, txIndex uint64, account libcommon.Address) (*AccountResult, error)
+	AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, account common.Address) (*AccountResult, error)
 }
 
 // PrivateDebugAPIImpl is implementation of the PrivateDebugAPI interface based on remote Db access
@@ -53,7 +54,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 }
 
 // storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash libcommon.Hash, txIndex uint64, contractAddress libcommon.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return StorageRangeResult{}, err
@@ -83,7 +84,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash li
 		return StorageRangeResult{}, nil
 	}
 
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txIndex, api.historyV3(tx))
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
@@ -131,7 +132,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	}
 
 	dumper := state.NewDumper(tx, blockNumber)
-	res, err := dumper.IteratorDump(excludeCode, excludeStorage, libcommon.BytesToAddress(startKey), maxResults)
+	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
@@ -140,7 +141,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
-	if hash != (libcommon.Hash{}) {
+	if hash != (common.Hash{}) {
 		header := rawdb.ReadHeader(tx, hash, blockNumber)
 		if header != nil {
 			res.Root = header.Root.String()
@@ -151,7 +152,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 }
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]libcommon.Address, error) {
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -188,7 +189,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
-func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash libcommon.Hash, endHash *libcommon.Hash) ([]libcommon.Address, error) {
+func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHash common.Hash, endHash *common.Hash) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -223,12 +224,53 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
-func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash libcommon.Hash, txIndex uint64, address libcommon.Address) (*AccountResult, error) {
+func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, txIndex uint64, address common.Address) (*AccountResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	if api.historyV3(tx) {
+		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		if number == nil {
+			return nil, nil
+		}
+		canonicalHash, _ := rawdb.ReadCanonicalHash(tx, *number)
+		isCanonical := canonicalHash == blockHash
+		if !isCanonical {
+			return nil, fmt.Errorf("block hash is not canonical")
+		}
+
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+		if err != nil {
+			return nil, err
+		}
+		ttx := tx.(kv.TemporalTx)
+		v, ok, err := ttx.DomainGet(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			return &AccountResult{}, nil
+		}
+
+		var a accounts.Account
+		if err := a.DecodeForStorage(v); err != nil {
+			return nil, err
+		}
+		result := &AccountResult{}
+		result.Balance.ToInt().Set(a.Balance.ToBig())
+		result.Nonce = hexutil.Uint64(a.Nonce)
+		result.CodeHash = a.CodeHash
+
+		code, _, err := ttx.DomainGet(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		if err != nil {
+			return nil, err
+		}
+		result.Code = code
+		return result, nil
+	}
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
@@ -243,7 +285,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash libcomm
 	if block == nil {
 		return nil, nil
 	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txIndex, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
@@ -259,5 +301,5 @@ type AccountResult struct {
 	Balance  hexutil.Big    `json:"balance"`
 	Nonce    hexutil.Uint64 `json:"nonce"`
 	Code     hexutil.Bytes  `json:"code"`
-	CodeHash libcommon.Hash `json:"codeHash"`
+	CodeHash common.Hash    `json:"codeHash"`
 }

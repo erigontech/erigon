@@ -8,7 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -33,7 +33,7 @@ func (api *PrivateDebugAPIImpl) TraceBlockByNumber(ctx context.Context, blockNum
 }
 
 // TraceBlockByHash implements debug_traceBlockByHash. Returns Geth style block traces.
-func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash libcommon.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	return api.traceBlock(ctx, rpc.BlockNumberOrHashWithHash(hash, true), config, stream)
 }
 
@@ -48,7 +48,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		block    *types.Block
 		number   rpc.BlockNumber
 		numberOk bool
-		hash     libcommon.Hash
+		hash     common.Hash
 		hashOk   bool
 	)
 	if number, numberOk = blockNrOrHash.Number(); numberOk {
@@ -100,7 +100,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
 		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
 				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
@@ -139,7 +139,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 }
 
 // TraceTransaction implements debug_traceTransaction. Returns Geth style transaction traces.
-func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash libcommon.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
+func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -209,7 +209,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash libco
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex, api.historyV3(tx))
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -276,16 +276,16 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 
 func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	var (
-		hash               libcommon.Hash
+		hash               common.Hash
 		replayTransactions types.Transactions
 		evm                *vm.EVM
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]libcommon.Hash
+		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
 
-	overrideBlockHash = make(map[uint64]libcommon.Hash)
+	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		stream.WriteNil()
@@ -356,7 +356,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) libcommon.Hash {
+	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}
@@ -435,7 +435,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.Prepare(libcommon.Hash{}, parent.Hash(), txn_index)
+			ibs.Prepare(common.Hash{}, parent.Hash(), txn_index)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 
 			if err != nil {

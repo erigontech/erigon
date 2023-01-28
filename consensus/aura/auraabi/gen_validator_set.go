@@ -12,7 +12,6 @@ import (
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/event"
 )
@@ -23,7 +22,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = common.Big1
+	_ = libcommon.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )

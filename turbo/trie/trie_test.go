@@ -229,7 +229,7 @@ func BenchmarkHash(b *testing.B) {
 	for i := 0; i < len(accounts); i++ {
 		var (
 			nonce   = uint64(random.Int63())
-			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+			balance = new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 			root    = EmptyRoot
 			code    = crypto.Keccak256(nil)
 		)
@@ -312,7 +312,7 @@ func TestCodeNodeValid(t *testing.T) {
 	for i := 0; i < len(addresses); i++ {
 		codeValues[i] = genRandomByteArrayOfLen(128)
 		codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValues[i]))
-		balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+		balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 		acc := accounts.NewAccount()
 		acc.Nonce = uint64(random.Int63())
 		acc.Balance.SetFromBig(balance)
@@ -340,7 +340,7 @@ func TestCodeNodeUpdateNotExisting(t *testing.T) {
 	codeValue := genRandomByteArrayOfLen(128)
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -368,7 +368,7 @@ func TestCodeNodeGetNotExistingAccount(t *testing.T) {
 	codeValue := genRandomByteArrayOfLen(128)
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -413,7 +413,7 @@ func TestCodeNodeGetExistingAccountNoCodeNotEmpty(t *testing.T) {
 	codeValue := genRandomByteArrayOfLen(128)
 
 	codeHash := libcommon.BytesToHash(crypto.Keccak256(codeValue))
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -436,7 +436,7 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 	address := getAddressForIndex(0)
 
 	codeHash := EmptyCodeHash
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -461,7 +461,7 @@ func TestCodeNodeWrongHash(t *testing.T) {
 	codeValue1 := genRandomByteArrayOfLen(128)
 	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -486,7 +486,7 @@ func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
 	codeValue1 := genRandomByteArrayOfLen(128)
 	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -518,7 +518,7 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	codeValue1 := genRandomByteArrayOfLen(128)
 	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -552,7 +552,7 @@ func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
 	codeValue1 := genRandomByteArrayOfLen(128)
 	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -585,7 +585,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	codeValue1 := genRandomByteArrayOfLen(128)
 	codeHash1 := libcommon.BytesToHash(crypto.Keccak256(codeValue1))
 
-	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = uint64(random.Int63())
@@ -598,7 +598,7 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 	assert.Nil(t, err, "should successfully insert code")
 
 	acc.Nonce = uint64(random.Int63())
-	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	balance = new(big.Int).Rand(random, new(big.Int).Exp(libcommon.Big2, libcommon.Big256, nil))
 	acc.Balance.SetFromBig(balance)
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)

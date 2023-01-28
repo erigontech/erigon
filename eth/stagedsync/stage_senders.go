@@ -232,6 +232,10 @@ Loop:
 		}
 
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blockNumber)
+		if body == nil {
+			log.Warn(fmt.Sprintf("[%s] ReadCanonicalBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
+			continue
+		}
 
 		select {
 		case recoveryErr := <-errCh:
