@@ -152,7 +152,7 @@ func TestSearchTransactionsBefore(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	agg, require := m.HistoryV3Components(), require.New(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
-	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB)
+	api := NewOtterscanAPI(NewBaseApi(nil, nil, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, nil), m.DB)
 
 	addr := libcommon.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	t.Run("small page size", func(t *testing.T) {

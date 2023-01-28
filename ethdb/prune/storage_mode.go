@@ -185,7 +185,7 @@ func (p Distance) toValue() uint64       { return uint64(p) }
 func (p Distance) useDefaultValue() bool { return uint64(p) == params.FullImmutabilityThreshold }
 func (p Distance) dbType() []byte        { return kv.PruneTypeOlder }
 
-func (p Distance) HasBeenPruned(latestBlockNum, blockNum uint64) bool {
+func (p Distance) HasBeenPruned(blockNum, latestBlockNum uint64) bool {
 	if p == 0 {
 		return false
 	}
@@ -210,7 +210,7 @@ func (b Before) toValue() uint64       { return uint64(b) }
 func (b Before) useDefaultValue() bool { return uint64(b) == 0 }
 func (b Before) dbType() []byte        { return kv.PruneTypeBefore }
 
-func (b Before) HasBeenPruned(_, blockNum uint64) bool {
+func (b Before) HasBeenPruned(blockNum, _ uint64) bool {
 	if b == 0 {
 		return false
 	}

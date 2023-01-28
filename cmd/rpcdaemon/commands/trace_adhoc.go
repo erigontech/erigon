@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -909,16 +908,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	if api._pruneAmount == nil {
-		pruneAmount, err := prune.Get(tx)
-		if err != nil {
-			return nil, err
-		}
-		api._pruneAmount = &pruneAmount
+	hasCallTracesBeenPruned, hasHistoryBeenPruned := false, false
+	if api._pruneAmount != nil {
+		hasCallTracesBeenPruned = api._pruneAmount.CallTraces.HasBeenPruned(blockNumber, latestFinishedBlockNumber)
+		hasHistoryBeenPruned = api._pruneAmount.History.HasBeenPruned(blockNumber, latestFinishedBlockNumber)
 	}
-
-	hasCallTracesBeenPruned := api._pruneAmount.CallTraces.HasBeenPruned(latestFinishedBlockNumber, blockNumber)
-	hasHistoryBeenPruned := api._pruneAmount.History.HasBeenPruned(latestFinishedBlockNumber, blockNumber)
 
 	if hasCallTracesBeenPruned || hasHistoryBeenPruned {
 		return &TraceCallResult{Output: []byte(fmt.Sprintf("Block %d has been prune, Latest pruned block: %d", blockNumber, latestFinishedBlockNumber))}, nil

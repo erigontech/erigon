@@ -40,7 +40,7 @@ func DoCall(
 	stateReader state.StateReader,
 	headerReader services.HeaderReader,
 	callTimeout time.Duration,
-	pruneAmount prune.Mode,
+	pruneAmount *prune.Mode,
 ) (*core.ExecutionResult, error) {
 	// todo: Pending state is only known by the miner
 	/*
@@ -54,8 +54,11 @@ func DoCall(
 		return nil, err
 	}
 
-	hasCallTracesBeenPruned := pruneAmount.CallTraces.HasBeenPruned(latestFinishedBlockNumber, header.Number.Uint64())
-	hasHistoryBeenPruned := pruneAmount.History.HasBeenPruned(latestFinishedBlockNumber, header.Number.Uint64())
+	hasCallTracesBeenPruned, hasHistoryBeenPruned := false, false
+	if pruneAmount != nil {
+		hasCallTracesBeenPruned = pruneAmount.CallTraces.HasBeenPruned(header.Number.Uint64(), latestFinishedBlockNumber)
+		hasHistoryBeenPruned = pruneAmount.History.HasBeenPruned(header.Number.Uint64(), latestFinishedBlockNumber)
+	}
 
 	if hasCallTracesBeenPruned || hasHistoryBeenPruned {
 		return &core.ExecutionResult{
