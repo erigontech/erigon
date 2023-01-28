@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -537,7 +536,7 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 // and assembles the block stats. If block is nil, the current head is processed.
 func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = libcommon.Big0
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))

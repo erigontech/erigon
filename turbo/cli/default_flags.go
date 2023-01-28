@@ -122,7 +122,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
 	&utils.CliqueSnapshotInmemorySignaturesFlag,
 	&utils.CliqueDataDirFlag,
-	&utils.EnabledIssuance,
 	&utils.MiningEnabledFlag,
 	&utils.ProposingDisableFlag,
 	&utils.MinerNotifyFlag,

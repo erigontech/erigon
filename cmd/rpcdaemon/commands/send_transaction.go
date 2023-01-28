@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/log/v3"
 
@@ -21,24 +21,24 @@ import (
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
-func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (libcommon.Hash, error) {
+func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	// If the transaction fee cap is already specified, ensure the
 	// fee of the given transaction is _reasonable_.
 	if err := checkTxFee(txn.GetPrice().ToBig(), txn.GetGas(), ethconfig.Defaults.RPCTxFeeCap); err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	if !txn.Protected() {
-		return libcommon.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
+		return common.Hash{}, errors.New("only replay-protected (EIP-155) transactions allowed over RPC")
 	}
 	hash := txn.Hash()
 	res, err := api.txPool.Add(ctx, &txPoolProto.AddRequest{RlpTxs: [][]byte{encodedTx}})
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	if res.Imported[0] != txPoolProto.ImportResult_SUCCESS {
@@ -47,31 +47,31 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 
 	// Print a log with full txn details for manual investigations and interventions
 	blockNum := rawdb.ReadCurrentBlockNumber(tx)
 	if blockNum == nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 	cc, err := api.chainConfig(tx)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	txnChainId := txn.GetChainID()
 	chainId := cc.ChainID
 
 	if chainId.Cmp(txnChainId.ToBig()) != 0 {
-		return libcommon.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
+		return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, *txnChainId)
 	}
 
 	signer := types.MakeSigner(cc, *blockNum)
 	from, err := txn.Sender(*signer)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return common.Hash{}, err
 	}
 
 	if txn.GetTo() == nil {
@@ -85,8 +85,8 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.
-func (api *APIImpl) SendTransaction(_ context.Context, txObject interface{}) (libcommon.Hash, error) {
-	return libcommon.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
+func (api *APIImpl) SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error) {
+	return common.Hash{0}, fmt.Errorf(NotImplemented, "eth_sendTransaction")
 }
 
 // checkTxFee is an internal function used to check whether the fee of

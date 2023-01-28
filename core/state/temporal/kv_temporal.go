@@ -8,10 +8,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -136,21 +137,63 @@ const (
 )
 
 const (
+	AccountsHistoryIdx kv.InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx  kv.InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx     kv.InvertedIdx = "CodeHistoryIdx"
+
 	LogTopicIdx   kv.InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    kv.InvertedIdx = "LogAddrIdx"
 	TracesFromIdx kv.InvertedIdx = "TracesFromIdx"
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
 	switch name {
 	case AccountsDomain:
-		panic("not implemented yet")
+		it := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
+		// Is it possible to increase keys lifetime to: 2 .Next() calls??
+		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+			if len(v) == 0 {
+				return k[:20], v, nil
+			}
+			v, err = tx.db.convertV3toV2(v)
+			if err != nil {
+				return nil, nil, err
+			}
+			var force *common.Hash
+			if tx.db.systemContractLookup != nil {
+				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
+					p := sort.Search(len(records), func(i int) bool {
+						return records[i].TxNumber > asOfTs
+					})
+					hash := records[p-1].CodeHash
+					force = &hash
+				}
+			}
+			v, err = tx.db.restoreCodeHash(tx.Tx, k, v, force)
+			if err != nil {
+				return nil, nil, err
+			}
+			return k[:20], v, nil
+		})
+		it2, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		if err != nil {
+			return nil, err
+		}
+		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
+		it3 := iter.FilterKV(it2, func(k, v []byte) bool {
+			return len(k) == 20
+		})
+		//TODO: seems UnionKV can't handle "amount" request
+		return iter.UnionKV(it11, it3), nil
 	case StorageDomain:
-		//it := tx.agg.StorageHistoryRIterateChanged(asOfTs, math.MaxUint64, tx)
 		toKey, _ := kv.NextSubtree(k1)
-		fromKey2 := append(common.Copy(k1), fromKey...)
+		fromKey2 := append(common.Copy(k1), k2...)
 		it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
+		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+			return k, v, nil
+		})
 
 		accData, err := tx.GetOne(kv.PlainState, k1)
 		if err != nil {
@@ -163,21 +206,21 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
 		copy(startkey, k1)
 		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], fromKey)
+		copy(startkey[length.Addr+length.Incarnation:], k2)
 
 		toPrefix := make([]byte, length.Addr+length.Incarnation)
 		copy(toPrefix, k1)
 		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
-		it2, err := tx.StreamAscend(kv.PlainState, startkey, toPrefix, limit)
+		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
 		if err != nil {
 			return nil, err
 		}
-		it3 := iter.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
-			return append(append([]byte{}, k[:20]...), k[28:]...), v
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
+			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionPairs(it, it3), nil
+		return iter.UnionKV(it11, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -271,42 +314,30 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
-}
-
-// [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps iter.U64, err error) {
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
+	case AccountsHistoryIdx:
+		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case StorageHistoryIdx:
+		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case CodeHistoryIdx:
+		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := timestamps.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return timestamps, nil
 }

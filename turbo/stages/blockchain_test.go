@@ -27,17 +27,14 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -48,7 +45,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -1024,15 +1023,15 @@ func TestDoubleAccountRemoval(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	st := state.New(m.NewHistoricalStateReader(1, tx))
+	st := state.New(m.NewHistoryStateReader(1, tx))
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
 
-	st = state.New(m.NewHistoricalStateReader(2, tx))
+	st = state.New(m.NewHistoryStateReader(2, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
 
-	st = state.New(m.NewHistoricalStateReader(3, tx))
+	st = state.New(m.NewHistoryStateReader(3, tx))
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
@@ -1387,7 +1386,7 @@ func TestDeleteRecreateSlots(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then slot 1 and 2 are zero
 		key1 := libcommon.HexToHash("01")
@@ -1495,7 +1494,8 @@ func TestCVE2020_26265(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		reader := m.NewHistoryStateReader(2, tx)
+		statedb := state.New(reader)
 
 		got := statedb.GetBalance(aa)
 		if !got.Eq(new(uint256.Int).SetUint64(5)) {
@@ -1561,7 +1561,7 @@ func TestDeleteRecreateAccount(t *testing.T) {
 		t.Fatalf("failed to insert into chain: %v", err)
 	}
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		statedb := state.New(m.NewHistoryStateReader(2, tx))
 
 		// If all is correct, then both slots are zero
 		key1 := libcommon.HexToHash("01")
@@ -1873,7 +1873,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
 
 		// Import the canonical chain
-		statedb := state.New(state.NewPlainState(tx, 2, nil))
+		statedb := state.New(m.NewHistoryStateReader(2, tx))
 		if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 			t.Fatalf("Genesis err, got %v exp %v", got, exp)
 		}
@@ -1883,7 +1883,7 @@ func TestInitThenFailCreateContract(t *testing.T) {
 			if err := m.InsertChain(chain.Slice(0, 1)); err != nil {
 				t.Fatalf("block %d: failed to insert into chain: %v", block.NumberU64(), err)
 			}
-			statedb = state.New(state.NewPlainState(tx, 1, nil))
+			statedb = state.New(m.NewHistoryStateReader(1, tx))
 			if got, exp := statedb.GetBalance(aa), uint64(100000); got.Uint64() != exp {
 				t.Fatalf("block %d: got %v exp %v", block.NumberU64(), got, exp)
 			}
@@ -1951,7 +1951,7 @@ func TestEIP2718Transition(t *testing.T) {
 				},
 				GasPrice: gasPrice,
 			},
-			AccessList: types.AccessList{{
+			AccessList: types2.AccessList{{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}},
@@ -2037,7 +2037,7 @@ func TestEIP1559Transition(t *testing.T) {
 		}
 		if i == 500 {
 			// One transaction to 0xAAAA
-			accesses := types.AccessList{types.AccessTuple{
+			accesses := types2.AccessList{types2.AccessTuple{
 				Address:     aa,
 				StorageKeys: []libcommon.Hash{{0}},
 			}}
@@ -2079,7 +2079,7 @@ func TestEIP1559Transition(t *testing.T) {
 	}
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 1, nil))
+		statedb := state.New(m.NewHistoryStateReader(1, tx))
 
 		// 3: Ensure that miner received only the tx's tip.
 		actual := statedb.GetBalance(block.Coinbase())
@@ -2120,7 +2120,7 @@ func TestEIP1559Transition(t *testing.T) {
 
 	block = chain.Blocks[0]
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		statedb := state.New(state.NewPlainState(tx, 1, nil))
+		statedb := state.New(m.NewHistoryStateReader(1, tx))
 		effectiveTip := block.Transactions()[0].GetPrice().Uint64() - block.BaseFee().Uint64()
 
 		// 6+5: Ensure that miner received only the tx's effective tip.

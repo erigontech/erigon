@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -27,7 +27,7 @@ type ChunkProvider func() (chunk []byte, ok bool, err error)
 type BlockProvider func() (nextBlock uint64, hasMore bool, err error)
 
 // Standard key format for call from/to indexes [address + block]
-func callIndexKey(addr libcommon.Address, block uint64) []byte {
+func callIndexKey(addr common.Address, block uint64) []byte {
 	key := make([]byte, length.Addr+8)
 	copy(key[:length.Addr], addr.Bytes())
 	binary.BigEndian.PutUint64(key[length.Addr:], block)
@@ -36,11 +36,11 @@ func callIndexKey(addr libcommon.Address, block uint64) []byte {
 
 const MaxBlockNum = ^uint64(0)
 
-// This ChunkLocator searches over a cursor with a key format of [libcommon.Address, block uint64],
+// This ChunkLocator searches over a cursor with a key format of [common.Address, block uint64],
 // where block is the first block number contained in the chunk value.
 //
 // It positions the cursor on the chunk that contains the first block >= minBlock.
-func newCallChunkLocator(cursor kv.Cursor, addr libcommon.Address, navigateForward bool) ChunkLocator {
+func newCallChunkLocator(cursor kv.Cursor, addr common.Address, navigateForward bool) ChunkLocator {
 	return func(minBlock uint64) (ChunkProvider, bool, error) {
 		searchKey := callIndexKey(addr, minBlock)
 		k, _, err := cursor.Seek(searchKey)
@@ -57,7 +57,7 @@ func newCallChunkLocator(cursor kv.Cursor, addr libcommon.Address, navigateForwa
 
 // This ChunkProvider is built by NewForwardChunkLocator and advances the cursor forward until
 // there is no more chunks for the desired addr.
-func newCallChunkProvider(cursor kv.Cursor, addr libcommon.Address, navigateForward bool) ChunkProvider {
+func newCallChunkProvider(cursor kv.Cursor, addr common.Address, navigateForward bool) ChunkProvider {
 	first := true
 	var err error
 	// TODO: is this flag really used?

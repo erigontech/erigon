@@ -4,7 +4,7 @@ import (
 	"bytes"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -101,7 +101,7 @@ func NewForwardBlockProvider(chunkLocator ChunkLocator, minBlock uint64) BlockPr
 	}
 }
 
-func NewCallCursorForwardBlockProvider(cursor kv.Cursor, addr libcommon.Address, minBlock uint64) BlockProvider {
+func NewCallCursorForwardBlockProvider(cursor kv.Cursor, addr common.Address, minBlock uint64) BlockProvider {
 	chunkLocator := newCallChunkLocator(cursor, addr, true)
 	return NewForwardBlockProvider(chunkLocator, minBlock)
 }

@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -336,18 +337,37 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
+	var gasConsumption uint64
+
+	if evm.config.Debug {
+		if evm.interpreter.Depth() == 0 {
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
+			}()
+		} else {
+			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureExit(ret, gasConsumption, err)
+			}()
+		}
+	}
+
 	// Depth check execution. Fail if we're trying to execute above the
 	// limit.
 	if evm.interpreter.Depth() > int(params.CallCreateDepth) {
-		return nil, libcommon.Address{}, gas, ErrDepth
+		err = ErrDepth
+		return nil, libcommon.Address{}, gas, err
 	}
 	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
-		return nil, libcommon.Address{}, gas, ErrInsufficientBalance
+		err = ErrInsufficientBalance
+		return nil, libcommon.Address{}, gas, err
 	}
 	if incrementNonce {
 		nonce := evm.intraBlockState.GetNonce(caller.Address())
 		if nonce+1 < nonce {
-			return nil, libcommon.Address{}, gas, ErrNonceUintOverflow
+			err = ErrNonceUintOverflow
+			return nil, libcommon.Address{}, gas, err
 		}
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
@@ -374,14 +394,6 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
-
-	if evm.config.Debug {
-		if evm.interpreter.Depth() == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-		} else {
-			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
-		}
-	}
 
 	if evm.config.NoRecursion && evm.interpreter.Depth() > 0 {
 		return nil, address, gas, nil
@@ -421,13 +433,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		}
 	}
 
-	if evm.config.Debug {
-		if evm.interpreter.Depth() == 0 {
-			evm.config.Tracer.CaptureEnd(ret, gas-contract.Gas, err)
-		} else {
-			evm.config.Tracer.CaptureExit(ret, gas-contract.Gas, err)
-		}
-	}
+	// calculate gasConsumption for deferred captures
+	gasConsumption = gas - contract.Gas
 
 	return ret, address, contract.Gas, err
 }

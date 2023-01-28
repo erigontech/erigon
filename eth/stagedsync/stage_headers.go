@@ -647,7 +647,7 @@ func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *header
 			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
 
-		foundPow = h.Difficulty.Cmp(common.Big0) != 0
+		foundPow = h.Difficulty.Cmp(libcommon.Big0) != 0
 		if foundPow {
 			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
