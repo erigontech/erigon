@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/ethdb/prune"
+	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -26,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )

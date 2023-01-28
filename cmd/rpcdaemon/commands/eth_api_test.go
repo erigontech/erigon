@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -220,7 +221,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, nil), m.DB, nil, nil, nil, 5000000, 100_000)
-	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	from := libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
