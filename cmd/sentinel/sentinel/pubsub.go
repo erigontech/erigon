@@ -129,10 +129,20 @@ func (s *GossipManager) CloseTopic(topic string) {
 	}
 }
 
+// reset'em
+func (s *GossipManager) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, val := range s.subscriptions {
+		val.Close() // Close all.
+	}
+	s.subscriptions = map[string]*GossipSubscription{}
+}
+
 // get a specific topic
 func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if val, ok := s.subscriptions[topic]; ok {
 		return val, true
 	}
@@ -140,8 +150,8 @@ func (s *GossipManager) GetSubscription(topic string) (*GossipSubscription, bool
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var sub *GossipSubscription
 	for topic, currSub := range s.subscriptions {
 		if strings.Contains(topic, string(BeaconBlockTopic)) {
@@ -152,15 +162,15 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.subscriptions[topic] = sub
 }
 
 // starts listening to a specific topic (forwarding its messages to the gossip manager channel)
 func (s *GossipManager) ListenTopic(topic string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if val, ok := s.subscriptions[topic]; ok {
 		return val.Listen()
 	}
@@ -178,18 +188,26 @@ func (s *GossipManager) Close() {
 }
 
 func (s *GossipManager) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sb := strings.Builder{}
 	sb.Grow(len(s.subscriptions) * 4)
 
-	s.mu.RLock()
 	for _, v := range s.subscriptions {
 		sb.Write([]byte(v.topic.String()))
 		sb.WriteString("=")
 		sb.WriteString(strconv.Itoa(len(v.topic.ListPeers())))
 		sb.WriteString(" ")
 	}
-	s.mu.RUnlock()
 	return sb.String()
+}
+
+func (s *Sentinel) RestartTopics() {
+	// Reset all topics
+	s.subManager.Reset()
+	for _, topic := range s.gossipTopics {
+		s.SubscribeGossip(topic)
+	}
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
@@ -205,6 +223,12 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
 	s.subManager.AddSubscription(path, sub)
+	for _, t := range s.gossipTopics {
+		if t.CodecStr == topic.CodecStr {
+			return sub, nil
+		}
+	}
+	s.gossipTopics = append(s.gossipTopics, topic)
 	return sub, nil
 }
 

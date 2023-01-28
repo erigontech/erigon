@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -104,7 +105,7 @@ func TestEIP1559BlockEncoding(t *testing.T) {
 	tx1, _ = tx1.WithSignature(*LatestSignerForChainID(nil), common.Hex2Bytes("9bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094f8a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b100"))
 
 	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
-	accesses := AccessList{AccessTuple{
+	accesses := types2.AccessList{types2.AccessTuple{
 		Address: addr,
 		StorageKeys: []libcommon.Hash{
 			{0},
@@ -192,7 +193,7 @@ func TestEIP2718BlockEncoding(t *testing.T) {
 			},
 			GasPrice: ten,
 		},
-		AccessList: AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
+		AccessList: types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}},
 	}
 	sig2 := common.Hex2Bytes("3dbacc8d0259f2508625e97fdfc57cd85fdd16e5821bc2c10bdd1a52649e8335476e10695b183a87b0aa292a7f4b78ef0c3fbe62aa2c42c84e1d9c3da159ef1401")
 	tx2, _ = tx2.WithSignature(*LatestSignerForChainID(big.NewInt(1)), sig2)
@@ -393,7 +394,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		ParentHash: libcommon.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
 		Coinbase:   libcommon.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
 		Root:       libcommon.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
-		Difficulty: common.Big0,
+		Difficulty: libcommon.Big0,
 		Number:     big.NewInt(20_000_000),
 		GasLimit:   30_000_000,
 		GasUsed:    3_074_345,

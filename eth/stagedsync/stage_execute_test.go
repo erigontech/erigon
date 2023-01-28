@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
@@ -165,7 +165,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 func newAgg(t *testing.T) *libstate.AggregatorV3 {
 	t.Helper()
 	dir, ctx := t.TempDir(), context.Background()
-	agg, err := libstate.NewAggregator22(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
+	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
 	require.NoError(t, err)
 	err = agg.ReopenFiles()
 	require.NoError(t, err)

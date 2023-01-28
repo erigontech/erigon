@@ -4,32 +4,119 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (
 	SyncCommitteeBranchLength = 5
 	FinalityBranchLength      = 6
+	ExecutionBranchLength     = 4
 )
+
+type LightClientHeader struct {
+	HeaderEth2      *BeaconBlockHeader
+	HeaderEth1      *types.Header
+	ExecutionBranch [ExecutionBranchLength]libcommon.Hash
+	version         clparams.StateVersion
+}
+
+func (l *LightClientHeader) WithVersion(v clparams.StateVersion) *LightClientHeader {
+	l.version = v
+	return l
+}
+
+func (l *LightClientHeader) DecodeSSZ([]byte) error {
+	panic("not implemnted")
+}
+
+func (l *LightClientHeader) DecodeSSZWithVersion(buf []byte, v int) error {
+	var err error
+	l.version = clparams.StateVersion(v)
+	l.HeaderEth2 = new(BeaconBlockHeader)
+	if err = l.HeaderEth2.DecodeSSZ(buf); err != nil {
+		return err
+	}
+	if l.version <= clparams.BellatrixVersion {
+		return nil
+	}
+	pos := l.HeaderEth2.EncodingSizeSSZ() + 4 // Skip the offset, assume it is at the end.
+	// Decode branch
+	for i := range l.ExecutionBranch {
+		copy(l.ExecutionBranch[i][:], buf[pos:])
+		pos += length.Hash
+	}
+	l.HeaderEth1 = new(types.Header)
+	return l.HeaderEth1.DecodeSSZ(buf[pos:], l.version)
+}
+
+func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
+	var (
+		err error
+		dst = buf
+	)
+	if dst, err = l.HeaderEth2.EncodeSSZ(dst); err != nil {
+		return nil, err
+	}
+	// Pre-capella is easy, encode only header.
+	if l.version < clparams.CapellaVersion {
+		return dst, nil
+	}
+	// Post-Capella
+	offset := uint32(l.HeaderEth2.EncodingSizeSSZ() + len(l.ExecutionBranch)*length.Hash + 4)
+	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
+	for _, root := range l.ExecutionBranch {
+		dst = append(dst, root[:]...)
+	}
+	return l.HeaderEth1.EncodeSSZ(dst)
+}
+
+func (l *LightClientHeader) EncodingSizeSSZ() int {
+	if l.HeaderEth2 == nil {
+		l.HeaderEth2 = new(BeaconBlockHeader)
+	}
+	size := l.HeaderEth2.EncodingSizeSSZ()
+	if l.version >= clparams.CapellaVersion {
+		if l.HeaderEth1 == nil {
+			l.HeaderEth1 = new(types.Header)
+		}
+		size += l.HeaderEth1.EncodingSizeSSZ(l.version) + 4
+		size += length.Hash * len(l.ExecutionBranch)
+	}
+	return size
+}
 
 // LightClientBootstrap is used to bootstrap the lightclient from checkpoint sync.
 type LightClientBootstrap struct {
-	Header                     *BeaconBlockHeader
+	Header                     *LightClientHeader
 	CurrentSyncCommittee       *SyncCommittee
 	CurrentSyncCommitteeBranch []libcommon.Hash
+	version                    clparams.StateVersion
 }
 
-func (l *LightClientBootstrap) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return l.DecodeSSZ(buf)
+func (l *LightClientBootstrap) WithVersion(v clparams.StateVersion) *LightClientBootstrap {
+	l.version = v
+	return l
+}
+
+func (l *LightClientBootstrap) DecodeSSZ(buf []byte) error {
+	panic("AAAAAA")
 }
 
 // EncodeSSZ ssz marshals the LightClientBootstrap object
 func (l *LightClientBootstrap) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
-	if buf, err = l.Header.EncodeSSZ(buf); err != nil {
-		return nil, err
+	offset := l.CurrentSyncCommittee.EncodingSizeSSZ() + len(l.CurrentSyncCommitteeBranch)*length.Hash + 4
+	if l.version < clparams.CapellaVersion {
+		if buf, err = l.Header.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
+	} else {
+		buf = append(buf, ssz_utils.OffsetSSZ(uint32(offset))...)
 	}
 
 	if buf, err = l.CurrentSyncCommittee.EncodeSSZ(buf); err != nil {
@@ -41,31 +128,51 @@ func (l *LightClientBootstrap) EncodeSSZ(dst []byte) ([]byte, error) {
 	for _, leaf := range l.CurrentSyncCommitteeBranch {
 		buf = append(buf, leaf[:]...)
 	}
+	if l.version >= clparams.CapellaVersion {
+		if buf, err = l.Header.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
+	}
 	return buf, nil
 }
 
 // DecodeSSZ ssz unmarshals the LightClientBootstrap object
-func (l *LightClientBootstrap) DecodeSSZ(buf []byte) error {
+func (l *LightClientBootstrap) DecodeSSZWithVersion(buf []byte, version int) error {
 	var err error
+	l.version = clparams.StateVersion(version)
+
 	if len(buf) < l.EncodingSizeSSZ() {
+		fmt.Println(len(buf))
+		fmt.Println(l.EncodingSizeSSZ())
 		return ssz_utils.ErrLowBufferSize
 	}
-
-	l.Header = new(BeaconBlockHeader)
-
-	if err = l.Header.DecodeSSZ(buf[0:112]); err != nil {
-		return err
-	}
+	l.Header = new(LightClientHeader)
 	l.CurrentSyncCommittee = new(SyncCommittee)
-	if err = l.CurrentSyncCommittee.DecodeSSZ(buf[112:24736]); err != nil {
+	l.CurrentSyncCommitteeBranch = make([]libcommon.Hash, 5)
+
+	pos := 0
+	if l.version >= clparams.CapellaVersion {
+		pos += 4
+	} else {
+		if err = l.Header.DecodeSSZWithVersion(buf[pos:], int(l.version)); err != nil {
+			return err
+		}
+		pos += l.Header.EncodingSizeSSZ()
+	}
+
+	if err = l.CurrentSyncCommittee.DecodeSSZ(buf[pos:]); err != nil {
 		return err
 	}
-	pos := 24736
+	pos += l.CurrentSyncCommittee.EncodingSizeSSZ()
 
-	l.CurrentSyncCommitteeBranch = make([]libcommon.Hash, 5)
 	for i := range l.CurrentSyncCommitteeBranch {
 		copy(l.CurrentSyncCommitteeBranch[i][:], buf[pos:pos+32])
 		pos += 32
+	}
+	if l.version >= clparams.CapellaVersion {
+		if err = l.Header.DecodeSSZWithVersion(buf[pos:], int(l.version)); err != nil {
+			return err
+		}
 	}
 
 	return err
@@ -73,23 +180,49 @@ func (l *LightClientBootstrap) DecodeSSZ(buf []byte) error {
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the LightClientBootstrap object
 func (l *LightClientBootstrap) EncodingSizeSSZ() (size int) {
-	size = 24896
+	if l.Header == nil {
+		l.Header = &LightClientHeader{version: l.version}
+	}
+	size = 0
+	size += l.Header.EncodingSizeSSZ()
+	if l.version >= clparams.CapellaVersion {
+		size += 4
+	}
+	if l.CurrentSyncCommittee == nil {
+		l.CurrentSyncCommittee = new(SyncCommittee)
+		l.CurrentSyncCommittee.PubKeys = make([][48]byte, SyncCommitteeSize)
+	}
+
+	size += l.CurrentSyncCommittee.EncodingSizeSSZ()
+
+	if len(l.CurrentSyncCommitteeBranch) == 0 {
+		l.CurrentSyncCommitteeBranch = make([]libcommon.Hash, SyncCommitteeBranchLength)
+	}
+	size += len(l.CurrentSyncCommitteeBranch) * length.Hash
+
 	return
 }
 
 // LightClientUpdate is used to update the sync committee every 27 hours.
 type LightClientUpdate struct {
-	AttestedHeader          *BeaconBlockHeader
+	AttestedHeader          *LightClientHeader
 	NextSyncCommitee        *SyncCommittee
 	NextSyncCommitteeBranch []libcommon.Hash
-	FinalizedHeader         *BeaconBlockHeader
+	FinalizedHeader         *LightClientHeader
 	FinalityBranch          []libcommon.Hash
 	SyncAggregate           *SyncAggregate
 	SignatureSlot           uint64
+
+	version clparams.StateVersion
 }
 
-func (l *LightClientUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return l.DecodeSSZ(buf)
+func (l *LightClientUpdate) WithVersion(v clparams.StateVersion) *LightClientUpdate {
+	l.version = v
+	return l
+}
+
+func (l *LightClientUpdate) DecodeSSZ(buf []byte) error {
+	panic("OOOH")
 }
 
 func (l *LightClientUpdate) HasNextSyncCommittee() bool {
@@ -102,17 +235,26 @@ func (l *LightClientUpdate) IsFinalityUpdate() bool {
 
 func (l *LightClientUpdate) HasSyncFinality() bool {
 	return l.FinalizedHeader != nil &&
-		utils.SlotToPeriod(l.AttestedHeader.Slot) == utils.SlotToPeriod(l.FinalizedHeader.Slot)
+		utils.SlotToPeriod(l.AttestedHeader.HeaderEth2.Slot) == utils.SlotToPeriod(l.FinalizedHeader.HeaderEth2.Slot)
 }
 
 // MarshalSSZTo ssz marshals the LightClientUpdate object to a target array
 func (l *LightClientUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
 	var err error
-	// Generic Update Specific
-	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
-		return nil, err
+	offset := 8 + l.NextSyncCommitee.EncodingSizeSSZ() + len(l.NextSyncCommitteeBranch)*length.Hash +
+		len(l.FinalityBranch)*length.Hash + l.SyncAggregate.EncodingSizeSSZ() + 8
+
+	if l.version >= clparams.CapellaVersion {
+		dst = append(dst, ssz_utils.OffsetSSZ(uint32(offset))...)
+		offset += l.AttestedHeader.EncodingSizeSSZ()
+	} else {
+		// Generic Update Specific
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
 	}
+
 	if dst, err = l.NextSyncCommitee.EncodeSSZ(dst); err != nil {
 		return nil, err
 	}
@@ -124,20 +266,34 @@ func (l *LightClientUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 		dst = append(dst, leaf[:]...)
 	}
 
-	dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch)
+	dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch, uint32(offset))
 	if err != nil {
 		return nil, err
 	}
+
 	dst = encodeUpdateFooter(dst, l.SyncAggregate, l.SignatureSlot)
+	if l.version >= clparams.CapellaVersion {
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
+		if dst, err = l.FinalizedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
+	}
 	return dst, nil
 }
 
-func encodeFinalityUpdateSpecificField(buf []byte, finalizedHeader *BeaconBlockHeader, finalityBranch []libcommon.Hash) ([]byte, error) {
+func encodeFinalityUpdateSpecificField(buf []byte, finalizedHeader *LightClientHeader, finalityBranch []libcommon.Hash, offset uint32) ([]byte, error) {
 	dst := buf
 	var err error
-	if dst, err = finalizedHeader.EncodeSSZ(dst); err != nil {
-		return nil, err
+	if finalizedHeader.version >= clparams.CapellaVersion {
+		dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
+	} else {
+		if dst, err = finalizedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
 	}
+
 	if len(finalityBranch) != FinalityBranchLength {
 		return nil, fmt.Errorf("invalid finality branch length")
 	}
@@ -153,17 +309,26 @@ func encodeUpdateFooter(buf []byte, aggregate *SyncAggregate, signatureSlot uint
 	return append(dst, ssz_utils.Uint64SSZ(signatureSlot)...)
 }
 
-func decodeFinalityUpdateSpecificField(buf []byte) (*BeaconBlockHeader, []libcommon.Hash, error) {
-	header := &BeaconBlockHeader{}
-	if err := header.DecodeSSZ(buf); err != nil {
-		return nil, nil, err
+func decodeFinalityUpdateSpecificField(buf []byte, version clparams.StateVersion) (*LightClientHeader, []libcommon.Hash, uint32, int, error) {
+	header := &LightClientHeader{}
+	var offset uint32
+	pos := 0
+	if version < clparams.CapellaVersion {
+		if err := header.DecodeSSZWithVersion(buf, int(version)); err != nil {
+			return nil, nil, 0, 0, err
+		}
+		pos += header.EncodingSizeSSZ()
+	} else {
+		offset = ssz_utils.DecodeOffset(buf)
+		pos += 4
 	}
+
 	finalityBranch := make([]libcommon.Hash, FinalityBranchLength)
-	startBranch := 112
 	for i := range finalityBranch {
-		copy(finalityBranch[i][:], buf[startBranch+i*32:])
+		copy(finalityBranch[i][:], buf[pos:])
+		pos += length.Hash
 	}
-	return header, finalityBranch, nil
+	return header, finalityBranch, offset, pos, nil
 }
 
 func decodeUpdateFooter(buf []byte) (*SyncAggregate, uint64, error) {
@@ -176,144 +341,292 @@ func decodeUpdateFooter(buf []byte) (*SyncAggregate, uint64, error) {
 
 // LightClientFinalityUpdate is used to update the sync aggreggate every 6 minutes.
 type LightClientFinalityUpdate struct {
-	AttestedHeader  *BeaconBlockHeader
-	FinalizedHeader *BeaconBlockHeader
+	AttestedHeader  *LightClientHeader
+	FinalizedHeader *LightClientHeader
 	FinalityBranch  []libcommon.Hash `ssz-size:"6,32"`
 	SyncAggregate   *SyncAggregate
 	SignatureSlot   uint64
+
+	version clparams.StateVersion
 }
 
-func (l *LightClientFinalityUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return l.DecodeSSZ(buf)
+func (l *LightClientFinalityUpdate) WithVersion(v clparams.StateVersion) *LightClientFinalityUpdate {
+	l.version = v
+	return l
+}
+
+func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte) error {
+	panic("OOOOOOOOOOOOO")
 }
 
 // DecodeSSZ ssz unmarshals the LightClientUpdate object
-func (l *LightClientUpdate) DecodeSSZ(buf []byte) error {
+func (l *LightClientUpdate) DecodeSSZWithVersion(buf []byte, version int) error {
 	var err error
+	l.version = clparams.StateVersion(version)
 	if len(buf) < l.EncodingSizeSSZ() {
-		return ssz_utils.ErrBadOffset
+		return ssz_utils.ErrLowBufferSize
 	}
 
-	l.AttestedHeader = new(BeaconBlockHeader)
-
-	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
-		return err
-	}
-
-	// Field (1) 'NextSyncCommitee'
-	if l.NextSyncCommitee == nil {
-		l.NextSyncCommitee = new(SyncCommittee)
-	}
-	if err = l.NextSyncCommitee.DecodeSSZ(buf[112:24736]); err != nil {
-		return err
-	}
-
+	l.AttestedHeader = new(LightClientHeader)
+	l.NextSyncCommitee = new(SyncCommittee)
 	l.NextSyncCommitteeBranch = make([]libcommon.Hash, SyncCommitteeBranchLength)
-	pos := 24736
+	l.FinalizedHeader = new(LightClientHeader)
+	l.SyncAggregate = new(SyncAggregate)
+
+	var (
+		pos             int
+		offsetAttested  uint32
+		offsetFinalized uint32
+	)
+
+	if l.version >= clparams.CapellaVersion {
+		offsetAttested = ssz_utils.DecodeOffset(buf)
+		pos += 4
+	} else {
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf, version); err != nil {
+			return err
+		}
+		pos += l.AttestedHeader.EncodingSizeSSZ()
+	}
+
+	if err = l.NextSyncCommitee.DecodeSSZ(buf[pos:]); err != nil {
+		return err
+	}
+	pos += l.NextSyncCommitee.EncodingSizeSSZ()
 	for i := range l.NextSyncCommitteeBranch {
 		copy(l.NextSyncCommitteeBranch[i][:], buf[pos:])
 		pos += 32
 	}
 
-	l.FinalizedHeader, l.FinalityBranch, err = decodeFinalityUpdateSpecificField(buf[24896:])
+	var written int
+	l.FinalizedHeader, l.FinalityBranch, offsetFinalized, written, err = decodeFinalityUpdateSpecificField(buf[pos:], l.version)
 	if err != nil {
 		return err
 	}
+	pos += written
 
-	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[25200:])
-	fmt.Println(l.SignatureSlot)
+	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[pos:])
+	if l.version >= clparams.CapellaVersion {
+		if offsetAttested > offsetFinalized || offsetFinalized > uint32(len(buf)) {
+			return ssz_utils.ErrBadOffset
+		}
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf[offsetAttested:offsetFinalized], version); err != nil {
+			return err
+		}
+		if err = l.FinalizedHeader.DecodeSSZWithVersion(buf[offsetFinalized:], version); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the LightClientUpdate object
 func (l *LightClientUpdate) EncodingSizeSSZ() int {
-	return 25368
+	size := 0
+	if l.version >= clparams.CapellaVersion {
+		size += 8
+	}
+	if l.AttestedHeader == nil {
+		l.AttestedHeader = &LightClientHeader{version: l.version}
+	}
+	if l.NextSyncCommitee == nil {
+		l.NextSyncCommitee = new(SyncCommittee)
+		l.NextSyncCommitee.PubKeys = make([][48]byte, 512)
+	}
+	if l.FinalizedHeader == nil {
+		l.FinalizedHeader = &LightClientHeader{version: l.version}
+	}
+	if l.SyncAggregate == nil {
+		l.SyncAggregate = new(SyncAggregate)
+	}
+	if len(l.NextSyncCommitteeBranch) == 0 {
+		l.NextSyncCommitteeBranch = make([]libcommon.Hash, SyncCommitteeBranchLength)
+	}
+	if len(l.FinalityBranch) == 0 {
+		l.FinalityBranch = make([]libcommon.Hash, FinalityBranchLength)
+	}
+	return size + l.AttestedHeader.EncodingSizeSSZ() + l.FinalizedHeader.EncodingSizeSSZ() + l.SyncAggregate.EncodingSizeSSZ() +
+		8 + len(l.FinalityBranch)*length.Hash + len(l.NextSyncCommitteeBranch)*length.Hash + l.NextSyncCommitee.EncodingSizeSSZ()
 }
 
 func (l *LightClientFinalityUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
 	var err error
-
-	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
-		return nil, err
+	offset := 8 + len(l.FinalityBranch)*length.Hash + l.SyncAggregate.EncodingSizeSSZ() + 8
+	if l.version >= clparams.CapellaVersion {
+		dst = append(dst, ssz_utils.OffsetSSZ(uint32(offset))...)
+		offset += l.AttestedHeader.EncodingSizeSSZ()
+	} else {
+		// Generic Update Specific
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
 	}
 
-	if dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch); err != nil {
+	dst, err = encodeFinalityUpdateSpecificField(dst, l.FinalizedHeader, l.FinalityBranch, uint32(offset))
+	if err != nil {
 		return nil, err
 	}
 	dst = encodeUpdateFooter(dst, l.SyncAggregate, l.SignatureSlot)
-
+	if l.version >= clparams.CapellaVersion {
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
+		if dst, err = l.FinalizedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
+	}
 	return dst, nil
 }
 
 // DecodeSSZ ssz unmarshals the LightClientFinalityUpdate object
-func (l *LightClientFinalityUpdate) DecodeSSZ(buf []byte) error {
+func (l *LightClientFinalityUpdate) DecodeSSZWithVersion(buf []byte, version int) error {
 	var err error
+	l.version = clparams.StateVersion(version)
 	if len(buf) < l.EncodingSizeSSZ() {
 		return ssz_utils.ErrBadOffset
 	}
 
-	l.AttestedHeader = new(BeaconBlockHeader)
-	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
-		return err
+	pos := 0
+	l.AttestedHeader = new(LightClientHeader)
+
+	var offsetAttested, offsetFinalized uint32
+	if l.version < clparams.CapellaVersion {
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf, int(l.version)); err != nil {
+			return err
+		}
+		pos += l.AttestedHeader.EncodingSizeSSZ()
+	} else {
+		offsetAttested = ssz_utils.DecodeOffset(buf)
+		pos += 4
 	}
 
-	l.FinalizedHeader, l.FinalityBranch, err = decodeFinalityUpdateSpecificField(buf[112:416])
+	var written int
+	l.FinalizedHeader, l.FinalityBranch, offsetFinalized, written, err = decodeFinalityUpdateSpecificField(buf[pos:], l.version)
 	if err != nil {
 		return err
 	}
+	pos += written
 
-	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[416:584])
+	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[pos:])
 	if err != nil {
 		return err
 	}
-
+	if l.version >= clparams.CapellaVersion {
+		if offsetAttested > offsetFinalized || offsetFinalized > uint32(len(buf)) {
+			return ssz_utils.ErrBadOffset
+		}
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf[offsetAttested:offsetFinalized], version); err != nil {
+			return err
+		}
+		if err = l.FinalizedHeader.DecodeSSZWithVersion(buf[offsetFinalized:], version); err != nil {
+			return err
+		}
+	}
 	return err
 }
 
 func (l *LightClientFinalityUpdate) EncodingSizeSSZ() int {
-	return 584
+	size := 0
+	if l.version >= clparams.CapellaVersion {
+		size += 8
+	}
+	if l.AttestedHeader == nil {
+		l.AttestedHeader = &LightClientHeader{version: l.version}
+	}
+	if l.FinalizedHeader == nil {
+		l.FinalizedHeader = &LightClientHeader{version: l.version}
+	}
+	if l.SyncAggregate == nil {
+		l.SyncAggregate = new(SyncAggregate)
+	}
+	if len(l.FinalityBranch) == 0 {
+		l.FinalityBranch = make([]libcommon.Hash, FinalityBranchLength)
+	}
+	return size + l.AttestedHeader.EncodingSizeSSZ() + l.FinalizedHeader.EncodingSizeSSZ() + l.SyncAggregate.EncodingSizeSSZ() +
+		8 + len(l.FinalityBranch)*length.Hash
+
 }
 
 // LightClientOptimisticUpdate is used for verifying N-1 block.
 type LightClientOptimisticUpdate struct {
-	AttestedHeader *BeaconBlockHeader
+	AttestedHeader *LightClientHeader
 	SyncAggregate  *SyncAggregate
 	SignatureSlot  uint64
+
+	version clparams.StateVersion
 }
 
-func (l *LightClientOptimisticUpdate) DecodeSSZWithVersion(buf []byte, _ int) error {
-	return l.DecodeSSZ(buf)
+func (l *LightClientOptimisticUpdate) WithVersion(v clparams.StateVersion) *LightClientOptimisticUpdate {
+	l.version = v
+	return l
 }
 
 func (l *LightClientOptimisticUpdate) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
 	var err error
-	if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
-		return nil, err
+	if l.version >= clparams.CapellaVersion {
+		dst = append(dst, ssz_utils.OffsetSSZ(uint32(8+l.SyncAggregate.EncodingSizeSSZ()+4))...)
+	} else {
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
 	}
 	dst = encodeUpdateFooter(dst, l.SyncAggregate, l.SignatureSlot)
-
+	if l.version >= clparams.CapellaVersion {
+		if dst, err = l.AttestedHeader.EncodeSSZ(dst); err != nil {
+			return nil, err
+		}
+	}
 	return dst, nil
 }
 
-func (l *LightClientOptimisticUpdate) DecodeSSZ(buf []byte) error {
+func (l *LightClientOptimisticUpdate) DecodeSSZWithVersion(buf []byte, version int) error {
 	var err error
+	l.version = clparams.StateVersion(version)
 	if len(buf) < l.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz_utils.ErrBadOffset
 	}
 
-	// Field (0) 'AttestedHeader'
-	if l.AttestedHeader == nil {
-		l.AttestedHeader = new(BeaconBlockHeader)
+	pos := 0
+	l.AttestedHeader = new(LightClientHeader)
+
+	if l.version < clparams.CapellaVersion {
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf, int(l.version)); err != nil {
+			return err
+		}
+		pos += l.AttestedHeader.EncodingSizeSSZ()
+	} else {
+		pos += 4
 	}
-	if err = l.AttestedHeader.DecodeSSZ(buf[0:112]); err != nil {
+
+	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[pos:])
+	if err != nil {
 		return err
 	}
-	l.SyncAggregate, l.SignatureSlot, err = decodeUpdateFooter(buf[112:])
+	pos += l.SyncAggregate.EncodingSizeSSZ() + 8
+	if l.version >= clparams.CapellaVersion {
+		if err = l.AttestedHeader.DecodeSSZWithVersion(buf[pos:], version); err != nil {
+			return err
+		}
+	}
 	return err
+
+}
+
+func (l *LightClientOptimisticUpdate) DecodeSSZ([]byte) error {
+	panic("DJFCF")
 }
 
 func (l *LightClientOptimisticUpdate) EncodingSizeSSZ() (size int) {
-	return 280
+	if l.version >= clparams.CapellaVersion {
+		size += 4
+	}
+	if l.AttestedHeader == nil {
+		l.AttestedHeader = &LightClientHeader{version: l.version}
+	}
+	if l.SyncAggregate == nil {
+		l.SyncAggregate = new(SyncAggregate)
+	}
+	return size + l.AttestedHeader.EncodingSizeSSZ() + l.SyncAggregate.EncodingSizeSSZ() + 8
 }

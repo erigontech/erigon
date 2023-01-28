@@ -27,10 +27,9 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
-	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/common"
@@ -148,6 +147,8 @@ func TestNewSimulatedBackend(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	//statedb := sim.stateByBlockNumber(tx, big.NewInt(int64(num+1)))
 	statedb := state.New(state.NewPlainState(tx, num+1, nil))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {

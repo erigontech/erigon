@@ -19,35 +19,51 @@ const (
 
 type BeaconState struct {
 	// State fields
-	genesisTime                  uint64
-	genesisValidatorsRoot        libcommon.Hash
-	slot                         uint64
-	fork                         *cltypes.Fork
-	latestBlockHeader            *cltypes.BeaconBlockHeader
-	blockRoots                   [blockRootsLength]libcommon.Hash
-	stateRoots                   [stateRootsLength]libcommon.Hash
-	historicalRoots              []libcommon.Hash
-	eth1Data                     *cltypes.Eth1Data
-	eth1DataVotes                []*cltypes.Eth1Data
-	eth1DepositIndex             uint64
-	validators                   []*cltypes.Validator
-	balances                     []uint64
-	randaoMixes                  [randoMixesLength]libcommon.Hash
-	slashings                    [slashingsLength]uint64
-	previousEpochParticipation   []byte
-	currentEpochParticipation    []byte
-	justificationBits            byte
-	previousJustifiedCheckpoint  *cltypes.Checkpoint
-	currentJustifiedCheckpoint   *cltypes.Checkpoint
-	finalizedCheckpoint          *cltypes.Checkpoint
-	inactivityScores             []uint64
-	currentSyncCommittee         *cltypes.SyncCommittee
-	nextSyncCommittee            *cltypes.SyncCommittee
+	genesisTime                uint64
+	genesisValidatorsRoot      libcommon.Hash
+	slot                       uint64
+	fork                       *cltypes.Fork
+	latestBlockHeader          *cltypes.BeaconBlockHeader
+	blockRoots                 [blockRootsLength]libcommon.Hash
+	stateRoots                 [stateRootsLength]libcommon.Hash
+	historicalRoots            []libcommon.Hash
+	eth1Data                   *cltypes.Eth1Data
+	eth1DataVotes              []*cltypes.Eth1Data
+	eth1DepositIndex           uint64
+	validators                 []*cltypes.Validator
+	balances                   []uint64
+	randaoMixes                [randoMixesLength]libcommon.Hash
+	slashings                  [slashingsLength]uint64
+	previousEpochParticipation cltypes.ParticipationFlagsList
+	currentEpochParticipation  cltypes.ParticipationFlagsList
+	justificationBits          cltypes.JustificationBits
+	// Altair
+	previousJustifiedCheckpoint *cltypes.Checkpoint
+	currentJustifiedCheckpoint  *cltypes.Checkpoint
+	finalizedCheckpoint         *cltypes.Checkpoint
+	inactivityScores            []uint64
+	currentSyncCommittee        *cltypes.SyncCommittee
+	nextSyncCommittee           *cltypes.SyncCommittee
+	// Bellatrix
 	latestExecutionPayloadHeader *types.Header
+	// Capella
+	nextWithdrawalIndex          uint64
+	nextWithdrawalValidatorIndex uint64
+	historicalSummaries          []*cltypes.HistoricalSummary
 	// Internals
 	version       clparams.StateVersion   // State version
 	leaves        [32][32]byte            // Pre-computed leaves.
 	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	// Configs
+	beaconConfig *clparams.BeaconChainConfig
+}
+
+func New(cfg *clparams.BeaconChainConfig) *BeaconState {
+	state := &BeaconState{
+		beaconConfig: cfg,
+	}
+	state.initBeaconState()
+	return state
 }
 
 func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {

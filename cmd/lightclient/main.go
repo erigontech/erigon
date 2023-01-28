@@ -66,7 +66,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 			return err
 		}
 	}
-	state, err := core.RetrieveBeaconState(ctx, cfg.CheckpointUri)
+	state, err := core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
 		return err
 	}
