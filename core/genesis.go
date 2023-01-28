@@ -32,9 +32,12 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -47,8 +50,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 //go:generate gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -90,14 +91,6 @@ type AuthorityRoundSeal struct {
 	Step uint64 `json:"step"`
 	/// Seal signature.
 	Signature libcommon.Hash `json:"signature"`
-}
-
-var genesisTmpDB kv.RwDB
-var genesisDBLock *sync.Mutex
-
-func init() {
-	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
-	genesisDBLock = &sync.Mutex{}
 }
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
@@ -380,9 +373,9 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		genesisDBLock.Lock()
-		defer genesisDBLock.Unlock()
-		tx, err := genesisTmpDB.BeginRw(context.Background())
+		tmpDB := mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).MustOpen()
+		defer tmpDB.Close()
+		tx, err := tmpDB.BeginRw(context.Background())
 		if err != nil {
 			panic(err)
 		}
@@ -548,7 +541,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
 		return nil, nil, err
 	}
-	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, libcommon.Big0)
+	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, common.Big0)
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

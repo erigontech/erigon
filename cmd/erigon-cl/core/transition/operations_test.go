@@ -5,7 +5,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -168,8 +167,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
-			err := s.ProcessProposerSlashing(tc.slashing)
+			err := ProcessProposerSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -280,8 +278,7 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
-			err := s.ProcessAttesterSlashing(tc.slashing)
+			err := ProcessAttesterSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")

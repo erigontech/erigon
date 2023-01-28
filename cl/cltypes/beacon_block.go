@@ -46,13 +46,10 @@ const (
 	MaxAttestations      = 128
 	MaxDeposits          = 16
 	MaxVoluntaryExits    = 16
-	MaxExecutionChanges  = 16
 )
 
 func getBeaconBlockMinimumSize(v clparams.StateVersion) (size uint32) {
 	switch v {
-	case clparams.CapellaVersion:
-		size = 388
 	case clparams.BellatrixVersion:
 		size = 384
 	case clparams.AltairVersion:
@@ -99,8 +96,6 @@ type BeaconBody struct {
 	SyncAggregate *SyncAggregate
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
 	ExecutionPayload *Eth1Block
-	// Withdrawals Diffs for Execution Layer
-	ExecutionChanges []*SignedBLSToExecutionChange
 	// The version of the beacon chain
 	Version clparams.StateVersion
 }
@@ -156,10 +151,6 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if b.Version >= clparams.BellatrixVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ(b.Version))
-	}
-	if b.Version >= clparams.CapellaVersion {
-		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
 	}
 	// Now start encoding the rest of the fields.
 	if len(b.AttesterSlashings) > MaxAttesterSlashings {
@@ -176,9 +167,6 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if len(b.VoluntaryExits) > MaxVoluntaryExits {
 		return nil, fmt.Errorf("Encode(SSZ): too many attestations")
-	}
-	if len(b.ExecutionChanges) > MaxExecutionChanges {
-		return nil, fmt.Errorf("Encode(SSZ): too many changes")
 	}
 	// Write proposer slashings
 	for _, proposerSlashing := range b.ProposerSlashings {
@@ -221,17 +209,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.Version >= clparams.BellatrixVersion {
-		buf, err = b.ExecutionPayload.EncodeSSZ(buf, b.Version)
+		buf, err = b.ExecutionPayload.EncodeSSZ(buf)
 		if err != nil {
 			return nil, err
-		}
-	}
-
-	if b.Version >= clparams.CapellaVersion {
-		for _, change := range b.ExecutionChanges {
-			if buf, err = change.EncodeSSZ(buf); err != nil {
-				return nil, err
-			}
 		}
 	}
 	return buf, nil
@@ -259,14 +239,9 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		if b.ExecutionPayload == nil {
 			b.ExecutionPayload = new(Eth1Block)
 		}
-		size += b.ExecutionPayload.EncodingSizeSSZ(b.Version)
+		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
 
-	if b.Version >= clparams.CapellaVersion {
-		for _, change := range b.ExecutionChanges {
-			size += change.EncodingSizeSSZ()
-		}
-	}
 	return
 }
 
@@ -310,11 +285,6 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	if version >= clparams.BellatrixVersion {
 		offsetExecution = ssz_utils.DecodeOffset(buf[380:])
 	}
-	// Execution to BLS changes
-	var blsChangesOffset uint32
-	if version >= clparams.CapellaVersion {
-		blsChangesOffset = ssz_utils.DecodeOffset(buf[384:])
-	}
 	// Decode Proposer slashings
 	proposerSlashingLength := 416
 	b.ProposerSlashings, err = ssz_utils.DecodeStaticList[*ProposerSlashing](buf, offSetProposerSlashings, offsetAttesterSlashings, uint32(proposerSlashingLength), MaxProposerSlashings)
@@ -339,34 +309,19 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	}
 	// Decode exits
 	exitLength := 112
-	endOffset := len(buf)
+	endExitBuffer := len(buf)
 	if b.Version >= clparams.BellatrixVersion {
-		endOffset = int(offsetExecution)
+		endExitBuffer = int(offsetExecution)
 	}
-	b.VoluntaryExits, err = ssz_utils.DecodeStaticList[*SignedVoluntaryExit](buf, offsetExits, uint32(endOffset), uint32(exitLength), MaxVoluntaryExits)
+	b.VoluntaryExits, err = ssz_utils.DecodeStaticList[*SignedVoluntaryExit](buf, offsetExits, uint32(endExitBuffer), uint32(exitLength), MaxVoluntaryExits)
 	if err != nil {
 		return err
 	}
-
-	endOffset = len(buf)
-	if b.Version >= clparams.CapellaVersion {
-		endOffset = int(blsChangesOffset)
-	}
 	if b.Version >= clparams.BellatrixVersion {
 		b.ExecutionPayload = new(Eth1Block)
-		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
-			return ssz_utils.ErrBadOffset
-		}
-		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], b.Version); err != nil {
+		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:], b.Version); err != nil {
 			return err
 		}
-	}
-
-	if b.Version >= clparams.CapellaVersion {
-		if b.ExecutionChanges, err = ssz_utils.DecodeStaticList[*SignedBLSToExecutionChange](buf, blsChangesOffset, uint32(len(buf)), 172, MaxExecutionChanges); err != nil {
-			return err
-		}
-
 	}
 	return nil
 }
@@ -428,7 +383,7 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		leaves = append(leaves, aggLeaf)
 	}
 	if b.Version >= clparams.BellatrixVersion {
-		payloadLeaf, err := b.ExecutionPayload.HashSSZ(b.Version)
+		payloadLeaf, err := b.ExecutionPayload.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}

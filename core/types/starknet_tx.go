@@ -10,7 +10,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -22,7 +21,7 @@ type StarknetTransaction struct {
 	Salt       []byte // cairo contract address salt
 	Tip        *uint256.Int
 	FeeCap     *uint256.Int
-	AccessList types2.AccessList
+	AccessList AccessList
 }
 
 func (tx StarknetTransaction) Type() byte {
@@ -82,7 +81,7 @@ func (tx *StarknetTransaction) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// decode AccessList
-	tx.AccessList = types2.AccessList{}
+	tx.AccessList = AccessList{}
 	if err = decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
@@ -209,7 +208,7 @@ func (tx StarknetTransaction) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
-func (tx StarknetTransaction) GetAccessList() types2.AccessList {
+func (tx StarknetTransaction) GetAccessList() AccessList {
 	panic("implement me")
 }
 
@@ -438,7 +437,7 @@ func (tx StarknetTransaction) copy() *StarknetTransaction {
 			Value:   new(uint256.Int),
 		},
 		Salt:       common.CopyBytes(tx.Salt),
-		AccessList: make(types2.AccessList, len(tx.AccessList)),
+		AccessList: make(AccessList, len(tx.AccessList)),
 		Tip:        new(uint256.Int),
 		FeeCap:     new(uint256.Int),
 	}

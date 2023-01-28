@@ -48,7 +48,7 @@ func (*BLSToExecutionChange) EncodingSizeSSZ() int {
 }
 
 type SignedBLSToExecutionChange struct {
-	Message   *BLSToExecutionChange
+	Message   BLSToExecutionChange
 	Signature [96]byte
 }
 
@@ -66,7 +66,6 @@ func (s *SignedBLSToExecutionChange) DecodeSSZ(buf []byte) error {
 	if len(buf) < s.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
-	s.Message = new(BLSToExecutionChange)
 	if err := s.Message.DecodeSSZ(buf); err != nil {
 		return err
 	}

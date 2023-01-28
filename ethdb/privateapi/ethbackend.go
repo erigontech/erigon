@@ -1,7 +1,6 @@
 package privateapi
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -320,10 +319,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
 		log.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
-		return &remote.EnginePayloadStatus{
-			Status:          remote.EngineStatus_INVALID,
-			ValidationError: "invalid block hash",
-		}, nil
+		return &remote.EnginePayloadStatus{Status: remote.EngineStatus_INVALID_BLOCK_HASH}, nil
 	}
 
 	for _, txn := range req.Transactions {
@@ -331,6 +327,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 			log.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
 			return &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_INVALID,
+				LatestValidHash: nil,
 				ValidationError: "typed txn marshalled as RLP string",
 			}, nil
 		}
@@ -341,6 +338,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		log.Warn("[NewPayload] failed to decode transactions", "err", err)
 		return &remote.EnginePayloadStatus{
 			Status:          remote.EngineStatus_INVALID,
+			LatestValidHash: nil,
 			ValidationError: err.Error(),
 		}, nil
 	}
@@ -678,96 +676,6 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		},
 		PayloadId: s.payloadId,
 	}, nil
-}
-
-func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByHashV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	bodies := make([]*types2.ExecutionPayloadBodyV1, len(request.Hashes))
-
-	for hashIdx, hash := range request.Hashes {
-		h := gointerfaces.ConvertH256ToHash(hash)
-		block, err := rawdb.ReadBlockByHash(tx, h)
-		if err != nil {
-			return nil, err
-		}
-
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		bodies[hashIdx] = body
-	}
-
-	return &remote.EngineGetPayloadBodiesV1Response{Bodies: bodies}, nil
-}
-
-func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, request *remote.EngineGetPayloadBodiesByRangeV1Request) (*remote.EngineGetPayloadBodiesV1Response, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	bodies := make([]*types2.ExecutionPayloadBodyV1, request.Count)
-
-	var i uint64
-	for i = 0; i < request.Count; i++ {
-		block, err := rawdb.ReadBlockByNumber(tx, request.Start+i)
-		if err != nil {
-			return nil, err
-		}
-		body, err := extractPayloadBodyFromBlock(block)
-		if err != nil {
-			return nil, err
-		}
-		if body == nil {
-			// break early if the body is nil to trim the response.  A missing body indicates we don't have the
-			// canonical block so can just stop outputting from here
-			break
-		}
-		bodies[i] = body
-	}
-
-	return &remote.EngineGetPayloadBodiesV1Response{Bodies: bodies}, nil
-}
-
-func extractPayloadBodyFromBlock(block *types.Block) (*types2.ExecutionPayloadBodyV1, error) {
-	if block == nil {
-		return nil, nil
-	}
-
-	txs := block.Transactions()
-	bdTxs := make([][]byte, len(txs))
-	for idx, tx := range txs {
-		var buf bytes.Buffer
-		if err := tx.MarshalBinary(&buf); err != nil {
-			return nil, err
-		} else {
-			bdTxs[idx] = buf.Bytes()
-		}
-	}
-
-	wds := block.Withdrawals()
-	bdWds := make([]*types2.Withdrawal, len(wds))
-
-	if wds == nil {
-		// pre shanghai blocks could have nil withdrawals so nil the slice as per spec
-		bdWds = nil
-	} else {
-		for idx, wd := range wds {
-			bdWds[idx] = &types2.Withdrawal{
-				Index:          wd.Index,
-				ValidatorIndex: wd.Validator,
-				Address:        gointerfaces.ConvertAddressToH160(wd.Address),
-				Amount:         wd.Amount,
-			}
-		}
-	}
-
-	return &types2.ExecutionPayloadBodyV1{Transactions: bdTxs, Withdrawals: bdWds}, nil
 }
 
 func (s *EthBackendServer) evictOldBuilders() {

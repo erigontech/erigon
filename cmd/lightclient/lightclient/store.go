@@ -31,7 +31,7 @@ type LightClientStore struct {
  *	received LightClientBootstrap derived from a given trusted_block_root.
  */
 func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBootstrap) (*LightClientStore, error) {
-	headerRoot, err := bootstrap.Header.HeaderEth2.HashSSZ()
+	headerRoot, err := bootstrap.Header.HashSSZ()
 	if err != nil {
 		return nil, err
 	}
@@ -49,16 +49,16 @@ func NewLightClientStore(trustedRoot [32]byte, bootstrap *cltypes.LightClientBoo
 		bootstrap.CurrentSyncCommitteeBranch,
 		5,  // floorlog2(CURRENT_SYNC_COMMITTEE_INDEX)
 		22, // get_subtree_index(CURRENT_SYNC_COMMITTEE_INDEX),
-		bootstrap.Header.HeaderEth2.Root,
+		bootstrap.Header.Root,
 	) {
 		return nil, fmt.Errorf("invalid sync committee")
 	}
 
 	return &LightClientStore{
-		finalizedHeader:               bootstrap.Header.HeaderEth2,
+		finalizedHeader:               bootstrap.Header,
 		currentSyncCommittee:          bootstrap.CurrentSyncCommittee,
 		nextSyncCommittee:             nil,
-		optimisticHeader:              bootstrap.Header.HeaderEth2,
+		optimisticHeader:              bootstrap.Header,
 		previousMaxActivePartecipants: 0,
 		currentMaxActivePartecipants:  0,
 	}, nil

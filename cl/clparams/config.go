@@ -18,13 +18,10 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"os"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -192,7 +189,7 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
 var CheckpointSyncEndpoints = map[NetworkType][]string{
 	MainnetNetwork: {
-		"https://beaconstate.ethstaker.cc",
+		"https://beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
@@ -342,14 +339,14 @@ type BeaconChainConfig struct {
 	SlashingProtectionPruningEpochs uint64 // SlashingProtectionPruningEpochs defines a period after which all prior epochs are pruned in the validator database.
 
 	// Fork-related values.
-	GenesisForkVersion   uint32 `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
-	AltairForkVersion    uint32 `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for altair.
+	GenesisForkVersion   []byte `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
+	AltairForkVersion    []byte `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for altair.
 	AltairForkEpoch      uint64 `yaml:"ALTAIR_FORK_EPOCH" spec:"true"`      // AltairForkEpoch is used to represent the assigned fork epoch for altair.
-	BellatrixForkVersion uint32 `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for bellatrix.
+	BellatrixForkVersion []byte `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for bellatrix.
 	BellatrixForkEpoch   uint64 `yaml:"BELLATRIX_FORK_EPOCH" spec:"true"`   // BellatrixForkEpoch is used to represent the assigned fork epoch for bellatrix.
-	ShardingForkVersion  uint32 `yaml:"SHARDING_FORK_VERSION" spec:"true"`  // ShardingForkVersion is used to represent the fork version for sharding.
+	ShardingForkVersion  []byte `yaml:"SHARDING_FORK_VERSION" spec:"true"`  // ShardingForkVersion is used to represent the fork version for sharding.
 	ShardingForkEpoch    uint64 `yaml:"SHARDING_FORK_EPOCH" spec:"true"`    // ShardingForkEpoch is used to represent the assigned fork epoch for sharding.
-	CapellaForkVersion   uint32 `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for capella.
+	CapellaForkVersion   []byte `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for capella.
 	CapellaForkEpoch     uint64 `yaml:"CAPELLA_FORK_EPOCH" spec:"true"`     // CapellaForkEpoch is used to represent the assigned fork epoch for capella.
 
 	ForkVersionSchedule map[[VersionLength]byte]uint64 // Schedule of fork epochs by version.
@@ -407,18 +404,6 @@ type BeaconChainConfig struct {
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 }
 
-func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
-	forkEpochList := []uint64{b.AltairForkEpoch, b.BellatrixForkEpoch, b.CapellaForkEpoch}
-	stateVersion := Phase0Version
-	for _, forkEpoch := range forkEpochList {
-		if forkEpoch > epoch {
-			return stateVersion
-		}
-		stateVersion++
-	}
-	return stateVersion
-}
-
 // InitializeForkSchedule initializes the schedules forks baked into the config.
 func (b *BeaconChainConfig) InitializeForkSchedule() {
 	b.ForkVersionSchedule = configForkSchedule(b)
@@ -432,19 +417,17 @@ func toBytes4(in []byte) (ret [4]byte) {
 
 func configForkSchedule(b *BeaconChainConfig) map[[VersionLength]byte]uint64 {
 	fvs := map[[VersionLength]byte]uint64{}
-	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
-	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
-	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
-	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
+	fvs[toBytes4(b.GenesisForkVersion)] = b.GenesisEpoch
+	fvs[toBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
+	fvs[toBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
 	return fvs
 }
 
 func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn := map[[VersionLength]byte]string{}
-	fvn[utils.Uint32ToBytes4(b.GenesisForkVersion)] = "phase0"
-	fvn[utils.Uint32ToBytes4(b.AltairForkVersion)] = "altair"
-	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
-	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
+	fvn[toBytes4(b.GenesisForkVersion)] = "phase0"
+	fvn[toBytes4(b.AltairForkVersion)] = "altair"
+	fvn[toBytes4(b.BellatrixForkVersion)] = "bellatrix"
 	return fvn
 }
 
@@ -581,14 +564,15 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	SafetyDecay: 10,
 
 	// Fork related values.
-	GenesisForkVersion:   0,
-	AltairForkVersion:    0x01000000,
+	GenesisEpoch:         0,
+	GenesisForkVersion:   []byte{0, 0, 0, 0},
+	AltairForkVersion:    []byte{1, 0, 0, 0},
 	AltairForkEpoch:      74240,
-	BellatrixForkVersion: 0x02000000,
+	BellatrixForkVersion: []byte{2, 0, 0, 0},
 	BellatrixForkEpoch:   144869,
-	CapellaForkVersion:   0x03000000,
+	CapellaForkVersion:   []byte{3, 0, 0, 0},
 	CapellaForkEpoch:     math.MaxUint64,
-	ShardingForkVersion:  0x04000000,
+	ShardingForkVersion:  []byte{4, 0, 0, 0},
 	ShardingForkEpoch:    math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
@@ -644,44 +628,20 @@ func mainnetConfig() BeaconChainConfig {
 	return cfg
 }
 
-func CustomConfig(configFile string) (BeaconChainConfig, error) {
-	cfg := MainnetBeaconConfig
-	b, err := os.ReadFile(configFile) // just pass the file name
-	if err != nil {
-		return BeaconChainConfig{}, nil
-	}
-	err = yaml.Unmarshal(b, &cfg)
-	cfg.InitializeForkSchedule()
-	return cfg, err
-}
-
-func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
-	cfg := GenesisConfig{}
-	b, err := os.ReadFile(genesisFile) // just pass the file name
-	if err != nil {
-		return GenesisConfig{}, nil
-	}
-	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
-	copy(cfg.GenesisValidatorRoot[:], b[8:])
-	return cfg, nil
-}
-
 func sepoliaConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1655647200
 	cfg.GenesisDelay = 86400
 	cfg.MinGenesisActiveValidatorCount = 1300
 	cfg.ConfigName = "sepolia"
-
-	cfg.GenesisForkVersion = 0x90000069
+	cfg.GenesisForkVersion = []byte{0x90, 0x00, 0x00, 0x69}
 	cfg.SecondsPerETH1Block = 14
 	cfg.DepositChainID = uint64(SepoliaNetwork)
 	cfg.DepositNetworkID = uint64(SepoliaNetwork)
 	cfg.AltairForkEpoch = 50
-	cfg.AltairForkVersion = 0x90000070
+	cfg.AltairForkVersion = []byte{0x90, 0x00, 0x00, 0x70}
 	cfg.BellatrixForkEpoch = 100
-	cfg.BellatrixForkVersion = 0x90000071
+	cfg.BellatrixForkVersion = []byte{0x90, 0x00, 0x00, 0x71}
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -693,16 +653,16 @@ func goerliConfig() BeaconChainConfig {
 	cfg.MinGenesisTime = 1614588812
 	cfg.GenesisDelay = 1919188
 	cfg.ConfigName = "prater"
-	cfg.GenesisForkVersion = 0x00001020
+	cfg.GenesisForkVersion = []byte{0x00, 0x00, 0x10, 0x20}
 	cfg.SecondsPerETH1Block = 14
 	cfg.DepositChainID = uint64(GoerliNetwork)
 	cfg.DepositNetworkID = uint64(GoerliNetwork)
 	cfg.AltairForkEpoch = 36660
-	cfg.AltairForkVersion = 0x1001020
-	cfg.CapellaForkVersion = 0x03001020
-	cfg.ShardingForkVersion = 0x40001020
+	cfg.AltairForkVersion = []byte{0x1, 0x0, 0x10, 0x20}
+	cfg.CapellaForkVersion = []byte{0x3, 0x0, 0x10, 0x20}
+	cfg.ShardingForkVersion = []byte{0x4, 0x0, 0x10, 0x20}
 	cfg.BellatrixForkEpoch = 112260
-	cfg.BellatrixForkVersion = 0x02001020
+	cfg.BellatrixForkVersion = []byte{0x2, 0x0, 0x10, 0x20}
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()

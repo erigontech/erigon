@@ -70,11 +70,6 @@ func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 	b.eth1DataVotes = append(b.eth1DataVotes, vote)
 }
 
-func (b *BeaconState) ResetEth1DataVotes() {
-	b.touchedLeaves[Eth1DataVotesLeafIndex] = true
-	b.eth1DataVotes = b.eth1DataVotes[:0]
-}
-
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
 	b.eth1DepositIndex = eth1DepositIndex
@@ -95,16 +90,6 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 	b.balances = balances
 }
 
-func (b *BeaconState) AddBalance(balance uint64) {
-	b.touchedLeaves[BalancesLeafIndex] = true
-	b.balances = append(b.balances, balance)
-}
-
-func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
-	b.touchedLeaves[BalancesLeafIndex] = true
-	b.balances[index] = balance
-}
-
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.touchedLeaves[RandaoMixesLeafIndex] = true
 	b.randaoMixes[index] = mix
@@ -115,17 +100,17 @@ func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 	b.slashings[index] = segment
 }
 
-func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
+func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []byte) {
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = previousEpochParticipation
 }
 
-func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []cltypes.ParticipationFlags) {
+func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []byte) {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = currentEpochParticipation
 }
 
-func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
+func (b *BeaconState) SetJustificationBits(justificationBits byte) {
 	b.touchedLeaves[JustificationBitsLeafIndex] = true
 	b.justificationBits = justificationBits
 }
@@ -158,16 +143,4 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
-}
-
-func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
-	b.nextWithdrawalIndex = index
-}
-
-func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
-	b.nextWithdrawalValidatorIndex = index
-}
-
-func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
-	b.historicalSummaries = append(b.historicalSummaries, summary)
 }

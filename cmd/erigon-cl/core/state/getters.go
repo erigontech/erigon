@@ -3,7 +3,6 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -66,10 +65,6 @@ func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
 
-func (b *BeaconState) ValidatorBalance(index int) uint64 {
-	return b.balances[index]
-}
-
 func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
 	return b.randaoMixes
 }
@@ -82,15 +77,15 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings[pos]
 }
 
-func (b *BeaconState) PreviousEpochParticipation() cltypes.ParticipationFlagsList {
+func (b *BeaconState) PreviousEpochParticipation() []byte {
 	return b.previousEpochParticipation
 }
 
-func (b *BeaconState) CurrentEpochParticipation() cltypes.ParticipationFlagsList {
+func (b *BeaconState) CurrentEpochParticipation() []byte {
 	return b.currentEpochParticipation
 }
 
-func (b *BeaconState) JustificationBits() cltypes.JustificationBits {
+func (b *BeaconState) JustificationBits() byte {
 	return b.justificationBits
 }
 
@@ -116,20 +111,4 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 
 func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
 	return b.latestExecutionPayloadHeader
-}
-
-func (b *BeaconState) NextWithdrawalIndex() uint64 {
-	return b.nextWithdrawalIndex
-}
-
-func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
-	return b.nextWithdrawalValidatorIndex
-}
-
-func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
-	return b.historicalSummaries
-}
-
-func (b *BeaconState) Version() clparams.StateVersion {
-	return b.version
 }

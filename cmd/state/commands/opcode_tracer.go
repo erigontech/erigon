@@ -16,9 +16,7 @@ import (
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -549,16 +547,6 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 
 	timeLastBlock := startTime
 	blockNumLastReport := blockNum
-
-	var historyV3 bool
-	chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
-		historyV3, err = kvcfg.HistoryV3.Enabled(tx)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-
 	for !interrupt {
 		var block *types.Block
 		if err := chainDb.View(context.Background(), func(tx kv.Tx) (err error) {
@@ -581,10 +569,7 @@ func OpcodeTracer(genesis *core.Genesis, blockNum uint64, chaindata string, numB
 			ot.fsumWriter = bufio.NewWriter(fsum)
 		}
 
-		dbstate, err := rpchelper.CreateHistoryStateReader(historyTx, block.NumberU64(), 0, historyV3, chainConfig.ChainName)
-		if err != nil {
-			return err
-		}
+		dbstate := state.NewPlainState(historyTx, block.NumberU64(), systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
 		intraBlockState := state.New(dbstate)
 
 		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {

@@ -156,6 +156,13 @@ By default, on Ethereum Mainnet, Görli, and Sepolia, the Engine API is disabled
 If you want to use an external Consensus Layer, run Erigon with flag `--externalcl`.
 _Warning:_ Staking (block production) is not possible with the embedded CL – use `--externalcl` instead.
 
+### Optional stages
+
+There is an optional stage that can be enabled through flags:
+
+* `--watch-the-burn`, Enable WatchTheBurn stage which keeps track of ETH issuance and is required to
+  use `erigon_watchTheBurn`.
+
 ### Testnets
 
 If you would like to give Erigon a try, but do not have spare 2TB on your drive, a good option is to start syncing one
@@ -242,9 +249,9 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli`
+`./build/bin/erigon --config ./config.yaml --chain=goerli
 
-Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the
 flag inside
 of the yaml configuration file and sets the chain to goerli
 
