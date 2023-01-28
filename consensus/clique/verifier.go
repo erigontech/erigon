@@ -312,12 +312,13 @@ func (c *Clique) verifyShanghai(chain consensus.ChainHeaderReader, header *types
 }
 
 func (c *Clique) verifySharding(chain consensus.ChainHeaderReader, header, parent *types.Header) error {
-
-	if chain.Config().IsSharding(header.Time) {
-		// Verify the header's EIP-4844 attributes.
-		if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
-			return err
+	if !chain.Config().IsSharding(header.Time) {
+		if header.ExcessDataGas != nil {
+			return fmt.Errorf("invalid excessDataGas before fork: have %v, want <nil>", header.ExcessDataGas)
 		}
+	} else if err := misc.VerifyEip4844Header(chain.Config(), parent, header); err != nil {
+		// Verify the header's EIP-4844 attributes.
+		return err
 	}
 
 	return nil

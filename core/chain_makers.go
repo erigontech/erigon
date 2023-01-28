@@ -165,6 +165,10 @@ func (b *BlockGen) Number() *big.Int {
 	return new(big.Int).Set(b.header.Number)
 }
 
+func (b *BlockGen) Time() uint64 {
+	return b.header.Time
+}
+
 // AddUncheckedReceipt forcefully adds a receipts to the block without a
 // backing transaction.
 //
@@ -538,4 +542,9 @@ func (cr *FakeChainReader) GetHeaderByHash(hash libcommon.Hash) *types.Header   
 func (cr *FakeChainReader) GetHeader(hash libcommon.Hash, number uint64) *types.Header { return nil }
 func (cr *FakeChainReader) GetBlock(hash libcommon.Hash, number uint64) *types.Block   { return nil }
 func (cr *FakeChainReader) HasBlock(hash libcommon.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int          { return nil }
+func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
+	if cr.Cfg.TerminalTotalDifficultyPassed {
+		return cr.Cfg.TerminalTotalDifficulty
+	}
+	return nil
+}

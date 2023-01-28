@@ -42,9 +42,9 @@ func CalcExcessDataGas(parentExcessDataGas *big.Int, newBlobs int) *big.Int {
 	return new(big.Int).Set(excessDataGas.Sub(excessDataGas, targetGas))
 }
 
-// FakeExponential approximates factor * e ** (num / denom) using a taylor expansion
+// fakeExponential approximates factor * e ** (num / denom) using a taylor expansion
 // as described in the EIP-4844 spec.
-func FakeExponential(factor, num, denom *big.Int) *big.Int {
+func fakeExponential(factor, num, denom *big.Int) *big.Int {
 	output := new(big.Int)
 	numAccum := new(big.Int).Mul(factor, denom)
 	for i := 1; numAccum.Sign() > 0; i++ {
@@ -70,10 +70,12 @@ func VerifyEip4844Header(config *chain.Config, parent, header *types.Header) err
 	if header.ExcessDataGas == nil {
 		return fmt.Errorf("header is missing excessDataGas")
 	}
+	// TODO: Make sure excess data gas is computed correctly. This requires we know the
+	// number of blobs in the previous block.
 	return nil
 }
 
 // GetDataGasPrice implements get_data_gas_price from EIP-4844
 func GetDataGasPrice(excessDataGas *big.Int) *big.Int {
-	return FakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
+	return fakeExponential(big.NewInt(params.MinDataGasPrice), excessDataGas, big.NewInt(params.DataGasPriceUpdateFraction))
 }
