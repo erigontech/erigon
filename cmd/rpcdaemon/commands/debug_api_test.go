@@ -304,7 +304,7 @@ func TestAccountRange(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	agg := m.HistoryV3Components()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, nil)
 	api := NewPrivateDebugAPI(base, m.DB, 0)
 
 	t.Run("valid account", func(t *testing.T) {
@@ -420,7 +420,7 @@ func TestAccountAt(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, nil)
 	api := NewPrivateDebugAPI(base, m.DB, 0)
 
 	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash11 common.Hash

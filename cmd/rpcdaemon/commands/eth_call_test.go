@@ -9,6 +9,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
@@ -82,8 +83,15 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 
 	agg := m.HistoryV3Components()
 
+	tx, err := m.DB.BeginRo(m.Ctx)
+	assert.NoError(t, err)
+
+	pruneAmount, err := prune.Get(tx)
+	assert.NoError(t, err)
+	tx.Commit()
+
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, nil), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, &pruneAmount), m.DB, nil, nil, nil, 5000000, 100_000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)

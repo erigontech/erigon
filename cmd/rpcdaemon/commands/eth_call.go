@@ -15,8 +15,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -40,14 +38,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	if api._pruneAmount == nil {
-		pruneAmount, err := prune.Get(tx)
-		if err != nil {
-			return nil, err
-		}
-		api._pruneAmount = &pruneAmount
-	}
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
