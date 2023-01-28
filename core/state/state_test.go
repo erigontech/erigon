@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	checker "gopkg.in/check.v1"
 
@@ -71,7 +72,12 @@ func (s *StateSuite) TestDump(c *checker.C) {
 		c.Fatalf("create tx: %v", err1)
 	}
 	defer tx.Rollback()
-	got := string(NewDumper(tx, 1).DefaultDump())
+
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+	got := string(NewDumper(tx, 1, historyV3).DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -361,7 +367,11 @@ func TestDump(t *testing.T) {
 	}
 
 	// check that dump contains the state objects that are in trie
-	got := string(NewDumper(tx, 2).DefaultDump())
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
+	got := string(NewDumper(tx, 2, historyV3).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",
     "accounts": {

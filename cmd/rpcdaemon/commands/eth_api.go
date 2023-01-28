@@ -212,7 +212,7 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 	}
 	enabled, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
-		log.Warn("HisoryV2Enabled: read", "err", err)
+		log.Warn("HisoryV3Enabled: read", "err", err)
 		return false
 	}
 	api._historyV3Lock.Lock()

@@ -147,14 +147,53 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
+func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
 	switch name {
 	case AccountsDomain:
-		panic("not implemented yet")
+		it := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
+		// Is it possible to increase keys lifetime to: 2 .Next() calls??
+		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+			if len(v) == 0 {
+				return k[:20], v, nil
+			}
+			v, err = tx.db.convertV3toV2(v)
+			if err != nil {
+				return nil, nil, err
+			}
+			var force *common.Hash
+			if tx.db.systemContractLookup != nil {
+				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
+					p := sort.Search(len(records), func(i int) bool {
+						return records[i].TxNumber > asOfTs
+					})
+					hash := records[p-1].CodeHash
+					force = &hash
+				}
+			}
+			v, err = tx.db.restoreCodeHash(tx.Tx, k, v, force)
+			if err != nil {
+				return nil, nil, err
+			}
+			return k[:20], v, nil
+		})
+		it2, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		if err != nil {
+			return nil, err
+		}
+		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
+		it3 := iter.FilterKV(it2, func(k, v []byte) bool {
+			return len(k) == 20
+		})
+		//TODO: seems UnionKV can't handle "amount" request
+		return iter.UnionKV(it11, it3), nil
 	case StorageDomain:
 		toKey, _ := kv.NextSubtree(k1)
-		fromKey2 := append(common.Copy(k1), fromKey...)
+		fromKey2 := append(common.Copy(k1), k2...)
 		it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
+		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+			return k, v, nil
+		})
 
 		accData, err := tx.GetOne(kv.PlainState, k1)
 		if err != nil {
@@ -167,7 +206,7 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
 		copy(startkey, k1)
 		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], fromKey)
+		copy(startkey[length.Addr+length.Incarnation:], k2)
 
 		toPrefix := make([]byte, length.Addr+length.Incarnation)
 		copy(toPrefix, k1)
@@ -177,11 +216,11 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		if err != nil {
 			return nil, err
 		}
-		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte) {
-			return append(append([]byte{}, k[:20]...), k[28:]...), v
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
+			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionKV(it, it3), nil
+		return iter.UnionKV(it11, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
