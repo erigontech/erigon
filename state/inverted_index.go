@@ -561,7 +561,6 @@ func (it *InvertedIterator) advanceInDb() {
 		if it.startTxNum > 0 {
 			binary.BigEndian.PutUint64(keyBytes[:], uint64(it.startTxNum))
 		}
-		k, v, err = it.cursor.SeekExact(it.key)
 		if v, err = it.cursor.SeekBothRange(it.key, keyBytes[:]); err != nil {
 			panic(err)
 		}

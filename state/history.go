@@ -1329,7 +1329,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 		indexTable:   hc.h.indexTable,
 		idxKeysTable: hc.h.indexKeysTable,
 		valsTable:    hc.h.historyValsTable,
-		from:         from, to: to, amount: amount,
+		from:         from, to: to, limit: amount,
 	}
 
 	hc.indexFiles.Ascend(func(item ctxItem) bool {
@@ -1367,7 +1367,7 @@ type WalkAsOfIter struct {
 	indexTable    string
 
 	from, to []byte
-	amount   int
+	limit    int
 
 	nextFileKey []byte
 	nextDbKey   []byte
@@ -1387,7 +1387,7 @@ type WalkAsOfIter struct {
 	hasNextInDb    bool
 	compressVals   bool
 
-	k, v []byte
+	k, v, kBackup, vBackup []byte
 }
 
 func (hi *WalkAsOfIter) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
@@ -1554,15 +1554,17 @@ func (hi *WalkAsOfIter) advance() {
 }
 
 func (hi *WalkAsOfIter) HasNext() bool {
-	return hi.amount > 0 && (hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil)
+	return hi.limit != 0 && (hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil)
 }
 
 func (hi *WalkAsOfIter) Next() ([]byte, []byte, error) {
-	hi.amount--
-	hi.k = append(hi.k[:0], hi.nextKey...)
-	hi.v = append(hi.v[:0], hi.nextVal...)
+	hi.limit--
+	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
+
+	// Satisfy iter.Dual Invariant 2
+	hi.k, hi.kBackup, hi.v, hi.vBackup = hi.kBackup, hi.k, hi.vBackup, hi.v
 	hi.advance()
-	return hi.k, hi.v, nil
+	return hi.kBackup, hi.vBackup, nil
 }
 
 func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {

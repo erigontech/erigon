@@ -296,10 +296,10 @@ func (m *IntersectIter[T]) Next() (T, error) {
 // TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
 type TransformDualIter[K, V any] struct {
 	it        Dual[K, V]
-	transform func(K, V) (K, V)
+	transform func(K, V) (K, V, error)
 }
 
-func TransformDual[K, V any](it Dual[K, V], transform func(K, V) (K, V)) *TransformDualIter[K, V] {
+func TransformDual[K, V any](it Dual[K, V], transform func(K, V) (K, V, error)) *TransformDualIter[K, V] {
 	return &TransformDualIter[K, V]{it: it, transform: transform}
 }
 func (m *TransformDualIter[K, V]) HasNext() bool { return m.it.HasNext() }
@@ -308,35 +308,97 @@ func (m *TransformDualIter[K, V]) Next() (K, V, error) {
 	if err != nil {
 		return k, v, err
 	}
-	newK, newV := m.transform(k, v)
-	return newK, newV, nil
+	return m.transform(k, v)
 }
 
-// FilterStream - analog `map` (in terms of map-filter-reduce pattern)
-type FilterStream[K, V any] struct {
-	it     Dual[K, V]
-	filter func(K, V) bool
+// FilterDualIter - analog `map` (in terms of map-filter-reduce pattern)
+// please avoid reading from Disk/DB more elements and then filter them. Better
+// push-down filter conditions to lower-level iterator to reduce disk reads amount.
+type FilterDualIter[K, V any] struct {
+	it      Dual[K, V]
+	filter  func(K, V) bool
+	hasNext bool
+	err     error
+	nextK   K
+	nextV   V
 }
 
-func FilterPairs(it KV, filter func(k, v []byte) bool) *FilterStream[[]byte, []byte] {
-	return &FilterStream[[]byte, []byte]{it: it, filter: filter}
+func FilterKV(it KV, filter func(k, v []byte) bool) *FilterDualIter[[]byte, []byte] {
+	return FilterDual[[]byte, []byte](it, filter)
 }
-func Filter[K, V any](it Dual[K, V], filter func(K, V) bool) *FilterStream[K, V] {
-	return &FilterStream[K, V]{it: it, filter: filter}
+func FilterDual[K, V any](it Dual[K, V], filter func(K, V) bool) *FilterDualIter[K, V] {
+	i := &FilterDualIter[K, V]{it: it, filter: filter}
+	i.advance()
+	return i
 }
-func (m *FilterStream[K, V]) HasNext() bool { return m.it.HasNext() }
-func (m *FilterStream[K, V]) Next() (k K, v V, err error) {
-	for m.it.HasNext() {
-		k, v, err = m.it.Next()
-		if err != nil {
-			return k, v, err
-		}
-		if !m.filter(k, v) {
-			continue
-		}
-		return k, v, nil
+func (m *FilterDualIter[K, V]) advance() {
+	if m.err != nil {
+		return
 	}
-	return k, v, nil
+	m.hasNext = false
+	for m.it.HasNext() {
+		// create new variables, to avoid leaking outside of loop
+		key, val, err := m.it.Next()
+		if err != nil {
+			m.err = err
+			return
+		}
+		if m.filter(key, val) {
+			m.hasNext = true
+			m.nextK, m.nextV = key, val
+			break
+		}
+	}
+}
+func (m *FilterDualIter[K, V]) HasNext() bool { return m.err != nil || m.hasNext }
+func (m *FilterDualIter[K, V]) Next() (k K, v V, err error) {
+	k, v, err = m.nextK, m.nextV, m.err
+	m.advance()
+	return k, v, err
+}
+
+// FilterUnaryIter - analog `map` (in terms of map-filter-reduce pattern)
+// please avoid reading from Disk/DB more elements and then filter them. Better
+// push-down filter conditions to lower-level iterator to reduce disk reads amount.
+type FilterUnaryIter[T any] struct {
+	it      Unary[T]
+	filter  func(T) bool
+	hasNext bool
+	err     error
+	nextK   T
+}
+
+func FilterU64(it U64, filter func(k uint64) bool) *FilterUnaryIter[uint64] {
+	return FilterUnary[uint64](it, filter)
+}
+func FilterUnary[T any](it Unary[T], filter func(T) bool) *FilterUnaryIter[T] {
+	i := &FilterUnaryIter[T]{it: it, filter: filter}
+	i.advance()
+	return i
+}
+func (m *FilterUnaryIter[T]) advance() {
+	if m.err != nil {
+		return
+	}
+	m.hasNext = false
+	for m.it.HasNext() {
+		// create new variables, to avoid leaking outside of loop
+		key, err := m.it.Next()
+		if err != nil {
+			m.err = err
+			return
+		}
+		if m.filter(key) {
+			m.hasNext, m.nextK = true, key
+			break
+		}
+	}
+}
+func (m *FilterUnaryIter[T]) HasNext() bool { return m.err != nil || m.hasNext }
+func (m *FilterUnaryIter[T]) Next() (k T, err error) {
+	k, err = m.nextK, m.err
+	m.advance()
+	return k, err
 }
 
 // PaginatedIter - for remote-list pagination

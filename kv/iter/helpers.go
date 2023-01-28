@@ -23,8 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ToArr[T any](s Unary[T]) ([]T, error) {
-	res := make([]T, 0)
+func ToArr[T any](s Unary[T]) (res []T, err error) {
 	for s.HasNext() {
 		k, err := s.Next()
 		if err != nil {
