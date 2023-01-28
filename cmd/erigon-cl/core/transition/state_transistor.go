@@ -10,6 +10,7 @@ type StateTransistor struct {
 	state         *state.BeaconState
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
+	noValidate    bool // Whether we want to do cryptography checks.
 }
 
 func New(state *state.BeaconState, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *StateTransistor {
