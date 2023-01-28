@@ -148,11 +148,16 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 	var acc accounts.Account
 	numberOfResults := 0
 
-	var txNum uint64
+	var txNum, txNumForStorage uint64
 	if d.historyV3 {
 		ttx := d.db.(*temporal.Tx)
 		var err error
+		// Why only account does +1?
 		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -255,7 +260,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			if d.historyV3 {
-				r, err := d.db.(*temporal.Tx).DomainRangeAscend(temporal.StorageDomain, addr[:], nil, txNum, -1)
+				r, err := d.db.(*temporal.Tx).DomainRangeAscend(temporal.StorageDomain, addr[:], nil, txNumForStorage, -1)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}

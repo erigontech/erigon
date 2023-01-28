@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -335,6 +336,29 @@ func TestAccountRange(t *testing.T) {
 		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(result.Accounts))
+	})
+	t.Run("with storage", func(t *testing.T) {
+		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+
+		n := rpc.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(result.Accounts))
+
+		n = rpc.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(result.Accounts[addr].Storage))
+
+		n = rpc.BlockNumber(10)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
+		for _, v := range result.Accounts {
+			hashedCode, _ := common2.HashData(v.Code)
+			require.Equal(t, v.CodeHash.String(), hashedCode.String())
+		}
 	})
 }
 
