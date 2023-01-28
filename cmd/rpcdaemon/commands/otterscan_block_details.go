@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -52,7 +52,7 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 }
 
 // TODO: remove duplication with GetBlockDetails
-func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash libcommon.Hash) (map[string]interface{}, error) {
+func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

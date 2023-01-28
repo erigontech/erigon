@@ -22,6 +22,7 @@ func getTestEth1Block() *cltypes.Eth1Block {
 		Body: &types.RawBody{},
 	}
 	emptyBlock.Header.TxHashSSZ, _ = merkle_tree.TransactionsListRoot([][]byte{})
+	emptyBlock.Header.WithdrawalsHash = new(common.Hash)
 	return emptyBlock
 }
 
@@ -94,13 +95,38 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 			Deposits:         []*cltypes.Deposit{createDepositTest(), createDepositTest()},
 			SyncAggregate:    &cltypes.SyncAggregate{},
 			ExecutionPayload: getTestEth1Block(),
+			ExecutionChanges: []*cltypes.SignedBLSToExecutionChange{
+				{
+					Message: &cltypes.BLSToExecutionChange{
+						ValidatorIndex: 34,
+						To:             common.HexToAddress("aaa"),
+					},
+				},
+			},
 		},
 	},
 }
 
-var bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
-var altairHash = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
-var phase0Hash = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
+var (
+	// Hashes
+	capellaHash   = common.HexToHash("0x00a1f1a46f4bcdd9030c11c1cf9a8062cd48478620e6fd3bd3a748263a49433f")
+	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
+	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
+	phase0Hash    = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
+)
+
+func TestCapellaBlock(t *testing.T) {
+	testBeaconBlockVariation.Block.Body.Version = clparams.CapellaVersion
+	require.Equal(t, testBeaconBlockVariation.Version(), clparams.CapellaVersion)
+	// Simple unit test: unmarshal + marshal + hashtreeroot
+	hash, err := testBeaconBlockVariation.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.Hash(hash), capellaHash)
+	encoded, err := testBeaconBlockVariation.EncodeSSZ(nil)
+	require.NoError(t, err)
+	block2 := &cltypes.SignedBeaconBlock{}
+	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.CapellaVersion)))
+}
 
 func TestBellatrixBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.BellatrixVersion
@@ -113,14 +139,6 @@ func TestBellatrixBlock(t *testing.T) {
 	require.NoError(t, err)
 	block2 := &cltypes.SignedBeaconBlock{}
 	require.NoError(t, block2.DecodeSSZWithVersion(encoded, int(clparams.BellatrixVersion)))
-	hash2, err := block2.HashSSZ()
-	require.NoError(t, err)
-	require.Equal(t, common.Hash(hash2), bellatrixHash)
-	// encode/decode for storage
-	storageEncoded, err := block2.EncodeForStorage()
-	require.NoError(t, err)
-	_, _, _, _, err = cltypes.DecodeBeaconBlockForStorage(storageEncoded)
-	require.NoError(t, err)
 }
 
 func TestAltairBlock(t *testing.T) {

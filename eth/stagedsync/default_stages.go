@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, issuance IssuanceCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
+func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersCfg, cumulativeIndex CumulativeIndexCfg, blockHashCfg BlockHashesCfg, bodies BodiesCfg, senders SendersCfg, exec ExecuteBlockCfg, hashState HashStateCfg, trieCfg TrieCfg, history HistoryCfg, logIndex LogIndexCfg, callTraces CallTracesCfg, txLookup TxLookupCfg, finish FinishCfg, test bool) []*Stage {
 	return []*Stage{
 		{
 			ID:          stages.Snapshots,
@@ -208,19 +208,6 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
-			},
-		},
-		{
-			ID:          stages.Issuance,
-			Description: "Issuance computation",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnStageIssuance(issuance, s, tx, ctx)
-			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindIssuanceStage(u, issuance, tx, ctx)
-			},
-			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
-				return PruneIssuanceStage(p, issuance, tx, ctx)
 			},
 		},
 		{

@@ -3,23 +3,153 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"sort"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr libcommon.Address, nonce uint64) (*libcommon.Hash, error) {
+func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context, addr common.Address, nonce uint64) (*common.Hash, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+
+	var acc accounts.Account
+	if api.historyV3(tx) {
+		ttx := tx.(*temporal.Tx)
+		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, -1)
+		if err != nil {
+			return nil, err
+		}
+
+		var prevTxnID, nextTxnID uint64
+		for i := 0; it.HasNext(); i++ {
+			txnID, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
+
+			if i%4096 != 0 { // probe history periodically, not on every change
+				nextTxnID = txnID
+				continue
+			}
+
+			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			if err != nil {
+				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				return nil, err
+			}
+			if !ok {
+				err = fmt.Errorf("couldn't find history txnID=%v addr=%v", txnID, addr)
+				log.Error("[rpc] Unexpected error", "err", err)
+				return nil, err
+			}
+
+			if len(v) == 0 { // creation, but maybe not our Incarnation
+				prevTxnID = txnID
+				continue
+			}
+
+			if err := acc.DecodeForStorage(v); err != nil {
+				return nil, err
+			}
+			// Desired nonce was found in this chunk
+			if acc.Nonce > nonce {
+				break
+			}
+			prevTxnID = txnID
+		}
+
+		// The sort.Search function finds the first block where the incarnation has
+		// changed to the desired one, so we get the previous block from the bitmap;
+		// however if the creationTxnID block is already the first one from the bitmap, it means
+		// the block we want is the max block from the previous shard.
+		var creationTxnID uint64
+		var searchErr error
+
+		if nextTxnID == 0 {
+			nextTxnID = prevTxnID + 1
+		}
+		// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
+		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
+		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+			txnID := uint64(i) + prevTxnID
+			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
+			if err != nil {
+				log.Error("[rpc] Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
+				panic(err)
+			}
+			if !ok {
+				return false
+			}
+			if len(v) == 0 {
+				creationTxnID = cmp.Max(creationTxnID, txnID)
+				return false
+			}
+
+			if err := acc.DecodeForStorage(v); err != nil {
+				searchErr = err
+				return false
+			}
+			// Since the state contains the nonce BEFORE the block changes, we look for
+			// the block when the nonce changed to be > the desired once, which means the
+			// previous history block contains the actual change; it may contain multiple
+			// nonce changes.
+			if acc.Nonce <= nonce {
+				creationTxnID = cmp.Max(creationTxnID, txnID)
+				return false
+			}
+			return true
+		})
+		if searchErr != nil {
+			return nil, searchErr
+		}
+		if creationTxnID == 0 {
+			return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		}
+		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
+		}
+		minTxNum, err := rawdbv3.TxNums.Min(tx, bn)
+		if err != nil {
+			return nil, err
+		}
+		txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-tx */
+		if txIndex == -1 {
+			txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
+		}
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, bn, txIndex)
+		if err != nil {
+			return nil, err
+		}
+		if txn == nil {
+			log.Warn("[rpc] tx is nil", "blockNum", bn, "txIndex", txIndex)
+			return nil, nil
+		}
+		found := txn.GetNonce() == nonce
+		if !found {
+			return nil, nil
+		}
+		txHash := txn.Hash()
+		return &txHash, nil
+	}
 
 	accHistoryC, err := tx.Cursor(kv.AccountsHistory)
 	if err != nil {
@@ -42,7 +172,6 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 
 	bitmap := roaring64.New()
 	maxBlPrevChunk := uint64(0)
-	var acc accounts.Account
 
 	for {
 		if k == nil || !bytes.HasPrefix(k, addr.Bytes()) {
@@ -60,7 +189,6 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 			if acc.Nonce > nonce {
 				break
 			}
-
 			// Not found; asked for nonce still not used
 			return nil, nil
 		}
@@ -138,14 +266,14 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 	return &txHash, nil
 }
 
-func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr libcommon.Address, nonce uint64, blockNum uint64) (bool, libcommon.Hash, error) {
+func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr common.Address, nonce uint64, blockNum uint64) (bool, common.Hash, error) {
 	hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 	if err != nil {
-		return false, libcommon.Hash{}, err
+		return false, common.Hash{}, err
 	}
 	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
-		return false, libcommon.Hash{}, err
+		return false, common.Hash{}, err
 	}
 
 	txs := block.Transactions()
@@ -160,5 +288,5 @@ func (api *OtterscanAPIImpl) findNonce(ctx context.Context, tx kv.Tx, addr libco
 		}
 	}
 
-	return false, libcommon.Hash{}, nil
+	return false, common.Hash{}, nil
 }

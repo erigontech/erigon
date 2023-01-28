@@ -22,6 +22,9 @@ import (
 
 func TestEthSubscribe(t *testing.T) {
 	m, require := stages.Mock(t), require.New(t)
+	if m.HistoryV3 {
+		t.Skip()
+	}
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 7, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})

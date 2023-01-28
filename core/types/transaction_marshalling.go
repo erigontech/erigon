@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/valyala/fastjson"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -30,8 +31,8 @@ type txJSON struct {
 	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID    *hexutil.Big `json:"chainId,omitempty"`
-	AccessList *AccessList  `json:"accessList,omitempty"`
+	ChainID    *hexutil.Big       `json:"chainId,omitempty"`
+	AccessList *types2.AccessList `json:"accessList,omitempty"`
 
 	// Only used for encoding:
 	Hash libcommon.Hash `json:"hash"`

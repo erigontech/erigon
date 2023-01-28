@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -629,7 +628,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	lastValidHeader := chain.Headers[0]
 
 	invalidParent := types.CopyHeader(chain.Headers[1])
-	invalidParent.Difficulty = common.Big1
+	invalidParent.Difficulty = libcommon.Big1
 
 	invalidTip := chain.TopBlock.Header()
 	invalidTip.ParentHash = invalidParent.Hash()

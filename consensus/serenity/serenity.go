@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -22,7 +21,7 @@ import (
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	SerenityDifficulty = common.Big0        // Serenity block's difficulty is always 0.
+	SerenityDifficulty = libcommon.Big0     // Serenity block's difficulty is always 0.
 	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
 	RewardSerenity     = big.NewInt(300000000000000000)
 )
@@ -202,7 +201,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(libcommon.Big1) != 0 {
 		return consensus.ErrInvalidNumber
 	}
 

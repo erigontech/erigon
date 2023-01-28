@@ -71,10 +71,14 @@ func (c *ChainTipSubscriber) StartLoop() {
 func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	currentEpoch := utils.GetCurrentEpoch(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot, c.beaconConfig.SlotsPerEpoch)
+	version := c.beaconConfig.GetCurrentStateVersion(currentEpoch)
+
 	switch data.Type {
 	case sentinel.GossipType_BeaconBlockGossipType:
 		block := &cltypes.SignedBeaconBlock{}
-		if err := block.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+		if err := block.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 
@@ -82,7 +86,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		c.lastReceivedSlot = block.Block.Slot
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
-		if err := finalityUpdate.DecodeSSZ(data.Data); err != nil {
+		if err := finalityUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall finality update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
@@ -101,7 +105,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 		}
 
 		optimisticUpdate := &cltypes.LightClientOptimisticUpdate{}
-		if err := optimisticUpdate.DecodeSSZ(data.Data); err != nil {
+		if err := optimisticUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 			return fmt.Errorf("could not unmarshall optimistic update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{

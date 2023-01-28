@@ -8,7 +8,7 @@ import (
 	"math/big"
 	"math/bits"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // FastExp is semantically equivalent to x.Exp(x,y, m), but is faster for even

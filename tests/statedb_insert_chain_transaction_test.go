@@ -742,8 +742,7 @@ func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockS
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := stages.MockWithGenesis(t, gspec, key, false)
 
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	defer contractBackend.Close()
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, len(txs), func(i int, block *core.BlockGen) {
 		var tx types.Transaction
