@@ -77,7 +77,6 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, db: db}
 
 	tx.agg = db.agg.MakeContext()
-	tx.agg.SetTx(kvTx)
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -270,7 +269,7 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts)
+		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.Tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -297,9 +296,9 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		}
 		return v, true, nil
 	case StorageHistory:
-		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts)
+		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.Tx)
 	case CodeHistory:
-		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts)
+		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.Tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
