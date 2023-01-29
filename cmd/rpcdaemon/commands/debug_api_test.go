@@ -362,6 +362,56 @@ func TestAccountRange(t *testing.T) {
 	})
 }
 
+func TestGetModifiedAccountsByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
+
+	t.Run("correct input", func(t *testing.T) {
+		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+
+		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 38, len(result))
+
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 40, len(result))
+
+		//nil value means: to = from + 1
+		n = rpc.BlockNumber(0)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(10)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.Error(t, err)
+
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.Error(t, err)
+
+		n = rpc.BlockNumber(0)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+
+		n = rpc.BlockNumber(1_000_000)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.Error(t, err)
+	})
+}
+
 func TestMapTxNum2BlockNum(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	if !m.HistoryV3 {
