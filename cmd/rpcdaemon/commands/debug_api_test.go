@@ -394,20 +394,20 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 	})
 	t.Run("invalid input", func(t *testing.T) {
 		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(10)
-		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.Error(t, err)
 
 		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
-		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.Error(t, err)
 
 		n = rpc.BlockNumber(0)
-		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.NoError(t, err)
 		require.Equal(t, 3, len(result))
 
 		n = rpc.BlockNumber(1_000_000)
-		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
 		require.Error(t, err)
 	})
 }
