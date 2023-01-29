@@ -390,7 +390,7 @@ func CanonicalTxnByID(db kv.Getter, id uint64, blockHash libcommon.Hash, transac
 	var v []byte
 	var err error
 	if transactionsV3 {
-		key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+		key := append(txIdKey, blockHash.Bytes()...)
 		v, err = db.GetOne(kv.EthTxV3, key)
 	} else {
 		v, err = db.GetOne(kv.EthTx, txIdKey)
@@ -481,7 +481,7 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blo
 				return err
 			}
 		} else {
-			key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+			key := append(txIdKey, blockHash.Bytes()...)
 			if err := db.Append(kv.EthTxV3, key, common.CopyBytes(buf.Bytes())); err != nil {
 				return err
 			}
@@ -501,7 +501,7 @@ func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash l
 				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 			}
 		} else {
-			key := append(hexutility.EncodeTs(txIdKey), blockHash.Bytes()...)
+			key := append(txIdKey, blockHash.Bytes()...)
 			if err := tx.Append(kv.EthTxV3, key, txn); err != nil {
 				return fmt.Errorf("txId=%d, baseTxId=%d, %w", txId, baseTxId, err)
 			}
