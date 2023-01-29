@@ -1323,8 +1323,8 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	return nil, false, nil
 }
 
-func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, amount int) *WalkAsOfIter {
-	hi := WalkAsOfIter{
+func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, amount int) *StateAsOfIter {
+	hi := StateAsOfIter{
 		hasNextInDb:  true,
 		roTx:         roTx,
 		indexTable:   hc.h.indexTable,
@@ -1358,7 +1358,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 	return &hi
 }
 
-type WalkAsOfIter struct {
+type StateAsOfIter struct {
 	roTx          kv.Tx
 	txNum2kCursor kv.CursorDupSort
 	idxCursor     kv.CursorDupSort
@@ -1391,9 +1391,9 @@ type WalkAsOfIter struct {
 	k, v, kBackup, vBackup []byte
 }
 
-func (hi *WalkAsOfIter) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
+func (hi *StateAsOfIter) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
 
-func (hi *WalkAsOfIter) Close() {
+func (hi *StateAsOfIter) Close() {
 	if hi.idxCursor != nil {
 		hi.idxCursor.Close()
 	}
@@ -1402,7 +1402,7 @@ func (hi *WalkAsOfIter) Close() {
 	}
 }
 
-func (hi *WalkAsOfIter) advanceInFiles() {
+func (hi *StateAsOfIter) advanceInFiles() {
 	hi.advFileCnt++
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
@@ -1458,7 +1458,7 @@ func (hi *WalkAsOfIter) advanceInFiles() {
 	hi.hasNextInFiles = false
 }
 
-func (hi *WalkAsOfIter) advanceInDb() {
+func (hi *StateAsOfIter) advanceInDb() {
 	hi.advDbCnt++
 	var k []byte
 	var err error
@@ -1521,7 +1521,7 @@ func (hi *WalkAsOfIter) advanceInDb() {
 	hi.hasNextInDb = false
 }
 
-func (hi *WalkAsOfIter) advance() {
+func (hi *StateAsOfIter) advance() {
 	if hi.hasNextInFiles {
 		if hi.hasNextInDb {
 			c := bytes.Compare(hi.nextFileKey, hi.nextDbKey)
@@ -1554,11 +1554,11 @@ func (hi *WalkAsOfIter) advance() {
 	}
 }
 
-func (hi *WalkAsOfIter) HasNext() bool {
+func (hi *StateAsOfIter) HasNext() bool {
 	return hi.limit != 0 && (hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil)
 }
 
-func (hi *WalkAsOfIter) Next() ([]byte, []byte, error) {
+func (hi *StateAsOfIter) Next() ([]byte, []byte, error) {
 	hi.limit--
 	hi.k, hi.v = append(hi.k[:0], hi.nextKey...), append(hi.v[:0], hi.nextVal...)
 
@@ -1568,7 +1568,7 @@ func (hi *WalkAsOfIter) Next() ([]byte, []byte, error) {
 	return hi.kBackup, hi.vBackup, nil
 }
 
-func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) *HistoryIterator1 {
+func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) *HistoryChangesIter {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1583,7 +1583,7 @@ func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, l
 	}
 	startTxNum, endTxNum := uint64(fromTxNum), uint64(toTxNum)
 
-	hi := HistoryIterator1{
+	hi := HistoryChangesIter{
 		hasNextInDb:  true,
 		roTx:         roTx,
 		indexTable:   hc.h.indexTable,
@@ -1622,7 +1622,7 @@ func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, l
 	return &hi
 }
 
-type HistoryIterator1 struct {
+type HistoryChangesIter struct {
 	roTx           kv.Tx
 	txNum2kCursor  kv.CursorDupSort
 	idxCursor      kv.CursorDupSort
@@ -1651,9 +1651,9 @@ type HistoryIterator1 struct {
 	k, v []byte
 }
 
-func (hi *HistoryIterator1) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
+func (hi *HistoryChangesIter) Stat() (int, int) { return hi.advDbCnt, hi.advFileCnt }
 
-func (hi *HistoryIterator1) Close() {
+func (hi *HistoryChangesIter) Close() {
 	if hi.idxCursor != nil {
 		hi.idxCursor.Close()
 	}
@@ -1662,7 +1662,7 @@ func (hi *HistoryIterator1) Close() {
 	}
 }
 
-func (hi *HistoryIterator1) advanceInFiles() {
+func (hi *HistoryChangesIter) advanceInFiles() {
 	hi.advFileCnt++
 	for hi.h.Len() > 0 {
 		top := heap.Pop(&hi.h).(*ReconItem)
@@ -1715,7 +1715,7 @@ func (hi *HistoryIterator1) advanceInFiles() {
 	hi.hasNextInFiles = false
 }
 
-func (hi *HistoryIterator1) advanceInDb() {
+func (hi *HistoryChangesIter) advanceInDb() {
 	hi.advDbCnt++
 	var k []byte
 	var err error
@@ -1775,7 +1775,7 @@ func (hi *HistoryIterator1) advanceInDb() {
 	hi.hasNextInDb = false
 }
 
-func (hi *HistoryIterator1) advance() {
+func (hi *HistoryChangesIter) advance() {
 	if hi.hasNextInFiles {
 		if hi.hasNextInDb {
 			c := bytes.Compare(hi.nextFileKey, hi.nextDbKey)
@@ -1808,11 +1808,11 @@ func (hi *HistoryIterator1) advance() {
 	}
 }
 
-func (hi *HistoryIterator1) HasNext() bool {
+func (hi *HistoryChangesIter) HasNext() bool {
 	return hi.hasNextInFiles || hi.hasNextInDb || hi.nextKey != nil
 }
 
-func (hi *HistoryIterator1) Next() ([]byte, []byte, error) {
+func (hi *HistoryChangesIter) Next() ([]byte, []byte, error) {
 	hi.k = append(hi.k[:0], hi.nextKey...)
 	hi.v = append(hi.v[:0], hi.nextVal...)
 	hi.advance()
