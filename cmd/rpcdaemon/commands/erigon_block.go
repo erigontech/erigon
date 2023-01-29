@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
@@ -57,7 +57,7 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 }
 
 // GetHeaderByHash implements erigon_getHeaderByHash. Returns a block's header given a block's hash.
-func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) (*types.Header, error) {
+func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
-	currenttHeaderTime := currentHeader.Time
+	currentHeaderTime := currentHeader.Time
 	highestNumber := currentHeader.Number.Uint64()
 
 	firstHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -99,7 +99,7 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	firstHeaderTime := firstHeader.Time
 
-	if currenttHeaderTime <= uintTimestamp {
+	if currentHeaderTime <= uintTimestamp {
 		blockResponse, err := buildBlockResponse(tx, highestNumber, fullTx)
 		if err != nil {
 			return nil, err
@@ -139,12 +139,18 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return nil, fmt.Errorf("no header found with header number: %d", blockNum)
 	}
 
-	if resultingHeader.Time > uintTimestamp {
-		response, err := buildBlockResponse(tx, uint64(blockNum)-1, fullTx)
+	for resultingHeader.Time > uintTimestamp {
+		beforeHeader, err := api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNum)-1)
 		if err != nil {
 			return nil, err
 		}
-		return response, nil
+
+		if beforeHeader == nil || beforeHeader.Time < uintTimestamp {
+			break
+		}
+
+		blockNum--
+		resultingHeader = beforeHeader
 	}
 
 	response, err := buildBlockResponse(tx, uint64(blockNum), fullTx)
@@ -174,7 +180,7 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
 	}
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, libcommon.Hash{}, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
@@ -185,7 +191,7 @@ func buildBlockResponse(db kv.Tx, blockNum uint64, fullTx bool) (map[string]inte
 	return response, err
 }
 
-func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[libcommon.Address]*hexutil.Big, error) {
+func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.Big, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -207,9 +213,9 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 	decodeFn := historyv2.Mapper[kv.AccountChangeSet].Decode
 
-	balancesMapping := make(map[libcommon.Address]*hexutil.Big)
+	balancesMapping := make(map[common.Address]*hexutil.Big)
 
-	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	newReader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +235,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 		}
 		oldBalance := oldAcc.Balance
 
-		address := libcommon.BytesToAddress(addressBytes)
+		address := common.BytesToAddress(addressBytes)
 
 		newAcc, err := newReader.ReadAccountData(address)
 		if err != nil {

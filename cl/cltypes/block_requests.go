@@ -1,8 +1,8 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/pkg/errors"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 const (
@@ -22,47 +22,38 @@ const (
 type BeaconBlocksByRootRequest [][rootLength]byte
 
 // Just to satisfy the ObjectSSZ interface.
-func (r *BeaconBlocksByRootRequest) HashTreeRoot() ([32]byte, error) {
+func (r *BeaconBlocksByRootRequest) HashSSZ() ([32]byte, error) {
 	empty := [32]byte{}
 	return empty, nil
 }
 
-// MarshalSSZTo marshals the block by roots request with the provided byte slice.
-func (r *BeaconBlocksByRootRequest) MarshalSSZTo(dst []byte) ([]byte, error) {
-	marshalledObj, err := r.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return append(dst, marshalledObj...), nil
-}
-
-// MarshalSSZ Marshals the block by roots request type into the serialized object.
-func (r *BeaconBlocksByRootRequest) MarshalSSZ() ([]byte, error) {
+// EncodeSSZ Marshals the block by roots request type into the serialized object.
+func (r *BeaconBlocksByRootRequest) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(*r) > maxRequestBlocks {
 		return nil, errors.Errorf("beacon block by roots request exceeds max size: %d > %d", len(*r), maxRequestBlocks)
 	}
-	buf := make([]byte, 0, r.SizeSSZ())
+	buf := make([]byte, 0, r.EncodingSizeSSZ())
 	for _, r := range *r {
 		buf = append(buf, r[:]...)
 	}
-	return buf, nil
+	return append(dst, buf...), nil
 }
 
-// SizeSSZ returns the size of the serialized representation.
-func (r *BeaconBlocksByRootRequest) SizeSSZ() int {
+// EncodingSizeSSZ returns the size of the serialized representation.
+func (r *BeaconBlocksByRootRequest) EncodingSizeSSZ() int {
 	return len(*r) * rootLength
 }
 
-// UnmarshalSSZ unmarshals the provided bytes buffer into the
+// DecodeSSZ unmarshals the provided bytes buffer into the
 // block by roots request object.
-func (r *BeaconBlocksByRootRequest) UnmarshalSSZ(buf []byte) error {
+func (r *BeaconBlocksByRootRequest) DecodeSSZ(buf []byte) error {
 	bufLen := len(buf)
 	maxLength := maxRequestBlocks * rootLength
 	if bufLen > maxLength {
 		return errors.Errorf("expected buffer with length of upto %d but received length %d", maxLength, bufLen)
 	}
 	if bufLen%rootLength != 0 {
-		return ssz.ErrIncorrectByteSize
+		return ssz_utils.ErrBufferNotRounded
 	}
 	numOfRoots := bufLen / rootLength
 	roots := make([][rootLength]byte, 0, numOfRoots)
@@ -73,4 +64,8 @@ func (r *BeaconBlocksByRootRequest) UnmarshalSSZ(buf []byte) error {
 	}
 	*r = roots
 	return nil
+}
+
+func (r *BeaconBlocksByRootRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return r.DecodeSSZ(buf)
 }

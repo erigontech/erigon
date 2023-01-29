@@ -117,6 +117,10 @@ func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.Hea
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 			return libcommon.Hash{}
 		}
+		if h == nil {
+			log.Warn("[evm] header is nil", "blockNum", n)
+			return libcommon.Hash{}
+		}
 		return h.Hash()
 	}
 }

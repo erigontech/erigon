@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/stream"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -29,7 +32,7 @@ import (
 // Prefix: Has(k, prefix)
 // Amount: [from, INF) AND maximum N records
 
-type tRestoreCodeHash func(tx kv.Getter, key, v []byte) ([]byte, error)
+type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
 type tParseIncarnation func(v []byte) (uint64, error)
 
@@ -37,16 +40,34 @@ type DB struct {
 	kv.RwDB
 	agg *state.AggregatorV3
 
-	convertV3toV2   tConvertV3toV2
-	restoreCodeHash tRestoreCodeHash
-	parseInc        tParseIncarnation
+	convertV3toV2        tConvertV3toV2
+	restoreCodeHash      tRestoreCodeHash
+	parseInc             tParseIncarnation
+	systemContractLookup map[common.Address][]common.CodeRecord
 }
 
-func New(kv kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation) *DB {
-	if !kvcfg.HistoryV3.FromDB(kv) {
+func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCodeHash, cb3 tParseIncarnation, systemContractLookup map[common.Address][]common.CodeRecord) (*DB, error) {
+	if !kvcfg.HistoryV3.FromDB(db) {
 		panic("not supported")
 	}
-	return &DB{RwDB: kv, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3}
+	if systemContractLookup != nil {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
+			var err error
+			for _, list := range systemContractLookup {
+				for i := range list {
+					list[i].TxNumber, err = rawdbv3.TxNums.Min(tx, list[i].BlockNumber)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
 }
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
@@ -56,7 +77,6 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, db: db}
 
 	tx.agg = db.agg.MakeContext()
-	tx.agg.SetTx(kvTx)
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -84,7 +104,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 type Tx struct {
 	kv.Tx
 	db               *DB
-	agg              *state.Aggregator22Context
+	agg              *state.AggregatorV3Context
 	resourcesToClose []kv.Closer
 }
 
@@ -116,21 +136,66 @@ const (
 )
 
 const (
+	AccountsHistoryIdx kv.InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx  kv.InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx     kv.InvertedIdx = "CodeHistoryIdx"
+
 	LogTopicIdx   kv.InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    kv.InvertedIdx = "LogAddrIdx"
 	TracesFromIdx kv.InvertedIdx = "TracesFromIdx"
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint64, limit int) (pairs stream.Kv, err error) {
+func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
 	switch name {
 	case AccountsDomain:
-		panic("not implemented yet")
+		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
+		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
+		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
+			if len(v) == 0 {
+				return k[:20], v, nil
+			}
+			v, err = tx.db.convertV3toV2(v)
+			if err != nil {
+				return nil, nil, err
+			}
+			var force *common.Hash
+			if tx.db.systemContractLookup != nil {
+				if records, ok := tx.db.systemContractLookup[common.BytesToAddress(k)]; ok {
+					p := sort.Search(len(records), func(i int) bool {
+						return records[i].TxNumber > asOfTs
+					})
+					hash := records[p-1].CodeHash
+					force = &hash
+				}
+			}
+			v, err = tx.db.restoreCodeHash(tx.Tx, k, v, force)
+			if err != nil {
+				return nil, nil, err
+			}
+			return k[:20], v, nil
+		})
+		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		if err != nil {
+			return nil, err
+		}
+		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
+		latestStateIt2 := iter.FilterKV(lastestStateIt, func(k, v []byte) bool {
+			return len(k) == 20
+		})
+		//TODO: seems UnionKV can't handle "amount" request
+		return iter.UnionKV(histStateIt2, latestStateIt2), nil
 	case StorageDomain:
-		//it := tx.agg.StorageHistoryRIterateChanged(asOfTs, math.MaxUint64, tx)
 		toKey, _ := kv.NextSubtree(k1)
-		fromKey2 := append(common.Copy(k1), fromKey...)
+		fromKey2 := append(common.Copy(k1), k2...)
 		it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
+		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+			return k, v, nil
+		})
 
 		accData, err := tx.GetOne(kv.PlainState, k1)
 		if err != nil {
@@ -143,21 +208,21 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, fromKey []byte, asOfTs uint6
 		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
 		copy(startkey, k1)
 		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], fromKey)
+		copy(startkey[length.Addr+length.Incarnation:], k2)
 
 		toPrefix := make([]byte, length.Addr+length.Incarnation)
 		copy(toPrefix, k1)
 		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
-		it2, err := tx.StreamAscend(kv.PlainState, startkey, toPrefix, limit)
+		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
 		if err != nil {
 			return nil, err
 		}
-		it3 := stream.TransformPairs(it2, func(k, v []byte) ([]byte, []byte) {
-			return append(append([]byte{}, k[:20]...), k[28:]...), v
+		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
+			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
 		//TODO: seems MergePairs can't handle "amount" request
-		return stream.UnionPairs(it, it3), nil
+		return iter.UnionKV(it11, it3), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -204,7 +269,7 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts)
+		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.Tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -215,15 +280,25 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		if err != nil {
 			return nil, false, err
 		}
-		v, err = tx.db.restoreCodeHash(tx.Tx, key, v)
+		var force *common.Hash
+		if tx.db.systemContractLookup != nil {
+			if records, ok := tx.db.systemContractLookup[common.BytesToAddress(key)]; ok {
+				p := sort.Search(len(records), func(i int) bool {
+					return records[i].TxNumber > ts
+				})
+				hash := records[p-1].CodeHash
+				force = &hash
+			}
+		}
+		v, err = tx.db.restoreCodeHash(tx.Tx, key, v, force)
 		if err != nil {
 			return nil, false, err
 		}
 		return v, true, nil
 	case StorageHistory:
-		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts)
+		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.Tx)
 	case CodeHistory:
-		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts)
+		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.Tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
@@ -231,7 +306,7 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 
 type Cursor struct {
 	kv  kv.Cursor
-	agg *state.Aggregator22Context
+	agg *state.AggregatorV3Context
 
 	//HistoryV2 fields
 	accHistoryC, storageHistoryC kv.Cursor
@@ -241,41 +316,51 @@ type Cursor struct {
 	hitoryV3 bool
 }
 
-func (tx *Tx) IndexRange(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
-	return tx.IndexStream(name, key, fromTs, toTs, orderAscend, limit)
+func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
+	switch name {
+	case AccountsHistoryIdx:
+		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case StorageHistoryIdx:
+		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case CodeHistoryIdx:
+		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+	case LogTopicIdx:
+		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
+	case LogAddrIdx:
+		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
+	case TracesFromIdx:
+		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
+	case TracesToIdx:
+		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := timestamps.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return timestamps, nil
 }
 
-// [fromTs, toTs)
-func (tx *Tx) IndexStream(name kv.InvertedIdx, key []byte, fromTs, toTs uint64, orderAscend bool, limit int) (timestamps stream.U64, err error) {
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not implemented yet")
+	}
+	if limit >= 0 {
+		panic("not implemented yet")
+	}
 	switch name {
-	case LogTopicIdx:
-		t, err := tx.agg.LogTopicIterator(key, fromTs, toTs, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
-	case LogAddrIdx:
-		t, err := tx.agg.LogAddrIterator(key, fromTs, toTs, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
-	case TracesFromIdx:
-		t, err := tx.agg.TraceFromIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
-	case TracesToIdx:
-		t, err := tx.agg.TraceToIterator(key, fromTs, toTs, orderAscend, limit, tx)
-		if err != nil {
-			return nil, err
-		}
-		tx.resourcesToClose = append(tx.resourcesToClose, t)
-		return t, nil
+	case AccountsHistory:
+		it = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
+	case StorageHistory:
+		it = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
+	case CodeHistory:
+		it = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}

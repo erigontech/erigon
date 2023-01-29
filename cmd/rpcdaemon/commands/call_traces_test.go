@@ -7,7 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,7 +47,7 @@ func blockNumbersFromTraces(t *testing.T, b []byte) []int {
 func TestCallTraceOneByOne(t *testing.T) {
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(libcommon.Address{1})
+		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -69,11 +69,11 @@ func TestCallTraceOneByOne(t *testing.T) {
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
-	toAddress1 := libcommon.Address{1}
+	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
-		ToAddress: []*libcommon.Address{&toAddress1},
+		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
@@ -86,16 +86,16 @@ func TestCallTraceUnwind(t *testing.T) {
 	var chainA, chainB *core.ChainPack
 	var err error
 	chainA, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(libcommon.Address{1})
+		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
 	chainB, err = core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *core.BlockGen) {
 		if i < 5 || i >= 10 {
-			gen.SetCoinbase(libcommon.Address{1})
+			gen.SetCoinbase(common.Address{1})
 		} else {
-			gen.SetCoinbase(libcommon.Address{2})
+			gen.SetCoinbase(common.Address{2})
 		}
 	}, false /* intermediateHashes */)
 	if err != nil {
@@ -113,11 +113,11 @@ func TestCallTraceUnwind(t *testing.T) {
 	var fromBlock, toBlock uint64
 	fromBlock = 1
 	toBlock = 10
-	toAddress1 := libcommon.Address{1}
+	toAddress1 := common.Address{1}
 	traceReq1 := TraceFilterRequest{
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
-		ToAddress: []*libcommon.Address{&toAddress1},
+		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
@@ -132,7 +132,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	traceReq2 := TraceFilterRequest{
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
-		ToAddress: []*libcommon.Address{&toAddress1},
+		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq2, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
@@ -148,7 +148,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	traceReq3 := TraceFilterRequest{
 		FromBlock: (*hexutil.Uint64)(&fromBlock),
 		ToBlock:   (*hexutil.Uint64)(&toBlock),
-		ToAddress: []*libcommon.Address{&toAddress1},
+		ToAddress: []*common.Address{&toAddress1},
 	}
 	if err = api.Filter(context.Background(), traceReq3, stream); err != nil {
 		t.Fatalf("trace_filter failed: %v", err)
@@ -159,7 +159,7 @@ func TestCallTraceUnwind(t *testing.T) {
 func TestFilterNoAddresses(t *testing.T) {
 	m := stages.Mock(t)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(libcommon.Address{1})
+		gen.SetCoinbase(common.Address{1})
 	}, false /* intermediateHashes */)
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
@@ -194,13 +194,13 @@ func TestFilterAddressIntersection(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	api := NewTraceAPI(NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
 
-	toAddress1, toAddress2, other := libcommon.Address{1}, libcommon.Address{2}, libcommon.Address{3}
+	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *core.BlockGen) {
-		once.Do(func() { block.SetCoinbase(libcommon.Address{4}) })
+		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
-		var rcv libcommon.Address
+		var rcv common.Address
 		if i < 5 {
 			rcv = toAddress1
 		} else if i < 10 {
@@ -229,8 +229,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
 			ToBlock:     (*hexutil.Uint64)(&toBlock),
-			FromAddress: []*libcommon.Address{&m.Address, &other},
-			ToAddress:   []*libcommon.Address{&m.Address, &toAddress2},
+			FromAddress: []*common.Address{&m.Address, &other},
+			ToAddress:   []*common.Address{&m.Address, &toAddress2},
 			Mode:        TraceFilterModeIntersection,
 		}
 		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
@@ -245,8 +245,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
 			ToBlock:     (*hexutil.Uint64)(&toBlock),
-			FromAddress: []*libcommon.Address{&m.Address, &other},
-			ToAddress:   []*libcommon.Address{&toAddress1, &m.Address},
+			FromAddress: []*common.Address{&m.Address, &other},
+			ToAddress:   []*common.Address{&toAddress1, &m.Address},
 			Mode:        TraceFilterModeIntersection,
 		}
 		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {
@@ -261,8 +261,8 @@ func TestFilterAddressIntersection(t *testing.T) {
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   (*hexutil.Uint64)(&fromBlock),
 			ToBlock:     (*hexutil.Uint64)(&toBlock),
-			ToAddress:   []*libcommon.Address{&other},
-			FromAddress: []*libcommon.Address{&toAddress2, &toAddress1, &other},
+			ToAddress:   []*common.Address{&other},
+			FromAddress: []*common.Address{&toAddress2, &toAddress1, &other},
 			Mode:        TraceFilterModeIntersection,
 		}
 		if err = api.Filter(context.Background(), traceReq1, stream); err != nil {

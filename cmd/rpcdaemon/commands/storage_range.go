@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 )
@@ -35,13 +36,12 @@ func storageRangeAt(stateReader walker, contractAddress libcommon.Address, start
 
 	if err := stateReader.ForEachStorage(contractAddress, libcommon.BytesToHash(start), func(key, seckey libcommon.Hash, value uint256.Int) bool {
 		if resultCount < maxResult {
-			fmt.Printf("res: %x, %x\n", key, value.Bytes32())
 			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
 		} else {
 			result.NextKey = &key
 		}
 		resultCount++
-		return resultCount <= maxResult
+		return resultCount < maxResult
 	}, maxResult+1); err != nil {
 		return StorageRangeResult{}, fmt.Errorf("error walking over storage: %w", err)
 	}
@@ -50,13 +50,12 @@ func storageRangeAt(stateReader walker, contractAddress libcommon.Address, start
 
 func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, start []byte, txNum uint64, maxResult int) (StorageRangeResult, error) {
 	result := StorageRangeResult{Storage: storageMap{}}
-	resultCount := 0
 
-	r, err := ttx.(*temporal.Tx).DomainRangeAscend(temporal.StorageDomain, contractAddress.Bytes(), start, txNum, maxResult)
+	r, err := ttx.DomainRange(temporal.StorageDomain, contractAddress.Bytes(), start, txNum, order.Asc, maxResult+1)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	for r.HasNext() {
+	for i := 0; i < maxResult && r.HasNext(); i++ {
 		k, v, err := r.Next()
 		if err != nil {
 			return StorageRangeResult{}, err
@@ -71,13 +70,18 @@ func storageRangeAtV3(ttx kv.TemporalTx, contractAddress libcommon.Address, star
 		}
 		var value uint256.Int
 		value.SetBytes(v)
-		if resultCount < maxResult {
-			result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
-		} else {
-			result.NextKey = &key
-			break
+		result.Storage[seckey] = StorageEntry{Key: &key, Value: value.Bytes32()}
+	}
+
+	if r.HasNext() {
+		k, v, err := r.Next()
+		if err != nil {
+			return StorageRangeResult{}, err
 		}
-		resultCount++
+		if len(v) > 0 {
+			key := libcommon.BytesToHash(k[20:])
+			result.NextKey = &key
+		}
 	}
 	return result, nil
 }

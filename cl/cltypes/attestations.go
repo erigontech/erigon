@@ -273,7 +273,9 @@ func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
 	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
 
-	dst = a.Data.EncodeSSZ(dst)
+	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
+		return
+	}
 
 	dst = append(dst, a.Signature[:]...)
 	if len(a.AggregationBits) > 2048 {
@@ -284,8 +286,8 @@ func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// UnmarshalSSZ ssz unmarshals the Attestation object
-func (a *Attestation) UnmarshalSSZ(buf []byte) error {
+// DecodeSSZ ssz unmarshals the Attestation object
+func (a *Attestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
@@ -319,17 +321,17 @@ func (a *Attestation) UnmarshalSSZ(buf []byte) error {
 	return err
 }
 
-func (a *Attestation) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return a.UnmarshalSSZ(buf)
+func (a *Attestation) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return a.DecodeSSZ(buf)
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the Attestation object
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the Attestation object
 func (a *Attestation) EncodingSizeSSZ() int {
 	return 228 + len(a.AggregationBits)
 }
 
-// HashTreeRoot ssz hashes the Attestation object
-func (a *Attestation) HashTreeRoot() ([32]byte, error) {
+// HashSSZ ssz hashes the Attestation object
+func (a *Attestation) HashSSZ() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
 	if a.Data == nil {
@@ -340,7 +342,7 @@ func (a *Attestation) HashTreeRoot() ([32]byte, error) {
 		return [32]byte{}, err
 	}
 
-	leaves[1], err = a.Data.HashTreeRoot()
+	leaves[1], err = a.Data.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -368,7 +370,9 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
 
 	// Process data field.
-	dst = i.Data.EncodeSSZ(dst)
+	if dst, err = i.Data.EncodeSSZ(dst); err != nil {
+		return
+	}
 	// Write signature
 	dst = append(dst, i.Signature[:]...)
 
@@ -383,7 +387,7 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return
 }
 
-// UnmarshalSSZ ssz unmarshals the IndexedAttestation object
+// DecodeSSZ ssz unmarshals the IndexedAttestation object
 func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
@@ -408,18 +412,18 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	i.AttestingIndices = make([]uint64, num)
 
 	for index := 0; index < num; index++ {
-		i.AttestingIndices[index] = ssz.UnmarshallUint64(bitsBuf[index*8:])
+		i.AttestingIndices[index] = ssz_utils.UnmarshalUint64SSZ(bitsBuf[index*8:])
 	}
 	return nil
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the IndexedAttestation object
 func (i *IndexedAttestation) EncodingSizeSSZ() int {
 	return 228 + len(i.AttestingIndices)*8
 }
 
-// HashTreeRoot ssz hashes the IndexedAttestation object
-func (i *IndexedAttestation) HashTreeRoot() ([32]byte, error) {
+// HashSSZ ssz hashes the IndexedAttestation object
+func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
 	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, ssz_utils.CalculateIndiciesLimit(2048, uint64(len(i.AttestingIndices)), 8))
@@ -427,7 +431,7 @@ func (i *IndexedAttestation) HashTreeRoot() ([32]byte, error) {
 		return [32]byte{}, err
 	}
 
-	leaves[1], err = i.Data.HashTreeRoot()
+	leaves[1], err = i.Data.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -448,33 +452,24 @@ type AttestationData struct {
 	Target          *Checkpoint
 }
 
-// MarshalSSZ ssz marshals the AttestationData object
-func (a *AttestationData) EncodeSSZ(dst []byte) []byte {
+// EncodeSSZ ssz marshals the AttestationData object
+func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
+	var err error
 	buf = append(buf, ssz_utils.Uint64SSZ(a.Slot)...)
 	buf = append(buf, ssz_utils.Uint64SSZ(a.Index)...)
 	buf = append(buf, a.BeaconBlockHash[:]...)
-	buf = a.Source.EncodeSSZ(buf)
-	buf = a.Target.EncodeSSZ(buf)
-	return buf
-}
-
-// MarshalSSZ ssz marshals the AttestationData object
-func (a *AttestationData) MarshalSSZTo(buf []byte) (dst []byte, err error) {
-	dst = buf
-
-	dst = a.EncodeSSZ(dst)
-	if err != nil {
-		return
+	if buf, err = a.Source.EncodeSSZ(buf); err != nil {
+		return nil, err
 	}
-	return
+	return a.Target.EncodeSSZ(buf)
 }
 
-// UnmarshalSSZ ssz unmarshals the AttestationData object
+// DecodeSSZ ssz unmarshals the AttestationData object
 func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
-	if size != uint64(a.SizeSSZ()) {
+	if size != uint64(a.EncodingSizeSSZ()) {
 		return ssz_utils.ErrLowBufferSize
 	}
 
@@ -495,13 +490,13 @@ func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	return err
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the AttestationData object
-func (a *AttestationData) SizeSSZ() int {
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the AttestationData object
+func (a *AttestationData) EncodingSizeSSZ() int {
 	return 2*common.BlockNumberLength + length.Hash + a.Source.EncodingSizeSSZ() + a.Target.EncodingSizeSSZ()
 }
 
-// HashTreeRoot ssz hashes the AttestationData object
-func (a *AttestationData) HashTreeRoot() ([32]byte, error) {
+// HashSSZ ssz hashes the AttestationData object
+func (a *AttestationData) HashSSZ() ([32]byte, error) {
 	sourceRoot, err := a.Source.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
