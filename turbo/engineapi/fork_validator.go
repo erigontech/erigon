@@ -241,9 +241,9 @@ func (fv *ForkValidator) clear() {
 
 // TryAddingPoWBlock adds a PoW block to the fork validator if possible
 func (fv *ForkValidator) TryAddingPoWBlock(block *types.Block) {
-	defer fv.clean()
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
+	defer fv.clean()
 	fv.sideForksBlock[block.Hash()] = types.RawBlock{Header: block.Header(), Body: block.RawBody()}
 }
 
