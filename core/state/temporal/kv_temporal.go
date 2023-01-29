@@ -304,18 +304,6 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 	}
 }
 
-type Cursor struct {
-	kv  kv.Cursor
-	agg *state.AggregatorV3Context
-
-	//HistoryV2 fields
-	accHistoryC, storageHistoryC kv.Cursor
-	accChangesC, storageChangesC kv.CursorDupSort
-
-	//HistoryV3 fields
-	hitoryV3 bool
-}
-
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
