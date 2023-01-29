@@ -224,6 +224,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	cfg := ethconfig.Defaults
 	cfg.HistoryV3 = ethconfig.EnableHistoryV3InTest
+	cfg.TransactionsV3 = ethconfig.EnableTransactionsV3InTest
 	cfg.StateStream = true
 	cfg.BatchSize = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
