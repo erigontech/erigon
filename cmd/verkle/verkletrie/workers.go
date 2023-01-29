@@ -4,46 +4,48 @@ import (
 	"context"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
 
 type regeneratePedersenAccountsJob struct {
-	address  common.Address
+	address  libcommon.Address
 	account  accounts.Account
 	codeSize uint64
 }
 
 type regeneratePedersenAccountsOut struct {
-	versionHash common.Hash
-	address     common.Address
+	versionHash libcommon.Hash
+	address     libcommon.Address
 	account     accounts.Account
 	codeSize    uint64
 }
 
 type regeneratePedersenStorageJob struct {
-	storageVerkleKey common.Hash
+	storageVerkleKey libcommon.Hash
 	storageKey       *uint256.Int
 	storageValue     []byte
-	address          common.Address
+	address          libcommon.Address
 }
 
 type regeneratePedersenCodeJob struct {
-	address common.Address
+	address libcommon.Address
 	code    []byte
 }
 
 type regeneratePedersenCodeOut struct {
 	chunks     [][]byte
-	address    common.Address
+	address    libcommon.Address
 	chunksKeys [][]byte
 	codeSize   int
 }
 
 type regenerateIncrementalPedersenAccountsJob struct {
 	// Update
-	address       common.Address
+	address       libcommon.Address
 	account       accounts.Account
 	code          []byte // New code
 	isContract    bool
@@ -51,7 +53,7 @@ type regenerateIncrementalPedersenAccountsJob struct {
 }
 
 type regenerateIncrementalPedersenAccountsOut struct {
-	address       common.Address
+	address       libcommon.Address
 	versionHash   []byte
 	account       accounts.Account
 	codeSize      uint64
@@ -82,7 +84,7 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
-			versionHash: common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
+			versionHash: libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
 			account:     job.account,
 			address:     job.address,
 			codeSize:    job.codeSize,
@@ -106,7 +108,7 @@ func pedersenStorageWorker(ctx context.Context, logPrefix string, in, out chan *
 			return
 		}
 		out <- &regeneratePedersenStorageJob{
-			storageVerkleKey: common.BytesToHash(vtree.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
+			storageVerkleKey: libcommon.BytesToHash(vtree.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
 			storageKey:       job.storageKey,
 			address:          job.address,
 			storageValue:     job.storageValue,
@@ -186,7 +188,7 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		case <-ctx.Done():
 			return
 		}
-		versionKey := common.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
+		versionKey := libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
 		if job.absentInState {
 			out <- &regenerateIncrementalPedersenAccountsOut{
 				versionHash:   versionKey[:],

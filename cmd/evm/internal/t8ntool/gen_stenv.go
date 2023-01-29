@@ -7,6 +7,8 @@ import (
 	"errors"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 )
@@ -24,10 +26,10 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 		Number           math.HexOrDecimal64                 `json:"currentNumber"     gencodec:"required"`
 		Timestamp        math.HexOrDecimal64                 `json:"currentTimestamp"  gencodec:"required"`
 		ParentTimestamp  math.HexOrDecimal64                 `json:"parentTimestamp,omitempty"`
-		BlockHashes      map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
+		BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
 		Ommers           []ommer                             `json:"ommers,omitempty"`
 		BaseFee          *math.HexOrDecimal256               `json:"currentBaseFee,omitempty"`
-		ParentUncleHash  common.Hash                         `json:"parentUncleHash"`
+		ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
 	}
 	var enc stEnv
 	enc.Coinbase = common.UnprefixedAddress(s.Coinbase)
@@ -56,10 +58,10 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 		Number           *math.HexOrDecimal64                `json:"currentNumber"     gencodec:"required"`
 		Timestamp        *math.HexOrDecimal64                `json:"currentTimestamp"  gencodec:"required"`
 		ParentTimestamp  *math.HexOrDecimal64                `json:"parentTimestamp,omitempty"`
-		BlockHashes      map[math.HexOrDecimal64]common.Hash `json:"blockHashes,omitempty"`
+		BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
 		Ommers           []ommer                             `json:"ommers,omitempty"`
 		BaseFee          *math.HexOrDecimal256               `json:"currentBaseFee,omitempty"`
-		ParentUncleHash  *common.Hash                        `json:"parentUncleHash"`
+		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
 	}
 	var dec stEnv
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -68,7 +70,7 @@ func (s *stEnv) UnmarshalJSON(input []byte) error {
 	if dec.Coinbase == nil {
 		return errors.New("missing required field 'currentCoinbase' for stEnv")
 	}
-	s.Coinbase = common.Address(*dec.Coinbase)
+	s.Coinbase = libcommon.Address(*dec.Coinbase)
 	if dec.Difficulty != nil {
 		s.Difficulty = (*big.Int)(dec.Difficulty)
 	}

@@ -32,15 +32,16 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -466,24 +467,24 @@ func (s *Service) reportLatency(conn *connWrapper) error {
 
 // blockStats is the information to report about individual blocks.
 type blockStats struct {
-	Number     *big.Int       `json:"number"`
-	Hash       common.Hash    `json:"hash"`
-	ParentHash common.Hash    `json:"parentHash"`
-	Timestamp  *big.Int       `json:"timestamp"`
-	Miner      common.Address `json:"miner"`
-	GasUsed    uint64         `json:"gasUsed"`
-	GasLimit   uint64         `json:"gasLimit"`
-	Diff       string         `json:"difficulty"`
-	TotalDiff  string         `json:"totalDifficulty"`
-	Txs        []txStats      `json:"transactions"`
-	TxHash     common.Hash    `json:"transactionsRoot"`
-	Root       common.Hash    `json:"stateRoot"`
-	Uncles     uncleStats     `json:"uncles"`
+	Number     *big.Int          `json:"number"`
+	Hash       libcommon.Hash    `json:"hash"`
+	ParentHash libcommon.Hash    `json:"parentHash"`
+	Timestamp  *big.Int          `json:"timestamp"`
+	Miner      libcommon.Address `json:"miner"`
+	GasUsed    uint64            `json:"gasUsed"`
+	GasLimit   uint64            `json:"gasLimit"`
+	Diff       string            `json:"difficulty"`
+	TotalDiff  string            `json:"totalDifficulty"`
+	Txs        []txStats         `json:"transactions"`
+	TxHash     libcommon.Hash    `json:"transactionsRoot"`
+	Root       libcommon.Hash    `json:"stateRoot"`
+	Uncles     uncleStats        `json:"uncles"`
 }
 
 // txStats is the information to report about individual transactions.
 type txStats struct {
-	Hash common.Hash `json:"hash"`
+	Hash libcommon.Hash `json:"hash"`
 }
 
 // uncleStats is a custom wrapper around an uncle array to force serializing
@@ -535,7 +536,7 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 // and assembles the block stats. If block is nil, the current head is processed.
 func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = libcommon.Big0
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))

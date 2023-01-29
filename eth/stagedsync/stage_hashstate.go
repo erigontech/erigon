@@ -13,19 +13,21 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 type HashStateCfg struct {
@@ -127,13 +129,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	prom := NewPromoter(tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, true); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, false, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint+1, true, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
 			return err
 		}
 		return nil
@@ -151,17 +153,17 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 }
 
 func PromoteHashedStateCleanly(logPrefix string, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
-	if err := promotePlainState(
+	err := promotePlainState(
 		logPrefix,
 		cfg.db,
 		tx,
 		cfg.dirs.Tmp,
 		ctx,
-	); err != nil {
+	)
+	if err != nil {
 		return err
 	}
 
-	go parallelWarmup(ctx, cfg.db, kv.PlainContractCode, 2)
 	return etl.Transform(
 		logPrefix,
 		tx,
@@ -307,6 +309,9 @@ func parallelTransform(ctx context.Context, in chan pair, out chan pair, transfo
 }
 
 func parallelWarmup(ctx context.Context, db kv.RoDB, bucket string, workers int) error {
+	if db == nil || ctx == nil || workers == 0 {
+		return nil
+	}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(workers)
 	for i := 0; i < 256; i++ {
@@ -548,7 +553,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "storage", storage)
 	}
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
 	if err != nil {
 		return err
 	}
@@ -660,7 +665,7 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 		log.Info(fmt.Sprintf("[%s] Incremental promotion", logPrefix), "from", from, "to", to, "codes", codes, "csbucket", changeSetBucket)
 	}
 
-	startkey := libcommon.EncodeTs(from + 1)
+	startkey := hexutility.EncodeTs(from + 1)
 
 	var loadBucket string
 	var extract etl.ExtractFunc
@@ -697,9 +702,9 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 }
 
 func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo-1, "storage", storage, "codes", codes)
+	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)
 	if err != nil {
 		return err
 	}
@@ -815,7 +820,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 
 	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", from, "to", to, "storage", storage, "codes", codes)
 
-	startkey := libcommon.EncodeTs(to + 1)
+	startkey := hexutility.EncodeTs(to + 1)
 
 	var l OldestAppearedLoad
 	l.innerLoadFunc = etl.IdentityLoadFunc

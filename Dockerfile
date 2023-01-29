@@ -27,7 +27,10 @@ ADD go.sum go.sum
 
 RUN mkdir -p /app/build/bin
 
-RUN make db-tools
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make db-tools
 
 FROM docker.io/library/alpine:3.16
 

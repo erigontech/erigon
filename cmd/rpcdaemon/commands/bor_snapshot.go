@@ -7,22 +7,23 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/xsleonard/go-merkle"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/xsleonard/go-merkle"
-	"golang.org/x/crypto/sha3"
 )
 
 type Snapshot struct {
-	config *params.BorConfig // Consensus engine parameters to fine tune behavior
+	config *chain.BorConfig // Consensus engine parameters to fine tune behavior
 
 	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
 	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
@@ -413,7 +414,7 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
-	config, _ := api.BaseAPI.chainConfig(db)
+	config, _ := api.chainConfig(db)
 	snap.config = config.Bor
 
 	// update total voting power

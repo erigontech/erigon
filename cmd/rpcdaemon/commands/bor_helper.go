@@ -6,12 +6,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -86,7 +87,7 @@ func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Ha
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, c *params.BorConfig) (common.Address, error) {
+func ecrecover(header *types.Header, c *chain.BorConfig) (common.Address, error) {
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
 		return common.Address{}, errMissingSignature
@@ -155,6 +156,6 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Valida
 // author returns the Ethereum address recovered
 // from the signature in the header's extra-data section.
 func author(api *BorImpl, tx kv.Tx, header *types.Header) (common.Address, error) {
-	config, _ := api.BaseAPI.chainConfig(tx)
+	config, _ := api.chainConfig(tx)
 	return ecrecover(header, config.Bor)
 }

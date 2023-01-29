@@ -16,15 +16,66 @@ package fork
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
+
+func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) (clparams.StateVersion, error) {
+	var (
+		phase0ForkDigest, altairForkDigest, bellatrixForkDigest, capellaForkDigest [4]byte
+		err                                                                        error
+	)
+	phase0ForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.GenesisForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	altairForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.AltairForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	bellatrixForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.BellatrixForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	capellaForkDigest, err = ComputeForkDigestForVersion(
+		utils.Uint32ToBytes4(b.CapellaForkVersion),
+		genesisValidatorRoot,
+	)
+	if err != nil {
+		return 0, err
+	}
+	switch digest {
+	case phase0ForkDigest:
+		return clparams.Phase0Version, nil
+	case altairForkDigest:
+		return clparams.AltairVersion, nil
+	case bellatrixForkDigest:
+		return clparams.BellatrixVersion, nil
+	case capellaForkDigest:
+		return clparams.CapellaVersion, nil
+	}
+	return 0, fmt.Errorf("invalid state version")
+}
 
 func ComputeForkDigest(
 	beaconConfig *clparams.BeaconChainConfig,
@@ -33,13 +84,13 @@ func ComputeForkDigest(
 	if genesisConfig.GenesisTime == 0 {
 		return [4]byte{}, errors.New("genesis time is not set")
 	}
-	if genesisConfig.GenesisValidatorRoot == (common.Hash{}) {
+	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
 		return [4]byte{}, errors.New("genesis validators root is not set")
 	}
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentForkVersion := utils.BytesToBytes4(beaconConfig.GenesisForkVersion)
+	currentForkVersion := utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion)
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentForkVersion = fork.version
@@ -67,7 +118,7 @@ func forkList(schedule map[[4]byte]uint64) (f []fork) {
 }
 
 func ComputeForkDigestForVersion(currentVersion [4]byte, genesisValidatorsRoot [32]byte) (digest [4]byte, err error) {
-	var currentVersion32 common.Hash
+	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
 	dataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	// copy first four bytes to output
@@ -115,7 +166,7 @@ func GetLastFork(
 ) [4]byte {
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentFork := utils.BytesToBytes4(beaconConfig.GenesisForkVersion)
+	currentFork := utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion)
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentFork = fork.version
@@ -131,17 +182,17 @@ func ComputeDomain(
 	currentVersion [4]byte,
 	genesisValidatorsRoot [32]byte,
 ) ([]byte, error) {
-	var currentVersion32 common.Hash
+	var currentVersion32 libcommon.Hash
 	copy(currentVersion32[:], currentVersion[:])
 	forkDataRoot := utils.Keccak256(currentVersion32[:], genesisValidatorsRoot[:])
 	return append(domainType, forkDataRoot[:28]...), nil
 }
 
 func ComputeSigningRoot(
-	obj ssz_utils.ObjectSSZ,
+	obj ssz_utils.HashableSSZ,
 	domain []byte,
 ) ([32]byte, error) {
-	objRoot, err := obj.HashTreeRoot()
+	objRoot, err := obj.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

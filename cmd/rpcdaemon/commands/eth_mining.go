@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon/common"
+	"google.golang.org/grpc/status"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
-	"google.golang.org/grpc/status"
 )
 
 // Coinbase implements eth_coinbase. Returns the current client coinbase address.
-func (api *APIImpl) Coinbase(ctx context.Context) (common.Address, error) {
+func (api *APIImpl) Coinbase(ctx context.Context) (libcommon.Address, error) {
 	return api.ethBackend.Etherbase(ctx)
 }
 
@@ -67,7 +68,7 @@ func (api *APIImpl) GetWork(ctx context.Context) ([4]string, error) {
 // SubmitWork can be used by external miner to submit their POW solution.
 // It returns an indication if the work was accepted.
 // Note either an invalid solution, a stale work a non-existent work will return false.
-func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest common.Hash) (bool, error) {
+func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powHash, digest libcommon.Hash) (bool, error) {
 	repl, err := api.mining.SubmitWork(ctx, &txpool.SubmitWorkRequest{BlockNonce: nonce[:], PowHash: powHash.Bytes(), Digest: digest.Bytes()})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {
@@ -83,7 +84,7 @@ func (api *APIImpl) SubmitWork(ctx context.Context, nonce types.BlockNonce, powH
 // which submit work through this node.
 //
 // It accepts the miner hash rate and an identifier which must be unique
-func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id common.Hash) (bool, error) {
+func (api *APIImpl) SubmitHashrate(ctx context.Context, hashRate hexutil.Uint64, id libcommon.Hash) (bool, error) {
 	repl, err := api.mining.SubmitHashRate(ctx, &txpool.SubmitHashRateRequest{Rate: uint64(hashRate), Id: id.Bytes()})
 	if err != nil {
 		if s, ok := status.FromError(err); ok {

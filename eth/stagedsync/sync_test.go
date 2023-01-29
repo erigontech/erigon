@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 func TestStagesSuccess(t *testing.T) {
@@ -177,7 +178,7 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(1500, common.Hash{})
+					u.UnwindTo(1500, libcommon.Hash{})
 					return nil
 				}
 				return nil
@@ -270,7 +271,7 @@ func TestUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, common.Hash{})
+					u.UnwindTo(500, libcommon.Hash{})
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -324,7 +325,7 @@ func TestUnwind(t *testing.T) {
 	//check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
-	state.UnwindTo(100, common.Hash{})
+	state.UnwindTo(100, libcommon.Hash{})
 	err = state.Run(db, tx, true /* initialCycle */, false /* quiet */)
 	assert.NoError(t, err)
 
@@ -374,7 +375,7 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, common.Hash{})
+					u.UnwindTo(500, libcommon.Hash{})
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -562,7 +563,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
-					u.UnwindTo(500, common.Hash{})
+					u.UnwindTo(500, libcommon.Hash{})
 					return s.Update(tx, 3000)
 				}
 				return nil
@@ -587,7 +588,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	//state.unwindOrder = []*Stage{s[0], s[1], s[2]}
 	//err = state.LoadUnwindInfo(tx)
 	//assert.NoError(t, err)
-	//state.UnwindTo(500, common.Hash{})
+	//state.UnwindTo(500, libcommon.Hash{})
 	err = state.Run(db, tx, true /* initialCycle */, false /* quiet */)
 	assert.NoError(t, err)
 

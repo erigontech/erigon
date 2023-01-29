@@ -24,7 +24,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -135,9 +136,9 @@ func (bn BlockNumber) Int64() int64 {
 }
 
 type BlockNumberOrHash struct {
-	BlockNumber      *BlockNumber `json:"blockNumber,omitempty"`
-	BlockHash        *common.Hash `json:"blockHash,omitempty"`
-	RequireCanonical bool         `json:"requireCanonical,omitempty"`
+	BlockNumber      *BlockNumber    `json:"blockNumber,omitempty"`
+	BlockHash        *libcommon.Hash `json:"blockHash,omitempty"`
+	RequireCanonical bool            `json:"requireCanonical,omitempty"`
 }
 
 func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
@@ -193,7 +194,7 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 		return nil
 	default:
 		if len(input) == 66 {
-			hash := common.Hash{}
+			hash := libcommon.Hash{}
 			err := hash.UnmarshalText([]byte(input))
 			if err != nil {
 				return err
@@ -221,11 +222,11 @@ func (bnh *BlockNumberOrHash) Number() (BlockNumber, bool) {
 	return BlockNumber(0), false
 }
 
-func (bnh *BlockNumberOrHash) Hash() (common.Hash, bool) {
+func (bnh *BlockNumberOrHash) Hash() (libcommon.Hash, bool) {
 	if bnh.BlockHash != nil {
 		return *bnh.BlockHash, true
 	}
-	return common.Hash{}, false
+	return libcommon.Hash{}, false
 }
 
 func BlockNumberOrHashWithNumber(blockNr BlockNumber) BlockNumberOrHash {
@@ -236,7 +237,7 @@ func BlockNumberOrHashWithNumber(blockNr BlockNumber) BlockNumberOrHash {
 	}
 }
 
-func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHash {
+func BlockNumberOrHashWithHash(hash libcommon.Hash, canonical bool) BlockNumberOrHash {
 	return BlockNumberOrHash{
 		BlockNumber:      nil,
 		BlockHash:        &hash,

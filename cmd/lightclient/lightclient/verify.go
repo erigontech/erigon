@@ -21,8 +21,8 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	isNextSyncCommitteeKnown := l.store.nextSyncCommittee != nil
 	// Check if the timings and slot are valid
 	current_slot := utils.GetCurrentSlot(l.genesisConfig.GenesisTime, l.beaconConfig.SecondsPerSlot)
-	if current_slot < update.SignatureSlot || update.SignatureSlot <= update.AttestedHeader.Slot ||
-		(update.IsFinalityUpdate() && update.AttestedHeader.Slot < update.FinalizedHeader.Slot) {
+	if current_slot < update.SignatureSlot || update.SignatureSlot <= update.AttestedHeader.HeaderEth2.Slot ||
+		(update.IsFinalityUpdate() && update.AttestedHeader.HeaderEth2.Slot < update.FinalizedHeader.HeaderEth2.Slot) {
 		return false, fmt.Errorf("too far in the future")
 	}
 	storePeriod := utils.SlotToPeriod(l.store.finalizedHeader.Slot)
@@ -34,17 +34,17 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 	}
 
 	// Verify whether update is relevant
-	attestedPeriod := utils.SlotToPeriod(update.AttestedHeader.Slot)
+	attestedPeriod := utils.SlotToPeriod(update.AttestedHeader.HeaderEth2.Slot)
 	hasNextSyncCommittee := l.store.nextSyncCommittee == nil &&
 		update.HasNextSyncCommittee() && attestedPeriod == storePeriod
 
-	if update.AttestedHeader.Slot <= l.store.finalizedHeader.Slot && !hasNextSyncCommittee {
+	if update.AttestedHeader.HeaderEth2.Slot <= l.store.finalizedHeader.Slot && !hasNextSyncCommittee {
 		return false, fmt.Errorf("invalid sync committee")
 	}
 
 	// Verify that the `finality_branch`, if present, confirms `finalized_header`
 	if update.IsFinalityUpdate() {
-		finalizedRoot, err := update.FinalizedHeader.HashTreeRoot()
+		finalizedRoot, err := update.FinalizedHeader.HeaderEth2.HashSSZ()
 		if err != nil {
 			return false, err
 		}
@@ -53,7 +53,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 			update.FinalityBranch,
 			6,  // floorlog2(FINALIZED_ROOT_INDEX)
 			41, // get_subtree_index(FINALIZED_ROOT_INDEX),
-			update.AttestedHeader.Root,
+			update.AttestedHeader.HeaderEth2.Root,
 		) {
 			return false, fmt.Errorf("update is not part of the merkle tree")
 		}
@@ -63,7 +63,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 			!update.NextSyncCommitee.Equal(l.store.nextSyncCommittee) {
 			return false, fmt.Errorf("mismatching sync committee")
 		}
-		syncRoot, err := update.NextSyncCommitee.HashTreeRoot()
+		syncRoot, err := update.NextSyncCommitee.HashSSZ()
 		if err != nil {
 			return false, err
 		}
@@ -72,7 +72,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 			update.NextSyncCommitteeBranch,
 			5,  // floorlog2(NEXT_SYNC_COMMITTEE_INDEX)
 			23, // get_subtree_index(NEXT_SYNC_COMMITTEE_INDEX),
-			update.AttestedHeader.Root,
+			update.AttestedHeader.HeaderEth2.Root,
 		) {
 			return false, fmt.Errorf("sync committee is not part of the merkle tree")
 		}
@@ -102,7 +102,7 @@ func (l *LightClient) validateUpdate(update *cltypes.LightClientUpdate) (bool, e
 		return false, err
 	}
 	// Computing signing root
-	signingRoot, err := fork.ComputeSigningRoot(update.AttestedHeader, domain)
+	signingRoot, err := fork.ComputeSigningRoot(update.AttestedHeader.HeaderEth2, domain)
 	if err != nil {
 		return false, err
 	}

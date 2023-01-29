@@ -19,22 +19,23 @@ package misc
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // VerifyForkHashes verifies that blocks conforming to network hard-forks do have
 // the correct hashes, to avoid clients going off on different chains. This is an
 // optional feature.
-func VerifyForkHashes(config *params.ChainConfig, header *types.Header, uncle bool) error {
+func VerifyForkHashes(config *chain.Config, header *types.Header, uncle bool) error {
 	// We don't care about uncles
 	if uncle {
 		return nil
 	}
 	// If the homestead reprice hash is set, validate it
 	if config.TangerineWhistleBlock != nil && config.TangerineWhistleBlock.Cmp(header.Number) == 0 {
-		if config.TangerineWhistleHash != (common.Hash{}) && config.TangerineWhistleHash != header.Hash() {
+		if config.TangerineWhistleHash != (libcommon.Hash{}) && config.TangerineWhistleHash != header.Hash() {
 			return fmt.Errorf("tangerine whistle gas reprice fork: have 0x%x, want 0x%x", header.Hash(), config.TangerineWhistleHash)
 		}
 	}

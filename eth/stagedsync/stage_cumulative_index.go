@@ -7,15 +7,16 @@ import (
 	"math/big"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CumulativeIndexCfg struct {
@@ -64,7 +65,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	}
 
 	currentBlockNumber := s.BlockNumber + 1
-	for k, v, err := headerC.Seek(common2.EncodeTs(s.BlockNumber)); k != nil; k, v, err = headerC.Next() {
+	for k, v, err := headerC.Seek(hexutility.EncodeTs(s.BlockNumber)); k != nil; k, v, err = headerC.Next() {
 		if err != nil {
 			return err
 		}
@@ -83,7 +84,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 			return err
 		}
 
-		if canonicalHash != common.BytesToHash(k[8:]) {
+		if canonicalHash != libcommon.BytesToHash(k[8:]) {
 			continue
 		}
 

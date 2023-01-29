@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/aura/test"
@@ -18,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/stretchr/testify/require"
 )
 
 /*
@@ -98,7 +99,7 @@ import (
 func TestRewardContract(t *testing.T) {
 	t.Skip("not ready yet")
 	auraDB, require := memdb.NewTestDB(t), require.New(t)
-	engine, err := aura.NewAuRa(nil, auraDB, common.Address{}, test.AuthorityRoundBlockRewardContract)
+	engine, err := aura.NewAuRa(nil, auraDB, libcommon.Address{}, test.AuthorityRoundBlockRewardContract)
 	require.NoError(err)
 	m := stages.MockWithGenesisEngine(t, core.DefaultSokolGenesisBlock(), engine, false)
 	m.EnableLogs()
@@ -218,7 +219,7 @@ func TestEmptyBlock(t *testing.T) {
 	header.UncleHash = types.EmptyUncleHash
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
-	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
+	header.Coinbase = libcommon.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
 	header.Difficulty = engine.CalcDifficulty(nil, time,
 		0,
 		genesisBlock.Difficulty(),

@@ -21,7 +21,7 @@ const (
 // hashing state data in the Ethereum 2.0 beacon chain.
 
 // Eth1DataVectorRoot calculates the root hash of an array of Eth1Data values by first vectorizing the input array using
-// the HashTreeRoot method on each Eth1Data value, then calculating the root hash of the vectorized array using
+// the HashSSZ method on each Eth1Data value, then calculating the root hash of the vectorized array using
 // the ArraysRootWithLimit function and the Eth1DataVotesRootsLimit constant.
 func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	var err error
@@ -29,7 +29,7 @@ func Eth1DataVectorRoot(votes []*cltypes.Eth1Data) ([32]byte, error) {
 	vectorizedVotesRoot := make([][32]byte, len(votes))
 	// Vectorize ETH1 Data first of all
 	for i, vote := range votes {
-		vectorizedVotesRoot[i], err = vote.HashTreeRoot()
+		vectorizedVotesRoot[i], err = vote.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -44,7 +44,7 @@ func ValidatorsVectorRoot(validators []*cltypes.Validator) ([32]byte, error) {
 	vectorizedValidatorsRoot := make([][32]byte, len(validators))
 	// Vectorize ETH1 Data first of all
 	for i, validator := range validators {
-		vectorizedValidatorsRoot[i], err = validator.HashTreeRoot()
+		vectorizedValidatorsRoot[i], err = validator.HashSSZ()
 		if err != nil {
 			return [32]byte{}, err
 		}

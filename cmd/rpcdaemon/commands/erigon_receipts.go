@@ -7,10 +7,11 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/filters"
@@ -101,31 +102,10 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(begin, end+1) // [min,max)
-
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, uint32(begin), uint32(end))
-	if err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(begin), uint32(end))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
-		blockNumbers.And(addrBitmap)
-	}
-
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 
@@ -135,7 +115,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	iter := blockNumbers.Iterator()
 	for iter.HasNext() {
-		if err = ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 
@@ -143,7 +123,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
 		if err != nil {
 			return nil, err
 		}
@@ -257,30 +237,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	blockNumbers.AddRange(0, latest)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, 0, uint32(latest))
-	if err != nil {
-		return nil, err
+	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
+		return erigonLogs, err
 	}
-	if topicsBitmap != nil {
-		blockNumbers.And(topicsBitmap)
-	}
-
-	rx := make([]*roaring.Bitmap, len(crit.Addresses))
-	for idx, addr := range crit.Addresses {
-		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(0), uint32(latest))
-		if err != nil {
-			return nil, err
-		}
-		rx[idx] = m
-	}
-	addrBitmap := roaring.FastOr(rx...)
-
-	if len(rx) > 0 {
-		blockNumbers.And(addrBitmap)
-	}
-
-	if blockNumbers.GetCardinality() == 0 {
+	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
 
@@ -307,7 +267,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		var logIndex uint
 		var txIndex uint
 		var blockLogs []*types.Log
-		it, err := tx.Prefix(kv.Log, common2.EncodeTs(blockNumber))
+		it, err := tx.Prefix(kv.Log, hexutility.EncodeTs(blockNumber))
 		if err != nil {
 			return nil, err
 		}
@@ -341,11 +301,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 				blockLogs = append(blockLogs, filtered[i])
 				logCount++
 			}
-			blockCount++
 			if logOptions.LogCount != 0 && logOptions.LogCount == logCount {
 				continue
 			}
 		}
+		blockCount++
 		if len(blockLogs) == 0 {
 			continue
 		}
@@ -434,7 +394,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block, txn.Hash(), true))
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
 	if chainConfig.Bor != nil {
@@ -445,7 +405,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 				return nil, err
 			}
 			if borReceipt != nil {
-				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block, borReceipt.TxHash, false))
+				result = append(result, marshalReceipt(borReceipt, borTx, chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false))
 			}
 		}
 	}

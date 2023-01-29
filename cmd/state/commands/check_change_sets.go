@@ -11,11 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -25,8 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 var (
@@ -158,7 +159,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			blockWriter = csw
 		}
 
-		getHeader := func(hash common.Hash, number uint64) *types.Header {
+		getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
 			h, e := blockReader.Header(ctx, rwtx, hash, number)
 			if e != nil {
 				panic(e)
@@ -184,7 +185,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			sort.Sort(accountChanges)
 			i := 0
 			match := true
-			err = historyv2.ForPrefix(historyTx, kv.AccountChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.AccountChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(accountChanges.Changes) {
 					if len(v) != 0 {
 						fmt.Printf("Unexpected account changes in block %d\n", blockNum)
@@ -231,7 +232,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 			}
 			sort.Sort(expectedStorageChanges)
 			match = true
-			err = historyv2.ForPrefix(historyTx, kv.StorageChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
+			err = historyv2.ForPrefix(historyTx, kv.StorageChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 				if i >= len(expectedStorageChanges.Changes) {
 					fmt.Printf("Unexpected storage changes in block %d\nIn the database: ======================\n", blockNum)
 					fmt.Printf("0x%x: %x\n", k, v)

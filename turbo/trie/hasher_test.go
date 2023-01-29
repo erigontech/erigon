@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestValue(t *testing.T) {
 	t.Skip("should be restored. skipped for Erigon")
 
 	h := newHasher(false)
-	var hn common.Hash
+	var hn libcommon.Hash
 	h.hash(valueNode("BLAH"), false, hn[:])
 	expected := "0x0"
 	actual := fmt.Sprintf("0x%x", hn[:])

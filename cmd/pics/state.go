@@ -12,8 +12,11 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/pics/contracts"
@@ -25,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/visual"
-	"github.com/ledgerwatch/log/v3"
 )
 
 /*func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
@@ -270,7 +272,7 @@ func initialState1() error {
 		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
+		theAddr  = libcommon.Address{1}
 		gspec    = &core.Genesis{
 			Config: params.AllProtocolChanges,
 			Alloc: core.GenesisAlloc{
@@ -339,7 +341,7 @@ func initialState1() error {
 		case 5:
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
@@ -367,7 +369,7 @@ func initialState1() error {
 			txs = append(txs, tx)
 			// Multiple transactions sending small amounts of ether to various accounts
 			var j uint64
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			for j = 1; j <= 32; j++ {
 				binary.BigEndian.PutUint64(toAddr[:], j)
 				tx, err = tokenContract.Transfer(transactOpts2, toAddr, big.NewInt(1))
@@ -377,7 +379,7 @@ func initialState1() error {
 				txs = append(txs, tx)
 			}
 		case 7:
-			var toAddr common.Address
+			var toAddr libcommon.Address
 			nonce := block.TxNonce(address)
 			binary.BigEndian.PutUint64(toAddr[:], 4)
 			tx, err = types.SignTx(types.NewTransaction(nonce, toAddr, uint256.NewInt(1000000000000000), 21000, new(uint256.Int), nil), *signer, key)

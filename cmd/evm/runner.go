@@ -30,7 +30,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -130,9 +133,9 @@ func runCmd(ctx *cli.Context) error {
 		tracer        vm.EVMLogger
 		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
-		chainConfig   *params.ChainConfig
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		chainConfig   *chain.Config
+		sender        = libcommon.BytesToAddress([]byte("sender"))
+		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *core.Genesis
 	)
 	if ctx.Bool(MachineFlag.Name) {
@@ -160,12 +163,12 @@ func runCmd(ctx *cli.Context) error {
 
 	statedb = state.New(state.NewPlainStateReader(tx))
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = libcommon.HexToAddress(ctx.String(ReceiverFlag.Name))
 	}
 
 	var code []byte
@@ -285,7 +288,7 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.Bool(DumpFlag.Name) {
-		rules := &params.Rules{}
+		rules := &chain.Rules{}
 		if chainConfig != nil {
 			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
 		}
@@ -293,7 +296,11 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
+		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(state.NewDumper(tx, 0, historyV3).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {

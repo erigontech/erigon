@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -116,8 +116,8 @@ func buildRandomValidatorSet(numVals int) []*Validator {
 	return validators
 }
 
-func randomAddress() common.Address {
+func randomAddress() libcommon.Address {
 	bytes := make([]byte, 32)
 	rand.Read(bytes)
-	return common.BytesToAddress(bytes)
+	return libcommon.BytesToAddress(bytes)
 }

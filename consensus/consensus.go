@@ -21,10 +21,11 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -32,22 +33,22 @@ import (
 // blockchain during header verification.
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
-	Config() *params.ChainConfig
+	Config() *chain.Config
 
 	// CurrentHeader retrieves the current header from the local chain.
 	CurrentHeader() *types.Header
 
 	// GetHeader retrieves a block header from the database by hash and number.
-	GetHeader(hash common.Hash, number uint64) *types.Header
+	GetHeader(hash libcommon.Hash, number uint64) *types.Header
 
 	// GetHeaderByNumber retrieves a block header from the database by number.
 	GetHeaderByNumber(number uint64) *types.Header
 
 	// GetHeaderByHash retrieves a block header from the database by its hash.
-	GetHeaderByHash(hash common.Hash) *types.Header
+	GetHeaderByHash(hash libcommon.Hash) *types.Header
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
-	GetTd(hash common.Hash, number uint64) *big.Int
+	GetTd(hash libcommon.Hash, number uint64) *big.Int
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -56,22 +57,22 @@ type ChainReader interface {
 	ChainHeaderReader
 
 	// GetBlock retrieves a block from the database by hash and number.
-	GetBlock(hash common.Hash, number uint64) *types.Block
-	GetHeader(hash common.Hash, number uint64) *types.Header
+	GetBlock(hash libcommon.Hash, number uint64) *types.Block
+	GetHeader(hash libcommon.Hash, number uint64) *types.Header
 
-	HasBlock(hash common.Hash, number uint64) bool
+	HasBlock(hash libcommon.Hash, number uint64) bool
 }
 
 type EpochReader interface {
-	GetEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
-	GetPendingEpoch(blockHash common.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutPendingEpoch(blockHash common.Hash, blockN uint64, transitionProof []byte) (err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error)
+	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
+	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
+	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
+	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
+	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
 }
 
-type SystemCall func(contract common.Address, data []byte) ([]byte, error)
-type Call func(contract common.Address, data []byte) ([]byte, error)
+type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
+type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
 // Engine is an algorithm agnostic consensus engine.
 type Engine interface {
@@ -85,12 +86,12 @@ type EngineReader interface {
 	// Author retrieves the Ethereum address of the account that minted the given
 	// block, which may be different from the header's coinbase if a consensus
 	// engine is based on signatures.
-	Author(header *types.Header) (common.Address, error)
+	Author(header *types.Header) (libcommon.Address, error)
 
 	// Service transactions are free and don't pay baseFee after EIP-1559
-	IsServiceTransaction(sender common.Address, syscall SystemCall) bool
+	IsServiceTransaction(sender libcommon.Address, syscall SystemCall) bool
 
-	Type() params.ConsensusType
+	Type() chain.ConsensusName
 }
 
 // EngineReader are write methods of the consensus engine
@@ -109,7 +110,7 @@ type EngineWriter interface {
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *params.ChainConfig, chain ChainHeaderReader, e EpochReader, header *types.Header,
+	Initialize(config *chain.Config, chain ChainHeaderReader, e EpochReader, header *types.Header,
 		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
@@ -117,7 +118,7 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
 	) (types.Transactions, types.Receipts, error)
@@ -127,7 +128,7 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
 	) (*types.Block, types.Transactions, types.Receipts, error)
@@ -140,11 +141,11 @@ type EngineWriter interface {
 	Seal(chain ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
-	SealHash(header *types.Header) common.Hash
+	SealHash(header *types.Header) libcommon.Hash
 
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
-	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int
+	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int
 
 	GenerateSeal(chain ChainHeaderReader, currnt, parent *types.Header, call Call) []byte
 
@@ -164,14 +165,14 @@ type PoW interface {
 }
 
 var (
-	SystemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+	SystemAddress = libcommon.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 type PoSA interface {
 	Engine
 
 	IsSystemTransaction(tx types.Transaction, header *types.Header) (bool, error)
-	IsSystemContract(to *common.Address) bool
+	IsSystemContract(to *libcommon.Address) bool
 	EnoughDistance(chain ChainReader, header *types.Header) bool
 	IsLocalBlock(header *types.Header) bool
 	AllowLightProcess(chain ChainReader, currentHeader *types.Header) bool
