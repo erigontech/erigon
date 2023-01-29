@@ -468,6 +468,8 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", 10, 5, order.Desc, -1)
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
+	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
+	DomainRange(name Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error)
 }
 
 type TemporalRwDB interface {

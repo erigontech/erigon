@@ -29,6 +29,7 @@ import (
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
@@ -385,7 +386,7 @@ func TestIterateChanged(t *testing.T) {
 	ic := h.MakeContext()
 	ic.SetTx(roTx)
 
-	it := ic.IterateChanged(2, 20, roTx)
+	it := ic.IterateChanged(2, 20, order.Asc, -1, roTx)
 	defer it.Close()
 	for it.HasNext() {
 		k, v, err := it.Next()
@@ -434,7 +435,7 @@ func TestIterateChanged(t *testing.T) {
 		"",
 		"",
 		""}, vals)
-	it = ic.IterateChanged(995, 1000, roTx)
+	it = ic.IterateChanged(995, 1000, order.Asc, -1, roTx)
 	keys, vals = keys[:0], vals[:0]
 	for it.HasNext() {
 		k, v, err := it.Next()

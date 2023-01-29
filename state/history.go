@@ -34,6 +34,7 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
@@ -1567,7 +1568,21 @@ func (hi *WalkAsOfIter) Next() ([]byte, []byte, error) {
 	return hi.kBackup, hi.vBackup, nil
 }
 
-func (hc *HistoryContext) IterateChanged(startTxNum, endTxNum uint64, roTx kv.Tx) *HistoryIterator1 {
+func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) *HistoryIterator1 {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
+	if limit >= 0 {
+		panic("not supported yet")
+	}
+	if fromTxNum < 0 {
+		panic("not supported yet")
+	}
+	if toTxNum < 0 {
+		panic("not supported yet")
+	}
+	startTxNum, endTxNum := uint64(fromTxNum), uint64(toTxNum)
+
 	hi := HistoryIterator1{
 		hasNextInDb:  true,
 		roTx:         roTx,
