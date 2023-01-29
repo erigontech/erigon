@@ -341,3 +341,25 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 	}
 	return timestamps, nil
 }
+
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not implemented yet")
+	}
+	if limit >= 0 {
+		panic("not implemented yet")
+	}
+	switch name {
+	case AccountsHistory:
+		it = tx.agg.AccountHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		return it, nil
+	case StorageHistory:
+		it = tx.agg.StorageHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		return it, nil
+	case CodeHistory:
+		it = tx.agg.CodeHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		return it, nil
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
+	}
+}

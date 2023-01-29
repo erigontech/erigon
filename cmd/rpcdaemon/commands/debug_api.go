@@ -7,6 +7,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -152,6 +153,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 }
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
+// [from, to)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -185,7 +187,47 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
+	//[from, to)
+	if api.historyV3(tx) {
+		ttx := tx.(*temporal.Tx)
+		startTxNum, err := rawdbv3.TxNums.Min(ttx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		endTxNum, err := rawdbv3.TxNums.Max(ttx, endNum-1)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccountsV3(ttx, startTxNum, endTxNum)
+	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
+}
+
+// getModifiedAccountsV3 returns a list of addresses that were modified in the block range
+// [startNum:endNum)
+func getModifiedAccountsV3(tx *temporal.Tx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	changedAddrs := make(map[common.Address]struct{})
+	it, _ := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+	}
+
+	if len(changedAddrs) == 0 {
+		return nil, nil
+	}
+
+	idx := 0
+	result := make([]common.Address, len(changedAddrs))
+	for addr := range changedAddrs {
+		copy(result[idx][:], addr[:])
+		idx++
+	}
+
+	return result, nil
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
@@ -221,6 +263,19 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
+	//[from, to)
+	if api.historyV3(tx) {
+		ttx := tx.(*temporal.Tx)
+		startTxNum, err := rawdbv3.TxNums.Min(ttx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		endTxNum, err := rawdbv3.TxNums.Max(ttx, endNum-1)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccountsV3(ttx, startTxNum, endTxNum)
+	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
