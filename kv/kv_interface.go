@@ -26,22 +26,22 @@ import (
 )
 
 //Variables Naming:
-//  ts - TimeStamp
+//  ts - TimeStamp (usually it's TxnNumber)
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
 //  RoTx - Read-Only Database Transaction
 //  RwTx - Read-Write Database Transaction
 //  k - key
 //  v - value
-//  Cursor - low-level mdbx-tide api to walk over Table
-//  Stream - high-level simplified api for iteration over Table, InvertedIndex, History, Domain, ...
+//  Cursor - low-level mdbx-tide api to navigate over Table
+//  Iter - high-level iterator-like api over Table, InvertedIndex, History, Domain. Has less features than Cursor.
 
 //Methods Naming:
 //  Get: exact match of criterias
-//  Stream: [from, to). Stream(from, nil) means [from, EndOfTable). Stream(nil, to) means [StartOfTable, to).
-//  Each: Stream(from, nil)
-//  Prefix: `Stream(Table, prefix, kv.NextSubtree(prefix))`
-//  Amount: [from, INF) AND maximum N records
+//  Range: [from, to). Stream(from, nil) means [from, EndOfTable). Stream(nil, to) means [StartOfTable, to).
+//  Each: Range(from, nil)
+//  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
+//  Limit: [from, INF) AND maximum N records
 
 //Entity Naming:
 //  State: simple table in db

@@ -1257,16 +1257,16 @@ func (ac *AggregatorV3Context) CodeHistoryIterateChanged(startTxNum, endTxNum in
 	return ac.code.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, tx kv.Tx) *StateAsOfIter {
-	return ac.accounts.WalkAsOf(startTxNum, from, to, tx, amount)
+func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) *StateAsOfIter {
+	return ac.accounts.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, tx kv.Tx) *StateAsOfIter {
-	return ac.storage.WalkAsOf(startTxNum, from, to, tx, amount)
+func (ac *AggregatorV3Context) StorageHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) *StateAsOfIter {
+	return ac.storage.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
-func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, amount int, tx kv.Tx) *StateAsOfIter {
-	return ac.code.WalkAsOf(startTxNum, from, to, tx, amount)
+func (ac *AggregatorV3Context) CodeHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) *StateAsOfIter {
+	return ac.code.WalkAsOf(startTxNum, from, to, tx, limit)
 }
 
 type FilesStats22 struct {
