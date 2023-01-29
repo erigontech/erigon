@@ -27,10 +27,10 @@ import (
 
 //Methods Naming:
 // Get: exact match of criterias
-// Dual: [from, to)
+// Range: [from, to)
 // Each: [from, INF)
 // Prefix: Has(k, prefix)
-// Amount: [from, INF) AND maximum N records
+// Limit: [from, INF) AND maximum N records
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
