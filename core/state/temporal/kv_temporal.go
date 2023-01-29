@@ -147,13 +147,16 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
+func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
 	switch name {
 	case AccountsDomain:
-		it := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
 		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
-		// Is it possible to increase keys lifetime to: 2 .Next() calls??
-		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
+		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
 			if len(v) == 0 {
 				return k[:20], v, nil
 			}
@@ -177,16 +180,16 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, li
 			}
 			return k[:20], v, nil
 		})
-		it2, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
 		if err != nil {
 			return nil, err
 		}
 		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
-		it3 := iter.FilterKV(it2, func(k, v []byte) bool {
+		latestStateIt2 := iter.FilterKV(lastestStateIt, func(k, v []byte) bool {
 			return len(k) == 20
 		})
 		//TODO: seems UnionKV can't handle "amount" request
-		return iter.UnionKV(it11, it3), nil
+		return iter.UnionKV(histStateIt2, latestStateIt2), nil
 	case StorageDomain:
 		toKey, _ := kv.NextSubtree(k1)
 		fromKey2 := append(common.Copy(k1), k2...)
@@ -351,13 +354,13 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it = tx.agg.AccountHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		it = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 		return it, nil
 	case StorageHistory:
-		it = tx.agg.StorageHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		it = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 		return it, nil
 	case CodeHistory:
-		it = tx.agg.CodeHistoryIterateChanged(uint64(fromTs), uint64(toTs), tx)
+		it = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 		return it, nil
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)

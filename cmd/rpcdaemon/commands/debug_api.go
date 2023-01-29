@@ -189,23 +189,22 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 
 	//[from, to)
 	if api.historyV3(tx) {
-		ttx := tx.(*temporal.Tx)
-		startTxNum, err := rawdbv3.TxNums.Min(ttx, startNum)
+		startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
 		if err != nil {
 			return nil, err
 		}
-		endTxNum, err := rawdbv3.TxNums.Max(ttx, endNum-1)
+		endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
 		if err != nil {
 			return nil, err
 		}
-		return getModifiedAccountsV3(ttx, startTxNum, endTxNum)
+		return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
 	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
 // getModifiedAccountsV3 returns a list of addresses that were modified in the block range
 // [startNum:endNum)
-func getModifiedAccountsV3(tx *temporal.Tx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
 	changedAddrs := make(map[common.Address]struct{})
 	it, _ := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
 	for it.HasNext() {
@@ -265,16 +264,15 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 
 	//[from, to)
 	if api.historyV3(tx) {
-		ttx := tx.(*temporal.Tx)
-		startTxNum, err := rawdbv3.TxNums.Min(ttx, startNum)
+		startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
 		if err != nil {
 			return nil, err
 		}
-		endTxNum, err := rawdbv3.TxNums.Max(ttx, endNum-1)
+		endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
 		if err != nil {
 			return nil, err
 		}
-		return getModifiedAccountsV3(ttx, startTxNum, endTxNum)
+		return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
 	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
