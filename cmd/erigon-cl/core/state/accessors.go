@@ -242,12 +242,15 @@ func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
-func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64) {
+func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
 	activeBalance, err := b.GetTotalActiveBalance()
+	if err != nil {
+		return 0, 0, err
+	}
 	totalActiveIncrements := activeBalance / b.beaconConfig.EffectiveBalanceIncrement
 	baseRewardPerInc := b.baseRewardPerIncrement(activeBalance)
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
-	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / uint64(b.beaconConfig.SlotsPerEpoch)
+	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / b.beaconConfig.SlotsPerEpoch
 	participantReward = maxParticipantRewards / b.beaconConfig.SyncCommitteeSize
 	proposerReward = participantReward * b.beaconConfig.ProposerWeight / (b.beaconConfig.WeightDenominator - b.beaconConfig.ProposerWeight)
 	return

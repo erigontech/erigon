@@ -24,7 +24,11 @@ func (s *StateTransistor) processSyncAggregate(sync *cltypes.SyncAggregate) ([][
 	}
 	votedKeys := make([][]byte, 0, len(committeeKeys))
 
-	proposerReward, participantReward := s.state.SyncRewards()
+	proposerReward, participantReward, err := s.state.SyncRewards()
+	if err != nil {
+		return nil, err
+	}
+
 	proposerIndex, err := s.state.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
