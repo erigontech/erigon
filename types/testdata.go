@@ -70,9 +70,6 @@ var txParseDevNetTests = []parseTxTest{
 		SenderStr:   "67b1d87101671b127f5f8714789c7192f7ad340e", Nonce: 1},
 }
 
-var txStarknetTests = []parseTxTest{
-	{PayloadStr: "03f86f83127ed801808001800196376232323631363236393232336132303562356437648973616c745f74657374c080a0b44c2f4e18ca27e621171da5cf3a0c875c0749c7b998ec2759974280d987143aa04f01823122d972baa1a03b113535d9f9057fd9366fd8770e766b91f835b88ea6", Nonce: 1},
-}
 var txRopstenTests = []parseTxTest{
 	{PayloadStr: "f868188902000000000000000082520894000000000000000000000000000000000000004380801ba01d852f75e0bdbdf3c2b770be97eb3b74d9a3b2450fb58aa6cfbc9e9faa1c4b24a079aef959a5f032ed90b2e44b74a2e850043a3e0ab83f994ab0619638173fe035",
 		Nonce: 24, SenderStr: "874b54a8bd152966d63f706bae1ffeb0411921e5", IdHashStr: "5928c90044b9d2add2fc7f580e0c6ea1b2dca2ea8c254dfa4092c251f895ed52"},
@@ -93,10 +90,6 @@ var allNetsTestCases = []struct {
 	{
 		chainID: *uint256.NewInt(1337),
 		tests:   txParseDevNetTests,
-	},
-	{
-		chainID: *uint256.NewInt(1212120),
-		tests:   txStarknetTests,
 	},
 	{
 		chainID: *uint256.NewInt(3),

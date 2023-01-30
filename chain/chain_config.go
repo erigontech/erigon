@@ -82,8 +82,6 @@ type Config struct {
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
-	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
-
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -656,8 +654,7 @@ type Rules struct {
 	IsSharding                                              bool
 	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
-	IsParlia, IsStarknet, IsAura                            bool
-	IsEIP150, IsEIP155, IsEIP158                            bool
+	IsParlia, IsAura                                        bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -685,9 +682,6 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
 		IsParlia:              c.Parlia != nil,
 		IsAura:                c.Aura != nil,
-		IsEIP150:              c.IsTangerineWhistle(num),
-		IsEIP155:              c.IsSpuriousDragon(num),
-		IsEIP158:              isForked(c.EIP158Block, num),
 	}
 }
 
