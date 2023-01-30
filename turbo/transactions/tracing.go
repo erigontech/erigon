@@ -36,8 +36,7 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	header := block.HeaderNoCopy()
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
@@ -54,8 +53,10 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, statedb, reader, nil
 	}
 
+	header := block.HeaderNoCopy()
+
 	var excessDataGas *big.Int
-	ph := getHeader(header.ParentHash, header.Nonce.Uint64()-1)
+	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
 	if ph != nil {
 		excessDataGas = ph.ExcessDataGas
 	}
@@ -67,7 +68,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Prepare(txn.Hash(), block.Hash(), int(txIndex))
+		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -103,7 +104,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 
 		TxContext := core.NewEVMTxContext(msg)
-		if idx == int(txIndex) {
+		if idx == txIndex {
 			return msg, BlockContext, TxContext, statedb, reader, nil
 		}
 		vmenv.Reset(TxContext, statedb)

@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -298,6 +299,119 @@ func TestStorageRangeAt(t *testing.T) {
 
 }
 
+func TestAccountRange(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
+
+	t.Run("valid account", func(t *testing.T) {
+		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+		n := rpc.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(result.Accounts))
+
+		n = rpc.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result.Accounts))
+	})
+	t.Run("valid contract", func(t *testing.T) {
+		addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+		n := rpc.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		require.NoError(t, err)
+		require.Equal(t, 1, len(result.Accounts))
+
+		n = rpc.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(result.Accounts))
+
+		n = rpc.BlockNumber(10)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 10, true, true)
+		require.NoError(t, err)
+		require.Equal(t, 2, len(result.Accounts))
+	})
+	t.Run("with storage", func(t *testing.T) {
+		addr := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+
+		n := rpc.BlockNumber(1)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(result.Accounts))
+
+		n = rpc.BlockNumber(7)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(result.Accounts[addr].Storage))
+
+		n = rpc.BlockNumber(10)
+		result, err = api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &n}, addr[:], 1, false, false)
+		require.NoError(t, err)
+		require.Equal(t, 35, len(result.Accounts[addr].Storage))
+		require.Equal(t, 1, int(result.Accounts[addr].Nonce))
+		for _, v := range result.Accounts {
+			hashedCode, _ := common2.HashData(v.Code)
+			require.Equal(t, v.CodeHash.String(), hashedCode.String())
+		}
+	})
+}
+
+func TestGetModifiedAccountsByNumber(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	agg := m.HistoryV3Components()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
+
+	t.Run("correct input", func(t *testing.T) {
+		n, n2 := rpc.BlockNumber(1), rpc.BlockNumber(2)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+
+		n, n2 = rpc.BlockNumber(5), rpc.BlockNumber(7)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 38, len(result))
+
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(9)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.NoError(t, err)
+		require.Equal(t, 40, len(result))
+
+		//nil value means: to = from + 1
+		n = rpc.BlockNumber(0)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+	})
+	t.Run("invalid input", func(t *testing.T) {
+		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(10)
+		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.Error(t, err)
+
+		n, n2 = rpc.BlockNumber(0), rpc.BlockNumber(1_000_000)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
+		require.Error(t, err)
+
+		n = rpc.BlockNumber(0)
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.NoError(t, err)
+		require.Equal(t, 3, len(result))
+
+		n = rpc.BlockNumber(1_000_000)
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, n, nil)
+		require.Error(t, err)
+	})
+}
+
 func TestMapTxNum2BlockNum(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
 	if !m.HistoryV3 {
@@ -348,5 +462,72 @@ func TestMapTxNum2BlockNum(t *testing.T) {
 		expectTxNums, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], 0, 1024, order.Asc, 2)
 		require.NoError(t, err)
 		checkIter(t, expectTxNums, txNumsIter)
+	})
+}
+
+func TestAccountAt(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	api := NewPrivateDebugAPI(base, m.DB, 0)
+
+	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash11 common.Hash
+	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		blockHash0, _ = rawdb.ReadCanonicalHash(tx, 0)
+		blockHash1, _ = rawdb.ReadCanonicalHash(tx, 1)
+		blockHash3, _ = rawdb.ReadCanonicalHash(tx, 3)
+		blockHash10, _ = rawdb.ReadCanonicalHash(tx, 10)
+		blockHash11, _ = rawdb.ReadCanonicalHash(tx, 11)
+		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash11
+		return nil
+	})
+
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	contract := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	t.Run("addr", func(t *testing.T) {
+		require := require.New(t)
+		results, err := api.AccountAt(m.Ctx, blockHash0, 0, addr)
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
+
+		results, err = api.AccountAt(m.Ctx, blockHash1, 0, addr)
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
+
+		results, err = api.AccountAt(m.Ctx, blockHash10, 0, addr)
+		require.NoError(err)
+		require.Equal(1, int(results.Nonce))
+
+		//only 10 blocks in chain
+		results, err = api.AccountAt(m.Ctx, blockHash11, 0, addr)
+		require.NoError(err)
+		require.Nil(results)
+	})
+	t.Run("contract", func(t *testing.T) {
+		require := require.New(t)
+
+		// check contract with more nonces
+		results, err := api.AccountAt(m.Ctx, blockHash10, 0, contract)
+		require.NoError(err)
+		require.Equal(38, int(results.Nonce))
+
+		// and in the middle of block
+		results, err = api.AccountAt(m.Ctx, blockHash10, 1, contract)
+		require.NoError(err)
+		require.Equal(39, int(results.Nonce))
+		require.Equal("0x", results.Code.String())
+
+		// and too big txIndex
+		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
+		require.NoError(err)
+		require.Equal(39, int(results.Nonce))
+	})
+	t.Run("not existing addr", func(t *testing.T) {
+		require := require.New(t)
+		results, err := api.AccountAt(m.Ctx, blockHash10, 0, common.HexToAddress("0x1234"))
+		require.NoError(err)
+		require.Equal(0, int(results.Nonce))
 	})
 }

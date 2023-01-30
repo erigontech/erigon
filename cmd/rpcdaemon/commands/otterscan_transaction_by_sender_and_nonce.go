@@ -29,7 +29,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 
 	var acc accounts.Account
 	if api.historyV3(tx) {
-		ttx := tx.(*temporal.Tx)
+		ttx := tx.(kv.TemporalTx)
 		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, -1)
 		if err != nil {
 			return nil, err
@@ -85,7 +85,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		}
 		// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
 		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
-		_ = sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 			txnID := uint64(i) + prevTxnID
 			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
@@ -131,9 +131,11 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 		if err != nil {
 			return nil, err
 		}
-		txIndex := creationTxnID - minTxNum - 1 /* system-contract */
-
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, bn, int(txIndex))
+		txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-tx */
+		if txIndex == -1 {
+			txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
+		}
+		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, bn, txIndex)
 		if err != nil {
 			return nil, err
 		}

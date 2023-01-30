@@ -125,7 +125,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		}
 		// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
 		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
-		_ = sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 			txnID := uint64(i) + prevTxnID
 			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
@@ -168,7 +168,10 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		if err != nil {
 			return nil, err
 		}
-		txIndex := creationTxnID - minTxNum - 1 /* system-contract */
+		txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-contract */
+		if txIndex == -1 {
+			txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
+		}
 
 		// Trace block, find tx and contract creator
 		tracer := NewCreateTracer(ctx, addr)

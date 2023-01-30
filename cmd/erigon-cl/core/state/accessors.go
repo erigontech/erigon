@@ -91,6 +91,14 @@ func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
 	return b.GetTotalBalance(b.GetActiveValidatorsIndices(b.Epoch()))
 }
 
+// GetTotalSlashingAmount return the sum of all slashings.
+func (b *BeaconState) GetTotalSlashingAmount() (t uint64) {
+	for _, slash := range &b.slashings {
+		t += slash
+	}
+	return
+}
+
 // GetBlockRoot returns blook root at start of a given epoch
 func (b *BeaconState) GetBlockRoot(epoch uint64) (libcommon.Hash, error) {
 	return b.GetBlockRootAtSlot(epoch * b.beaconConfig.SlotsPerEpoch)
