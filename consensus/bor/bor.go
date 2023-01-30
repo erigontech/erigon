@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/btree"
@@ -38,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
+	"go.uber.org/atomic"
 )
 
 const (
