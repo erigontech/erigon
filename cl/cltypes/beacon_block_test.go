@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -28,9 +28,8 @@ func getTestEth1Block() *cltypes.Eth1Block {
 
 func createDepositTest() *cltypes.Deposit {
 	// Make proof
-	proof := make([][]byte, 33)
+	proof := make([]libcommon.Hash, 33)
 	for i := range proof {
-		proof[i] = make([]byte, length.Hash)
 		proof[i][0] = byte(i)
 	}
 	return &cltypes.Deposit{

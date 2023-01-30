@@ -52,15 +52,14 @@ type HttpCfg struct {
 	TCPListenAddress string
 	TCPPort          int
 
-	StarknetGRPCAddress string
-	JWTSecretPath       string // Engine API Authentication
-	TraceRequests       bool   // Always trace requests in INFO level
-	HTTPTimeouts        rpccfg.HTTPTimeouts
-	AuthRpcTimeouts     rpccfg.HTTPTimeouts
-	EvmCallTimeout      time.Duration
-	InternalCL          bool
-	LogDirVerbosity     string
-	LogDirPath          string
+	JWTSecretPath   string // Engine API Authentication
+	TraceRequests   bool   // Always trace requests in INFO level
+	HTTPTimeouts    rpccfg.HTTPTimeouts
+	AuthRpcTimeouts rpccfg.HTTPTimeouts
+	EvmCallTimeout  time.Duration
+	InternalCL      bool
+	LogDirVerbosity string
+	LogDirPath      string
 
 	BatchLimit      int // Maximum number of requests in a batch
 	ReturnDataLimit int // Maximum number of bytes retutned from calls (like eth_call)

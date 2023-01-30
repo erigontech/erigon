@@ -12,7 +12,15 @@ Erigon version: `./erigon --version`
 
 OS & Version: Windows/Linux/OSX
 
-Commit hash : 
+Commit hash: 
+
+Erigon Command (with flags/config):
+
+Concensus Layer:
+
+Concensus Layer Command (with flags/config):
+
+Chain/Network: 
 
 #### Expected behaviour
 

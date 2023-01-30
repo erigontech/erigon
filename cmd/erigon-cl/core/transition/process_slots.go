@@ -7,10 +7,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, validate bool) error {
+func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
 	s.processSlots(currentBlock.Slot)
-	if validate {
+	if !s.noValidate {
 		valid, err := s.verifyBlockSignature(block)
 		if err != nil {
 			return fmt.Errorf("error validating block signature: %v", err)
@@ -20,7 +20,7 @@ func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, vali
 		}
 	}
 	// TODO add logic to process block and update state.
-	if validate {
+	if !s.noValidate {
 		expectedStateRoot, err := s.state.HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)

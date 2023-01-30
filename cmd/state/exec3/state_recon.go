@@ -234,9 +234,8 @@ type ReconWorker struct {
 	isPoSA      bool
 	posa        consensus.PoSA
 
-	starkNetEvm *vm.CVMAdapter
-	evm         *vm.EVM
-	ibs         *state.IntraBlockState
+	evm *vm.EVM
+	ibs *state.IntraBlockState
 }
 
 func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
@@ -256,7 +255,6 @@ func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
 		logger:      logger,
 		genesis:     genesis,
 		engine:      engine,
-		starkNetEvm: &vm.CVMAdapter{Cvm: vm.NewCVM(nil)},
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 	}
 	rw.epoch = NewEpochReader(chainTx)
@@ -347,14 +345,8 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		var vmenv vm.VMInterface
-		if txTask.Tx.IsStarkNet() {
-			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-			vmenv = rw.starkNetEvm
-		} else {
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-			vmenv = rw.evm
-		}
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		vmenv := rw.evm
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
