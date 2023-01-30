@@ -70,6 +70,11 @@ func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 	b.eth1DataVotes = append(b.eth1DataVotes, vote)
 }
 
+func (b *BeaconState) ResetEth1DataVotes() {
+	b.touchedLeaves[Eth1DataVotesLeafIndex] = true
+	b.eth1DataVotes = b.eth1DataVotes[:0]
+}
+
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
 	b.eth1DepositIndex = eth1DepositIndex
@@ -88,6 +93,16 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
 func (b *BeaconState) SetBalances(balances []uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances = balances
+}
+
+func (b *BeaconState) AddBalance(balance uint64) {
+	b.touchedLeaves[BalancesLeafIndex] = true
+	b.balances = append(b.balances, balance)
+}
+
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
+	b.touchedLeaves[BalancesLeafIndex] = true
+	b.balances[index] = balance
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {

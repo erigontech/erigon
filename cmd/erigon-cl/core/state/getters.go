@@ -66,6 +66,10 @@ func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
 
+func (b *BeaconState) ValidatorBalance(index int) uint64 {
+	return b.balances[index]
+}
+
 func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
 	return b.randaoMixes
 }

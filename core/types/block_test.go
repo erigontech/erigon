@@ -394,7 +394,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		ParentHash: libcommon.HexToHash("0x8b00fcf1e541d371a3a1b79cc999a85cc3db5ee5637b5159646e1acd3613fd15"),
 		Coinbase:   libcommon.HexToAddress("0x571846e42308df2dad8ed792f44a8bfddf0acb4d"),
 		Root:       libcommon.HexToHash("0x351780124dae86b84998c6d4fe9a88acfb41b4856b4f2c56767b51a4e2f94dd4"),
-		Difficulty: common.Big0,
+		Difficulty: libcommon.Big0,
 		Number:     big.NewInt(20_000_000),
 		GasLimit:   30_000_000,
 		GasUsed:    3_074_345,

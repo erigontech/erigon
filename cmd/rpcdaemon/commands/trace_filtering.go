@@ -9,13 +9,12 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -32,7 +31,7 @@ import (
 )
 
 // Transaction implements trace_transaction
-func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash libcommon.Hash) (ParityTraces, error) {
+func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash) (ParityTraces, error) {
 	tx, err := api.kv.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -119,7 +118,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash libcommon.Hash)
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash libcommon.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64) (*ParityTrace, error) {
 	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
 	if len(indicies) > 1 {
 		return nil, nil
@@ -205,7 +204,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 		rewardAction.Value.ToInt().Set(minerReward.ToBig())
 	}
 	tr.Action = rewardAction
-	tr.BlockHash = &libcommon.Hash{}
+	tr.BlockHash = &common.Hash{}
 	copy(tr.BlockHash[:], block.Hash().Bytes())
 	tr.BlockNumber = new(uint64)
 	*tr.BlockNumber = block.NumberU64()
@@ -223,7 +222,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 				rewardAction.RewardType = "uncle" // nolint: goconst
 				rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
 				tr.Action = rewardAction
-				tr.BlockHash = &libcommon.Hash{}
+				tr.BlockHash = &common.Hash{}
 				copy(tr.BlockHash[:], block.Hash().Bytes())
 				tr.BlockNumber = new(uint64)
 				*tr.BlockNumber = block.NumberU64()
@@ -237,9 +236,9 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
-func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[libcommon.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
-	fromAddresses = make(map[libcommon.Address]struct{}, len(req.FromAddress))
-	toAddresses = make(map[libcommon.Address]struct{}, len(req.ToAddress))
+func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
+	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
+	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
 	allBlocks = roaring64.New()
 	var blocksTo roaring64.Bitmap
 	for _, addr := range req.FromAddress {
@@ -290,9 +289,9 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 	return fromAddresses, toAddresses, allBlocks, nil
 }
 
-func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[libcommon.Address]struct{}, allBlocks iter.U64, err error) {
-	fromAddresses = make(map[libcommon.Address]struct{}, len(req.FromAddress))
-	toAddresses = make(map[libcommon.Address]struct{}, len(req.ToAddress))
+func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks iter.U64, err error) {
+	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
+	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
 	var blocksTo iter.U64
 
 	for _, addr := range req.FromAddress {
@@ -508,7 +507,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			rewardAction.RewardType = "block" // nolint: goconst
 			rewardAction.Value.ToInt().Set(minerReward.ToBig())
 			tr.Action = rewardAction
-			tr.BlockHash = &libcommon.Hash{}
+			tr.BlockHash = &common.Hash{}
 			copy(tr.BlockHash[:], block.Hash().Bytes())
 			tr.BlockNumber = new(uint64)
 			*tr.BlockNumber = block.NumberU64()
@@ -546,7 +545,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 					rewardAction.RewardType = "uncle" // nolint: goconst
 					rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
 					tr.Action = rewardAction
-					tr.BlockHash = &libcommon.Hash{}
+					tr.BlockHash = &common.Hash{}
 					copy(tr.BlockHash[:], block.Hash().Bytes())
 					tr.BlockNumber = new(uint64)
 					*tr.BlockNumber = block.NumberU64()
@@ -625,7 +624,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 	it := MapTxNum2BlockNum(dbtx, allTxs)
 
-	var lastBlockHash libcommon.Hash
+	var lastBlockHash common.Hash
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
@@ -699,7 +698,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				rewardAction.RewardType = "block" // nolint: goconst
 				rewardAction.Value.ToInt().Set(minerReward.ToBig())
 				tr.Action = rewardAction
-				tr.BlockHash = &libcommon.Hash{}
+				tr.BlockHash = &common.Hash{}
 				copy(tr.BlockHash[:], lastBlockHash.Bytes())
 				tr.BlockNumber = new(uint64)
 				*tr.BlockNumber = blockNum
@@ -737,7 +736,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 						rewardAction.RewardType = "uncle" // nolint: goconst
 						rewardAction.Value.ToInt().Set(uncleRewards[i].ToBig())
 						tr.Action = rewardAction
-						tr.BlockHash = &libcommon.Hash{}
+						tr.BlockHash = &common.Hash{}
 						copy(tr.BlockHash[:], lastBlockHash[:])
 						tr.BlockNumber = new(uint64)
 						*tr.BlockNumber = blockNum
@@ -836,7 +835,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		traceResult.Output = common.CopyBytes(execResult.ReturnData)
+		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {
 				first = false
@@ -894,7 +893,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	return stream.Flush()
 }
 
-func filter_trace(pt *ParityTrace, fromAddresses map[libcommon.Address]struct{}, toAddresses map[libcommon.Address]struct{}) bool {
+func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
 		_, f := fromAddresses[action.From]
@@ -926,7 +925,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[libcommon.Address]struct{},
 	return false
 }
 
-func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash libcommon.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer, rules *chain.Rules) ([]*TraceCallResult, error) {
+func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, txs []types.Transaction, traceTypes []string, parentHash common.Hash, parentNo rpc.BlockNumber, header *types.Header, txIndex int, signer *types.Signer, rules *chain.Rules) ([]*TraceCallResult, error) {
 	callParams := make([]TraceCallParam, 0, len(txs))
 	msgs := make([]types.Message, len(txs))
 	for i, tx := range txs {
@@ -956,13 +955,13 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, t
 
 // TraceFilterRequest represents the arguments for trace_filter
 type TraceFilterRequest struct {
-	FromBlock   *hexutil.Uint64      `json:"fromBlock"`
-	ToBlock     *hexutil.Uint64      `json:"toBlock"`
-	FromAddress []*libcommon.Address `json:"fromAddress"`
-	ToAddress   []*libcommon.Address `json:"toAddress"`
-	Mode        TraceFilterMode      `json:"mode"`
-	After       *uint64              `json:"after"`
-	Count       *uint64              `json:"count"`
+	FromBlock   *hexutil.Uint64   `json:"fromBlock"`
+	ToBlock     *hexutil.Uint64   `json:"toBlock"`
+	FromAddress []*common.Address `json:"fromAddress"`
+	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode"`
+	After       *uint64           `json:"after"`
+	Count       *uint64           `json:"count"`
 }
 
 type TraceFilterMode string

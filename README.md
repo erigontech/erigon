@@ -242,9 +242,9 @@ file can be overwritten by writing the flags directly on Erigon command line
 
 ### Example
 
-`./build/bin/erigon --config ./config.yaml --chain=goerli
+`./build/bin/erigon --config ./config.yaml --chain=goerli`
 
-Assuming we have `chain : "mainnet" in our configuration file, by adding `--chain=goerli` allows the overwrite of the
+Assuming we have `chain : "mainnet"` in our configuration file, by adding `--chain=goerli` allows the overwrite of the
 flag inside
 of the yaml configuration file and sets the chain to goerli
 

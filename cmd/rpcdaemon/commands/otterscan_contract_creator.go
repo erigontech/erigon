@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -22,11 +22,11 @@ import (
 )
 
 type ContractCreatorData struct {
-	Tx      libcommon.Hash    `json:"hash"`
-	Creator libcommon.Address `json:"creator"`
+	Tx      common.Hash    `json:"hash"`
+	Creator common.Address `json:"creator"`
 }
 
-func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcommon.Address) (*ContractCreatorData, error) {
+func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common.Address) (*ContractCreatorData, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,10 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 			return nil, err
 		}
 		for i := 0; it.HasNext(); i++ {
-			txnID, _ := it.Next()
+			txnID, err := it.Next()
+			if err != nil {
+				return nil, err
+			}
 
 			if i%4096 != 0 { // probe history periodically, not on every change
 				nextTxnID = txnID
@@ -87,7 +90,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
 				log.Error("Unexpected error, couldn't find changeset", "txNum", i, "addr", addr)
-				panic(err)
+				return nil, err
 			}
 			if !ok {
 				err = fmt.Errorf("couldn't find history txnID=%v addr=%v", txnID, addr)
@@ -122,7 +125,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		}
 		// Binary search in [prevTxnID, nextTxnID] range; get first block where desired incarnation appears
 		// can be replaced by full-scan over ttx.HistoryRange([prevTxnID, nextTxnID])?
-		_ = sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
+		idx := sort.Search(int(nextTxnID-prevTxnID), func(i int) bool {
 			txnID := uint64(i) + prevTxnID
 			v, ok, err := ttx.HistoryGet(temporal.AccountsHistory, addr[:], txnID)
 			if err != nil {
@@ -150,10 +153,25 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr libcom
 		if searchErr != nil {
 			return nil, searchErr
 		}
+		if creationTxnID == 0 {
+			return nil, fmt.Errorf("binary search between %d-%d doesn't find anything", nextTxnID, prevTxnID)
+		}
 
-		_, bn, _ := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
-		minTxNum, _ := rawdbv3.TxNums.Min(tx, bn)
-		txIndex := creationTxnID - minTxNum - 1 /* system-contract */
+		ok, bn, err := rawdbv3.TxNums.FindBlockNum(tx, creationTxnID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("block not found by txnID=%d", creationTxnID)
+		}
+		minTxNum, err := rawdbv3.TxNums.Min(tx, bn)
+		if err != nil {
+			return nil, err
+		}
+		txIndex := int(creationTxnID) - int(minTxNum) - 1 /* system-contract */
+		if txIndex == -1 {
+			txIndex = (idx + int(prevTxnID)) - int(minTxNum) - 1
+		}
 
 		// Trace block, find tx and contract creator
 		tracer := NewCreateTracer(ctx, addr)

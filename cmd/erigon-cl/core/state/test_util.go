@@ -32,3 +32,9 @@ func GetEmptyBeaconState() *BeaconState {
 	b.initBeaconState()
 	return b
 }
+
+func GetEmptyBeaconStateWithVersion(v clparams.StateVersion) *BeaconState {
+	b := GetEmptyBeaconState()
+	b.version = v
+	return b
+}
