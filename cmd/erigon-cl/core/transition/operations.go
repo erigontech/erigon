@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -179,6 +180,65 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 
 	if !slashedAny {
 		return fmt.Errorf("no validators slashed")
+	}
+	return nil
+}
+
+func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
+	if deposit == nil {
+		return nil
+	}
+	depositLeaf, err := deposit.Data.HashSSZ()
+	if err != nil {
+		return err
+	}
+	depositIndex := s.state.Eth1DepositIndex()
+	eth1Data := s.state.Eth1Data()
+	// Validate merkle proof for deposit leaf.
+	if !s.noValidate && utils.IsValidMerkleBranch(
+		depositLeaf,
+		deposit.Proof,
+		s.beaconConfig.DepositContractTreeDepth+1,
+		depositIndex,
+		eth1Data.Root,
+	) {
+		return fmt.Errorf("processDepositForAltair: Could not validate deposit root")
+	}
+
+	// Increment index
+	s.state.SetEth1DepositIndex(depositIndex + 1)
+	publicKey := deposit.Data.PubKey
+	amount := deposit.Data.Amount
+	// Check if pub key is in validator set
+	validatorIndex, has := s.state.ValidatorIndexByPubkey(publicKey)
+	if !has {
+		// Agnostic domain.
+		domain, err := fork.ComputeDomain(s.beaconConfig.DomainDeposit[:], utils.Uint32ToBytes4(s.beaconConfig.GenesisForkVersion), [32]byte{})
+		if err != nil {
+			return err
+		}
+		depositMessageRoot, err := deposit.Data.MessageHash()
+		if err != nil {
+			return err
+		}
+		signedRoot := utils.Keccak256(depositMessageRoot[:], domain)
+		// Perform BLS verification and if successful noice.
+		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
+		if err != nil {
+			return err
+		}
+		if valid {
+			// Append validator
+			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit))
+			s.state.AddBalance(amount)
+			// Altair only
+			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.state.AddInactivityScore(0)
+		}
+	} else {
+		// Increase the balance if exists already
+		s.state.IncreaseBalance(int(validatorIndex), amount)
 	}
 	return nil
 }

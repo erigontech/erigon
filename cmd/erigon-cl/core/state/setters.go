@@ -174,3 +174,15 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
+
+func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.inactivityScores = append(b.inactivityScores, score)
+}
+
+func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
+}
+
+func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
+}
