@@ -24,6 +24,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -197,4 +198,22 @@ func ComputeSigningRoot(
 		return [32]byte{}, err
 	}
 	return utils.Keccak256(objRoot[:], domain), nil
+}
+
+func Domain(fork *cltypes.Fork, epoch uint64, domainType [4]byte, genesisRoot libcommon.Hash) ([]byte, error) {
+	if fork == nil {
+		return []byte{}, errors.New("nil fork or domain type")
+	}
+	var forkVersion []byte
+	if epoch < fork.Epoch {
+		forkVersion = fork.PreviousVersion[:]
+	} else {
+		forkVersion = fork.CurrentVersion[:]
+	}
+	if len(forkVersion) != 4 {
+		return []byte{}, errors.New("fork version length is not 4 byte")
+	}
+	var forkVersionArray [4]byte
+	copy(forkVersionArray[:], forkVersion[:4])
+	return ComputeDomain(domainType[:], forkVersionArray, genesisRoot)
 }

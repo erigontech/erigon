@@ -80,14 +80,17 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
+// Should not be called if not for testing
 func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
+	b.initBeaconState()
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
+	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {

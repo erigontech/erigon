@@ -29,7 +29,7 @@ func (api *OtterscanAPIImpl) GetTransactionBySenderAndNonce(ctx context.Context,
 
 	var acc accounts.Account
 	if api.historyV3(tx) {
-		ttx := tx.(*temporal.Tx)
+		ttx := tx.(kv.TemporalTx)
 		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], -1, -1, order.Asc, -1)
 		if err != nil {
 			return nil, err

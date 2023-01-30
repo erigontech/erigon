@@ -168,7 +168,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessProposerSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
@@ -280,7 +280,7 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessAttesterSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
