@@ -354,7 +354,7 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 type SignedBlobTx struct {
 	TransactionMisc
 
-	WrapData  TxWrapData // TODO: write all methods
+	WrapData  TxWrapData
 	Message   BlobTxMessage
 	Signature ECDSASignature
 }

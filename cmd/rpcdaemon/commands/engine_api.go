@@ -39,6 +39,7 @@ type ExecutionPayload struct {
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
+	ExcessDataGas *hexutil.Big        `json:"excessDataGas"` // New in EIP-4844
 }
 
 // GetPayloadV2Response represents the response of the getPayloadV2 method

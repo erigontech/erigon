@@ -108,6 +108,10 @@ var (
 		Name:  "override.shanghaiTime",
 		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
 	}
+	// Eip4844Flag = cli.BoolFlag{
+	// 	Name:  "eip4844",
+	// 	Usage: "EIP-4844 (proto-danksharding) network: pre-configured proof-of-authority to proof-of-stake test network",
+	// }
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -136,10 +140,6 @@ var (
 		Name:  "externalcl",
 		Usage: "enables external consensus",
 	}
-	// Eip4844Flag = cli.BoolFlag{
-	// 	Name:     "eip4844",
-	// 	Usage:    "EIP-4844 (proto-danksharding) network: pre-configured proof-of-authority to proof-of-stake test network",
-	// }
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
