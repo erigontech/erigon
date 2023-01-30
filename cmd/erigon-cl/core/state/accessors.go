@@ -255,3 +255,21 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 	proposerReward = participantReward * b.beaconConfig.ProposerWeight / (b.beaconConfig.WeightDenominator - b.beaconConfig.ProposerWeight)
 	return
 }
+
+func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Validator {
+	amount := deposit.Data.Amount
+	effectiveBalance := amount - amount%b.beaconConfig.EffectiveBalanceIncrement
+	if effectiveBalance > b.beaconConfig.EffectiveBalanceIncrement {
+		effectiveBalance = b.beaconConfig.EffectiveBalanceIncrement
+	}
+
+	return &cltypes.Validator{
+		PublicKey:                  deposit.Data.PubKey,
+		WithdrawalCredentials:      deposit.Data.WithdrawalCredentials,
+		ActivationEligibilityEpoch: b.beaconConfig.FarFutureEpoch,
+		ActivationEpoch:            b.beaconConfig.FarFutureEpoch,
+		ExitEpoch:                  b.beaconConfig.FarFutureEpoch,
+		WithdrawableEpoch:          b.beaconConfig.FarFutureEpoch,
+		EffectiveBalance:           effectiveBalance,
+	}
+}
