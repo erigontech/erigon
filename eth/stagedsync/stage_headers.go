@@ -286,7 +286,6 @@ func startHandlingForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
-	//TODO(yperbasis): move after the no-op check?
 	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
