@@ -185,6 +185,9 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 }
 
 func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
+	if deposit == nil {
+		return nil
+	}
 	depositLeaf, err := deposit.Data.HashSSZ()
 	if err != nil {
 		return err
@@ -192,7 +195,7 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 	depositIndex := s.state.Eth1DepositIndex()
 	eth1Data := s.state.Eth1Data()
 	// Validate merkle proof for deposit leaf.
-	if utils.IsValidMerkleBranch(
+	if !s.noValidate && utils.IsValidMerkleBranch(
 		depositLeaf,
 		deposit.Proof,
 		s.beaconConfig.DepositContractTreeDepth+1,
