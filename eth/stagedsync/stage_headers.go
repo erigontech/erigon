@@ -286,36 +286,46 @@ func startHandlingForkChoice(
 	headerInserter *headerdownload.HeaderInserter,
 	preProgress uint64,
 ) (*engineapi.PayloadStatus, error) {
-	//TODO (yperbasis): move after the no-op check?
+	//TODO(yperbasis): move after the no-op check?
 	defer cfg.forkValidator.ClearWithUnwind(tx, cfg.notifications.Accumulator, cfg.notifications.StateChangesConsumer)
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
 	canonical, err := rawdb.IsCanonicalHash(tx, headerHash)
 	if err != nil {
-		log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHash)", s.LogPrefix()), "err", err)
+		cfg.hd.BeaconRequestList.Remove(requestId)
 		return nil, err
 	}
 	if canonical {
-		// FCU points to a canonical header in the past. Treat it as a no-op
-		// to avoid unnecessary unwind of block execution and other stages
-		// with subsequent rewind on a newer FCU.
-		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
-		cfg.hd.BeaconRequestList.Remove(requestId)
-		canonical, err = writeForkChoiceHashes(forkChoice, s, tx, cfg)
+		headerNumber := rawdb.ReadHeaderNumber(tx, headerHash)
+		ihProgress, err := s.IntermediateHashesAt(tx)
 		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			log.Warn(fmt.Sprintf("[%s] Fork choice err (IntermediateHashesAt)", s.LogPrefix()), "err", err)
+			cfg.hd.BeaconRequestList.Remove(requestId)
 			return nil, err
 		}
-		if canonical {
-			return &engineapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: headerHash,
-			}, nil
-		} else {
-			return &engineapi.PayloadStatus{
-				CriticalError: &privateapi.InvalidForkchoiceStateErr,
-			}, nil
+		if ihProgress >= *headerNumber {
+			// FCU points to a canonical and fully validated block in the past.
+			// Treat it as a no-op to avoid unnecessary unwind of block execution and other stages
+			// with subsequent rewind on a newer FCU.
+			log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
+			cfg.hd.BeaconRequestList.Remove(requestId)
+			canonical, err = writeForkChoiceHashes(forkChoice, s, tx, cfg)
+			if err != nil {
+				log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+				return nil, err
+			}
+			if canonical {
+				return &engineapi.PayloadStatus{
+					Status:          remote.EngineStatus_VALID,
+					LatestValidHash: headerHash,
+				}, nil
+			} else {
+				return &engineapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}, nil
+			}
 		}
 	}
 
@@ -346,7 +356,6 @@ func startHandlingForkChoice(
 		if err := cfg.forkValidator.FlushExtendingFork(tx, cfg.notifications.Accumulator); err != nil {
 			return nil, err
 		}
-		cfg.hd.BeaconRequestList.Remove(requestId)
 		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
