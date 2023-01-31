@@ -1,8 +1,8 @@
 {
     "000_warm_coinbase_opcode_extcodesize_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -86,8 +86,8 @@
     },
     "001_warm_coinbase_opcode_extcodecopy_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -171,8 +171,8 @@
     },
     "002_warm_coinbase_opcode_extcodehash_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -256,8 +256,8 @@
     },
     "003_warm_coinbase_opcode_balance_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -341,8 +341,8 @@
     },
     "004_warm_coinbase_opcode_call_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -426,8 +426,8 @@
     },
     "005_warm_coinbase_opcode_callcode_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -511,8 +511,8 @@
     },
     "006_warm_coinbase_opcode_delegatecall_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
@@ -596,8 +596,8 @@
     },
     "007_warm_coinbase_opcode_staticcall_shanghai": {
         "_info": {
-            "filling-transition-tool": "evm version 1.11.0-unstable-b49a8837",
-            "filling-block-build-tool": "evm version 1.11.0-unstable-b49a8837"
+            "filling-transition-tool": "evm version 1.11.0-unstable-55f41d19-20230126",
+            "filling-block-build-tool": "evm version 1.11.0-unstable-55f41d19-20230126"
         },
         "blocks": [
             {
