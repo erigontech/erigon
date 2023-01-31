@@ -85,7 +85,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		}
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(false)
 	}
 	chainDb := db
 	defer chainDb.Close()

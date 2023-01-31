@@ -362,7 +362,7 @@ func NewDefaultStages(ctx context.Context,
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
 	}
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
@@ -411,6 +411,7 @@ func NewDefaultStages(ctx context.Context,
 			snapshots,
 			blockReader,
 			cfg.HistoryV3,
+			cfg.TransactionsV3,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
 		stagedsync.StageExecuteBlocksCfg(
@@ -447,7 +448,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
 	}
 
 	return stagedsync.New(
@@ -467,7 +468,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				dirs.Tmp,
 				nil, nil,
 			),
-			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3, cfg.TransactionsV3),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

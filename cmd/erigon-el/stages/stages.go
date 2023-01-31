@@ -48,7 +48,7 @@ func NewStagedSync(ctx context.Context,
 	if cfg.Snapshot.Enabled {
 		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	} else {
-		blockReader = snapshotsync.NewBlockReader()
+		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
 	}
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
@@ -100,6 +100,7 @@ func NewStagedSync(ctx context.Context,
 				snapshots,
 				blockReader,
 				cfg.HistoryV3,
+				cfg.TransactionsV3,
 			),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

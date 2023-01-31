@@ -404,7 +404,12 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 			}
 			stateCache = kvcache.NewDummy()
 		} else {
-			blockReader = snapshotsync.NewBlockReader()
+			var transactionsV3 bool
+			_ = db.View(ctx, func(tx kv.Tx) error {
+				transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
+				return nil
+			})
+			blockReader = snapshotsync.NewBlockReader(transactionsV3)
 			stateCache = kvcache.NewDummy()
 		}
 	}
