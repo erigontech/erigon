@@ -279,11 +279,9 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 		select {
 		case <-time.After(1 * time.Second):
 			// timed out so just call done
-			fmt.Println("hexo: timed out")
 			wg.Done()
 		case <-waiter:
 			// state is now waiting so we're not busy
-			fmt.Println("hexo: finished waiting")
 			busy = false
 			wg.Done()
 		}
