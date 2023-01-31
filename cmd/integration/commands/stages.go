@@ -1216,6 +1216,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
+	cfg.Genesis = core.DefaultGenesisBlockByChainName(chain)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
