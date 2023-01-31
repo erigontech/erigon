@@ -20,6 +20,7 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
@@ -132,7 +133,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 	cfg.snapshots.LogStat()
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-		_, histBlockNumProgress, _ := rawdb.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
 	})
 
@@ -182,13 +183,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		s.BlockNumber = blocksAvailable
 	}
 
-	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine); err != nil {
+	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.snapshots, cfg.blockReader, cfg.chainConfig, cfg.engine, cfg.agg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine) error {
+func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs datadir.Dirs, sn *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, chainConfig chain.Config, engine consensus.Engine, agg *state.AggregatorV3) error {
 	blocksAvailable := sn.BlocksAvailable()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -295,7 +296,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				toBlock = cmp.Max(toBlock, progress)
 
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				if err := rawdb.TxNums.WriteForGenesis(tx, 1); err != nil {
+				if err := rawdbv3.TxNums.WriteForGenesis(tx, 1); err != nil {
 					return err
 				}
 				if err := sn.Bodies.View(func(bs []*snapshotsync.BodySegment) error {
@@ -313,7 +314,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 							}
 							maxTxNum := baseTxNum + txAmount - 1
 
-							if err := rawdb.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
+							if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
 								return fmt.Errorf("%w. blockNum=%d, maxTxNum=%d", err, blockNum, maxTxNum)
 							}
 							return nil
@@ -325,6 +326,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				}); err != nil {
 					return fmt.Errorf("build txNum => blockNum mapping: %w", err)
 				}
+			}
+			if err := rawdb.WriteSnapshots(tx, sn.Files(), agg.Files()); err != nil {
+				return err
 			}
 		}
 	}
@@ -479,7 +483,7 @@ Finish:
 		cfg.dbEventNotifier.OnNewSnapshot()
 	}
 
-	firstNonGenesis, err := rawdb.SecondKey(tx, kv.Headers)
+	firstNonGenesis, err := rawdbv3.SecondKey(tx, kv.Headers)
 	if err != nil {
 		return err
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -96,14 +95,14 @@ func TestMockDownloadRequest(t *testing.T) {
 	hd := headerdownload.NewHeaderDownload(0, 0, nil, nil)
 	hd.SetPOSSync(true)
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayloadV1(ctx, mockPayload1)
+		reply, err = backend.EngineNewPayload(ctx, mockPayload1)
 		done <- true
 	}()
 
@@ -116,7 +115,7 @@ func TestMockDownloadRequest(t *testing.T) {
 
 	// If we get another request we don't need to process it with processDownloadCh and ignore it and return Syncing status
 	go func() {
-		reply, err = backend.EngineNewPayloadV1(ctx, mockPayload2)
+		reply, err = backend.EngineNewPayload(ctx, mockPayload2)
 		done <- true
 	}()
 
@@ -133,7 +132,7 @@ func TestMockDownloadRequest(t *testing.T) {
 	_ = tx.Commit()
 	// Now we try to sync the next payload again
 	go func() {
-		reply, err = backend.EngineNewPayloadV1(ctx, mockPayload2)
+		reply, err = backend.EngineNewPayload(ctx, mockPayload2)
 		done <- true
 	}()
 
@@ -155,14 +154,14 @@ func TestMockValidExecution(t *testing.T) {
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayloadV1(ctx, mockPayload3)
+		reply, err = backend.EngineNewPayload(ctx, mockPayload3)
 		done <- true
 	}()
 
@@ -191,14 +190,14 @@ func TestMockInvalidExecution(t *testing.T) {
 	hd.SetPOSSync(true)
 
 	events := shards.NewEvents()
-	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: common.Big1}, nil, hd, false)
+	backend := NewEthBackendServer(ctx, nil, db, events, nil, &chain.Config{TerminalTotalDifficulty: libcommon.Big1}, nil, hd, false)
 
 	var err error
 	var reply *remote.EnginePayloadStatus
 	done := make(chan bool)
 
 	go func() {
-		reply, err = backend.EngineNewPayloadV1(ctx, mockPayload3)
+		reply, err = backend.EngineNewPayload(ctx, mockPayload3)
 		done <- true
 	}()
 
@@ -233,7 +232,7 @@ func TestNoTTD(t *testing.T) {
 	done := make(chan bool)
 
 	go func() {
-		_, err = backend.EngineNewPayloadV1(ctx, &types2.ExecutionPayload{
+		_, err = backend.EngineNewPayload(ctx, &types2.ExecutionPayload{
 			ParentHash:    gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x2")),
 			BlockHash:     gointerfaces.ConvertHashToH256(libcommon.HexToHash("0xe6a580606b065e08034dcd6eea026cfdcbd3b41918d98b41cb9bf797d0c27033")),
 			ReceiptRoot:   gointerfaces.ConvertHashToH256(libcommon.HexToHash("0x4")),

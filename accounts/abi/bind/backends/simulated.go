@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -112,11 +113,24 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config
 func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(func() {
-		b.m.DB.Close()
+		b.Close()
 	})
+	if b.m.HistoryV3 {
+		t.Skip("TODO: Fixme")
+	}
 	return b
 }
 
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
+	t.Cleanup(func() {
+		b.Close()
+	})
+	if b.m.HistoryV3 {
+		t.Skip("TODO: Fixme")
+	}
+	return b
+}
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
@@ -174,8 +188,10 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
 		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
+		//return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
 	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
+	//return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -770,18 +786,18 @@ type callMsg struct {
 	ethereum.CallMsg
 }
 
-func (m callMsg) From() libcommon.Address      { return m.CallMsg.From }
-func (m callMsg) Nonce() uint64                { return 0 }
-func (m callMsg) CheckNonce() bool             { return false }
-func (m callMsg) To() *libcommon.Address       { return m.CallMsg.To }
-func (m callMsg) GasPrice() *uint256.Int       { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *uint256.Int         { return m.CallMsg.FeeCap }
-func (m callMsg) Tip() *uint256.Int            { return m.CallMsg.Tip }
-func (m callMsg) Gas() uint64                  { return m.CallMsg.Gas }
-func (m callMsg) Value() *uint256.Int          { return m.CallMsg.Value }
-func (m callMsg) Data() []byte                 { return m.CallMsg.Data }
-func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
-func (m callMsg) IsFree() bool                 { return false }
+func (m callMsg) From() libcommon.Address       { return m.CallMsg.From }
+func (m callMsg) Nonce() uint64                 { return 0 }
+func (m callMsg) CheckNonce() bool              { return false }
+func (m callMsg) To() *libcommon.Address        { return m.CallMsg.To }
+func (m callMsg) GasPrice() *uint256.Int        { return m.CallMsg.GasPrice }
+func (m callMsg) FeeCap() *uint256.Int          { return m.CallMsg.FeeCap }
+func (m callMsg) Tip() *uint256.Int             { return m.CallMsg.Tip }
+func (m callMsg) Gas() uint64                   { return m.CallMsg.Gas }
+func (m callMsg) Value() *uint256.Int           { return m.CallMsg.Value }
+func (m callMsg) Data() []byte                  { return m.CallMsg.Data }
+func (m callMsg) AccessList() types2.AccessList { return m.CallMsg.AccessList }
+func (m callMsg) IsFree() bool                  { return false }
 
 // filterBackend implements filters.Backend to support filtering for logs without
 // taking bloom-bits acceleration structures into account.

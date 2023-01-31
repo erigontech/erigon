@@ -122,7 +122,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
 	&utils.CliqueSnapshotInmemorySignaturesFlag,
 	&utils.CliqueDataDirFlag,
-	&utils.EnabledIssuance,
 	&utils.MiningEnabledFlag,
 	&utils.ProposingDisableFlag,
 	&utils.MinerNotifyFlag,
@@ -141,6 +140,7 @@ var DefaultFlags = []cli.Flag{
 	&HealthCheckFlag,
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
+	&utils.HeimdallgRPCAddressFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideShanghaiTime,
 

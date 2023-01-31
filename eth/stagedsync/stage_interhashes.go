@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -103,7 +103,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 	tooBigJump := to > s.BlockNumber && to-s.BlockNumber > 100_000 // RetainList is in-memory structure and it will OOM if jump is too big, such big jump anyway invalidate most of existing Intermediate hashes
 	if !tooBigJump && cfg.historyV3 && to-s.BlockNumber > 10 {
 		//incremental can work only on DB data, not on snapshots
-		_, n, err := rawdb.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
+		_, n, err := rawdbv3.TxNums.FindBlockNum(tx, cfg.agg.EndTxNumMinimax())
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
@@ -207,7 +207,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 
 	agg.SetTx(p.tx)
 
-	txnFrom, err := rawdb.TxNums.Min(p.tx, from+1)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, from+1)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 }
 
 func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage bool, load func(k []byte, v []byte)) error {
-	txnFrom, err := rawdb.TxNums.Min(p.tx, unwindTo)
+	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo)
 	if err != nil {
 		return err
 	}

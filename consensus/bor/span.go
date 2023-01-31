@@ -1,29 +1,15 @@
 package bor
 
 import (
-	"github.com/google/btree"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 )
 
-// Span represents a current bor span
-type Span struct {
-	ID         uint64 `json:"span_id" yaml:"span_id"`
-	StartBlock uint64 `json:"start_block" yaml:"start_block"`
-	EndBlock   uint64 `json:"end_block" yaml:"end_block"`
-}
-
-// HeimdallSpan represents span from heimdall APIs
-type HeimdallSpan struct {
-	Span
-	ValidatorSet      ValidatorSet `json:"validator_set" yaml:"validator_set"`
-	SelectedProducers []Validator  `json:"selected_producers" yaml:"selected_producers"`
-	ChainID           string       `json:"bor_chain_id" yaml:"bor_chain_id"`
-}
-
-func (hs *HeimdallSpan) Less(other btree.Item) bool {
-	otherHs := other.(*HeimdallSpan)
-	if hs.EndBlock == 0 || otherHs.EndBlock == 0 {
-		// if endblock is not specified in one of the items, allow search by ID
-		return hs.ID < otherHs.ID
-	}
-	return hs.EndBlock < otherHs.EndBlock
+//go:generate mockgen -destination=./span_mock.go -package=bor . Spanner
+type Spanner interface {
+	GetCurrentSpan(syscall consensus.SystemCall) (*span.Span, error)
+	GetCurrentValidators(blockNumber uint64, signer libcommon.Address, getSpanForBlock func(blockNum uint64) (*span.HeimdallSpan, error)) ([]*valset.Validator, error)
+	CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error
 }

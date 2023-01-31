@@ -31,7 +31,6 @@ import (
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
@@ -62,7 +61,7 @@ func constructBodyFreeRequest(t string) *sentinelrpc.RequestData {
 	}
 }
 
-func constructRequest(t string, reqBody ssz_utils.ObjectSSZ) (*sentinelrpc.RequestData, error) {
+func constructRequest(t string, reqBody ssz_utils.EncodableSSZ) (*sentinelrpc.RequestData, error) {
 	var buffer buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buffer, reqBody); err != nil {
 		return nil, fmt.Errorf("unable to encode request body: %v", err)
@@ -77,11 +76,11 @@ func constructRequest(t string, reqBody ssz_utils.ObjectSSZ) (*sentinelrpc.Reque
 
 func runSentinelNode(cliCtx *cli.Context) error {
 	cfg, _ := lcCli.SetupConsensusClientCfg(cliCtx)
-	ctx := context.Background()
+	//ctx := context.Background()
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
-	s, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	_, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        cfg.Addr,
 		Port:          int(cfg.Port),
 		TCPPort:       cfg.ServerTcpPort,
@@ -176,7 +175,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		}
 		sendRequest(ctx, s, req)
 	*/
-	roots := make([][32]byte, 1)
+	/*roots := make([][32]byte, 1)
 	rawRoot1, err := hex.DecodeString("cc85056af7f6e3e4835436cb12a09a9d56e0aac15d08436af82dbe0cd7ae60e0")
 	check(err)
 
@@ -188,7 +187,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		log.Error("[Sentinel] could not construct request", "err", err)
 		return err
 	}
-	sendRequest(ctx, s, req)
+	sendRequest(ctx, s, req)*/
 	return nil
 }
 
@@ -207,7 +206,7 @@ func debugGossip(ctx context.Context, s sentinelrpc.SentinelClient) {
 			continue
 		}
 		block := &cltypes.SignedAggregateAndProof{}
-		if err := block.UnmarshalSSZ(data.Data); err != nil {
+		if err := block.DecodeSSZ(data.Data); err != nil {
 			log.Error("[Sentinel] Error", "err", err)
 			continue
 		}

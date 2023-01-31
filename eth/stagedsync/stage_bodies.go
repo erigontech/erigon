@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -106,7 +107,7 @@ func BodiesForward(
 	// do opposite here - without storing any meta-info.
 	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV3 {
-			if err := rawdb.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
+			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
 			}
 			//cfg.txNums.Append(blockNum, lastTxnNum)
@@ -239,7 +240,7 @@ func BodiesForward(
 				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
 			}
 			if cfg.historyV3 && ok {
-				if err := rawdb.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
+				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
 					return false, err
 				}
 			}
@@ -373,7 +374,7 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		return err
 	}
 	if cfg.historyV3 {
-		if err := rawdb.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, u.UnwindPoint+1); err != nil {
 			return err
 		}
 	}

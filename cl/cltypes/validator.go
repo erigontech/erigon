@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"bytes"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -8,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
@@ -33,7 +33,7 @@ func (d *DepositData) EncodeSSZ(dst []byte) []byte {
 	return buf
 }
 
-func (d *DepositData) UnmarshalSSZ(buf []byte) error {
+func (d *DepositData) DecodeSSZ(buf []byte) error {
 	copy(d.PubKey[:], buf)
 	copy(d.WithdrawalCredentials[:], buf[48:])
 	d.Amount = ssz_utils.UnmarshalUint64SSZ(buf[80:])
@@ -41,11 +41,11 @@ func (d *DepositData) UnmarshalSSZ(buf []byte) error {
 	return nil
 }
 
-func (d *DepositData) SizeSSZ() int {
+func (d *DepositData) EncodingSizeSSZ() int {
 	return 184
 }
 
-func (d *DepositData) HashTreeRoot() ([32]byte, error) {
+func (d *DepositData) HashSSZ() ([32]byte, error) {
 	var (
 		leaves = make([][32]byte, 4)
 		err    error
@@ -63,9 +63,23 @@ func (d *DepositData) HashTreeRoot() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
+func (d *DepositData) MessageHash() ([32]byte, error) {
+	var (
+		leaves = make([][32]byte, 4)
+		err    error
+	)
+	leaves[0], err = merkle_tree.PublicKeyRoot(d.PubKey)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	leaves[1] = d.WithdrawalCredentials
+	leaves[2] = merkle_tree.Uint64Root(d.Amount)
+	return merkle_tree.ArraysRoot(leaves, 4)
+}
+
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof [][]byte // 33 X 32 size.
+	Proof []libcommon.Hash // 33 X 32 size.
 	Data  *DepositData
 }
 
@@ -73,36 +87,36 @@ func (d *Deposit) EncodeSSZ(dst []byte) []byte {
 
 	buf := dst
 	for _, proofSeg := range d.Proof {
-		buf = append(buf, proofSeg...)
+		buf = append(buf, proofSeg[:]...)
 	}
 	buf = d.Data.EncodeSSZ(buf)
 	return buf
 }
 
-func (d *Deposit) UnmarshalSSZ(buf []byte) error {
-	d.Proof = make([][]byte, DepositProofLength)
+func (d *Deposit) DecodeSSZ(buf []byte) error {
+	d.Proof = make([]libcommon.Hash, DepositProofLength)
 	for i := range d.Proof {
-		d.Proof[i] = common.CopyBytes(buf[i*32 : i*32+32])
+		copy(d.Proof[i][:], buf[i*32:i*32+32])
 	}
 
 	if d.Data == nil {
 		d.Data = new(DepositData)
 	}
-	return d.Data.UnmarshalSSZ(buf[33*32:])
+	return d.Data.DecodeSSZ(buf[33*32:])
 }
 
-func (d *Deposit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return d.UnmarshalSSZ(buf)
+func (d *Deposit) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return d.DecodeSSZ(buf)
 }
 
 func (d *Deposit) EncodingSizeSSZ() int {
 	return 1240
 }
 
-func (d *Deposit) HashTreeRoot() ([32]byte, error) {
+func (d *Deposit) HashSSZ() ([32]byte, error) {
 	proofLeaves := make([][32]byte, DepositProofLength)
 	for i, segProof := range d.Proof {
-		proofLeaves[i] = libcommon.BytesToHash(segProof)
+		copy(proofLeaves[i][:], segProof[:])
 	}
 
 	proofRoot, err := merkle_tree.ArraysRoot(proofLeaves, 64)
@@ -110,7 +124,7 @@ func (d *Deposit) HashTreeRoot() ([32]byte, error) {
 		return [32]byte{}, err
 	}
 
-	depositRoot, err := d.Data.HashTreeRoot()
+	depositRoot, err := d.Data.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -133,13 +147,13 @@ func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
-func (e *VoluntaryExit) HashTreeRoot() ([32]byte, error) {
+func (e *VoluntaryExit) HashSSZ() ([32]byte, error) {
 	epochRoot := merkle_tree.Uint64Root(e.Epoch)
 	indexRoot := merkle_tree.Uint64Root(e.ValidatorIndex)
 	return utils.Keccak256(epochRoot[:], indexRoot[:]), nil
 }
 
-func (e *VoluntaryExit) SizeSSZ() int {
+func (e *VoluntaryExit) EncodingSizeSSZ() int {
 	return 16
 }
 
@@ -153,7 +167,7 @@ func (e *SignedVoluntaryExit) EncodeSSZ(dst []byte) []byte {
 	return append(buf, e.Signature[:]...)
 }
 
-func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
+func (e *SignedVoluntaryExit) DecodeSSZ(buf []byte) error {
 	if e.VolunaryExit == nil {
 		e.VolunaryExit = new(VoluntaryExit)
 	}
@@ -165,16 +179,16 @@ func (e *SignedVoluntaryExit) UnmarshalSSZ(buf []byte) error {
 	return nil
 }
 
-func (e *SignedVoluntaryExit) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return e.UnmarshalSSZ(buf)
+func (e *SignedVoluntaryExit) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return e.DecodeSSZ(buf)
 }
 
-func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
+func (e *SignedVoluntaryExit) HashSSZ() ([32]byte, error) {
 	sigRoot, err := merkle_tree.SignatureRoot(e.Signature)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	exitRoot, err := e.VolunaryExit.HashTreeRoot()
+	exitRoot, err := e.VolunaryExit.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -182,7 +196,7 @@ func (e *SignedVoluntaryExit) HashTreeRoot() ([32]byte, error) {
 }
 
 func (e *SignedVoluntaryExit) EncodingSizeSSZ() int {
-	return 96 + e.VolunaryExit.SizeSSZ()
+	return 96 + e.VolunaryExit.EncodingSizeSSZ()
 }
 
 /*
@@ -208,7 +222,7 @@ func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 	return dst, nil
 }
 
-// UnmarshalSSZ ssz unmarshals the SyncCommittee object
+// DecodeSSZ ssz unmarshals the SyncCommittee object
 func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	if len(buf) < 24624 {
 		return ssz_utils.ErrLowBufferSize
@@ -223,8 +237,8 @@ func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
-func (s *SyncCommittee) SizeSSZ() (size int) {
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the SyncCommittee object
+func (s *SyncCommittee) EncodingSizeSSZ() (size int) {
 	size = 24624
 	return
 }
@@ -253,4 +267,92 @@ func (s *SyncCommittee) HashSSZ() ([32]byte, error) {
 	}
 
 	return merkle_tree.ArraysRoot([][32]byte{pubKeyLeaf, aggregatePublicKeyRoot}, 2)
+}
+
+func (s *SyncCommittee) Equal(s2 *SyncCommittee) bool {
+	if !bytes.Equal(s.AggregatePublicKey[:], s2.AggregatePublicKey[:]) {
+		return false
+	}
+	if len(s.PubKeys) != len(s2.PubKeys) {
+		return false
+	}
+	for i := range s.PubKeys {
+		if !bytes.Equal(s.PubKeys[i][:], s2.PubKeys[i][:]) {
+			return false
+		}
+	}
+	return true
+}
+
+// Validator, contains if we were on bellatrix/alteir/phase0 and transition epoch.
+type Validator struct {
+	PublicKey                  [48]byte
+	WithdrawalCredentials      libcommon.Hash
+	EffectiveBalance           uint64
+	Slashed                    bool
+	ActivationEligibilityEpoch uint64
+	ActivationEpoch            uint64
+	ExitEpoch                  uint64
+	WithdrawableEpoch          uint64
+}
+
+func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
+	buf := dst
+	buf = append(buf, v.PublicKey[:]...)
+	buf = append(buf, v.WithdrawalCredentials[:]...)
+	buf = append(buf, ssz_utils.Uint64SSZ(v.EffectiveBalance)...)
+	buf = append(buf, ssz_utils.BoolSSZ(v.Slashed))
+	buf = append(buf, ssz_utils.Uint64SSZ(v.ActivationEligibilityEpoch)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(v.ActivationEpoch)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(v.ExitEpoch)...)
+	buf = append(buf, ssz_utils.Uint64SSZ(v.WithdrawableEpoch)...)
+	return buf, nil
+}
+
+func (v *Validator) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return v.DecodeSSZ(buf)
+}
+
+func (v *Validator) DecodeSSZ(buf []byte) error {
+	if len(buf) < v.EncodingSizeSSZ() {
+		return ssz_utils.ErrLowBufferSize
+	}
+	copy(v.PublicKey[:], buf)
+	copy(v.WithdrawalCredentials[:], buf[48:])
+	v.EffectiveBalance = ssz_utils.UnmarshalUint64SSZ(buf[80:])
+	v.Slashed = buf[88] == 1
+	v.ActivationEligibilityEpoch = ssz_utils.UnmarshalUint64SSZ(buf[89:])
+	v.ActivationEpoch = ssz_utils.UnmarshalUint64SSZ(buf[97:])
+	v.ExitEpoch = ssz_utils.UnmarshalUint64SSZ(buf[105:])
+	v.WithdrawableEpoch = ssz_utils.UnmarshalUint64SSZ(buf[113:])
+	return nil
+}
+
+func (v *Validator) EncodingSizeSSZ() int {
+	return 121
+}
+
+func (v *Validator) HashSSZ() ([32]byte, error) {
+	var (
+		leaves = make([][32]byte, 8)
+		err    error
+	)
+
+	leaves[0], err = merkle_tree.PublicKeyRoot(v.PublicKey)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	leaves[1] = v.WithdrawalCredentials
+	leaves[2] = merkle_tree.Uint64Root(v.EffectiveBalance)
+	leaves[3] = merkle_tree.BoolRoot(v.Slashed)
+	leaves[4] = merkle_tree.Uint64Root(v.ActivationEligibilityEpoch)
+	leaves[5] = merkle_tree.Uint64Root(v.ActivationEpoch)
+	leaves[6] = merkle_tree.Uint64Root(v.ExitEpoch)
+	leaves[7] = merkle_tree.Uint64Root(v.WithdrawableEpoch)
+	return merkle_tree.ArraysRoot(leaves, 8)
+}
+
+// Active returns if validator is active for given epoch
+func (v *Validator) Active(epoch uint64) bool {
+	return v.ActivationEpoch <= epoch && epoch < v.ExitEpoch
 }

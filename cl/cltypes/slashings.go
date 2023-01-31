@@ -10,14 +10,18 @@ type ProposerSlashing struct {
 	Header2 *SignedBeaconBlockHeader
 }
 
-func (p *ProposerSlashing) EncodeSSZ(dst []byte) []byte {
-	buf := dst
-	buf = p.Header1.EncodeSSZ(buf)
-	buf = p.Header2.EncodeSSZ(buf)
-	return buf
+func (p *ProposerSlashing) EncodeSSZ(dst []byte) (buf []byte, err error) {
+	buf = dst
+	if buf, err = p.Header1.EncodeSSZ(buf); err != nil {
+		return
+	}
+	if buf, err = p.Header2.EncodeSSZ(buf); err != nil {
+		return
+	}
+	return
 }
 
-func (p *ProposerSlashing) UnmarshalSSZ(buf []byte) error {
+func (p *ProposerSlashing) DecodeSSZ(buf []byte) error {
 	p.Header1 = new(SignedBeaconBlockHeader)
 	p.Header2 = new(SignedBeaconBlockHeader)
 	if err := p.Header1.DecodeSSZ(buf); err != nil {
@@ -26,20 +30,20 @@ func (p *ProposerSlashing) UnmarshalSSZ(buf []byte) error {
 	return p.Header2.DecodeSSZ(buf[p.Header1.EncodingSizeSSZ():])
 }
 
-func (p *ProposerSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return p.UnmarshalSSZ(buf)
+func (p *ProposerSlashing) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return p.DecodeSSZ(buf)
 }
 
 func (p *ProposerSlashing) EncodingSizeSSZ() int {
 	return p.Header1.EncodingSizeSSZ() * 2
 }
 
-func (p *ProposerSlashing) HashTreeRoot() ([32]byte, error) {
-	root1, err := p.Header1.HashTreeRoot()
+func (p *ProposerSlashing) HashSSZ() ([32]byte, error) {
+	root1, err := p.Header1.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	root2, err := p.Header2.HashTreeRoot()
+	root2, err := p.Header2.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -71,7 +75,7 @@ func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {
+func (a *AttesterSlashing) DecodeSSZ(buf []byte) error {
 	a.Attestation_1 = new(IndexedAttestation)
 	a.Attestation_2 = new(IndexedAttestation)
 	attestation2Offset := ssz_utils.DecodeOffset(buf[4:])
@@ -81,20 +85,20 @@ func (a *AttesterSlashing) UnmarshalSSZ(buf []byte) error {
 	return a.Attestation_2.DecodeSSZ(buf[attestation2Offset:])
 }
 
-func (a *AttesterSlashing) UnmarshalSSZWithVersion(buf []byte, _ int) error {
-	return a.UnmarshalSSZ(buf)
+func (a *AttesterSlashing) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return a.DecodeSSZ(buf)
 }
 
 func (a *AttesterSlashing) EncodingSizeSSZ() int {
 	return 8 + a.Attestation_1.EncodingSizeSSZ() + a.Attestation_2.EncodingSizeSSZ()
 }
 
-func (a *AttesterSlashing) HashTreeRoot() ([32]byte, error) {
-	root1, err := a.Attestation_1.HashTreeRoot()
+func (a *AttesterSlashing) HashSSZ() ([32]byte, error) {
+	root1, err := a.Attestation_1.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}
-	root2, err := a.Attestation_2.HashTreeRoot()
+	root2, err := a.Attestation_2.HashSSZ()
 	if err != nil {
 		return [32]byte{}, err
 	}

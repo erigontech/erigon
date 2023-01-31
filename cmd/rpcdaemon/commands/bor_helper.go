@@ -7,10 +7,11 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -74,7 +75,7 @@ func getHeaderByNumber(ctx context.Context, number rpc.BlockNumber, api *BorImpl
 
 // getHeaderByHash returns a block's header given a block's hash.
 // derived from erigon_getHeaderByHash implementation (see ./erigon_block.go)
-func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash libcommon.Hash) (*types.Header, error) {
+func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash common.Hash) (*types.Header, error) {
 	header, err := api._blockReader.HeaderByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
@@ -87,19 +88,19 @@ func getHeaderByHash(ctx context.Context, api *BorImpl, tx kv.Tx, hash libcommon
 }
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, c *chain.BorConfig) (libcommon.Address, error) {
+func ecrecover(header *types.Header, c *chain.BorConfig) (common.Address, error) {
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
-		return libcommon.Address{}, errMissingSignature
+		return common.Address{}, errMissingSignature
 	}
 	signature := header.Extra[len(header.Extra)-extraSeal:]
 
 	// Recover the public key and the Ethereum address
 	pubkey, err := crypto.Ecrecover(bor.SealHash(header, c).Bytes(), signature)
 	if err != nil {
-		return libcommon.Address{}, err
+		return common.Address{}, err
 	}
-	var signer libcommon.Address
+	var signer common.Address
 	copy(signer[:], crypto.Keccak256(pubkey[1:])[12:])
 
 	return signer, nil
@@ -118,7 +119,7 @@ func validateHeaderExtraField(extraBytes []byte) error {
 }
 
 // validatorContains checks for a validator in given validator set
-func validatorContains(a []*bor.Validator, x *bor.Validator) (*bor.Validator, bool) {
+func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
 	for _, n := range a {
 		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
 			return n, true
@@ -128,11 +129,11 @@ func validatorContains(a []*bor.Validator, x *bor.Validator) (*bor.Validator, bo
 }
 
 // getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Validator) *ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Validator) *ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	changes := make([]*bor.Validator, 0, len(oldVals))
+	changes := make([]*valset.Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower
@@ -155,7 +156,7 @@ func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Valida
 
 // author returns the Ethereum address recovered
 // from the signature in the header's extra-data section.
-func author(api *BorImpl, tx kv.Tx, header *types.Header) (libcommon.Address, error) {
-	config, _ := api.BaseAPI.chainConfig(tx)
+func author(api *BorImpl, tx kv.Tx, header *types.Header) (common.Address, error) {
+	config, _ := api.chainConfig(tx)
 	return ecrecover(header, config.Bor)
 }

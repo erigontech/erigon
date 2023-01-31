@@ -9,8 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -87,12 +87,12 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	if err != nil {
 		return err
 	}
-	lastK, lastV, err := rawdb.Last(tx, kv.MaxTxNum)
+	lastK, lastV, err := rawdbv3.Last(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
 	}
 
-	_, lastBlockInHistSnap, _ := rawdb.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 
 	s1, err := tx.ReadSequence(kv.EthTx)
@@ -106,19 +106,19 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		firstNonGenesisHeader, err := rawdb.SecondKey(tx, kv.Headers)
+		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		lastHeaders, err := rawdb.LastKey(tx, kv.Headers)
+		lastHeaders, err := rawdbv3.LastKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		firstNonGenesisBody, err := rawdb.SecondKey(tx, kv.BlockBody)
+		firstNonGenesisBody, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 		if err != nil {
 			return err
 		}
-		lastBody, err := rawdb.LastKey(tx, kv.BlockBody)
+		lastBody, err := rawdbv3.LastKey(tx, kv.BlockBody)
 		if err != nil {
 			return err
 		}

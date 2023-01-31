@@ -16,7 +16,8 @@ import (
 type Eth1Block struct {
 	Header *types.Header
 	// Transactions can be kept in bytes.
-	Body *types.RawBody
+	Body    *types.RawBody
+	version clparams.StateVersion
 }
 
 func (b *Eth1Block) NumberU64() uint64 {
@@ -27,7 +28,7 @@ func (b *Eth1Block) Withdrawals() types.Withdrawals {
 	return types.Withdrawals(b.Body.Withdrawals)
 }
 
-func (b *Eth1Block) EncodingSizeSSZ() (size int) {
+func (b *Eth1Block) EncodingSizeSSZ(version clparams.StateVersion) (size int) {
 	size = 508
 
 	if b.Header == nil {
@@ -41,15 +42,15 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 		size += len(tx)
 	}
 
-	if b.Header.WithdrawalsHash != nil {
-		size += len(b.Body.Withdrawals) * 44
+	if version >= clparams.CapellaVersion {
+		size += len(b.Body.Withdrawals)*44 + 4
 	}
 
 	return
 }
 
 func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
-	if len(buf) < b.EncodingSizeSSZ() {
+	if len(buf) < b.EncodingSizeSSZ(clparams.BellatrixVersion) {
 		return ssz_utils.ErrLowBufferSize
 	}
 	b.Header = new(types.Header)
@@ -57,12 +58,12 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	pos := b.Header.DecodeHeaderMetadataForSSZ(buf)
 	// Compute block SSZ offsets.
 	extraDataOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
-	transactionsOffset := ssz_utils.DecodeOffset(buf[pos : pos+4])
+	transactionsOffset := ssz_utils.DecodeOffset(buf[pos:])
 	pos += 4
 	var withdrawalOffset *uint32
 	if version >= clparams.CapellaVersion {
 		withdrawalOffset = new(uint32)
-		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos : pos+4])
+		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos:])
 	}
 	// Compute extra data.
 	b.Header.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
@@ -72,8 +73,14 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	// Compute transactions
 	var transactionsBuffer []byte
 	if withdrawalOffset == nil {
+		if len(transactionsBuffer) > len(buf) {
+			return ssz_utils.ErrLowBufferSize
+		}
 		transactionsBuffer = buf[transactionsOffset:]
 	} else {
+		if len(transactionsBuffer) > int(*withdrawalOffset) || int(*withdrawalOffset) > len(buf) {
+			return ssz_utils.ErrBadOffset
+		}
 		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
 	}
 
@@ -132,6 +139,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 		}
 		b.Body.Withdrawals = make([]*types.Withdrawal, withdrawalsCount)
 		for i := range b.Body.Withdrawals {
+			b.Body.Withdrawals[i] = new(types.Withdrawal)
 			b.Body.Withdrawals[i].DecodeSSZ(buf[(*withdrawalOffset)+uint32(i)*44:])
 		}
 		// Cache withdrawal root.
@@ -145,12 +153,12 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	return nil
 }
 
-func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
+func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte, error) {
 	buf := dst
 	var err error
 	currentOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
 
-	if b.Header.WithdrawalsHash != nil {
+	if version >= clparams.CapellaVersion {
 		currentOffset += 4
 	}
 	buf, err = b.Header.EncodeHeaderMetadataForSSZ(buf, currentOffset)
@@ -167,7 +175,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		currentOffset += len(tx) + 4
 	}
 	// Write withdrawals offset if exist
-	if b.Header.WithdrawalsHash != nil {
+	if version >= clparams.CapellaVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
 	}
 	// Sanity check for extra data then write it.
@@ -186,7 +194,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 		buf = append(buf, tx...)
 	}
 
-	if b.Header.WithdrawalsHash != nil {
+	if version >= clparams.CapellaVersion {
 		// Append all withdrawals SSZ
 		for _, withdrawal := range body.Withdrawals {
 			buf = append(buf, withdrawal.EncodeSSZ()...)
@@ -195,7 +203,19 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
-func (b *Eth1Block) HashSSZ() ([32]byte, error) {
+func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
+	var err error
+	if b.Header.TxHashSSZ, err = merkle_tree.TransactionsListRoot(b.Body.Transactions); err != nil {
+		return [32]byte{}, err
+	}
+	if version >= clparams.CapellaVersion {
+		b.Header.WithdrawalsHash = new(libcommon.Hash)
+		if *b.Header.WithdrawalsHash, err = types.Withdrawals(b.Body.Withdrawals).HashSSZ(16); err != nil {
+			return [32]byte{}, err
+		}
+	} else {
+		b.Header.WithdrawalsHash = nil
+	}
 	return b.Header.HashSSZ()
 }
 

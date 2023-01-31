@@ -7,10 +7,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, validate bool) error {
+func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
 	s.processSlots(currentBlock.Slot)
-	if validate {
+	if !s.noValidate {
 		valid, err := s.verifyBlockSignature(block)
 		if err != nil {
 			return fmt.Errorf("error validating block signature: %v", err)
@@ -20,8 +20,8 @@ func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, vali
 		}
 	}
 	// TODO add logic to process block and update state.
-	if validate {
-		expectedStateRoot, err := s.state.HashTreeRoot()
+	if !s.noValidate {
+		expectedStateRoot, err := s.state.HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)
 		}
@@ -35,7 +35,7 @@ func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, vali
 // transitionSlot is called each time there is a new slot to process
 func (s *StateTransistor) transitionSlot() error {
 	slot := s.state.Slot()
-	previousStateRoot, err := s.state.HashTreeRoot()
+	previousStateRoot, err := s.state.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -47,7 +47,7 @@ func (s *StateTransistor) transitionSlot() error {
 		s.state.SetLatestBlockHeader(latestBlockHeader)
 	}
 
-	previousBlockRoot, err := s.state.LatestBlockHeader().HashTreeRoot()
+	previousBlockRoot, err := s.state.LatestBlockHeader().HashSSZ()
 	if err != nil {
 		return err
 	}

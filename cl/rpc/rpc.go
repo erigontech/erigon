@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
 )
+
+const maxMessageLength = 18 * datasize.MB
 
 // BeaconRpcP2P represents a beacon chain RPC client.
 type BeaconRpcP2P struct {
@@ -63,7 +66,7 @@ func (b *BeaconRpcP2P) SendLightClientFinaltyUpdateReqV1() (*cltypes.LightClient
 		return nil, nil
 	}
 
-	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket, b.beaconConfig, b.genesisConfig.GenesisValidatorRoot); err != nil {
 		return nil, fmt.Errorf("unable to decode packet: %v", err)
 	}
 	return responsePacket, nil
@@ -85,7 +88,7 @@ func (b *BeaconRpcP2P) SendLightClientOptimisticUpdateReqV1() (*cltypes.LightCli
 		return nil, nil
 	}
 
-	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket, b.beaconConfig, b.genesisConfig.GenesisValidatorRoot); err != nil {
 		return nil, fmt.Errorf("unable to decode packet: %v", err)
 	}
 	return responsePacket, nil
@@ -111,7 +114,7 @@ func (b *BeaconRpcP2P) SendLightClientBootstrapReqV1(root libcommon.Hash) (*clty
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket); err != nil {
+	if err := ssz_snappy.DecodeAndRead(bytes.NewReader(message.Data), responsePacket, b.beaconConfig, b.genesisConfig.GenesisValidatorRoot); err != nil {
 		return nil, fmt.Errorf("unable to decode packet: %v", err)
 	}
 	return responsePacket, nil
@@ -143,7 +146,7 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 		log.Warn("received error", "err", string(message.Data))
 		return nil, nil
 	}
-	if err := ssz_snappy.DecodeListSSZ(message.Data, 1, responsePacket); err != nil {
+	if err := ssz_snappy.DecodeListSSZ(message.Data, 1, responsePacket, b.beaconConfig, b.genesisConfig.GenesisValidatorRoot); err != nil {
 		return nil, fmt.Errorf("unable to decode packet: %v", err)
 	}
 	return responsePacket[0].(*cltypes.LightClientUpdate), nil
@@ -180,6 +183,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		if err != nil {
 			return nil, fmt.Errorf("unable to read varint from message prefix: %v", err)
 		}
+		// Sanity check for message size.
+		if encodedLn > uint64(maxMessageLength) {
+			return nil, fmt.Errorf("received message too big")
+		}
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
@@ -197,52 +204,16 @@ func (b *BeaconRpcP2P) sendBlocksRequest(topic string, reqData []byte, count uin
 		if respForkDigest == 0 {
 			return nil, fmt.Errorf("null fork digest")
 		}
-		var phase0ForkDigest, altairForkDigest, bellatrixForkDigest [4]byte
-		if b.beaconConfig.GenesisForkVersion != nil {
-			phase0ForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.GenesisForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
-		}
 
-		if b.beaconConfig.AltairForkVersion != nil {
-			altairForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.AltairForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		if b.beaconConfig.BellatrixForkVersion != nil {
-			bellatrixForkDigest, err = fork.ComputeForkDigestForVersion(
-				utils.BytesToBytes4(b.beaconConfig.BellatrixForkVersion),
-				b.genesisConfig.GenesisValidatorRoot,
-			)
-			if err != nil {
-				return nil, err
-			}
-		}
-		responseChunk := &cltypes.SignedBeaconBlock{}
-
-		switch respForkDigest {
-		case utils.Bytes4ToUint32(phase0ForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.Phase0Version))
-		case utils.Bytes4ToUint32(altairForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.AltairVersion))
-		case utils.Bytes4ToUint32(bellatrixForkDigest):
-			err = responseChunk.UnmarshalSSZWithVersion(raw, int(clparams.BellatrixVersion))
-		default:
-			return nil, fmt.Errorf("received invalid fork digest")
-		}
+		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
 		if err != nil {
 			return nil, err
 		}
+		responseChunk := &cltypes.SignedBeaconBlock{}
 
+		if err = responseChunk.DecodeSSZWithVersion(raw, int(version)); err != nil {
+			return nil, err
+		}
 		responsePacket = append(responsePacket, responseChunk)
 		// TODO(issues/5884): figure out why there is this extra byte.
 		r.ReadByte()

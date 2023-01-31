@@ -552,7 +552,7 @@ func (h *Header) EncodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]
 	return buf, nil
 }
 
-func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
+func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	buf = dst
 	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
 
@@ -560,7 +560,10 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
 		offset += 32
 	}
 
-	h.EncodeHeaderMetadataForSSZ(buf, offset)
+	buf, err = h.EncodeHeaderMetadataForSSZ(buf, offset)
+	if err != nil {
+		return nil, err
+	}
 	buf = append(buf, h.TxHashSSZ[:]...)
 
 	if h.WithdrawalsHash != nil {
@@ -574,7 +577,7 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte) {
 // NOTE: it is skipping extra data
 func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
 	h.UncleHash = EmptyUncleHash
-	h.Difficulty = common.Big0
+	h.Difficulty = libcommon.Big0
 
 	copy(h.ParentHash[:], buf)
 	pos = len(h.ParentHash)
@@ -630,7 +633,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	return nil
 }
 
-// SizeSSZ returns the ssz encoded size in bytes for the Header object
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the Header object
 func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 	size := 536
 
@@ -1448,17 +1451,7 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	payloadSize++
 	for _, tx := range bb.transactions {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *LegacyTx:
-			txLen = t.EncodingSize()
-		case *AccessListTx:
-			txLen = t.EncodingSize()
-		case *DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		case *StarknetTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := tx.EncodingSize()
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
 		}
@@ -1526,23 +1519,8 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.transactions {
-		switch t := tx.(type) {
-		case *LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *StarknetTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
