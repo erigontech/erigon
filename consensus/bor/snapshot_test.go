@@ -7,7 +7,8 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/stretchr/testify/assert"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -15,8 +16,10 @@ const (
 )
 
 func TestGetSignerSuccessionNumber_ProposerIsSigner(t *testing.T) {
+	t.Parallel()
+
 	validators := buildRandomValidatorSet(numVals)
-	validatorSet := NewValidatorSet(validators)
+	validatorSet := valset.NewValidatorSet(validators)
 	snap := Snapshot{
 		ValidatorSet: validatorSet,
 	}
@@ -27,20 +30,24 @@ func TestGetSignerSuccessionNumber_ProposerIsSigner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	assert.Equal(t, 0, successionNumber)
+
+	require.Equal(t, 0, successionNumber)
 }
 
 func TestGetSignerSuccessionNumber_SignerIndexIsLarger(t *testing.T) {
+	t.Parallel()
+
 	validators := buildRandomValidatorSet(numVals)
 
 	// sort validators by address, which is what NewValidatorSet also does
-	sort.Sort(ValidatorsByAddress(validators))
+	sort.Sort(valset.ValidatorsByAddress(validators))
+
 	proposerIndex := 32
 	signerIndex := 56
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := Snapshot{
-		ValidatorSet: NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -49,17 +56,20 @@ func TestGetSignerSuccessionNumber_SignerIndexIsLarger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	assert.Equal(t, signerIndex-proposerIndex, successionNumber)
+
+	require.Equal(t, signerIndex-proposerIndex, successionNumber)
 }
 
 func TestGetSignerSuccessionNumber_SignerIndexIsSmaller(t *testing.T) {
+	t.Parallel()
+
 	validators := buildRandomValidatorSet(numVals)
 	proposerIndex := 98
 	signerIndex := 11
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := Snapshot{
-		ValidatorSet: NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -68,43 +78,54 @@ func TestGetSignerSuccessionNumber_SignerIndexIsSmaller(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%s", err)
 	}
-	assert.Equal(t, signerIndex+numVals-proposerIndex, successionNumber)
+
+	require.Equal(t, signerIndex+numVals-proposerIndex, successionNumber)
 }
 
 func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
+	t.Parallel()
+
 	validators := buildRandomValidatorSet(numVals)
 	snap := Snapshot{
-		ValidatorSet: NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
+
 	dummyProposerAddress := randomAddress()
-	snap.ValidatorSet.Proposer = &Validator{Address: dummyProposerAddress}
+	snap.ValidatorSet.Proposer = &valset.Validator{Address: dummyProposerAddress}
+
 	// choose any signer
 	signer := snap.ValidatorSet.Validators[3].Address
+
 	_, err := snap.GetSignerSuccessionNumber(signer)
-	assert.NotNil(t, err)
+	require.NotNil(t, err)
+
 	e, ok := err.(*UnauthorizedProposerError)
-	assert.True(t, ok)
-	assert.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
+	require.True(t, ok)
+	require.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
 }
 
 func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {
+	t.Parallel()
+
 	validators := buildRandomValidatorSet(numVals)
 	snap := Snapshot{
-		ValidatorSet: NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
+
 	dummySignerAddress := randomAddress()
 	_, err := snap.GetSignerSuccessionNumber(dummySignerAddress)
-	assert.NotNil(t, err)
+	require.NotNil(t, err)
+
 	e, ok := err.(*UnauthorizedSignerError)
-	assert.True(t, ok)
-	assert.Equal(t, dummySignerAddress.Bytes(), e.Signer)
+	require.True(t, ok)
+	require.Equal(t, dummySignerAddress.Bytes(), e.Signer)
 }
 
-func buildRandomValidatorSet(numVals int) []*Validator {
+func buildRandomValidatorSet(numVals int) []*valset.Validator {
 	rand.Seed(time.Now().Unix())
-	validators := make([]*Validator, numVals)
+	validators := make([]*valset.Validator, numVals)
 	for i := 0; i < numVals; i++ {
-		validators[i] = &Validator{
+		validators[i] = &valset.Validator{
 			Address: randomAddress(),
 			// cannot process validators with voting power 0, hence +1
 			VotingPower: int64(rand.Intn(99) + 1),
@@ -112,7 +133,7 @@ func buildRandomValidatorSet(numVals int) []*Validator {
 	}
 
 	// sort validators by address, which is what NewValidatorSet also does
-	sort.Sort(ValidatorsByAddress(validators))
+	sort.Sort(valset.ValidatorsByAddress(validators))
 	return validators
 }
 
