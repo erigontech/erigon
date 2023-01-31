@@ -20,7 +20,7 @@ func TestProcessSlashingsNoSlash(t *testing.T) {
 	base.AddBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	base.SetSlashingSegmentAt(0, 0)
 	base.SetSlashingSegmentAt(1, 1e9)
-	s := transition.New(base, &clparams.MainnetBeaconConfig, nil)
+	s := transition.New(base, &clparams.MainnetBeaconConfig, nil, false)
 	require.NoError(t, s.ProcessSlashings())
 	wanted := clparams.MainnetBeaconConfig.MaxEffectiveBalance
 	require.Equal(t, wanted, base.Balances()[0], "Unexpected slashed balance")
@@ -82,7 +82,7 @@ func TestProcessSlashingsSlash(t *testing.T) {
 
 	for i, tt := range tests {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
-			transitistor := transition.New(tt.state, &clparams.MainnetBeaconConfig, nil)
+			transitistor := transition.New(tt.state, &clparams.MainnetBeaconConfig, nil, false)
 			require.NoError(t, transitistor.ProcessSlashings())
 			assert.Equal(t, tt.want, tt.state.Balances()[0])
 		})

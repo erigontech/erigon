@@ -80,14 +80,17 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
+// Should not be called if not for testing
 func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
+	b.initBeaconState()
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
+	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
@@ -170,4 +173,16 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 	b.historicalSummaries = append(b.historicalSummaries, summary)
+}
+
+func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.inactivityScores = append(b.inactivityScores, score)
+}
+
+func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
+}
+
+func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }
