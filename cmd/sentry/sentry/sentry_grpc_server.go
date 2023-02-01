@@ -1124,7 +1124,7 @@ func (ss *GrpcServer) addMessagesStream(ids []proto_sentry.MessageId, ch chan *p
 
 const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *GrpcServer) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Trace("[Messages] new subscriber", "to", req.Ids)
+	log.Info("[Messages] new subscriber", "to", req.Ids)
 	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
