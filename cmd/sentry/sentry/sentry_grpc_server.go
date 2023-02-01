@@ -466,6 +466,9 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
+				if protocol == eth.ETH68 {
+					fmt.Printf("NewPooledTransactionHashesMsg 68 arrived, but no subscribers\n")
+				}
 				continue
 			}
 
