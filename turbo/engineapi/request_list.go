@@ -2,7 +2,6 @@ package engineapi
 
 import (
 	"sync"
-	"sync/atomic"
 
 	"github.com/emirpasic/gods/maps/treemap"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"go.uber.org/atomic"
 )
 
 // This is the status of a newly execute block.
@@ -53,7 +53,7 @@ type RequestList struct {
 	requestId int
 	requests  *treemap.Map // map[int]*RequestWithStatus
 	interrupt Interrupt
-	waiting   uint32
+	waiting   atomic.Uint32
 	syncCond  *sync.Cond
 	waiterMtx sync.Mutex
 	waiters   []chan struct{}
@@ -65,6 +65,7 @@ func NewRequestList() *RequestList {
 		syncCond:  sync.NewCond(&sync.Mutex{}),
 		waiterMtx: sync.Mutex{},
 		waiters:   make([]chan struct{}, 0),
+		waiting:   atomic.Uint32{},
 	}
 	return rl
 }
@@ -143,18 +144,22 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 }
 
 func (rl *RequestList) IsWaiting() bool {
-	return atomic.LoadUint32(&rl.waiting) != 0
+	return rl.waiting.Load() != 0
 }
 
 func (rl *RequestList) updateWaiting(val uint32) {
 	rl.waiterMtx.Lock()
 	defer rl.waiterMtx.Unlock()
-	atomic.StoreUint32(&rl.waiting, val)
+	rl.waiting.Store(val)
 
 	if val == 1 {
 		// something might be waiting to be notified of the waiting state being ready
 		for _, c := range rl.waiters {
-			c <- struct{}{}
+			// ensure the channel is still open before writing to it
+			_, ok := <-c
+			if ok {
+				c <- struct{}{}
+			}
 		}
 		rl.waiters = make([]chan struct{}, 0)
 	}
@@ -163,7 +168,7 @@ func (rl *RequestList) updateWaiting(val uint32) {
 func (rl *RequestList) WaitForWaiting(c chan struct{}) {
 	rl.waiterMtx.Lock()
 	defer rl.waiterMtx.Unlock()
-	val := atomic.LoadUint32(&rl.waiting)
+	val := rl.waiting.Load()
 	if val == 1 {
 		// we are already waiting so just send to the channel and quit
 		c <- struct{}{}
