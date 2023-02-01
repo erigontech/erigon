@@ -789,11 +789,10 @@ func reconstituteStep(last bool,
 	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
-	var err error
 	var startOk, endOk bool
 	startTxNum, endTxNum := as.TxNumRange()
 	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+	if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
 		startOk, startBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, startTxNum)
 		if err != nil {
 			return err
@@ -870,6 +869,7 @@ func reconstituteStep(last bool,
 		}
 	}()
 	for i := 0; i < workerCount; i++ {
+		var err error
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
@@ -933,14 +933,14 @@ func reconstituteStep(last bool,
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
 					t := time.Now()
-					if err = func() error {
+					if err := func() error {
 						lock.Lock()
 						defer lock.Unlock()
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
 						if err := db.Update(ctx, func(tx kv.RwTx) error {
-							if err = rs.Flush(tx); err != nil {
+							if err := rs.Flush(tx); err != nil {
 								return err
 							}
 							return nil
@@ -948,6 +948,7 @@ func reconstituteStep(last bool,
 							return err
 						}
 						for i := 0; i < workerCount; i++ {
+							var err error
 							if roTxs[i], err = db.BeginRo(ctx); err != nil {
 								return err
 							}
@@ -967,6 +968,7 @@ func reconstituteStep(last bool,
 	var b *types.Block
 	var txKey [8]byte
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+		var err error
 		if err = chainDb.View(ctx, func(tx kv.Tx) error {
 			h, err = blockReader.Header(ctx, tx, hash, number)
 			if err != nil {
@@ -979,6 +981,8 @@ func reconstituteStep(last bool,
 		}
 		return h
 	}
+
+	var err error // avoid declare global mutable variable
 	for bn = startBlockNum; bn <= endBlockNum; bn++ {
 		t = time.Now()
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
