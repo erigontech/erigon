@@ -140,7 +140,7 @@ func (rs *ReconState) Get(table string, key1, key2 []byte, txNum uint64) []byte 
 	if !ok {
 		return nil
 	}
-	i, ok := t.GetHint(reconPair{txNum: txNum, key1: key1, key2: key2}, rs.hints[table])
+	i, ok := t.Get(reconPair{txNum: txNum, key1: key1, key2: key2})
 	if !ok {
 		return nil
 	}
