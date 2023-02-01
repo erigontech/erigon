@@ -97,12 +97,14 @@ type TxSlot struct {
 	IDHash         [32]byte // Transaction hash for the purposes of using it as a transaction Id
 	Traced         bool     // Whether transaction needs to be traced throughout transaction pool code and generate debug printing
 	Creation       bool     // Set to true if "To" field of the transaction is not set
+	Type           byte     // Transaction type
+	Size           uint32   // Size of the payload
 }
 
 const (
-	LegacyTxType     int = 0
-	AccessListTxType int = 1
-	DynamicFeeTxType int = 2
+	LegacyTxType     byte = 0
+	AccessListTxType byte = 1
+	DynamicFeeTxType byte = 2
 )
 
 var ErrParseTxn = fmt.Errorf("%w transaction", rlp.ErrParse)
@@ -149,10 +151,9 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	p = dataPos
 
-	var txType int
 	// If it is non-legacy transaction, the transaction type follows, and then the the list
 	if !legacy {
-		txType = int(payload[p])
+		slot.Type = payload[p]
 		if _, err = ctx.Keccak1.Write(payload[p : p+1]); err != nil {
 			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err)
 		}
@@ -176,6 +177,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		slot.Rlp = payload[p-1 : dataPos+dataLen]
 		p = dataPos
 	} else {
+		slot.Type = LegacyTxType
 		slot.Rlp = payload[pos : dataPos+dataLen]
 	}
 
@@ -215,7 +217,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	}
 	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 	// equal to tip
-	if txType < DynamicFeeTxType {
+	if slot.Type < DynamicFeeTxType {
 		slot.FeeCap = slot.Tip
 	} else {
 		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
@@ -459,6 +461,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	//take last 20 bytes as address
 	copy(sender, ctx.buf[12:32])
 
+	slot.Size = uint32(p - pos)
 	return p, nil
 }
 
@@ -502,6 +505,129 @@ func (h Hashes) DedupCopy() Hashes {
 			dest += length.Hash
 		}
 	}
+	return c
+}
+
+type Announcements struct {
+	ts     []byte
+	sizes  []uint32
+	hashes []byte
+}
+
+func (a *Announcements) Append(t byte, size uint32, hash []byte) {
+	a.ts = append(a.ts, t)
+	a.sizes = append(a.sizes, size)
+	a.hashes = append(a.hashes, hash...)
+}
+
+func (a *Announcements) AppendOther(other Announcements) {
+	a.ts = append(a.ts, other.ts...)
+	a.sizes = append(a.sizes, other.sizes...)
+	a.hashes = append(a.hashes, other.hashes...)
+}
+
+func (a *Announcements) Reset() {
+	a.ts = a.ts[:0]
+	a.sizes = a.sizes[:0]
+	a.hashes = a.hashes[:0]
+}
+
+func (a Announcements) At(i int) (byte, uint32, []byte) {
+	return a.ts[i], a.sizes[i], a.hashes[i*length.Hash : (i+1)*length.Hash]
+}
+func (a Announcements) Len() int { return len(a.ts) }
+func (a Announcements) Less(i, j int) bool {
+	return bytes.Compare(a.hashes[i*length.Hash:(i+1)*length.Hash], a.hashes[j*length.Hash:(j+1)*length.Hash]) < 0
+}
+func (a Announcements) Swap(i, j int) {
+	a.ts[i], a.ts[j] = a.ts[j], a.ts[i]
+	a.sizes[i], a.sizes[j] = a.sizes[j], a.sizes[i]
+	ii := i * length.Hash
+	jj := j * length.Hash
+	for k := 0; k < length.Hash; k++ {
+		a.hashes[ii], a.hashes[jj] = a.hashes[jj], a.hashes[ii]
+		ii++
+		jj++
+	}
+}
+
+// DedupCopy sorts hashes, and creates deduplicated copy
+func (a Announcements) DedupCopy() Announcements {
+	if len(a.ts) == 0 {
+		return a
+	}
+	sort.Sort(a)
+	unique := 1
+	for i := length.Hash; i < len(a.hashes); i += length.Hash {
+		if !bytes.Equal(a.hashes[i:i+length.Hash], a.hashes[i-length.Hash:i]) {
+			unique++
+		}
+	}
+	c := Announcements{
+		ts:     make([]byte, unique),
+		sizes:  make([]uint32, unique),
+		hashes: make([]byte, unique*length.Hash),
+	}
+	copy(c.hashes[:], a.hashes[0:length.Hash])
+	c.ts[0] = a.ts[0]
+	c.sizes[0] = a.sizes[0]
+	dest := length.Hash
+	j := 1
+	origin := length.Hash
+	for i := 1; i < len(a.ts); i++ {
+		if !bytes.Equal(a.hashes[origin:origin+length.Hash], a.hashes[origin-length.Hash:origin]) {
+			copy(c.hashes[dest:dest+length.Hash], a.hashes[origin:origin+length.Hash])
+			c.ts[j] = a.ts[i]
+			c.sizes[j] = a.sizes[i]
+			dest += length.Hash
+			j++
+		}
+		origin += length.Hash
+	}
+	return c
+}
+
+func (a Announcements) DedupHashes() Hashes {
+	if len(a.ts) == 0 {
+		return Hashes{}
+	}
+	sort.Sort(a)
+	unique := 1
+	for i := length.Hash; i < len(a.hashes); i += length.Hash {
+		if !bytes.Equal(a.hashes[i:i+length.Hash], a.hashes[i-length.Hash:i]) {
+			unique++
+		}
+	}
+	c := make(Hashes, unique*length.Hash)
+	copy(c[:], a.hashes[0:length.Hash])
+	dest := length.Hash
+	j := 1
+	origin := length.Hash
+	for i := 1; i < len(a.ts); i++ {
+		if !bytes.Equal(a.hashes[origin:origin+length.Hash], a.hashes[origin-length.Hash:origin]) {
+			copy(c[dest:dest+length.Hash], a.hashes[origin:origin+length.Hash])
+			dest += length.Hash
+			j++
+		}
+		origin += length.Hash
+	}
+	return c
+}
+
+func (a Announcements) Hashes() Hashes {
+	return Hashes(a.hashes)
+}
+
+func (a Announcements) Copy() Announcements {
+	if len(a.ts) == 0 {
+		return a
+	}
+	c := Announcements{
+		ts:     common.Copy(a.ts),
+		sizes:  make([]uint32, len(a.sizes)),
+		hashes: common.Copy(a.hashes),
+	}
+	copy(c.sizes, a.sizes)
 	return c
 }
 

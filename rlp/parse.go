@@ -236,3 +236,51 @@ func ParseHash(payload []byte, pos int, hashbuf []byte) (int, error) {
 }
 
 const ParseHashErrorPrefix = "parse hash payload"
+
+const ParseAnnouncementsErrorPrefix = "parse announcement payload"
+
+func ParseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int, error) {
+	pos, totalLen, err := List(payload, pos)
+	if err != nil {
+		return nil, nil, nil, pos, err
+	}
+	if pos+totalLen > len(payload) {
+		return nil, nil, nil, pos, fmt.Errorf("%s: totalLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, totalLen)
+	}
+	pos, typesLen, err := String(payload, pos)
+	if err != nil {
+		return nil, nil, nil, pos, err
+	}
+	if pos+typesLen > len(payload) {
+		return nil, nil, nil, pos, fmt.Errorf("%s: typesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, typesLen)
+	}
+	types := payload[pos : pos+typesLen]
+	pos += typesLen
+	pos, sizesLen, err := List(payload, pos)
+	if err != nil {
+		return nil, nil, nil, pos, err
+	}
+	if pos+sizesLen > len(payload) {
+		return nil, nil, nil, pos, fmt.Errorf("%s: sizesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, sizesLen)
+	}
+	sizes := make([]uint32, typesLen)
+	for i := 0; i < len(sizes); i++ {
+		if pos, sizes[i], err = U32(payload, pos); err != nil {
+			return nil, nil, nil, pos, err
+		}
+	}
+	pos, hashesLen, err := List(payload, pos)
+	if err != nil {
+		return nil, nil, nil, pos, err
+	}
+	if pos+hashesLen > len(payload) {
+		return nil, nil, nil, pos, fmt.Errorf("%s: hashesLen %d is beyond the end of payload", ParseAnnouncementsErrorPrefix, hashesLen)
+	}
+	hashes := make([]byte, 32*(hashesLen/33))
+	for i := 0; i < len(hashes); i += 32 {
+		if pos, err = ParseHash(payload, pos, hashes[i:]); err != nil {
+			return nil, nil, nil, pos, err
+		}
+	}
+	return types, sizes, hashes, pos, nil
+}

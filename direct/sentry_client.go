@@ -34,6 +34,7 @@ const (
 	ETH65 = 65
 	ETH66 = 66
 	ETH67 = 67
+	ETH68 = 68
 )
 
 var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
@@ -80,6 +81,20 @@ var ProtoIds = map[uint]map[sentry.MessageId]struct{}{
 		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
 		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
 		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66: struct{}{},
+		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
+		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
+	},
+	ETH68: {
+		sentry.MessageId_GET_BLOCK_HEADERS_66:             struct{}{},
+		sentry.MessageId_BLOCK_HEADERS_66:                 struct{}{},
+		sentry.MessageId_GET_BLOCK_BODIES_66:              struct{}{},
+		sentry.MessageId_BLOCK_BODIES_66:                  struct{}{},
+		sentry.MessageId_GET_RECEIPTS_66:                  struct{}{},
+		sentry.MessageId_RECEIPTS_66:                      struct{}{},
+		sentry.MessageId_NEW_BLOCK_HASHES_66:              struct{}{},
+		sentry.MessageId_NEW_BLOCK_66:                     struct{}{},
+		sentry.MessageId_TRANSACTIONS_66:                  struct{}{},
+		sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68: struct{}{},
 		sentry.MessageId_GET_POOLED_TRANSACTIONS_66:       struct{}{},
 		sentry.MessageId_POOLED_TRANSACTIONS_66:           struct{}{},
 	},
@@ -141,6 +156,8 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 		c.protocol = ETH66
 	case sentry.Protocol_ETH67:
 		c.protocol = ETH67
+	case sentry.Protocol_ETH68:
+		c.protocol = ETH68
 	default:
 		return nil, fmt.Errorf("unexpected protocol: %d", reply.Protocol)
 	}

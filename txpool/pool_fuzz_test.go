@@ -222,14 +222,14 @@ func fakeRlpTx(slot *types.TxSlot, data []byte) []byte {
 	dataLen := rlp.U64Len(1) + //chainID
 		rlp.U64Len(slot.Nonce) + rlp.U256Len(&slot.Tip) + rlp.U256Len(&slot.FeeCap) +
 		rlp.U64Len(0) + // gas
-		rlp.StringLen(0) + // dest addr
+		rlp.StringLen([]byte{}) + // dest addr
 		rlp.U256Len(&slot.Value) +
-		rlp.StringLen(len(data)) + // data
+		rlp.StringLen(data) + // data
 		rlp.ListPrefixLen(0) + //access list
 		+3 // v,r,s
 
 	buf := make([]byte, 1+rlp.ListPrefixLen(dataLen)+dataLen)
-	buf[0] = byte(types.DynamicFeeTxType)
+	buf[0] = types.DynamicFeeTxType
 	p := 1
 	p += rlp.EncodeListPrefix(dataLen, buf[p:])
 	p += rlp.EncodeU64(1, buf[p:]) //chainID
@@ -306,7 +306,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		assert.NoError(txs.Valid())
 
 		var prevHashes types.Hashes
-		ch := make(chan types.Hashes, 100)
+		ch := make(chan types.Announcements, 100)
 		db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 		cfg := DefaultConfig
@@ -433,10 +433,10 @@ func FuzzOnNewBlocks(f *testing.F) {
 
 		checkNotify := func(unwindTxs, minedTxs types.TxSlots, msg string) {
 			select {
-			case newHashes := <-ch:
-				assert.Greater(len(newHashes), 0)
-				for i := 0; i < newHashes.Len(); i++ {
-					newHash := newHashes.At(i)
+			case newAnnouncements := <-ch:
+				assert.Greater(newAnnouncements.Len(), 0)
+				for i := 0; i < newAnnouncements.Len(); i++ {
+					_, _, newHash := newAnnouncements.At(i)
 					for j := range unwindTxs.Txs {
 						if bytes.Equal(unwindTxs.Txs[j].IDHash[:], newHash) {
 							mt := pool.all.get(unwindTxs.Txs[j].SenderID, unwindTxs.Txs[j].Nonce)

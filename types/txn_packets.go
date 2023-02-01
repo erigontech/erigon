@@ -116,7 +116,7 @@ func EncodePooledTransactions66(txsRlp [][]byte, requestID uint64, encodeBuf []b
 		if isLegacy {
 			txsRlpLen += len(txsRlp[i])
 		} else {
-			txsRlpLen += rlp.StringLen(len(txsRlp[i]))
+			txsRlpLen += rlp.StringLen(txsRlp[i])
 		}
 	}
 	dataLen := rlp.U64Len(requestID) + rlp.ListPrefixLen(txsRlpLen) + txsRlpLen
@@ -147,7 +147,7 @@ func EncodeTransactions(txsRlp [][]byte, encodeBuf []byte) []byte {
 		if isLegacy {
 			dataLen += len(txsRlp[i])
 		} else {
-			dataLen += rlp.StringLen(len(txsRlp[i]))
+			dataLen += rlp.StringLen(txsRlp[i])
 		}
 	}
 

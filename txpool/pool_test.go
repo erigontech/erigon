@@ -93,7 +93,7 @@ func BenchmarkName2(b *testing.B) {
 
 func TestNonceFromAddress(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan types.Hashes, 100)
+	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -213,7 +213,7 @@ func TestNonceFromAddress(t *testing.T) {
 
 func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan types.Hashes, 100)
+	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -330,7 +330,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 
 func TestReverseNonces(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan types.Hashes, 100)
+	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -385,9 +385,10 @@ func TestReverseNonces(t *testing.T) {
 	}
 	fmt.Printf("AFTER TX 1\n")
 	select {
-	case hashes := <-ch:
-		for i := 0; i < hashes.Len(); i++ {
-			fmt.Printf("propagated hash %x\n", hashes.At(i))
+	case annoucements := <-ch:
+		for i := 0; i < annoucements.Len(); i++ {
+			_, _, hash := annoucements.At(i)
+			fmt.Printf("propagated hash %x\n", hash)
 		}
 	default:
 
@@ -412,9 +413,10 @@ func TestReverseNonces(t *testing.T) {
 	}
 	fmt.Printf("AFTER TX 2\n")
 	select {
-	case hashes := <-ch:
-		for i := 0; i < hashes.Len(); i++ {
-			fmt.Printf("propagated hash %x\n", hashes.At(i))
+	case annoucements := <-ch:
+		for i := 0; i < annoucements.Len(); i++ {
+			_, _, hash := annoucements.At(i)
+			fmt.Printf("propagated hash %x\n", hash)
 		}
 	default:
 
@@ -439,9 +441,10 @@ func TestReverseNonces(t *testing.T) {
 	}
 	fmt.Printf("AFTER TX 3\n")
 	select {
-	case hashes := <-ch:
-		for i := 0; i < hashes.Len(); i++ {
-			fmt.Printf("propagated hash %x\n", hashes.At(i))
+	case annoucements := <-ch:
+		for i := 0; i < annoucements.Len(); i++ {
+			_, _, hash := annoucements.At(i)
+			fmt.Printf("propagated hash %x\n", hash)
 		}
 	default:
 
@@ -454,7 +457,7 @@ func TestReverseNonces(t *testing.T) {
 // even though logs show they are broadcast
 func TestTxPoke(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
-	ch := make(chan types.Hashes, 100)
+	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
 	cfg := DefaultConfig
@@ -509,10 +512,10 @@ func TestTxPoke(t *testing.T) {
 			assert.Equal(Success, reason, reason.String())
 		}
 	}
-	var promoted types.Hashes
+	var promoted types.Announcements
 	select {
 	case promoted = <-ch:
-		if !bytes.Equal(idHash, promoted.DedupCopy()) {
+		if !bytes.Equal(idHash, promoted.DedupHashes()) {
 			t.Errorf("expected promoted %x, got %x", idHash, promoted)
 		}
 	default:
@@ -541,7 +544,7 @@ func TestTxPoke(t *testing.T) {
 	// Even though transaction not replaced, it gets poked
 	select {
 	case promoted = <-ch:
-		if !bytes.Equal(idHash, promoted) {
+		if !bytes.Equal(idHash, promoted.Hashes()) {
 			t.Errorf("expected promoted %x, got %x", idHash, promoted)
 		}
 	default:
@@ -570,7 +573,7 @@ func TestTxPoke(t *testing.T) {
 	// Even though transaction not replaced, it gets poked
 	select {
 	case promoted = <-ch:
-		if !bytes.Equal(idHash, promoted) {
+		if !bytes.Equal(idHash, promoted.Hashes()) {
 			t.Errorf("expected promoted %x, got %x", idHash, promoted)
 		}
 	default:
@@ -712,7 +715,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			ch := make(chan types.Hashes, 100)
+			ch := make(chan types.Announcements, 100)
 			_, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 			cfg := DefaultConfig
 
