@@ -1029,9 +1029,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
 	for i := range s.sentryServers {
-		for _, p := range s.sentryServers[i].Protocols {
-			protocols = append(protocols, p)
-		}
+		protocols = append(protocols, s.sentryServers[i].Protocols...)
 	}
 	return protocols
 }
