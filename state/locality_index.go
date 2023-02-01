@@ -115,13 +115,14 @@ func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []str
 		}
 
 		startTxNum, endTxNum := startStep*li.aggregationStep, endStep*li.aggregationStep
+		frozen := endStep-startStep == StepsInBiggestFile
 		if li.file == nil {
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
+			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 		} else if li.file.endTxNum < endTxNum {
 			uselessFiles = append(uselessFiles,
 				fmt.Sprintf("%s.%d-%d.li", li.filenameBase, li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep),
 			)
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum}
+			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 		}
 	}
 	return uselessFiles
@@ -184,7 +185,11 @@ func (li *LocalityIndex) lookupIdxFiles(r *recsplit.IndexReader, bm *bitmapdb.Fi
 }
 
 func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndex) (toStep uint64, idxExists bool) {
-	ii.files.Descend(func(item *filesItem) bool {
+	a, _ := ii.files.Max()
+	if a == nil {
+		a = &filesItem{}
+	}
+	ii.files.Descend(a, func(item *filesItem) bool {
 		if item.endTxNum-item.startTxNum == StepsInBiggestFile*li.aggregationStep {
 			toStep = item.endTxNum / li.aggregationStep
 			return false
@@ -290,10 +295,14 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ii *InvertedIndex, toSt
 }
 
 func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumTo uint64) {
+	if li.file != nil {
+		li.file.canDelete.Store(true)
+	}
 	li.file = &filesItem{
 		startTxNum: txNumFrom,
 		endTxNum:   txNumTo,
 		index:      sf.index,
+		frozen:     (txNumTo-txNumFrom)/li.aggregationStep == StepsInBiggestFile,
 	}
 	li.bm = sf.bm
 }
@@ -314,14 +323,7 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedInd
 	if err != nil {
 		return err
 	}
-	var oldFile *filesItem
-	if li.file != nil {
-		oldFile = li.file
-	}
 	li.integrateFiles(*f, fromStep*li.aggregationStep, toStep*li.aggregationStep)
-	if err = li.deleteFiles(oldFile); err != nil {
-		return err
-	}
 	return nil
 }
 

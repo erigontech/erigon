@@ -480,12 +480,16 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 		return false, nil
 	}
 
-	outs := a.staticFilesInRange(r)
+	ac := a.MakeContext() // this need, to ensure we do all operations on files in "transaction-style", maybe we will ensure it on type-level in future
+	defer ac.Close()
+
+	outs := a.staticFilesInRange(r, ac)
 	defer func() {
 		if closeAll {
 			outs.Close()
 		}
 	}()
+
 	in, err := a.mergeFiles(ctx, outs, r, maxSpan, workers)
 	if err != nil {
 		return true, err
@@ -496,9 +500,6 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 		}
 	}()
 	a.integrateMergedFiles(outs, in)
-	if err = a.deleteFiles(outs); err != nil {
-		return true, err
-	}
 	closeAll = false
 	return true, nil
 }
@@ -721,9 +722,11 @@ func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 	}
 	histBlockNumProgress := tx2block(a.maxTxNum.Load())
 	str := make([]string, 0, a.accounts.InvertedIndex.files.Len())
-	a.accounts.InvertedIndex.files.Ascend(func(it *filesItem) bool {
-		bn := tx2block(it.endTxNum)
-		str = append(str, fmt.Sprintf("%d=%dK", it.endTxNum/a.aggregationStep, bn/1_000))
+	a.accounts.InvertedIndex.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			bn := tx2block(item.endTxNum)
+			str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/a.aggregationStep, bn/1_000))
+		}
 		return true
 	})
 
@@ -753,6 +756,15 @@ func (a *AggregatorV3) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) 
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.maxTxNum.Load() }
+func (a *AggregatorV3) EndTxNumFrozenAndIndexed() uint64 {
+	return cmp.Min(
+		cmp.Min(
+			a.accounts.endIndexedTxNumMinimax(true),
+			a.storage.endIndexedTxNumMinimax(true),
+		),
+		a.code.endIndexedTxNumMinimax(true),
+	)
+}
 func (a *AggregatorV3) recalcMaxTxNum() {
 	min := a.accounts.endTxNumMinimax()
 	if txNum := a.storage.endTxNumMinimax(); txNum < min {
@@ -847,28 +859,30 @@ func (sf SelectedStaticFilesV3) Close() {
 	}
 }
 
-func (a *AggregatorV3) staticFilesInRange(r RangesV3) SelectedStaticFilesV3 {
+func (a *AggregatorV3) staticFilesInRange(r RangesV3, ac *AggregatorV3Context) SelectedStaticFilesV3 {
+	_ = ac // maybe will move this method to `ac` object
+
 	var sf SelectedStaticFilesV3
 	if r.accounts.any() {
-		sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts)
+		sf.accountsIdx, sf.accountsHist, sf.accountsI = a.accounts.staticFilesInRange(r.accounts, ac.accounts)
 	}
 	if r.storage.any() {
-		sf.storageIdx, sf.storageHist, sf.storageI = a.storage.staticFilesInRange(r.storage)
+		sf.storageIdx, sf.storageHist, sf.storageI = a.storage.staticFilesInRange(r.storage, ac.storage)
 	}
 	if r.code.any() {
-		sf.codeIdx, sf.codeHist, sf.codeI = a.code.staticFilesInRange(r.code)
+		sf.codeIdx, sf.codeHist, sf.codeI = a.code.staticFilesInRange(r.code, ac.code)
 	}
 	if r.logAddrs {
-		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum)
+		sf.logAddrs, sf.logAddrsI = a.logAddrs.staticFilesInRange(r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.logAddrs)
 	}
 	if r.logTopics {
-		sf.logTopics, sf.logTopicsI = a.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum)
+		sf.logTopics, sf.logTopicsI = a.logTopics.staticFilesInRange(r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.logTopics)
 	}
 	if r.tracesFrom {
-		sf.tracesFrom, sf.tracesFromI = a.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum)
+		sf.tracesFrom, sf.tracesFromI = a.tracesFrom.staticFilesInRange(r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.tracesFrom)
 	}
 	if r.tracesTo {
-		sf.tracesTo, sf.tracesToI = a.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum)
+		sf.tracesTo, sf.tracesToI = a.tracesTo.staticFilesInRange(r.tracesToStartTxNum, r.tracesToEndTxNum, ac.tracesTo)
 	}
 	return sf
 }
@@ -993,31 +1007,6 @@ func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in Merge
 	a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
 	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
-}
-
-func (a *AggregatorV3) deleteFiles(outs SelectedStaticFilesV3) error {
-	if err := a.accounts.deleteFiles(outs.accountsIdx, outs.accountsHist); err != nil {
-		return err
-	}
-	if err := a.storage.deleteFiles(outs.storageIdx, outs.storageHist); err != nil {
-		return err
-	}
-	if err := a.code.deleteFiles(outs.codeIdx, outs.codeHist); err != nil {
-		return err
-	}
-	if err := a.logAddrs.deleteFiles(outs.logAddrs); err != nil {
-		return err
-	}
-	if err := a.logTopics.deleteFiles(outs.logTopics); err != nil {
-		return err
-	}
-	if err := a.tracesFrom.deleteFiles(outs.tracesFrom); err != nil {
-		return err
-	}
-	if err := a.tracesTo.deleteFiles(outs.tracesTo); err != nil {
-		return err
-	}
-	return nil
 }
 
 // KeepInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
@@ -1305,7 +1294,15 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
 }
-func (ac *AggregatorV3Context) Close() {}
+func (ac *AggregatorV3Context) Close() {
+	ac.accounts.Close()
+	ac.storage.Close()
+	ac.code.Close()
+	ac.logAddrs.Close()
+	ac.logTopics.Close()
+	ac.tracesFrom.Close()
+	ac.tracesTo.Close()
+}
 
 // BackgroundResult - used only indicate that some work is done
 // no much reason to pass exact results by this object, just get latest state when need
@@ -1346,23 +1343,16 @@ type AggregatorStep struct {
 }
 
 func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
-	to := a.maxTxNum.Load()
-	indexedMax := cmp.Min(
-		cmp.Min(a.accounts.endIndexedTxNumMinimax(), a.storage.endIndexedTxNumMinimax()),
-		a.code.endIndexedTxNumMinimax(),
-	)
-	if to != indexedMax {
-		log.Warn("[snapshots] not all files are indexed", "files", to/a.aggregationStep, "indexed", indexedMax/a.aggregationStep)
-		to = cmp.Min(to, indexedMax)
-	}
-	accountSteps := a.accounts.MakeSteps(to)
-	codeSteps := a.code.MakeSteps(to)
-	storageSteps := a.storage.MakeSteps(to)
+	frozenAndIndexed := a.EndTxNumFrozenAndIndexed()
+	accountSteps := a.accounts.MakeSteps(frozenAndIndexed)
+	codeSteps := a.code.MakeSteps(frozenAndIndexed)
+	storageSteps := a.storage.MakeSteps(frozenAndIndexed)
 	if len(accountSteps) != len(storageSteps) || len(storageSteps) != len(codeSteps) {
 		return nil, fmt.Errorf("different limit of steps (try merge snapshots): accountSteps=%d, storageSteps=%d, codeSteps=%d", len(accountSteps), len(storageSteps), len(codeSteps))
 	}
 	steps := make([]*AggregatorStep, len(accountSteps))
 	for i, accountStep := range accountSteps {
+		log.Warn("dbg", "step", accountStep.historyItem.decompressor.FileName(), "startTx", accountStep.indexFile.startTxNum, "endTx", accountStep.indexFile.endTxNum)
 		steps[i] = &AggregatorStep{
 			a:        a,
 			accounts: accountStep,

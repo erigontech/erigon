@@ -4,24 +4,24 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/google/btree"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 func TestFindMergeRangeMustHandleAbsenseOfSomeFiles(t *testing.T) {
 	t.Run("not equal amount of files", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree.NewG[*filesItem](32, filesItemLess)}
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 1})
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 1, endTxNum: 2})
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
+		ii.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
+		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
+		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
 
-		h := &History{InvertedIndex: ii, files: btree.NewG[*filesItem](32, filesItemLess)}
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 1, endTxNum: 2})
+		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
+		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.history)
@@ -29,14 +29,14 @@ func TestFindMergeRangeMustHandleAbsenseOfSomeFiles(t *testing.T) {
 		assert.Equal(t, r.indexEndTxNum, uint64(2))
 	})
 	t.Run("idx merged, history not yet", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree.NewG[*filesItem](32, filesItemLess)}
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 2})
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 2, endTxNum: 3})
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 3, endTxNum: 4})
+		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 2})
+		ii.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
+		ii.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
 
-		h := &History{InvertedIndex: ii, files: btree.NewG[*filesItem](32, filesItemLess)}
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 1, endTxNum: 2})
+		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
+		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.history)
@@ -44,14 +44,14 @@ func TestFindMergeRangeMustHandleAbsenseOfSomeFiles(t *testing.T) {
 		assert.Equal(t, uint64(2), r.historyEndTxNum)
 	})
 	t.Run("idx merged, history not yet, 2", func(t *testing.T) {
-		ii := &InvertedIndex{aggregationStep: 1, files: btree.NewG[*filesItem](32, filesItemLess)}
-		ii.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 4})
+		ii := &InvertedIndex{aggregationStep: 1, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		ii.files.Set(&filesItem{startTxNum: 0, endTxNum: 4})
 
-		h := &History{InvertedIndex: ii, files: btree.NewG[*filesItem](32, filesItemLess)}
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 0, endTxNum: 1})
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 1, endTxNum: 2})
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 2, endTxNum: 3})
-		h.files.ReplaceOrInsert(&filesItem{startTxNum: 3, endTxNum: 4})
+		h := &History{InvertedIndex: ii, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
+		h.files.Set(&filesItem{startTxNum: 0, endTxNum: 1})
+		h.files.Set(&filesItem{startTxNum: 1, endTxNum: 2})
+		h.files.Set(&filesItem{startTxNum: 2, endTxNum: 3})
+		h.files.Set(&filesItem{startTxNum: 3, endTxNum: 4})
 
 		r := h.findMergeRange(4, 32)
 		assert.True(t, r.history)

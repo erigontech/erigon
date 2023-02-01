@@ -267,13 +267,13 @@ func (sf RSelectedStaticFiles) Close() {
 func (ri *ReadIndices) staticFilesInRange(r RRanges) RSelectedStaticFiles {
 	var sf RSelectedStaticFiles
 	if r.accounts {
-		sf.accounts, sf.accountsI = ri.accounts.staticFilesInRange(r.accountsStartTxNum, r.accountsEndTxNum)
+		sf.accounts, sf.accountsI = ri.accounts.staticFilesInRange(r.accountsStartTxNum, r.accountsEndTxNum, nil)
 	}
 	if r.storage {
-		sf.storage, sf.storageI = ri.storage.staticFilesInRange(r.storageStartTxNum, r.storageEndTxNum)
+		sf.storage, sf.storageI = ri.storage.staticFilesInRange(r.storageStartTxNum, r.storageEndTxNum, nil)
 	}
 	if r.code {
-		sf.code, sf.codeI = ri.code.staticFilesInRange(r.codeStartTxNum, r.codeEndTxNum)
+		sf.code, sf.codeI = ri.code.staticFilesInRange(r.codeStartTxNum, r.codeEndTxNum, nil)
 	}
 	return sf
 }
@@ -355,19 +355,6 @@ func (ri *ReadIndices) integrateMergedFiles(outs RSelectedStaticFiles, in RMerge
 	ri.code.integrateMergedFiles(outs.code, in.code)
 }
 
-func (ri *ReadIndices) deleteFiles(outs RSelectedStaticFiles) error {
-	if err := ri.accounts.deleteFiles(outs.accounts); err != nil {
-		return err
-	}
-	if err := ri.storage.deleteFiles(outs.storage); err != nil {
-		return err
-	}
-	if err := ri.code.deleteFiles(outs.code); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (ri *ReadIndices) ReadAccountData(addr []byte) error {
 	return ri.accounts.Add(addr)
 }
@@ -438,9 +425,6 @@ func (ri *ReadIndices) FinishTx() error {
 			}
 		}()
 		ri.integrateMergedFiles(outs, in)
-		if err = ri.deleteFiles(outs); err != nil {
-			return err
-		}
 	}
 	closeAll = false
 	return nil

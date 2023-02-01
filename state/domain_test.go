@@ -27,9 +27,9 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -153,7 +153,9 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	var keys, vals []string
-	err = d.MakeContext().IteratePrefix([]byte("addr2"), func(k, v []byte) {
+	dc := d.MakeContext()
+	defer dc.Close()
+	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
 		vals = append(vals, string(v))
 	})
@@ -203,11 +205,11 @@ func TestAfterPrune(t *testing.T) {
 
 	sf, err := d.buildFiles(ctx, 0, c)
 	require.NoError(t, err)
-	defer sf.Close()
 
 	d.integrateFiles(sf, 0, 16)
 	var v []byte
 	dc := d.MakeContext()
+	defer dc.Close()
 	v, err = dc.Get([]byte("key1"), nil, tx)
 	require.NoError(t, err)
 	require.Equal(t, []byte("value1.3"), v)
@@ -283,6 +285,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 	// Check the history
 	var roTx kv.Tx
 	dc := d.MakeContext()
+	defer dc.Close()
 	for txNum := uint64(0); txNum <= txs; txNum++ {
 		if txNum == 976 {
 			// Create roTx obnly for the last several txNum, because all history before that
@@ -401,7 +404,9 @@ func TestIterationMultistep(t *testing.T) {
 
 	var keys []string
 	var vals []string
-	err = d.MakeContext().IteratePrefix([]byte("addr2"), func(k, v []byte) {
+	dc := d.MakeContext()
+	defer dc.Close()
+	err = dc.IteratePrefix([]byte("addr2"), func(k, v []byte) {
 		keys = append(keys, string(k))
 		vals = append(vals, string(v))
 	})
@@ -412,6 +417,7 @@ func TestIterationMultistep(t *testing.T) {
 
 func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64) {
 	t.Helper()
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
@@ -437,12 +443,12 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			maxEndTxNum := d.endTxNumMinimax()
 			maxSpan := uint64(16 * 16)
 			for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
-				valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r)
+				dc := d.MakeContext()
+				valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
 				valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
 				require.NoError(t, err)
 				d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-				err = d.deleteFiles(valuesOuts, indexOuts, historyOuts)
-				require.NoError(t, err)
+				dc.Close()
 			}
 		}()
 	}
@@ -473,20 +479,18 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * d.aggregationStep
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
-		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r)
+		dc := d.MakeContext()
+		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
 		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-		err = d.deleteFiles(valuesOuts, indexOuts, historyOuts)
-		require.NoError(t, err)
+		dc.Close()
 	}
 }
 
 func TestMergeFiles(t *testing.T) {
 	_, db, d, txs := filledDomain(t)
-	defer db.Close()
-	defer d.Close()
 
 	collateAndMerge(t, db, nil, d, txs)
 	checkHistory(t, db, d, txs)
@@ -494,8 +498,6 @@ func TestMergeFiles(t *testing.T) {
 
 func TestScanFiles(t *testing.T) {
 	path, db, d, txs := filledDomain(t)
-	defer db.Close()
-	defer d.Close()
 
 	collateAndMerge(t, db, nil, d, txs)
 	// Recreate domain and re-scan the files
@@ -536,6 +538,7 @@ func TestDelete(t *testing.T) {
 	collateAndMerge(t, db, tx, d, 1000)
 	// Check the history
 	dc := d.MakeContext()
+	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
 		val, err := dc.GetBeforeTxNum([]byte("key1"), txNum+1, tx)
 		require.NoError(t, err)
@@ -601,8 +604,6 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 	keyCount, txCount := uint64(4), uint64(64)
 	_, db, dom, data := filledDomainFixedSize(t, keyCount, txCount)
-	defer db.Close()
-	defer dom.Close()
 
 	collateAndMerge(t, db, nil, dom, txCount)
 
@@ -613,6 +614,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 
 	// Check the history
 	dc := dom.MakeContext()
+	defer dc.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keyCount; keyNum++ {
 			var k [8]byte
@@ -704,6 +706,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 
 	// Check the history
 	dc := d.MakeContext()
+	defer dc.Close()
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
 			valNum := txNum
@@ -745,7 +748,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 
 func TestScanStaticFilesD(t *testing.T) {
 	ii := &Domain{History: &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1}},
-		files: btree.NewG[*filesItem](32, filesItemLess),
+		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
 	ffs := fstest.MapFS{
 		"test.0-1.kv": {},
@@ -759,8 +762,10 @@ func TestScanStaticFilesD(t *testing.T) {
 	require.NoError(t, err)
 	ii.scanStateFiles(files)
 	var found []string
-	ii.files.Ascend(func(i *filesItem) bool {
-		found = append(found, fmt.Sprintf("%d-%d", i.startTxNum, i.endTxNum))
+	ii.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
+		}
 		return true
 	})
 	require.Equal(t, 2, len(found))
