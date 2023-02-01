@@ -901,7 +901,7 @@ func reconstituteStep(last bool,
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})
-	var bn uint64
+	//var bn uint64
 	go func() {
 		for {
 			select {
@@ -926,11 +926,10 @@ func reconstituteStep(last bool,
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				syncMetrics[stages.Execution].Set(bn)
 				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].Get(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -985,7 +984,7 @@ func reconstituteStep(last bool,
 	}
 
 	var err error // avoid declare global mutable variable
-	for bn = startBlockNum; bn <= endBlockNum; bn++ {
+	for bn := startBlockNum; bn <= endBlockNum; bn++ {
 		t = time.Now()
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
@@ -1047,6 +1046,7 @@ func reconstituteStep(last bool,
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
+		syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()
