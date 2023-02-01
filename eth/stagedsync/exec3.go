@@ -1254,16 +1254,27 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 
+	// Incremental reconstitution, step by step (snapshot range by snapshot range)
+	aggSteps, err := agg.MakeSteps()
+	if err != nil {
+		return err
+	}
+	if len(aggSteps) == 0 {
+		return nil
+	}
+	lastStep := aggSteps[len(aggSteps)-1]
+
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
 	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		_, toTxNum := lastStep.TxNumRange()
+		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, toTxNum)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", toTxNum)
 		}
 		if blockNum == 0 {
 			return fmt.Errorf("not enough transactions in the history data")
@@ -1296,12 +1307,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
-	// Incremental reconstitution, step by step (snapshot range by snapshot range)
-
-	aggSteps, err := agg.MakeSteps()
-	if err != nil {
-		return err
-	}
 	for step, as := range aggSteps {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
 		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
