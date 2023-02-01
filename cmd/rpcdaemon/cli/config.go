@@ -342,76 +342,66 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 
 		// Configure sapshots
-		if cfg.Snap.Enabled {
-			allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-			allSnapshots.OptimisticReopenWithDB(db)
-			allSnapshots.LogStat()
+		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSnapshots.OptimisticReopenWithDB(db)
+		allSnapshots.LogStat()
 
-			if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
-			}
-			_ = agg.ReopenFiles()
-
-			db.View(context.Background(), func(tx kv.Tx) error {
-				agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress
-				})
-				return nil
-			})
-			onNewSnapshot = func() {
-				go func() { // don't block events processing by network communication
-					reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
-					if err != nil {
-						log.Warn("[Snapshots] reopen", "err", err)
-						return
-					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						allSnapshots.LogStat()
-					}
-
-					if err = agg.ReopenFiles(); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						db.View(context.Background(), func(tx kv.Tx) error {
-							agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-								_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-								return histBlockNumProgress
-							})
-							return nil
-						})
-					}
-				}()
-			}
-			onNewSnapshot()
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-			var histV3Enabled bool
-			_ = db.View(ctx, func(tx kv.Tx) error {
-				histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
-				return nil
-			})
-			if histV3Enabled {
-				log.Info("HistoryV3", "enable", histV3Enabled)
-				db, err = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[cc.ChainName])
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-				}
-			}
-			stateCache = kvcache.NewDummy()
-		} else {
-			var transactionsV3 bool
-			_ = db.View(ctx, func(tx kv.Tx) error {
-				transactionsV3, _ = kvcfg.TransactionsV3.Enabled(tx)
-				return nil
-			})
-			blockReader = snapshotsync.NewBlockReader(transactionsV3)
-			stateCache = kvcache.NewDummy()
+		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		_ = agg.ReopenFiles()
+
+		db.View(context.Background(), func(tx kv.Tx) error {
+			agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress
+			})
+			return nil
+		})
+		onNewSnapshot = func() {
+			go func() { // don't block events processing by network communication
+				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+				if err != nil {
+					log.Warn("[Snapshots] reopen", "err", err)
+					return
+				}
+				if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+					log.Error("[Snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat()
+				}
+
+				if err = agg.ReopenFiles(); err != nil {
+					log.Error("[Snapshots] reopen", "err", err)
+				} else {
+					db.View(context.Background(), func(tx kv.Tx) error {
+						agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress
+						})
+						return nil
+					})
+				}
+			}()
+		}
+		onNewSnapshot()
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+
+		var histV3Enabled bool
+		_ = db.View(ctx, func(tx kv.Tx) error {
+			histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
+			return nil
+		})
+		if histV3Enabled {
+			log.Info("HistoryV3", "enable", histV3Enabled)
+			db, err = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[cc.ChainName])
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+			}
+		}
+		stateCache = kvcache.NewDummy()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {

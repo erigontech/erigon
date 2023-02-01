@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -358,12 +357,7 @@ func NewDefaultStages(ctx context.Context,
 	engine consensus.Engine,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
@@ -444,12 +438,7 @@ func NewDefaultStages(ctx context.Context,
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) (*stagedsync.Sync, error) {
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,

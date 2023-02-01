@@ -44,12 +44,7 @@ func NewStagedSync(ctx context.Context,
 	engine consensus.Engine,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader(cfg.TransactionsV3)
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.

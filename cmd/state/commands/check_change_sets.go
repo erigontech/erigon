@@ -74,19 +74,13 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if err != nil {
 		return err
 	}
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader(false)
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenFolder(); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	
 	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb

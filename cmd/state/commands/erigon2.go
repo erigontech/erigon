@@ -225,19 +225,12 @@ func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 	}()
 
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenWithDB(db); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader(false)
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenWithDB(db); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {
