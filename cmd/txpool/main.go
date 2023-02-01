@@ -136,7 +136,7 @@ var rootCmd = &cobra.Command{
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 
-		newTxs := make(chan types.Hashes, 1024)
+		newTxs := make(chan types.Announcements, 1024)
 		defer close(newTxs)
 		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
 			kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
