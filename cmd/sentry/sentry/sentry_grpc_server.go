@@ -466,9 +466,6 @@ func runPeer(
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
-				if protocol == eth.ETH68 {
-					fmt.Printf("NewPooledTransactionHashesMsg 68 arrived, but no subscribers\n")
-				}
 				continue
 			}
 
@@ -1124,7 +1121,7 @@ func (ss *GrpcServer) addMessagesStream(ids []proto_sentry.MessageId, ch chan *p
 
 const MessagesQueueSize = 1024 // one such queue per client of .Messages stream
 func (ss *GrpcServer) Messages(req *proto_sentry.MessagesRequest, server proto_sentry.Sentry_MessagesServer) error {
-	log.Info("[Messages] new subscriber", "to", req.Ids)
+	log.Trace("[Messages] new subscriber", "to", req.Ids)
 	ch := make(chan *proto_sentry.InboundMessage, MessagesQueueSize)
 	defer close(ch)
 	clean := ss.addMessagesStream(req.Ids, ch)
