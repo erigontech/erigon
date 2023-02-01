@@ -110,7 +110,7 @@ func ExecV3(ctx context.Context,
 	parallel bool, rs *state.StateV3, logPrefix string,
 	logger log.Logger,
 	maxBlockNum uint64,
-) (err error) {
+) error {
 	batchSize, chainDb := cfg.batchSize, cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
@@ -119,6 +119,7 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
+		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -484,6 +485,7 @@ func ExecV3(ctx context.Context,
 
 	var b *types.Block
 	var blockNum uint64
+	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		inputBlockNum.Store(blockNum)
