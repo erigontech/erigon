@@ -16,6 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -184,10 +185,10 @@ func (api *BorImpl) GetCurrentProposer() (common.Address, error) {
 }
 
 // GetCurrentValidators gets the current validators
-func (api *BorImpl) GetCurrentValidators() ([]*bor.Validator, error) {
+func (api *BorImpl) GetCurrentValidators() ([]*valset.Validator, error) {
 	snap, err := api.GetSnapshot(nil)
 	if err != nil {
-		return make([]*bor.Validator, 0), err
+		return make([]*valset.Validator, 0), err
 	}
 	return snap.ValidatorSet.Validators, nil
 }
@@ -207,11 +208,11 @@ func (api *BorImpl) GetRootHash(start, end uint64) (string, error) {
 	header := rawdb.ReadCurrentHeader(tx)
 	var currentHeaderNumber uint64 = 0
 	if header == nil {
-		return "", &bor.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	currentHeaderNumber = header.Number.Uint64()
 	if start > end || end > currentHeaderNumber {
-		return "", &bor.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	blockHeaders := make([]*types.Header, end-start+1)
 	for number := start; number <= end; number++ {
@@ -343,7 +344,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 
 			// get validators from headers and use that for new validator set
-			newVals, _ := bor.ParseValidators(validatorBytes)
+			newVals, _ := valset.ParseValidators(validatorBytes)
 			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals)
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
@@ -418,7 +419,7 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 	snap.config = config.Bor
 
 	// update total voting power
-	if err := snap.ValidatorSet.updateTotalVotingPower(); err != nil {
+	if err := snap.ValidatorSet.UpdateTotalVotingPower(); err != nil {
 		return nil, err
 	}
 

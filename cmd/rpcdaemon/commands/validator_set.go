@@ -13,7 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -43,8 +43,8 @@ const (
 // NOTE: All get/set to validators should copy the value for safety.
 type ValidatorSet struct {
 	// NOTE: persisted via reflect, must be exported.
-	Validators []*bor.Validator `json:"validators"`
-	Proposer   *bor.Validator   `json:"proposer"`
+	Validators []*valset.Validator `json:"validators"`
+	Proposer   *valset.Validator   `json:"proposer"`
 
 	// cached (unexported)
 	totalVotingPower int64
@@ -55,7 +55,7 @@ type ValidatorSet struct {
 // the new ValidatorSet will have an empty list of Validators.
 // The addresses of validators in `valz` must be unique otherwise the
 // function panics.
-func NewValidatorSet(valz []*bor.Validator) *ValidatorSet {
+func NewValidatorSet(valz []*valset.Validator) *ValidatorSet {
 	vals := &ValidatorSet{}
 	err := vals.updateWithChangeSet(valz, false)
 	if err != nil {
@@ -97,7 +97,7 @@ func (vals *ValidatorSet) IncrementProposerPriority(times int) {
 	vals.RescalePriorities(diffMax)
 	vals.shiftByAvgProposerPriority()
 
-	var proposer *bor.Validator
+	var proposer *valset.Validator
 	// Call IncrementProposerPriority(1) times times.
 	for i := 0; i < times; i++ {
 		proposer = vals.incrementProposerPriority()
@@ -129,7 +129,7 @@ func (vals *ValidatorSet) RescalePriorities(diffMax int64) {
 	}
 }
 
-func (vals *ValidatorSet) incrementProposerPriority() *bor.Validator {
+func (vals *ValidatorSet) incrementProposerPriority() *valset.Validator {
 	for _, val := range vals.Validators {
 		// Check for overflow for sum.
 		newPrio := safeAddClip(val.ProposerPriority, val.VotingPower)
@@ -182,8 +182,8 @@ func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
 	}
 }
 
-func (vals *ValidatorSet) getValWithMostPriority() *bor.Validator {
-	var res *bor.Validator
+func (vals *ValidatorSet) getValWithMostPriority() *valset.Validator {
+	var res *valset.Validator
 	for _, val := range vals.Validators {
 		res = res.Cmp(val)
 	}
@@ -201,11 +201,11 @@ func (vals *ValidatorSet) shiftByAvgProposerPriority() {
 }
 
 // Makes a copy of the validator list.
-func validatorListCopy(valsList []*bor.Validator) []*bor.Validator {
+func validatorListCopy(valsList []*valset.Validator) []*valset.Validator {
 	if valsList == nil {
 		return nil
 	}
-	valsCopy := make([]*bor.Validator, len(valsList))
+	valsCopy := make([]*valset.Validator, len(valsList))
 	for i, val := range valsList {
 		valsCopy[i] = val.Copy()
 	}
@@ -232,7 +232,7 @@ func (vals *ValidatorSet) HasAddress(address []byte) bool {
 
 // GetByAddress returns an index of the validator with address and validator
 // itself if found. Otherwise, -1 and nil are returned.
-func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *bor.Validator) {
+func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, val *valset.Validator) {
 	idx := sort.Search(len(vals.Validators), func(i int) bool {
 		return bytes.Compare(address.Bytes(), vals.Validators[i].Address.Bytes()) <= 0
 	})
@@ -245,7 +245,7 @@ func (vals *ValidatorSet) GetByAddress(address libcommon.Address) (index int, va
 // GetByIndex returns the validator's address and validator itself by index.
 // It returns nil values if index is less than 0 or greater or equal to
 // len(ValidatorSet.Validators).
-func (vals *ValidatorSet) GetByIndex(index int) (address []byte, val *bor.Validator) {
+func (vals *ValidatorSet) GetByIndex(index int) (address []byte, val *valset.Validator) {
 	if index < 0 || index >= len(vals.Validators) {
 		return nil, nil
 	}
@@ -259,14 +259,14 @@ func (vals *ValidatorSet) Size() int {
 }
 
 // Force recalculation of the set's total voting power.
-func (vals *ValidatorSet) updateTotalVotingPower() error {
+func (vals *ValidatorSet) UpdateTotalVotingPower() error {
 
 	sum := int64(0)
 	for _, val := range vals.Validators {
 		// mind overflow
 		sum = safeAddClip(sum, val.VotingPower)
 		if sum > MaxTotalVotingPower {
-			return &bor.TotalVotingPowerExceededError{Sum: sum, Validators: vals.Validators}
+			return &valset.TotalVotingPowerExceededError{Sum: sum, Validators: vals.Validators}
 		}
 	}
 	vals.totalVotingPower = sum
@@ -278,7 +278,7 @@ func (vals *ValidatorSet) updateTotalVotingPower() error {
 func (vals *ValidatorSet) TotalVotingPower() int64 {
 	if vals.totalVotingPower == 0 {
 		log.Info("invoking updateTotalVotingPower before returning it")
-		if err := vals.updateTotalVotingPower(); err != nil {
+		if err := vals.UpdateTotalVotingPower(); err != nil {
 			// Can/should we do better?
 			panic(err)
 		}
@@ -288,7 +288,7 @@ func (vals *ValidatorSet) TotalVotingPower() int64 {
 
 // GetProposer returns the current proposer. If the validator set is empty, nil
 // is returned.
-func (vals *ValidatorSet) GetProposer() (proposer *bor.Validator) {
+func (vals *ValidatorSet) GetProposer() (proposer *valset.Validator) {
 	if len(vals.Validators) == 0 {
 		return nil
 	}
@@ -298,8 +298,8 @@ func (vals *ValidatorSet) GetProposer() (proposer *bor.Validator) {
 	return vals.Proposer.Copy()
 }
 
-func (vals *ValidatorSet) findProposer() *bor.Validator {
-	var proposer *bor.Validator
+func (vals *ValidatorSet) findProposer() *valset.Validator {
+	var proposer *valset.Validator
 	for _, val := range vals.Validators {
 		if proposer == nil || !bytes.Equal(val.Address.Bytes(), proposer.Address.Bytes()) {
 			proposer = proposer.Cmp(val)
@@ -322,7 +322,7 @@ func (vals *ValidatorSet) findProposer() *bor.Validator {
 // }
 
 // Iterate will run the given function over the set.
-func (vals *ValidatorSet) Iterate(fn func(index int, val *bor.Validator) bool) {
+func (vals *ValidatorSet) Iterate(fn func(index int, val *valset.Validator) bool) {
 	for i, val := range vals.Validators {
 		stop := fn(i, val.Copy())
 		if stop {
@@ -338,13 +338,13 @@ func (vals *ValidatorSet) Iterate(fn func(index int, val *bor.Validator) bool) {
 // err - non-nil if duplicate entries or entries with negative voting power are seen
 //
 // No changes are made to 'origChanges'.
-func processChanges(origChanges []*bor.Validator) (updates, removals []*bor.Validator, err error) {
+func processChanges(origChanges []*valset.Validator) (updates, removals []*valset.Validator, err error) {
 	// Make a deep copy of the changes and sort by address.
 	changes := validatorListCopy(origChanges)
 	sort.Sort(ValidatorsByAddress(changes))
 
-	removals = make([]*bor.Validator, 0, len(changes))
-	updates = make([]*bor.Validator, 0, len(changes))
+	removals = make([]*valset.Validator, 0, len(changes))
+	updates = make([]*valset.Validator, 0, len(changes))
 	var prevAddr libcommon.Address
 
 	// Scan changes by address and append valid validators to updates or removals lists.
@@ -383,7 +383,7 @@ func processChanges(origChanges []*bor.Validator) (updates, removals []*bor.Vali
 // 'updates' should be a list of proper validator changes, i.e. they have been verified
 // by processChanges for duplicates and invalid values.
 // No changes are made to the validator set 'vals'.
-func verifyUpdates(updates []*bor.Validator, vals *ValidatorSet) (updatedTotalVotingPower int64, numNewValidators int, err error) {
+func verifyUpdates(updates []*valset.Validator, vals *ValidatorSet) (updatedTotalVotingPower int64, numNewValidators int, err error) {
 
 	updatedTotalVotingPower = vals.TotalVotingPower()
 
@@ -415,7 +415,7 @@ func verifyUpdates(updates []*bor.Validator, vals *ValidatorSet) (updatedTotalVo
 //
 // 'updates' parameter must be a list of unique validators to be added or updated.
 // No changes are made to the validator set 'vals'.
-func computeNewPriorities(updates []*bor.Validator, vals *ValidatorSet, updatedTotalVotingPower int64) {
+func computeNewPriorities(updates []*valset.Validator, vals *ValidatorSet, updatedTotalVotingPower int64) {
 
 	for _, valUpdate := range updates {
 		address := valUpdate.Address
@@ -441,10 +441,10 @@ func computeNewPriorities(updates []*bor.Validator, vals *ValidatorSet, updatedT
 // When two elements with same address are seen, the one from updates is selected.
 // Expects updates to be a list of updates sorted by address with no duplicates or errors,
 // must have been validated with verifyUpdates() and priorities computed with computeNewPriorities().
-func (vals *ValidatorSet) applyUpdates(updates []*bor.Validator) {
+func (vals *ValidatorSet) applyUpdates(updates []*valset.Validator) {
 
 	existing := vals.Validators
-	merged := make([]*bor.Validator, len(existing)+len(updates))
+	merged := make([]*valset.Validator, len(existing)+len(updates))
 	i := 0
 
 	for len(existing) > 0 && len(updates) > 0 {
@@ -479,7 +479,7 @@ func (vals *ValidatorSet) applyUpdates(updates []*bor.Validator) {
 
 // Checks that the validators to be removed are part of the validator set.
 // No changes are made to the validator set 'vals'.
-func verifyRemovals(deletes []*bor.Validator, vals *ValidatorSet) error {
+func verifyRemovals(deletes []*valset.Validator, vals *ValidatorSet) error {
 
 	for _, valUpdate := range deletes {
 		address := valUpdate.Address
@@ -496,11 +496,11 @@ func verifyRemovals(deletes []*bor.Validator, vals *ValidatorSet) error {
 
 // Removes the validators specified in 'deletes' from validator set 'vals'.
 // Should not fail as verification has been done before.
-func (vals *ValidatorSet) applyRemovals(deletes []*bor.Validator) {
+func (vals *ValidatorSet) applyRemovals(deletes []*valset.Validator) {
 
 	existing := vals.Validators
 
-	merged := make([]*bor.Validator, len(existing)-len(deletes))
+	merged := make([]*valset.Validator, len(existing)-len(deletes))
 	i := 0
 
 	// Loop over deletes until we removed all of them.
@@ -527,7 +527,7 @@ func (vals *ValidatorSet) applyRemovals(deletes []*bor.Validator) {
 // If 'allowDeletes' is false then delete operations (identified by validators with voting power 0)
 // are not allowed and will trigger an error if present in 'changes'.
 // The 'allowDeletes' flag is set to false by NewValidatorSet() and to true by UpdateWithChangeSet().
-func (vals *ValidatorSet) updateWithChangeSet(changes []*bor.Validator, allowDeletes bool) error {
+func (vals *ValidatorSet) updateWithChangeSet(changes []*valset.Validator, allowDeletes bool) error {
 
 	if len(changes) < 1 {
 		return nil
@@ -566,7 +566,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*bor.Validator, allowDel
 	vals.applyUpdates(updates)
 	vals.applyRemovals(deletes)
 
-	if err := vals.updateTotalVotingPower(); err != nil {
+	if err := vals.UpdateTotalVotingPower(); err != nil {
 		return err
 	}
 
@@ -590,7 +590,7 @@ func (vals *ValidatorSet) updateWithChangeSet(changes []*bor.Validator, allowDel
 //
 // If an error is detected during verification steps, it is returned and the validator set
 // is not changed.
-func (vals *ValidatorSet) UpdateWithChangeSet(changes []*bor.Validator) error {
+func (vals *ValidatorSet) UpdateWithChangeSet(changes []*valset.Validator) error {
 	return vals.updateWithChangeSet(changes, true)
 }
 
@@ -626,7 +626,7 @@ func (vals *ValidatorSet) StringIndented(indent string) string {
 		return "nil-ValidatorSet"
 	}
 	var valStrings []string
-	vals.Iterate(func(index int, val *bor.Validator) bool {
+	vals.Iterate(func(index int, val *valset.Validator) bool {
 		valStrings = append(valStrings, val.String())
 		return false
 	})
@@ -646,7 +646,7 @@ func (vals *ValidatorSet) StringIndented(indent string) string {
 // Implements sort for sorting validators by address.
 
 // Sort validators by address.
-type ValidatorsByAddress []*bor.Validator
+type ValidatorsByAddress []*valset.Validator
 
 func (valz ValidatorsByAddress) Len() int {
 	return len(valz)
