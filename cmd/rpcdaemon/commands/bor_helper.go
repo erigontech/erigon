@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -118,7 +119,7 @@ func validateHeaderExtraField(extraBytes []byte) error {
 }
 
 // validatorContains checks for a validator in given validator set
-func validatorContains(a []*bor.Validator, x *bor.Validator) (*bor.Validator, bool) {
+func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
 	for _, n := range a {
 		if bytes.Equal(n.Address.Bytes(), x.Address.Bytes()) {
 			return n, true
@@ -128,11 +129,11 @@ func validatorContains(a []*bor.Validator, x *bor.Validator) (*bor.Validator, bo
 }
 
 // getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
-func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*bor.Validator) *ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Validator) *ValidatorSet {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
-	changes := make([]*bor.Validator, 0, len(oldVals))
+	changes := make([]*valset.Validator, 0, len(oldVals))
 	for _, ov := range oldVals {
 		if f, ok := validatorContains(newVals, ov); ok {
 			ov.VotingPower = f.VotingPower

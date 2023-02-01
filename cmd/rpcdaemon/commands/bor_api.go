@@ -4,7 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -17,7 +17,7 @@ type BorAPI interface {
 	GetSigners(number *rpc.BlockNumber) ([]common.Address, error)
 	GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	GetCurrentProposer() (common.Address, error)
-	GetCurrentValidators() ([]*bor.Validator, error)
+	GetCurrentValidators() ([]*valset.Validator, error)
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
