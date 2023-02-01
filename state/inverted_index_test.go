@@ -211,13 +211,15 @@ func filledInvIndex(t *testing.T) (string, kv.RwDB, *InvertedIndex, uint64) {
 func filledInvIndexOfSize(t *testing.T, txs, aggStep, module uint64) (string, kv.RwDB, *InvertedIndex, uint64) {
 	t.Helper()
 	path, db, ii := testDbAndInvertedIndex(t, aggStep)
-	ctx := context.Background()
+	ctx, require := context.Background(), require.New(t)
 	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
 	ii.StartWrites("")
 	defer ii.FinishWrites()
+
+	var flusher flusher
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
@@ -228,18 +230,23 @@ func filledInvIndexOfSize(t *testing.T, txs, aggStep, module uint64) (string, kv
 				var k [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				err = ii.Add(k[:])
-				require.NoError(t, err)
+				require.NoError(err)
 			}
 		}
+		if flusher != nil {
+			require.NoError(flusher.Flush(ctx, tx))
+		}
 		if txNum%10 == 0 {
-			err = ii.Rotate().Flush(ctx, tx)
-			require.NoError(t, err)
+			flusher = ii.Rotate()
 		}
 	}
+	if flusher != nil {
+		require.NoError(flusher.Flush(ctx, tx))
+	}
 	err = ii.Rotate().Flush(ctx, tx)
-	require.NoError(t, err)
+	require.NoError(err)
 	err = tx.Commit()
-	require.NoError(t, err)
+	require.NoError(err)
 	return path, db, ii, txs
 }
 

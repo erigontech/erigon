@@ -42,6 +42,7 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, doFsync bool, lvl lo
 	if b.Len() == 0 {
 		return nil, nil
 	}
+
 	// if we are going to create files in the system temp dir, we don't need any
 	// subfolders.
 	if tmpdir != "" {

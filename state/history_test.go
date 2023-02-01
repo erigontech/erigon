@@ -86,10 +86,15 @@ func TestHistoryCollationBuild(t *testing.T) {
 	err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 	require.NoError(err)
 
+	flusher := h.Rotate()
+
 	h.SetTxNum(7)
 	err = h.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
 	require.NoError(err)
 	err = h.AddPrevValue([]byte("key3"), nil, nil)
+	require.NoError(err)
+
+	err = flusher.Flush(ctx, tx)
 	require.NoError(err)
 
 	err = h.Rotate().Flush(ctx, tx)
@@ -234,6 +239,7 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	var prevVal [32][]byte
+	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 		h.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
@@ -250,10 +256,19 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 				prevVal[keyNum] = v[:]
 			}
 		}
-		if txNum%10 == 0 {
-			err = h.Rotate().Flush(ctx, tx)
+		if flusher != nil {
+			err = flusher.Flush(ctx, tx)
 			require.NoError(tb, err)
+			flusher = nil
 		}
+		if txNum%10 == 0 {
+			flusher = h.Rotate()
+		}
+	}
+	if flusher != nil {
+		err = flusher.Flush(ctx, tx)
+		require.NoError(tb, err)
+		flusher = nil
 	}
 	err = h.Rotate().Flush(ctx, tx)
 	require.NoError(tb, err)

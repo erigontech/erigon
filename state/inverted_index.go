@@ -61,14 +61,14 @@ type InvertedIndex struct {
 	tmpdir          string // Directory where static files are created
 	filenameBase    string
 	aggregationStep uint64
-	txNum           uint64
 	workers         int
-	txNumBytes      [8]byte
+	localityIndex   *LocalityIndex
 
-	localityIndex *LocalityIndex
-
-	wal     *invertedIndexWAL
-	walLock sync.RWMutex
+	// fields for history write
+	txNum      uint64
+	txNumBytes [8]byte
+	wal        *invertedIndexWAL
+	walLock    sync.RWMutex
 }
 
 func NewInvertedIndex(
@@ -328,20 +328,20 @@ func (ii *InvertedIndex) FinishWrites() {
 func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
 	ii.walLock.Lock()
 	defer ii.walLock.Unlock()
-	wal := ii.wal
-	if wal != nil {
-		ii.wal = ii.newWriter(ii.wal.tmpdir, ii.wal.buffered, ii.wal.discard)
+	if ii.wal != nil {
+		ii.wal.index, ii.wal.indexFlushing = ii.wal.indexFlushing, ii.wal.index
+		ii.wal.indexKeys, ii.wal.indexKeysFlushing = ii.wal.indexKeysFlushing, ii.wal.indexKeys
 	}
-	return wal
+	return ii.wal
 }
 
 type invertedIndexWAL struct {
-	ii        *InvertedIndex
-	index     *etl.Collector
-	indexKeys *etl.Collector
-	tmpdir    string
-	buffered  bool
-	discard   bool
+	ii                           *InvertedIndex
+	index, indexFlushing         *etl.Collector
+	indexKeys, indexKeysFlushing *etl.Collector
+	tmpdir                       string
+	buffered                     bool
+	discard                      bool
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -354,13 +354,12 @@ func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if ii.discard {
 		return nil
 	}
-	if err := ii.index.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ii.indexFlushing.Load(tx, ii.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := ii.indexKeys.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := ii.indexKeysFlushing.Load(tx, ii.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	ii.close()
 	return nil
 }
 
@@ -399,9 +398,13 @@ func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *inver
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.indexFlushing = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.indexKeysFlushing = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 		w.index.LogLvl(log.LvlTrace)
+		w.indexFlushing.LogLvl(log.LvlTrace)
 		w.indexKeys.LogLvl(log.LvlTrace)
+		w.indexKeysFlushing.LogLvl(log.LvlTrace)
 	}
 	return w
 }
