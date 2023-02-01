@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func decodeHex(in string) []byte {
@@ -360,4 +361,55 @@ func compareBucketsDouble(t *testing.T, db kv.Tx, b1, b2 string) {
 	})
 	assert.NoError(t, err)
 	assert.Equal(t, b1Map, b2Map)
+}
+
+func TestReuseCollectorAfterLoad(t *testing.T) {
+	buf := NewSortableBuffer(128)
+	c := NewCollector("", t.TempDir(), buf)
+
+	err := c.Collect([]byte{1}, []byte{2})
+	require.NoError(t, err)
+	see := 0
+	err = c.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		see++
+		return nil
+	}, TransformArgs{})
+	require.NoError(t, err)
+	require.Equal(t, 1, see)
+
+	// buffers are not lost
+	require.Zero(t, len(buf.data))
+	require.Zero(t, len(buf.lens))
+	require.Zero(t, len(buf.offsets))
+	require.NotZero(t, cap(buf.data))
+	require.NotZero(t, cap(buf.lens))
+	require.NotZero(t, cap(buf.offsets))
+
+	// teset that no data visible
+	see = 0
+	err = c.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		see++
+		return nil
+	}, TransformArgs{})
+	require.NoError(t, err)
+	require.Equal(t, 0, see)
+
+	// reuse
+	see = 0
+	err = c.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		see++
+		return nil
+	}, TransformArgs{})
+	require.NoError(t, err)
+	require.Equal(t, 0, see)
+
+	err = c.Collect([]byte{3}, []byte{4})
+	require.NoError(t, err)
+	see = 0
+	err = c.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+		see++
+		return nil
+	}, TransformArgs{})
+	require.NoError(t, err)
+	require.Equal(t, 1, see)
 }

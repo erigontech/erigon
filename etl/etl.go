@@ -150,7 +150,7 @@ func extractBucketIntoFiles(
 			return err
 		}
 	}
-	return collector.flushBuffer(nil, true)
+	return collector.flushBuffer(true)
 }
 
 type currentTableReader struct {
