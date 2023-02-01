@@ -13,9 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
 func TestInserter1(t *testing.T) {
+	m := stages.Mock(t)
 	funds := big.NewInt(1000000000)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -37,7 +39,7 @@ func TestInserter1(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	hi := NewHeaderInserter("headers", big.NewInt(0), 0, snapshotsync.NewBlockReader(false))
+	hi := NewHeaderInserter("headers", big.NewInt(0), 0, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots))
 	h1 := types.Header{
 		Number:     big.NewInt(1),
 		Difficulty: big.NewInt(10),
@@ -51,11 +53,11 @@ func TestInserter1(t *testing.T) {
 	}
 	h2Hash := h2.Hash()
 	data1, _ := rlp.EncodeToBytes(&h1)
-	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(false), &h1, data1, h1Hash, 1); err != nil {
+	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots), &h1, data1, h1Hash, 1); err != nil {
 		t.Errorf("feed empty header 1: %v", err)
 	}
 	data2, _ := rlp.EncodeToBytes(&h2)
-	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReader(false), &h2, data2, h2Hash, 2); err != nil {
+	if _, err = hi.FeedHeaderPoW(tx, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots), &h2, data2, h2Hash, 2); err != nil {
 		t.Errorf("feed empty header 2: %v", err)
 	}
 }
