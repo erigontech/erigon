@@ -1,6 +1,7 @@
 package transition
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -62,7 +63,10 @@ func IsValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 
 	pks := [][]byte{}
 	for _, v := range inds {
-		val := state.ValidatorAt(int(v))
+		val, err := state.ValidatorAt(int(v))
+		if err != nil {
+			return false, err
+		}
 		pks = append(pks, val.PublicKey[:])
 	}
 
@@ -110,8 +114,11 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer := s.state.ValidatorAt(int(h1.ProposerIndex))
-	if !IsSlashableValidator(proposer, s.state.Epoch()) {
+	proposer, err := s.state.ValidatorAt(int(h1.ProposerIndex))
+	if err != nil {
+		return err
+	}
+	if !IsSlashableValidator(&proposer, s.state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
@@ -169,7 +176,11 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	slashedAny := false
 	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
 	for _, ind := range indices {
-		if IsSlashableValidator(s.state.ValidatorAt(int(ind)), s.state.GetEpochAtSlot(s.state.Slot())) {
+		currentValidator, err := s.state.ValidatorAt(int(ind))
+		if err != nil {
+			return err
+		}
+		if IsSlashableValidator(&currentValidator, s.state.GetEpochAtSlot(s.state.Slot())) {
 			err := s.state.SlashValidator(ind, 0)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
@@ -236,9 +247,53 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddInactivityScore(0)
 		}
-	} else {
-		// Increase the balance if exists already
-		s.state.IncreaseBalance(int(validatorIndex), amount)
+		return nil
 	}
-	return nil
+	// Increase the balance if exists already
+	return s.state.IncreaseBalance(int(validatorIndex), amount)
+
+}
+
+// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
+func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
+	// Sanity checks so that we know it is good.
+	voluntaryExit := signedVoluntaryExit.VolunaryExit
+	currentEpoch := s.state.Epoch()
+	validator, err := s.state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+	if !validator.Active(currentEpoch) {
+		return errors.New("ProcessVoluntaryExit: validator is not active")
+	}
+	if validator.ExitEpoch != s.beaconConfig.FarFutureEpoch {
+		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
+	}
+	if currentEpoch < voluntaryExit.Epoch {
+		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
+	}
+	if currentEpoch < validator.ActivationEpoch+s.beaconConfig.ShardCommitteePeriod {
+		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
+	}
+
+	// We can skip it in some instances if we want to optimistically sync up.
+	if !s.noValidate {
+		domain, err := s.state.GetDomain(s.beaconConfig.DomainVoluntaryExit, voluntaryExit.Epoch)
+		if err != nil {
+			return err
+		}
+		signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
+		if err != nil {
+			return err
+		}
+		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], validator.PublicKey[:])
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return errors.New("ProcessVoluntaryExit: BLS verification failed")
+		}
+	}
+	// Do the exit (same process in slashing).
+	return s.state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }

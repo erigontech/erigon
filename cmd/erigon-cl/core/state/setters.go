@@ -56,8 +56,12 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.historicalRoots[index] = root
 }
 
-func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
+	if index >= len(b.validators) {
+		return InvalidValidatorIndex
+	}
 	b.validators[index] = validator
+	return nil
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -103,9 +107,13 @@ func (b *BeaconState) AddBalance(balance uint64) {
 	b.balances = append(b.balances, balance)
 }
 
-func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
+	if index >= len(b.balances) {
+		return InvalidValidatorIndex
+	}
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances[index] = balance
+	return nil
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {

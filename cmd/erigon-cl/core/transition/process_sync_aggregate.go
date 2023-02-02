@@ -45,14 +45,17 @@ func (s *StateTransistor) processSyncAggregate(sync *cltypes.SyncAggregate) ([][
 		currByte := sync.SyncCommiteeBits[i/8]
 		if (currByte & (1 << bit)) > 0 {
 			votedKeys = append(votedKeys, committeeKeys[i][:])
-			s.state.IncreaseBalance(int(vIdx), participantReward)
+			if err := s.state.IncreaseBalance(int(vIdx), participantReward); err != nil {
+				return nil, err
+			}
 			earnedProposerReward += proposerReward
 		} else {
-			s.state.DecreaseBalance(vIdx, participantReward)
+			if err := s.state.DecreaseBalance(vIdx, participantReward); err != nil {
+				return nil, err
+			}
 		}
 	}
-	s.state.IncreaseBalance(int(proposerIndex), earnedProposerReward)
-	return votedKeys, err
+	return votedKeys, s.state.IncreaseBalance(int(proposerIndex), earnedProposerReward)
 }
 
 func (s *StateTransistor) ProcessSyncAggregate(sync *cltypes.SyncAggregate) error {

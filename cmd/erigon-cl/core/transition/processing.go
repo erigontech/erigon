@@ -51,7 +51,10 @@ func (s *StateTransistor) ProcessBlockHeader(block *cltypes.BeaconBlock) error {
 		BodyRoot:      bodyRoot,
 	})
 
-	proposer := s.state.ValidatorAt(int(block.ProposerIndex))
+	proposer, err := s.state.ValidatorAt(int(block.ProposerIndex))
+	if err != nil {
+		return err
+	}
 	if proposer.Slashed {
 		return fmt.Errorf("proposer: %d is slashed", block.ProposerIndex)
 	}
@@ -64,7 +67,10 @@ func (s *StateTransistor) ProcessRandao(randao [96]byte) error {
 	if err != nil {
 		return fmt.Errorf("unable to get proposer index: %v", err)
 	}
-	proposer := s.state.ValidatorAt(int(propInd))
+	proposer, err := s.state.ValidatorAt(int(propInd))
+	if err != nil {
+		return err
+	}
 	domain, err := s.state.GetDomain(clparams.MainnetBeaconConfig.DomainRandao, epoch)
 	if err != nil {
 		return fmt.Errorf("unable to get domain: %v", err)

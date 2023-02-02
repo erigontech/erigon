@@ -1,11 +1,18 @@
 package state
 
 import (
+	"errors"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
+)
+
+var (
+	// Error for missing validator
+	InvalidValidatorIndex = errors.New("invalid validator index")
 )
 
 // Just a bunch of simple getters.
@@ -65,16 +72,22 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
-func (b *BeaconState) ValidatorAt(index int) *cltypes.Validator {
-	return b.validators[index]
+func (b *BeaconState) ValidatorAt(index int) (cltypes.Validator, error) {
+	if index >= len(b.validators) {
+		return cltypes.Validator{}, InvalidValidatorIndex
+	}
+	return *b.validators[index], nil
 }
 
 func (b *BeaconState) Balances() []uint64 {
 	return b.balances
 }
 
-func (b *BeaconState) ValidatorBalance(index int) uint64 {
-	return b.balances[index]
+func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
+	if index >= len(b.balances) {
+		return 0, InvalidValidatorIndex
+	}
+	return b.balances[index], nil
 }
 
 func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
