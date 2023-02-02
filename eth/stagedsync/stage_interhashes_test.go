@@ -201,7 +201,7 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	hash6 := libcommon.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, false)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, )
 	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), libcommon.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 

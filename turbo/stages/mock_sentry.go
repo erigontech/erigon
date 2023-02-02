@@ -97,6 +97,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
+	TransactionsV3 bool
 	agg            *libstate.AggregatorV3
 	BlockSnapshots *snapshotsync.RoSnapshots
 }
@@ -281,6 +282,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: snapshotsync.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap),
 		HistoryV3:      cfg.HistoryV3,
+		TransactionsV3: cfg.TransactionsV3,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
