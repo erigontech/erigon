@@ -94,7 +94,10 @@ func TestProcessBlockHeader(t *testing.T) {
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
 
 	badStateSlashed := getTestState(t)
-	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex)).Slashed = true
+	validator, err := badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex))
+	require.NoError(t, err)
+	validator.Slashed = true
+	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), &validator)
 
 	testCases := []struct {
 		description string
@@ -148,7 +151,7 @@ func TestProcessBlockHeader(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessBlockHeader(tc.block)
 			if tc.wantErr {
 				if err == nil {
@@ -169,8 +172,10 @@ func TestProcessRandao(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to get proposer index: %v", err)
 	}
-	testStateSuccess.ValidatorAt(int(propInd)).PublicKey = testPublicKeyRandao
-
+	validator, err := testStateSuccess.ValidatorAt(int(propInd))
+	require.NoError(t, err)
+	validator.PublicKey = testPublicKeyRandao
+	testStateSuccess.SetValidatorAt(int(propInd), &validator)
 	testBlock := getTestBlock(t)
 	testBlock.Body.RandaoReveal = testSignatureRandao
 	testBody := testBlock.Body
@@ -218,7 +223,7 @@ func TestProcessRandao(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessRandao(tc.body.RandaoReveal)
 			if tc.wantErr {
 				if err == nil {
@@ -295,7 +300,7 @@ func TestProcessEth1Data(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, &clparams.GenesisConfig{})
+			s := New(tc.state, &clparams.MainnetBeaconConfig, &clparams.GenesisConfig{}, false)
 			err := s.ProcessEth1Data(tc.body.Eth1Data)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)

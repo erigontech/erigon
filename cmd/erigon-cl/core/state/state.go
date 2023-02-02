@@ -51,9 +51,10 @@ type BeaconState struct {
 	nextWithdrawalValidatorIndex uint64
 	historicalSummaries          []*cltypes.HistoricalSummary
 	// Internals
-	version       clparams.StateVersion   // State version
-	leaves        [32][32]byte            // Pre-computed leaves.
-	touchedLeaves map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	version           clparams.StateVersion   // State version
+	leaves            [32][32]byte            // Pre-computed leaves.
+	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	publicKeyIndicies map[[48]byte]uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -96,4 +97,8 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 
 func (b *BeaconState) initBeaconState() {
 	b.touchedLeaves = make(map[StateLeafIndex]bool)
+	b.publicKeyIndicies = make(map[[48]byte]uint64)
+	for i, validator := range b.validators {
+		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
+	}
 }

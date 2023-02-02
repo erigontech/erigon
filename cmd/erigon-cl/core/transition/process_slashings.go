@@ -29,7 +29,9 @@ func (s *StateTransistor) processSlashings(slashingMultiplier uint64) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		s.state.DecreaseBalance(uint64(i), penalty)
+		if err := s.state.DecreaseBalance(uint64(i), penalty); err != nil {
+			return err
+		}
 	}
 	return nil
 }

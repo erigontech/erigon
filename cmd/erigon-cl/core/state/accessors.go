@@ -188,8 +188,12 @@ func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uin
 		binary.LittleEndian.PutUint64(buf, i/32)
 		input := append(seed[:], buf...)
 		randomByte := uint64(utils.Keccak256(input)[i%32])
-		effectiveBalance := b.validators[candidateIndex].EffectiveBalance
-		if effectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
+
+		validator, err := b.ValidatorAt(int(candidateIndex))
+		if err != nil {
+			return 0, err
+		}
+		if validator.EffectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
 			return candidateIndex, nil
 		}
 		i += 1
@@ -234,4 +238,42 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) []byte {
 	hash := sha256.New()
 	hash.Write(input)
 	return hash.Sum(nil)
+}
+
+// BaseRewardPerIncrement return base rewards for processing sync committee and duties.
+func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
+	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / utils.IntegerSquareRoot(totalActiveBalance)
+}
+
+// SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
+func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
+	activeBalance, err := b.GetTotalActiveBalance()
+	if err != nil {
+		return 0, 0, err
+	}
+	totalActiveIncrements := activeBalance / b.beaconConfig.EffectiveBalanceIncrement
+	baseRewardPerInc := b.baseRewardPerIncrement(activeBalance)
+	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
+	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / b.beaconConfig.SlotsPerEpoch
+	participantReward = maxParticipantRewards / b.beaconConfig.SyncCommitteeSize
+	proposerReward = participantReward * b.beaconConfig.ProposerWeight / (b.beaconConfig.WeightDenominator - b.beaconConfig.ProposerWeight)
+	return
+}
+
+func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Validator {
+	amount := deposit.Data.Amount
+	effectiveBalance := amount - amount%b.beaconConfig.EffectiveBalanceIncrement
+	if effectiveBalance > b.beaconConfig.EffectiveBalanceIncrement {
+		effectiveBalance = b.beaconConfig.EffectiveBalanceIncrement
+	}
+
+	return &cltypes.Validator{
+		PublicKey:                  deposit.Data.PubKey,
+		WithdrawalCredentials:      deposit.Data.WithdrawalCredentials,
+		ActivationEligibilityEpoch: b.beaconConfig.FarFutureEpoch,
+		ActivationEpoch:            b.beaconConfig.FarFutureEpoch,
+		ExitEpoch:                  b.beaconConfig.FarFutureEpoch,
+		WithdrawableEpoch:          b.beaconConfig.FarFutureEpoch,
+		EffectiveBalance:           effectiveBalance,
+	}
 }

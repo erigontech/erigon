@@ -1,12 +1,14 @@
 package transition
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -61,7 +63,10 @@ func IsValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 
 	pks := [][]byte{}
 	for _, v := range inds {
-		val := state.ValidatorAt(int(v))
+		val, err := state.ValidatorAt(int(v))
+		if err != nil {
+			return false, err
+		}
 		pks = append(pks, val.PublicKey[:])
 	}
 
@@ -109,8 +114,11 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer := s.state.ValidatorAt(int(h1.ProposerIndex))
-	if !IsSlashableValidator(proposer, s.state.Epoch()) {
+	proposer, err := s.state.ValidatorAt(int(h1.ProposerIndex))
+	if err != nil {
+		return err
+	}
+	if !IsSlashableValidator(&proposer, s.state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
@@ -168,7 +176,11 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	slashedAny := false
 	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
 	for _, ind := range indices {
-		if IsSlashableValidator(s.state.ValidatorAt(int(ind)), s.state.GetEpochAtSlot(s.state.Slot())) {
+		currentValidator, err := s.state.ValidatorAt(int(ind))
+		if err != nil {
+			return err
+		}
+		if IsSlashableValidator(&currentValidator, s.state.GetEpochAtSlot(s.state.Slot())) {
 			err := s.state.SlashValidator(ind, 0)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
@@ -181,4 +193,107 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 		return fmt.Errorf("no validators slashed")
 	}
 	return nil
+}
+
+func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
+	if deposit == nil {
+		return nil
+	}
+	depositLeaf, err := deposit.Data.HashSSZ()
+	if err != nil {
+		return err
+	}
+	depositIndex := s.state.Eth1DepositIndex()
+	eth1Data := s.state.Eth1Data()
+	// Validate merkle proof for deposit leaf.
+	if !s.noValidate && utils.IsValidMerkleBranch(
+		depositLeaf,
+		deposit.Proof,
+		s.beaconConfig.DepositContractTreeDepth+1,
+		depositIndex,
+		eth1Data.Root,
+	) {
+		return fmt.Errorf("processDepositForAltair: Could not validate deposit root")
+	}
+
+	// Increment index
+	s.state.SetEth1DepositIndex(depositIndex + 1)
+	publicKey := deposit.Data.PubKey
+	amount := deposit.Data.Amount
+	// Check if pub key is in validator set
+	validatorIndex, has := s.state.ValidatorIndexByPubkey(publicKey)
+	if !has {
+		// Agnostic domain.
+		domain, err := fork.ComputeDomain(s.beaconConfig.DomainDeposit[:], utils.Uint32ToBytes4(s.beaconConfig.GenesisForkVersion), [32]byte{})
+		if err != nil {
+			return err
+		}
+		depositMessageRoot, err := deposit.Data.MessageHash()
+		if err != nil {
+			return err
+		}
+		signedRoot := utils.Keccak256(depositMessageRoot[:], domain)
+		// Perform BLS verification and if successful noice.
+		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
+		if err != nil {
+			return err
+		}
+		if valid {
+			// Append validator
+			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit))
+			s.state.AddBalance(amount)
+			// Altair only
+			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			s.state.AddInactivityScore(0)
+		}
+		return nil
+	}
+	// Increase the balance if exists already
+	return s.state.IncreaseBalance(int(validatorIndex), amount)
+
+}
+
+// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
+func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
+	// Sanity checks so that we know it is good.
+	voluntaryExit := signedVoluntaryExit.VolunaryExit
+	currentEpoch := s.state.Epoch()
+	validator, err := s.state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+	if !validator.Active(currentEpoch) {
+		return errors.New("ProcessVoluntaryExit: validator is not active")
+	}
+	if validator.ExitEpoch != s.beaconConfig.FarFutureEpoch {
+		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
+	}
+	if currentEpoch < voluntaryExit.Epoch {
+		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
+	}
+	if currentEpoch < validator.ActivationEpoch+s.beaconConfig.ShardCommitteePeriod {
+		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
+	}
+
+	// We can skip it in some instances if we want to optimistically sync up.
+	if !s.noValidate {
+		domain, err := s.state.GetDomain(s.beaconConfig.DomainVoluntaryExit, voluntaryExit.Epoch)
+		if err != nil {
+			return err
+		}
+		signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
+		if err != nil {
+			return err
+		}
+		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], validator.PublicKey[:])
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return errors.New("ProcessVoluntaryExit: BLS verification failed")
+		}
+	}
+	// Do the exit (same process in slashing).
+	return s.state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }

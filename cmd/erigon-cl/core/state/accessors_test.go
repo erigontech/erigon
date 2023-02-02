@@ -232,3 +232,12 @@ func TestComputeProposerIndex(t *testing.T) {
 		})
 	}
 }
+
+func TestSyncReward(t *testing.T) {
+	s := state.GetEmptyBeaconState()
+	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2})
+	propReward, partRew, err := s.SyncRewards()
+	require.NoError(t, err)
+	require.Equal(t, propReward, uint64(30))
+	require.Equal(t, partRew, uint64(214))
+}
