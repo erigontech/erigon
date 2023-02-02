@@ -257,6 +257,15 @@ func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
 	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / utils.IntegerSquareRoot(totalActiveBalance)
 }
 
+// BaseReward return base rewards for processing sync committee and duties.
+func (b *BeaconState) BaseReward(totalActiveBalance, index uint64) (uint64, error) {
+	validator, err := b.ValidatorAt(index)
+	if err != nil {
+		return 0, err
+	}
+	return (validator.EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.baseRewardPerIncrement(totalActiveBalance), nil
+}
+
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
 func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
 	activeBalance, err := b.GetTotalActiveBalance()
@@ -337,24 +346,44 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 	return participationFlagIndicies, nil
 }
 
-/*func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation) (*cltypes.IndexedAttestation, error) {
-	attestation.AggregationBits
+func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
+	epoch := b.GetEpochAtSlot(slot)
+	committeesPerSlot := b.CommitteeCount(epoch)
+	return b.ComputeCommittee(
+		b.GetActiveValidatorsIndices(epoch),
+		b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester),
+		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
+		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
+	)
+}
+
+func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation) (*cltypes.IndexedAttestation, error) {
+	attestingIndicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+	if err != nil {
+		return nil, err
+	}
+	return &cltypes.IndexedAttestation{
+		AttestingIndices: attestingIndicies,
+		Data:             attestation.Data,
+		Signature:        attestation.Signature,
+	}, nil
 }
 
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
-	committee := b.GetC
-}*/
-
-/*
-def get_indexed_attestation(state: BeaconState, attestation: Attestation) -> IndexedAttestation:
-    """
-    Return the indexed attestation corresponding to ``attestation``.
-    """
-    attesting_indices = get_attesting_indices(state, attestation.data, attestation.aggregation_bits)
-
-    return IndexedAttestation(
-        attesting_indices=sorted(attesting_indices),
-        data=attestation.data,
-        signature=attestation.signature,
-    )
-*/
+	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
+	if err != nil {
+		return nil, err
+	}
+	attestingIndices := []uint64{}
+	for i, member := range committee {
+		bitIndex := i % 8
+		sliceIndex := i / 8
+		if sliceIndex >= len(aggregationBits) {
+			return nil, fmt.Errorf("GetAttestingIndicies: committee is too big")
+		}
+		if (aggregationBits[sliceIndex] & (1 << bitIndex)) > 0 {
+			attestingIndices = append(attestingIndices, member)
+		}
+	}
+	return attestingIndices, nil
+}
