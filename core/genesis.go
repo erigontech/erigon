@@ -548,7 +548,7 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 	if err := rawdb.WriteTotalIssued(tx, 0, genesisIssuance); err != nil {
 		return nil, nil, err
 	}
-	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, common.Big0)
+	return block, statedb, rawdb.WriteTotalBurnt(tx, 0, libcommon.Big0)
 }
 
 // MustCommit writes the genesis block and state to db, panicking on error.

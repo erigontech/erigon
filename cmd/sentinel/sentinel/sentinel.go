@@ -246,10 +246,10 @@ func (s *Sentinel) Start() error {
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: s.onConnection,
 	})
+	s.subManager = NewGossipManager(s.ctx)
 	if !s.cfg.NoDiscovery {
 		go s.listenForPeers()
 	}
-	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 

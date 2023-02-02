@@ -38,7 +38,7 @@ func getJustificationAndFinalizationState() *state.BeaconState {
 func TestProcessJustificationAndFinalizationJustifyCurrentEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	testState := getJustificationAndFinalizationState()
-	transitioner := transition.New(testState, &cfg, nil)
+	transitioner := transition.New(testState, &cfg, nil, false)
 	transitioner.ProcessJustificationBitsAndFinality()
 	rt := libcommon.Hash{byte(64)}
 	require.Equal(t, rt, testState.CurrentJustifiedCheckpoint().Root, "Unexpected current justified root")

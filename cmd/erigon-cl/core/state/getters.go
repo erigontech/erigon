@@ -22,6 +22,13 @@ func (b *BeaconState) Slot() uint64 {
 	return b.slot
 }
 
+func (b *BeaconState) PreviousSlot() uint64 {
+	if b.slot == 0 {
+		return 0
+	}
+	return b.slot - 1
+}
+
 func (b *BeaconState) Fork() *cltypes.Fork {
 	return b.fork
 }
@@ -64,6 +71,10 @@ func (b *BeaconState) ValidatorAt(index int) *cltypes.Validator {
 
 func (b *BeaconState) Balances() []uint64 {
 	return b.balances
+}
+
+func (b *BeaconState) ValidatorBalance(index int) uint64 {
+	return b.balances[index]
 }
 
 func (b *BeaconState) RandaoMixes() [randoMixesLength]libcommon.Hash {
@@ -128,4 +139,9 @@ func (b *BeaconState) HistoricalSummaries() []*cltypes.HistoricalSummary {
 
 func (b *BeaconState) Version() clparams.StateVersion {
 	return b.version
+}
+
+func (b *BeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
+	val, ok := b.publicKeyIndicies[key]
+	return val, ok
 }
