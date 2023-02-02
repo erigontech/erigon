@@ -229,7 +229,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, false)
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {

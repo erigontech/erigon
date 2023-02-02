@@ -48,13 +48,13 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, false)
 	},
 }
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, chaindata string, historyfile string, nocheck bool, transactionV3 bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -78,7 +78,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionV3)
 	
 	chainDb := db
 	defer chainDb.Close()

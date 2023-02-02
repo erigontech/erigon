@@ -285,7 +285,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	if t != nil {
 		t.Cleanup(mock.Close)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots, false)
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 

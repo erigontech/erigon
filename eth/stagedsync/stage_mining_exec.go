@@ -75,7 +75,7 @@ func StageMiningExecCfg(
 		notifier:    notifier,
 		chainConfig: chainConfig,
 		engine:      engine,
-		blockReader: snapshotsync.NewBlockReaderWithSnapshots(snapshots),
+		blockReader: snapshotsync.NewBlockReaderWithSnapshots(snapshots, transactionsV3),
 		vmConfig:    vmConfig,
 		tmpdir:      tmpdir,
 		interrupt:   interrupt,
