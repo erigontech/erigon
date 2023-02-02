@@ -547,7 +547,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	return grpcServer, nil
 }
 
-func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *GrpcServer {
+func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint) *GrpcServer {
 	ss := &GrpcServer{
 		ctx:          ctx,
 		p2p:          cfg,
@@ -565,7 +565,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates enode.Iterator, readNodeI
 			Name:           eth.ProtocolName,
 			Version:        protocol,
 			Length:         17,
-			DialCandidates: dialCandidates,
+			DialCandidates: dialCandidates(),
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.Pubkey()
 				printablePeerID := hex.EncodeToString(peerID[:])[:20]
