@@ -34,6 +34,12 @@ func CreateTransaction(txType models.TransactionType, addr string, value, nonce 
 			return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create non-contract transaction: %v", err)
 		}
 		return tx, address, nil, nil, nil
+	case models.DynamicFee:
+		tx, address, err := createDynamicTx(addr, value, nonce)
+		if err != nil {
+			return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create dynamic fee transaction: %v", err)
+		}
+		return tx, address, nil, nil, nil
 	case models.ContractTx:
 		return createContractTx(nonce)
 	default:
@@ -52,6 +58,33 @@ func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, 
 	signedTx, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
 	if err != nil {
 		return nil, libcommon.Address{}, fmt.Errorf("failed to sign non-contract transaction: %v", err)
+	}
+
+	return &signedTx, toAddress, nil
+}
+
+// createDynamicTx creates a transaction of the DynamicFee type
+func createDynamicTx(addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, error) {
+	toAddress := libcommon.HexToAddress(addr)
+
+	// TODO: Get the current header and the chain config and calc the base fee
+	// TODO: Using the base fee, test for cases where the gas fee cap is less than the base fee and greater than the base fee
+	//db := mdbx.MustOpen(models.DataDirParam + fmt.Sprintf("%d", 0))
+	//defer db.Close()
+	//tx, err := db.BeginRo(context.Background())
+	//val := misc.CalcBaseFee(params.AllCliqueProtocolChanges, rawdb.ReadCurrentHeader(tx))
+	//fmt.Printf("Base Fee value pointer is: %+v\n", val)
+	//if val != nil {
+	//	fmt.Printf("Base Fee value is: %+v\n", *val)
+	//}
+
+	// create a new transaction using the parameters to send
+	transaction := types.NewEIP1559Transaction(*signer.ChainID(), nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasPrice), nil)
+
+	// sign the transaction using the developer signed private key
+	signedTx, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+	if err != nil {
+		return nil, libcommon.Address{}, fmt.Errorf("failed to sign dynamic fee transaction: %v", err)
 	}
 
 	return &signedTx, toAddress, nil

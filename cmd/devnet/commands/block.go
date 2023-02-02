@@ -52,6 +52,40 @@ func callSendTx(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) 
 	return hash, nil
 }
 
+func callSendTxWithDynamicFee(value uint64, toAddr, fromAddr string) (*libcommon.Hash, error) {
+	fmt.Printf("Sending %d ETH to %q from %q using a dynamic fee transaction...\n", value, toAddr, fromAddr)
+
+	// get the latest nonce for the next transaction
+	nonce, err := services.GetNonce(models.ReqId, libcommon.HexToAddress(fromAddr))
+	if err != nil {
+		fmt.Printf("failed to get latest nonce: %s\n", err)
+		return nil, err
+	}
+
+	// create a non-contract transaction and sign it
+	signedTx, _, _, _, err := services.CreateTransaction(models.DynamicFee, toAddr, value, nonce)
+	if err != nil {
+		fmt.Printf("failed to create a transaction: %s\n", err)
+		return nil, err
+	}
+
+	// send the signed transaction
+	hash, err := requests.SendTransaction(models.ReqId, signedTx)
+	if err != nil {
+		fmt.Printf("failed to send transaction: %s\n", err)
+		return nil, err
+	}
+
+	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+
+	hashes := map[libcommon.Hash]bool{*hash: true}
+	if _, err = services.SearchReservesForTransactionHash(hashes); err != nil {
+		return nil, fmt.Errorf("failed to call contract tx: %v", err)
+	}
+
+	return hash, nil
+}
+
 func callContractTx() (*libcommon.Hash, error) {
 	// hashset to hold hashes for search after mining
 	hashes := make(map[libcommon.Hash]bool)
