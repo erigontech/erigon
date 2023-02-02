@@ -161,7 +161,7 @@ func TestTransitionSlot(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
+			s := New(tc.prevState, testBeaconConfig, nil, false)
 			err := s.transitionSlot()
 			if tc.wantErr {
 				if err == nil {
@@ -240,7 +240,7 @@ func TestProcessSlots(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
+			s := New(tc.prevState, testBeaconConfig, nil, false)
 			err := s.processSlots(tc.startSlot + tc.numSlots)
 			if tc.wantErr {
 				if err == nil {
@@ -292,7 +292,7 @@ func TestVerifyBlockSignature(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, testBeaconConfig, nil)
+			s := New(tc.state, testBeaconConfig, nil, false)
 			valid, err := s.verifyBlockSignature(tc.block)
 			if tc.wantErr {
 				if err == nil {
@@ -362,8 +362,8 @@ func TestTransitionState(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
-			err := s.transitionState(tc.block, true)
+			s := New(tc.prevState, testBeaconConfig, nil, false)
+			err := s.transitionState(tc.block)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

@@ -75,7 +75,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
@@ -164,7 +163,7 @@ type Ethereum struct {
 
 	txPool2DB               kv.RwDB
 	txPool2                 *txpool2.TxPool
-	newTxs2                 chan types2.Hashes
+	newTxs2                 chan types2.Announcements
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpool_proto.TxpoolServer
@@ -191,7 +190,7 @@ func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
 func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethereum, error) {
-	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(common.Big0) <= 0 {
+	if config.Miner.GasPrice == nil || config.Miner.GasPrice.Cmp(libcommon.Big0) <= 0 {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
@@ -235,7 +234,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		panic(err)
 	}
 
-	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) || config.Sync.UseSnapshots
+	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
@@ -358,7 +357,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			for ; pi < len(refCfg.AllowedPorts) && !picked; pi++ {
 				pc := int(refCfg.AllowedPorts[pi])
 				if !checkPortIsFree(fmt.Sprintf("%s:%d", listenHost, pc)) {
-					log.Warn("bind protocol to port has failed: port is busy", "protocol", fmt.Sprintf("eth/%d", protocol), "port", pc)
+					log.Warn("bind protocol to port has failed: port is busy", "protocols", fmt.Sprintf("eth/%d", refCfg.ProtocolVersion), "port", pc)
 					continue
 				}
 				if listenPort != pc {
@@ -391,8 +390,15 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 					return
 				case <-logEvery.C:
 					logItems = logItems[:0]
+					peerCountMap := map[uint]int{}
 					for _, srv := range backend.sentryServers {
-						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
+						counts := srv.SimplePeerCount()
+						for protocol, count := range counts {
+							peerCountMap[protocol] += count
+						}
+					}
+					for protocol, count := range peerCountMap {
+						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
 					}
 					log.Info("[p2p] GoodPeers", logItems...)
 				}
@@ -441,7 +447,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */, backend.chainDB)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */, backend.chainDB)
 	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
 
 	backend.sentriesClient, err = sentry.NewMultiClient(
@@ -469,7 +475,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
 
-		backend.newTxs2 = make(chan types2.Hashes, 1024)
+		backend.newTxs2 = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
@@ -1023,7 +1029,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
 	for i := range s.sentryServers {
-		protocols = append(protocols, s.sentryServers[i].Protocol)
+		protocols = append(protocols, s.sentryServers[i].Protocols...)
 	}
 	return protocols
 }

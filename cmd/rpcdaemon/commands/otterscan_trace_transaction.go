@@ -5,13 +5,13 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/vm"
 )
 
-func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash libcommon.Hash) ([]*TraceEntry, error) {
+func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash) ([]*TraceEntry, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -27,12 +27,12 @@ func (api *OtterscanAPIImpl) TraceTransaction(ctx context.Context, hash libcommo
 }
 
 type TraceEntry struct {
-	Type  string            `json:"type"`
-	Depth int               `json:"depth"`
-	From  libcommon.Address `json:"from"`
-	To    libcommon.Address `json:"to"`
-	Value *hexutil.Big      `json:"value"`
-	Input hexutil.Bytes     `json:"input"`
+	Type  string         `json:"type"`
+	Depth int            `json:"depth"`
+	From  common.Address `json:"from"`
+	To    common.Address `json:"to"`
+	Value *hexutil.Big   `json:"value"`
+	Input hexutil.Bytes  `json:"input"`
 }
 
 type TransactionTracer struct {
@@ -49,7 +49,7 @@ func NewTransactionTracer(ctx context.Context) *TransactionTracer {
 	}
 }
 
-func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to libcommon.Address, precompile bool, input []byte, value *uint256.Int) {
+func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to common.Address, precompile bool, input []byte, value *uint256.Int) {
 	if precompile {
 		return
 	}
@@ -91,12 +91,12 @@ func (t *TransactionTracer) captureStartOrEnter(typ vm.OpCode, from, to libcommo
 	}
 }
 
-func (t *TransactionTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) CaptureStart(env vm.VMInterface, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.depth = 0
 	t.captureStartOrEnter(vm.CALL, from, to, precompile, input, value)
 }
 
-func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *TransactionTracer) CaptureEnter(typ vm.OpCode, from common.Address, to common.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	t.depth++
 	t.captureStartOrEnter(typ, from, to, precompile, input, value)
 }

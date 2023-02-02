@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *APIImpl) CallBundle(ctx context.Context, txHashes []libcommon.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
+func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -182,7 +182,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []libcommon.Hash, s
 		if result.Err != nil {
 			jsonResult["error"] = result.Err.Error()
 		} else {
-			jsonResult["value"] = libcommon.BytesToHash(result.Return())
+			jsonResult["value"] = common.BytesToHash(result.Return())
 		}
 
 		results = append(results, jsonResult)
@@ -222,7 +222,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash libcommon.Hash
+	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, b)
 		if borTx != nil {
@@ -284,7 +284,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 	var borTx types.Transaction
-	var borTxHash libcommon.Hash
+	var borTxHash common.Hash
 	if chainConfig.Bor != nil {
 		borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
 		if borTx != nil {
@@ -344,7 +344,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 }
 
 // GetBlockTransactionCountByHash implements eth_getBlockTransactionCountByHash. Returns the number of transactions in a block given the block's block hash.
-func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash libcommon.Hash) (*hexutil.Uint, error) {
+func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHash common.Hash) (*hexutil.Uint, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err

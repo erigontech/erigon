@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -369,7 +368,9 @@ func (s *Service) login(conn *connWrapper) error {
 
 	protocols := make([]string, 0, len(s.servers))
 	for _, srv := range s.servers {
-		protocols = append(protocols, fmt.Sprintf("%s/%d", srv.Protocol.Name, srv.Protocol.Version))
+		for _, p := range srv.Protocols {
+			protocols = append(protocols, fmt.Sprintf("%s/%d", p.Name, p.Version))
+		}
 	}
 	nodeName := "Erigon"
 	if len(s.servers) > 0 {
@@ -537,7 +538,7 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 // and assembles the block stats. If block is nil, the current head is processed.
 func (s *Service) assembleBlockStats(block *types.Block, td *big.Int) *blockStats {
 	if td == nil {
-		td = common.Big0
+		td = libcommon.Big0
 	}
 	// Gather the block infos from the local blockchain
 	txs := make([]txStats, 0, len(block.Transactions()))
@@ -679,7 +680,10 @@ func (s *Service) reportStats(conn *connWrapper) error {
 	// TODO(Giulio2002): peer tracking
 	peerCount := 0
 	for _, srv := range s.servers {
-		peerCount += srv.SimplePeerCount()
+		counts := srv.SimplePeerCount()
+		for _, count := range counts {
+			peerCount += count
+		}
 	}
 	stats := map[string]interface{}{
 		"id": s.node,

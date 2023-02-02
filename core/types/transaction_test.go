@@ -439,7 +439,7 @@ func TestTransactionCoding(t *testing.T) {
 		t.Fatalf("could not generate key: %v", err)
 	}
 	var (
-		signer    = LatestSignerForChainID(common.Big1)
+		signer    = LatestSignerForChainID(libcommon.Big1)
 		addr      = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
 		recipient = libcommon.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")
 		accesses  = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
