@@ -56,6 +56,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -336,9 +337,12 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return res
 		}
 
-		discovery, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
+		discovery := func() enode.Iterator {
+			d, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				panic(err)
+			}
+			return d
 		}
 
 		refCfg := stack.Config().P2P
