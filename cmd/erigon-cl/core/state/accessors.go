@@ -168,6 +168,20 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte)
 	return ind, nil
 }
 
+func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64) ([]uint64, error) {
+	ret := []uint64{}
+	lenIndicies := uint64(len(indicies))
+	for i := (lenIndicies * index) / count; i < (lenIndicies*(index+1))/count; i++ {
+		index, err := b.ComputeShuffledIndex(i, lenIndicies, seed)
+		if err != nil {
+			return nil, err
+		}
+		ret = append(ret, indicies[index])
+	}
+	return ret, nil
+	//return [indices[compute_shuffled_index(uint64(i), uint64(len(indices)), seed)] for i in range(start, end)]
+}
+
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
 		return 0, fmt.Errorf("must have >0 indices")
@@ -214,7 +228,7 @@ func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
 	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
 
 	// Add slot to the end of the input.
-	inputWithSlot := append(input, slotByteArray...)
+	inputWithSlot := append(input[:], slotByteArray...)
 
 	// Calculate the hash.
 	hash.Write(inputWithSlot)
@@ -229,15 +243,13 @@ func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
 	return b.ComputeProposerIndex(indices, seedArray)
 }
 
-func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) []byte {
+func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 	mix := b.GetRandaoMixes(epoch + b.beaconConfig.EpochsPerHistoricalVector - b.beaconConfig.MinSeedLookahead - 1)
 	epochByteArray := make([]byte, 8)
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
 	input = append(input, mix[:]...)
-	hash := sha256.New()
-	hash.Write(input)
-	return hash.Sum(nil)
+	return utils.Keccak256(input)
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
@@ -277,3 +289,72 @@ func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Va
 		EffectiveBalance:           effectiveBalance,
 	}
 }
+
+// CommitteeCount returns current number of committee for epoch.
+func (b *BeaconState) CommitteeCount(epoch uint64) uint64 {
+	committeCount := uint64(len(b.GetActiveValidatorsIndices(epoch))) / b.beaconConfig.SlotsPerEpoch / b.beaconConfig.TargetCommitteeSize
+	if b.beaconConfig.MaxCommitteesPerSlot < committeCount {
+		committeCount = b.beaconConfig.MaxCommitteesPerSlot
+	}
+	if committeCount < 1 {
+		committeCount = 1
+	}
+	return committeCount
+}
+
+func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.AttestationData, inclusionDelay uint64) ([]uint8, error) {
+	var justifiedCheckpoint *cltypes.Checkpoint
+	// get checkpoint from epoch
+	if data.Target.Epoch == b.Epoch() {
+		justifiedCheckpoint = b.currentJustifiedCheckpoint
+	} else {
+		justifiedCheckpoint = b.previousJustifiedCheckpoint
+	}
+	// Matching roots
+	if *data.Source != *justifiedCheckpoint {
+		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
+	}
+	targetRoot, err := b.GetBlockRoot(data.Target.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	headRoot, err := b.GetBlockRoot(data.Slot)
+	if err != nil {
+		return nil, err
+	}
+	matchingTarget := data.Target.Root == targetRoot
+	matchingHead := matchingTarget && data.BeaconBlockHash == headRoot
+	participationFlagIndicies := []uint8{}
+	if inclusionDelay <= utils.IntegerSquareRoot(b.beaconConfig.SlotsPerEpoch) {
+		participationFlagIndicies = append(participationFlagIndicies, b.beaconConfig.TimelySourceFlagIndex)
+	}
+	if matchingTarget && inclusionDelay <= b.beaconConfig.SlotsPerEpoch {
+		participationFlagIndicies = append(participationFlagIndicies, b.beaconConfig.TimelyTargetFlagIndex)
+	}
+	if matchingHead && inclusionDelay == b.beaconConfig.MinAttestationInclusionDelay {
+		participationFlagIndicies = append(participationFlagIndicies, b.beaconConfig.TimelyHeadFlagIndex)
+	}
+	return participationFlagIndicies, nil
+}
+
+/*func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation) (*cltypes.IndexedAttestation, error) {
+	attestation.AggregationBits
+}
+
+func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
+	committee := b.GetC
+}*/
+
+/*
+def get_indexed_attestation(state: BeaconState, attestation: Attestation) -> IndexedAttestation:
+    """
+    Return the indexed attestation corresponding to ``attestation``.
+    """
+    attesting_indices = get_attesting_indices(state, attestation.data, attestation.aggregation_bits)
+
+    return IndexedAttestation(
+        attesting_indices=sorted(attesting_indices),
+        data=attestation.data,
+        signature=attestation.signature,
+    )
+*/
