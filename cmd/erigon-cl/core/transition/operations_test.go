@@ -1,6 +1,7 @@
 package transition
 
 import (
+	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -351,4 +352,25 @@ func TestProcessDeposit(t *testing.T) {
 			},
 		})*/
 	//s := New()
+}
+
+func TestProcessVoluntaryExits(t *testing.T) {
+	state := state.GetEmptyBeaconState()
+	exit := &cltypes.SignedVoluntaryExit{
+		VolunaryExit: &cltypes.VoluntaryExit{
+			ValidatorIndex: 0,
+			Epoch:          0,
+		},
+	}
+	state.AddValidator(&cltypes.Validator{
+		ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
+		ActivationEpoch: 0,
+	})
+	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
+	fmt.Println(state.Slot())
+	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
+	newRegistry := state.Validators()
+	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
 }

@@ -4,17 +4,24 @@ import (
 	"fmt"
 )
 
-func (b *BeaconState) IncreaseBalance(index int, delta uint64) {
-	b.SetValidatorBalance(index, b.balances[index]+delta)
+func (b *BeaconState) IncreaseBalance(index int, delta uint64) error {
+	currentBalance, err := b.ValidatorBalance(index)
+	if err != nil {
+		return err
+	}
+	return b.SetValidatorBalance(index, currentBalance+delta)
 }
 
-func (b *BeaconState) DecreaseBalance(index, delta uint64) {
-	curAmount := b.balances[index]
-	var newBalance uint64
-	if curAmount >= delta {
-		newBalance = curAmount - delta
+func (b *BeaconState) DecreaseBalance(index, delta uint64) error {
+	currentBalance, err := b.ValidatorBalance(int(index))
+	if err != nil {
+		return err
 	}
-	b.SetValidatorBalance(int(index), newBalance)
+	var newBalance uint64
+	if currentBalance >= delta {
+		newBalance = currentBalance - delta
+	}
+	return b.SetValidatorBalance(int(index), newBalance)
 }
 
 func (b *BeaconState) ComputeActivationExitEpoch(epoch uint64) uint64 {
@@ -30,20 +37,21 @@ func (b *BeaconState) GetValidatorChurnLimit() uint64 {
 	return b.beaconConfig.MinPerEpochChurnLimit
 }
 
-func (b *BeaconState) InitiateValidatorExit(index uint64) {
-	validator := b.validators[index]
+func (b *BeaconState) InitiateValidatorExit(index uint64) error {
+	validator, err := b.ValidatorAt(int(index))
+	if err != nil {
+		return err
+	}
 	if validator.ExitEpoch != b.beaconConfig.FarFutureEpoch {
-		return
+		return nil
 	}
 
 	currentEpoch := b.Epoch()
-	exitQueueEpoch := currentEpoch
-	activationExitEpoch := b.ComputeActivationExitEpoch(currentEpoch)
+	exitQueueEpoch := b.ComputeActivationExitEpoch(currentEpoch)
 	for _, v := range b.validators {
 		if v.ExitEpoch != b.beaconConfig.FarFutureEpoch {
-			potentialExit := v.ExitEpoch + activationExitEpoch
-			if potentialExit > exitQueueEpoch {
-				exitQueueEpoch = potentialExit
+			if v.ExitEpoch > exitQueueEpoch {
+				exitQueueEpoch = v.ExitEpoch
 			}
 		}
 	}
@@ -60,23 +68,29 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) {
 
 	validator.ExitEpoch = exitQueueEpoch
 	validator.WithdrawableEpoch = exitQueueEpoch + b.beaconConfig.MinValidatorWithdrawabilityDelay
-	b.SetValidatorAt(int(index), validator)
+	return b.SetValidatorAt(int(index), &validator)
 }
 
 func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error {
 	epoch := b.Epoch()
-	b.InitiateValidatorExit(slashedInd)
+	if err := b.InitiateValidatorExit(slashedInd); err != nil {
+		return err
+	}
 	newValidator := b.validators[slashedInd]
 	newValidator.Slashed = true
 	withdrawEpoch := epoch + b.beaconConfig.EpochsPerSlashingsVector
 	if newValidator.WithdrawableEpoch < withdrawEpoch {
 		newValidator.WithdrawableEpoch = withdrawEpoch
 	}
-	b.SetValidatorAt(int(slashedInd), newValidator)
+	if err := b.SetValidatorAt(int(slashedInd), newValidator); err != nil {
+		return err
+	}
 	segmentIndex := int(epoch % b.beaconConfig.EpochsPerSlashingsVector)
 	currentSlashing := b.SlashingSegmentAt(segmentIndex)
 	b.SetSlashingSegmentAt(segmentIndex, currentSlashing+newValidator.EffectiveBalance)
-	b.DecreaseBalance(slashedInd, newValidator.EffectiveBalance/b.beaconConfig.MinSlashingPenaltyQuotient)
+	if err := b.DecreaseBalance(slashedInd, newValidator.EffectiveBalance/b.beaconConfig.MinSlashingPenaltyQuotient); err != nil {
+		return err
+	}
 
 	proposerInd, err := b.GetBeaconProposerIndex()
 	if err != nil {
@@ -87,7 +101,8 @@ func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error 
 	}
 	whistleBlowerReward := newValidator.EffectiveBalance / b.beaconConfig.WhistleBlowerRewardQuotient
 	proposerReward := whistleBlowerReward / b.beaconConfig.ProposerRewardQuotient
-	b.IncreaseBalance(int(proposerInd), proposerReward)
-	b.IncreaseBalance(int(whistleblowerInd), whistleBlowerReward)
-	return nil
+	if err := b.IncreaseBalance(int(proposerInd), proposerReward); err != nil {
+		return err
+	}
+	return b.IncreaseBalance(int(whistleblowerInd), whistleBlowerReward)
 }

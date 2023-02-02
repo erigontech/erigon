@@ -188,8 +188,12 @@ func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uin
 		binary.LittleEndian.PutUint64(buf, i/32)
 		input := append(seed[:], buf...)
 		randomByte := uint64(utils.Keccak256(input)[i%32])
-		effectiveBalance := b.validators[candidateIndex].EffectiveBalance
-		if effectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
+
+		validator, err := b.ValidatorAt(int(candidateIndex))
+		if err != nil {
+			return 0, err
+		}
+		if validator.EffectiveBalance*maxRandomByte >= clparams.MainnetBeaconConfig.MaxEffectiveBalance*randomByte {
 			return candidateIndex, nil
 		}
 		i += 1
