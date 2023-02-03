@@ -1,11 +1,13 @@
 package state_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/stretchr/testify/require"
 )
@@ -240,4 +242,111 @@ func TestSyncReward(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, propReward, uint64(30))
 	require.Equal(t, partRew, uint64(214))
+}
+
+func TestComputeCommittee(t *testing.T) {
+	// Create 10 committees
+	committeeCount := uint64(10)
+	validatorCount := committeeCount * clparams.MainnetBeaconConfig.TargetCommitteeSize
+	validators := make([]*cltypes.Validator, validatorCount)
+
+	for i := 0; i < len(validators); i++ {
+		var k [48]byte
+		copy(k[:], strconv.Itoa(i))
+		validators[i] = &cltypes.Validator{
+			PublicKey: k,
+			ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
+		}
+	}
+	state := state.GetEmptyBeaconState()
+	state.SetValidators(validators)
+	state.SetSlot(200)
+
+	epoch := state.Epoch()
+	indices := state.GetActiveValidatorsIndices(epoch)
+	seed := state.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
+	committees, err := state.ComputeCommittee(indices, seed, 0, 1)
+	require.NoError(t, err, "Could not compute committee")
+
+	// Test shuffled indices are correct for index 5 committee
+	index := uint64(5)
+	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount)
+	require.NoError(t, err, "Could not compute committee")
+	start := (validatorCount * index) / committeeCount
+	end := (validatorCount * (index + 1)) / committeeCount
+	require.Equal(t, committee5, committees[start:end], "Committee has different shuffled indices")
+}
+
+func TestAttestationParticipationFlagIndices(t *testing.T) {
+	beaconState := state.GetEmptyBeaconState()
+	//beaconState, _ := util.DeterministicGenesisStateAltair(t, params.BeaconConfig().MaxValidatorsPerCommittee)
+	beaconState.SetSlot(1)
+	cfg := clparams.MainnetBeaconConfig
+
+	tests := []struct {
+		name                 string
+		inputState           state.BeaconState
+		inputData            *cltypes.AttestationData
+		inputDelay           uint64
+		participationIndices []uint8
+	}{
+		{
+			name: "none",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{
+					Root: [32]byte{2},
+				},
+			},
+			inputDelay:           cfg.SlotsPerEpoch,
+			participationIndices: []uint8{},
+		},
+		{
+			name: "participated source",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{
+					Root: [32]byte{2},
+				},
+			},
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex},
+		},
+		{
+			name: "participated source and target",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{},
+			},
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex},
+		},
+		{
+			name: "participated source and target and head",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{},
+			},
+			inputDelay:           1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex, cfg.TimelyHeadFlagIndex},
+		},
+	}
+
+	for _, test := range tests {
+		flagIndices, err := test.inputState.GetAttestationParticipationFlagIndicies(test.inputData, test.inputDelay)
+		require.NoError(t, err, test.name)
+		require.Equal(t, test.participationIndices, flagIndices, test.name)
+	}
 }

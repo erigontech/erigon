@@ -374,3 +374,43 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	newRegistry := state.Validators()
 	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
 }
+
+func TestProcessAttestation(t *testing.T) {
+	beaconState := state.GetEmptyBeaconState()
+	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
+	for i := 0; i < 64; i++ {
+		beaconState.AddValidator(&cltypes.Validator{
+			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
+			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
+			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
+		})
+		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+		beaconState.AddBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+	}
+
+	aggBits := []byte{7}
+	r, err := beaconState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	att := &cltypes.Attestation{
+		Data: &cltypes.AttestationData{
+			BeaconBlockHash: r,
+			Source:          &cltypes.Checkpoint{},
+			Target:          &cltypes.Checkpoint{},
+		},
+		AggregationBits: aggBits,
+	}
+	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, s.ProcessAttestation(att))
+
+	p := beaconState.CurrentEpochParticipation()
+	require.NoError(t, err)
+
+	indices, err := beaconState.GetAttestingIndicies(att.Data, att.AggregationBits)
+	require.NoError(t, err)
+	for _, index := range indices {
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyHeadFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelySourceFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
+	}
+}
