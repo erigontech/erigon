@@ -18,14 +18,14 @@ func (l ErigonLog) MarshalJSON() ([]byte, error) {
 	type ErigonLog struct {
 		Address     libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash  `json:"topics" gencodec:"required"`
-		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber hexutil.Uint64 `json:"blockNumber"`
+		Data        hexutil.Bytes     `json:"data" gencodec:"required"`
+		BlockNumber hexutil.Uint64    `json:"blockNumber"`
 		TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     hexutil.Uint   `json:"transactionIndex"`
+		TxIndex     hexutil.Uint      `json:"transactionIndex"`
 		BlockHash   libcommon.Hash    `json:"blockHash"`
-		Index       hexutil.Uint   `json:"logIndex"`
-		Removed     bool           `json:"removed"`
-		Timestamp   hexutil.Uint64 `json:"timestamp"`
+		Index       hexutil.Uint      `json:"logIndex"`
+		Removed     bool              `json:"removed"`
+		Timestamp   hexutil.Uint64    `json:"timestamp"`
 	}
 
 	var enc ErigonLog
@@ -48,14 +48,14 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type ErigonLog struct {
 		Address     *libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash   `json:"topics" gencodec:"required"`
-		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		Data        *hexutil.Bytes     `json:"data" gencodec:"required"`
+		BlockNumber *hexutil.Uint64    `json:"blockNumber"`
 		TxHash      *libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
+		TxIndex     *hexutil.Uint      `json:"transactionIndex"`
 		BlockHash   *libcommon.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-		Timestamp   *hexutil.Uint64 `json:"timestamp"`
+		Index       *hexutil.Uint      `json:"logIndex"`
+		Removed     *bool              `json:"removed"`
+		Timestamp   *hexutil.Uint64    `json:"timestamp"`
 	}
 
 	var dec ErigonLog

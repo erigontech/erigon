@@ -18,13 +18,13 @@ func (l Log) MarshalJSON() ([]byte, error) {
 	type Log struct {
 		Address     libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash  `json:"topics" gencodec:"required"`
-		Data        hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber hexutil.Uint64 `json:"blockNumber"`
+		Data        hexutil.Bytes     `json:"data" gencodec:"required"`
+		BlockNumber hexutil.Uint64    `json:"blockNumber"`
 		TxHash      libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     hexutil.Uint   `json:"transactionIndex"`
+		TxIndex     hexutil.Uint      `json:"transactionIndex"`
 		BlockHash   libcommon.Hash    `json:"blockHash"`
-		Index       hexutil.Uint   `json:"logIndex"`
-		Removed     bool           `json:"removed"`
+		Index       hexutil.Uint      `json:"logIndex"`
+		Removed     bool              `json:"removed"`
 	}
 	var enc Log
 	enc.Address = l.Address
@@ -44,13 +44,13 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	type Log struct {
 		Address     *libcommon.Address `json:"address" gencodec:"required"`
 		Topics      []libcommon.Hash   `json:"topics" gencodec:"required"`
-		Data        *hexutil.Bytes  `json:"data" gencodec:"required"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
+		Data        *hexutil.Bytes     `json:"data" gencodec:"required"`
+		BlockNumber *hexutil.Uint64    `json:"blockNumber"`
 		TxHash      *libcommon.Hash    `json:"transactionHash" gencodec:"required"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
+		TxIndex     *hexutil.Uint      `json:"transactionIndex"`
 		BlockHash   *libcommon.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
+		Index       *hexutil.Uint      `json:"logIndex"`
+		Removed     *bool              `json:"removed"`
 	}
 	var dec Log
 	if err := json.Unmarshal(input, &dec); err != nil {
