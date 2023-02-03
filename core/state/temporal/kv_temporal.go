@@ -27,10 +27,10 @@ import (
 
 //Methods Naming:
 // Get: exact match of criterias
-// Dual: [from, to)
+// Range: [from, to)
 // Each: [from, INF)
 // Prefix: Has(k, prefix)
-// Amount: [from, INF) AND maximum N records
+// Limit: [from, INF) AND maximum N records
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
@@ -112,7 +112,9 @@ func (tx *Tx) Rollback() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.agg.Close()
+	if tx.agg != nil {
+		tx.agg.Close()
+	}
 	tx.Tx.Rollback()
 }
 
@@ -302,18 +304,6 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
-}
-
-type Cursor struct {
-	kv  kv.Cursor
-	agg *state.AggregatorV3Context
-
-	//HistoryV2 fields
-	accHistoryC, storageHistoryC kv.Cursor
-	accChangesC, storageChangesC kv.CursorDupSort
-
-	//HistoryV3 fields
-	hitoryV3 bool
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {

@@ -386,4 +386,3 @@ func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation) (b
 		return false, err
 	}
 	return isValidIndexedAttestation(s.state, indexedAttestation)
-}
