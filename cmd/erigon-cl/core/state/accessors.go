@@ -259,7 +259,7 @@ func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
 
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseReward(totalActiveBalance, index uint64) (uint64, error) {
-	validator, err := b.ValidatorAt(index)
+	validator, err := b.ValidatorAt(int(index))
 	if err != nil {
 		return 0, err
 	}

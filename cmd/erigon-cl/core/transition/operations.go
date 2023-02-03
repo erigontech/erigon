@@ -353,7 +353,7 @@ func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) e
 			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
 				continue
 			}
-			epochParticipation[flagIndex].Add(flagIndex)
+			epochParticipation[attesterIndex] = epochParticipation[attesterIndex].Add(flagIndex)
 			baseReward, err := s.state.BaseReward(totalActiveBalance, attesterIndex)
 			if err != nil {
 				return err
@@ -365,6 +365,12 @@ func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) e
 	proposer, err := s.state.GetBeaconProposerIndex()
 	if err != nil {
 		return err
+	}
+	// Set participation
+	if data.Target.Epoch == currentEpoch {
+		s.state.SetCurrentEpochParticipation(epochParticipation)
+	} else {
+		s.state.SetPreviousEpochParticipation(epochParticipation)
 	}
 	proposerRewardDenominator := (s.beaconConfig.WeightDenominator - s.beaconConfig.ProposerWeight) * s.beaconConfig.WeightDenominator / s.beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
