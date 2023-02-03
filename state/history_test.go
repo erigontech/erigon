@@ -337,40 +337,50 @@ func TestHistoryHistory(t *testing.T) {
 
 func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	tb.Helper()
+	require := require.New(tb)
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
 	tx, err := db.BeginRwAsync(ctx)
-	require.NoError(tb, err)
+	require.NoError(err)
 	h.SetTx(tx)
 	defer tx.Rollback()
+
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
-		func() {
-			c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx, logEvery)
-			require.NoError(tb, err)
-			sf, err := h.buildFiles(ctx, step, c)
-			require.NoError(tb, err)
-			h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-			err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
-			require.NoError(tb, err)
-			var r HistoryRanges
-			maxEndTxNum := h.endTxNumMinimax()
-			maxSpan := uint64(16 * 16)
+		c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx, logEvery)
+		require.NoError(err)
+		sf, err := h.buildFiles(ctx, step, c)
+		require.NoError(err)
+		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+		err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
+		require.NoError(err)
+	}
 
-			for r = h.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = h.findMergeRange(maxEndTxNum, maxSpan) {
-				hc := h.MakeContext()
-				indexOuts, historyOuts, _ := h.staticFilesInRange(r, hc)
-				indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, 1)
-				require.NoError(tb, err)
-				h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
-				hc.Close()
-			}
+	var r HistoryRanges
+	maxEndTxNum := h.endTxNumMinimax()
+
+	maxSpan := h.aggregationStep * StepsInBiggestFile
+
+	for r = h.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = h.findMergeRange(maxEndTxNum, maxSpan) {
+		func() {
+			hc := h.MakeContext()
+			defer hc.Close()
+
+			indexOuts, historyOuts, _, err := h.staticFilesInRange(r, hc)
+			require.NoError(err)
+			indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, 1)
+			require.NoError(err)
+			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 		}()
 	}
+
+	err = h.BuildOptionalMissedIndices(ctx)
+	require.NoError(err)
+
 	err = tx.Commit()
-	require.NoError(tb, err)
+	require.NoError(err)
 }
 
 func TestHistoryMergeFiles(t *testing.T) {
@@ -634,9 +644,7 @@ func TestScanStaticFilesH(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 2, len(found))
-	require.Equal(t, "0-4", found[0])
-	require.Equal(t, "4-5", found[1])
+	require.Equal(t, 6, len(found))
 
 	h.files.Clear()
 	h.scanStateFiles(files, []string{"kv"})

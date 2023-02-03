@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -40,11 +41,9 @@ const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uin
 // Format: key -> bitmap(step_number_list)
 // step_number_list is list of .ef files where exists given key
 type LocalityIndex struct {
-	//file         *filesItem
 	filenameBase    string
-	dir             string // Directory where static files are created
-	tmpdir          string // Directory where static files are created
-	aggregationStep uint64 // Directory where static files are created
+	dir, tmpdir     string // Directory where static files are created
+	aggregationStep uint64 // immutable
 
 	file *filesItem
 	bm   *bitmapdb.FixedSizeBitmaps
@@ -65,17 +64,14 @@ func NewLocalityIndex(
 	if err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
-	uselessFiles := li.scanStateFiles(files)
-	for _, f := range uselessFiles {
-		_ = os.Remove(filepath.Join(li.dir, f))
-	}
+	_ = li.scanStateFiles(files)
 	if err = li.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
 	}
 	return li, nil
 }
 
-func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
+func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []*filesItem) {
 	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).li$")
 	var err error
 	for _, f := range files {
@@ -115,14 +111,11 @@ func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []str
 		}
 
 		startTxNum, endTxNum := startStep*li.aggregationStep, endStep*li.aggregationStep
-		frozen := endStep-startStep == StepsInBiggestFile
 		if li.file == nil {
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
 		} else if li.file.endTxNum < endTxNum {
-			uselessFiles = append(uselessFiles,
-				fmt.Sprintf("%s.%d-%d.li", li.filenameBase, li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep),
-			)
-			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
+			uselessFiles = append(uselessFiles, li.file)
+			li.file = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: false}
 		}
 	}
 	return uselessFiles
@@ -155,9 +148,24 @@ func (li *LocalityIndex) closeFiles() {
 	}
 }
 
-func (li *LocalityIndex) Close() {
-	li.closeFiles()
+func (li *LocalityIndex) closeFilesAndRemove(i ctxLocalityItem) {
+	if li == nil {
+		return
+	}
+	if i.file != nil {
+		i.file.closeFilesAndRemove()
+	}
+	if i.bm != nil {
+		if err := i.bm.Close(); err != nil {
+			log.Trace("close", "err", err, "file", i.bm.FileName())
+		}
+		if err := os.Remove(i.bm.FilePath()); err != nil {
+			log.Trace("os.Remove", "err", err, "file", i.bm.FileName())
+		}
+	}
 }
+
+func (li *LocalityIndex) Close()                { li.closeFiles() }
 func (li *LocalityIndex) Files() (res []string) { return res }
 func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 	if li != nil && li.file != nil && li.file.index != nil {
@@ -168,11 +176,11 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupIdxFiles(r *recsplit.IndexReader, bm *bitmapdb.FixedSizeBitmaps, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if li == nil || r == nil || bm == nil {
+func (li *LocalityIndex) lookupIdxFiles(r *recsplit.IndexReader, bm *bitmapdb.FixedSizeBitmaps, file *filesItem, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
+	if li == nil || r == nil || bm == nil || file == nil {
 		return 0, 0, 0, false, false
 	}
-	if fromTxNum >= li.file.endTxNum {
+	if fromTxNum >= file.endTxNum {
 		return 0, 0, fromTxNum, false, false
 	}
 
@@ -181,7 +189,7 @@ func (li *LocalityIndex) lookupIdxFiles(r *recsplit.IndexReader, bm *bitmapdb.Fi
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, li.file.endTxNum, ok1, ok2
+	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, file.endTxNum, ok1, ok2
 }
 
 func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndex) (toStep uint64, idxExists bool) {
@@ -302,7 +310,7 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 		startTxNum: txNumFrom,
 		endTxNum:   txNumTo,
 		index:      sf.index,
-		frozen:     (txNumTo-txNumFrom)/li.aggregationStep == StepsInBiggestFile,
+		frozen:     false,
 	}
 	li.bm = sf.bm
 }
@@ -312,10 +320,7 @@ func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedInd
 		return nil
 	}
 	toStep, idxExists := li.missedIdxFiles(ii)
-	if idxExists {
-		return nil
-	}
-	if toStep == 0 {
+	if idxExists || toStep == 0 {
 		return nil
 	}
 	fromStep := uint64(0)
@@ -403,11 +408,13 @@ func (si *LocalityIterator) Next() ([]byte, []uint64) {
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
 	si := &LocalityIterator{hc: ic}
 	ic.files.Ascend(func(item ctxItem) bool {
-		if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
-			return false
+		if !item.src.frozen || item.startTxNum > uptoTxNum {
+			return true
 		}
-		if item.startTxNum > uptoTxNum {
-			return false
+		if assert.Enable {
+			if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
+				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
+			}
 		}
 		g := item.getter
 		if g.HasNext() {
@@ -422,4 +429,24 @@ func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityI
 	})
 	si.advance()
 	return si
+}
+
+func (li *LocalityIndex) CleanupDir() {
+	if li == nil || li.dir == "" {
+		return
+	}
+	files, err := os.ReadDir(li.dir)
+	if err != nil {
+		log.Warn("[clean] can't read dir", "err", err, "dir", li.dir)
+		return
+	}
+	uselessFiles := li.scanStateFiles(files)
+	for _, f := range uselessFiles {
+		fName := fmt.Sprintf("%s.%d-%d.l", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
+		err = os.Remove(filepath.Join(li.dir, fName))
+		log.Debug("[clean] remove", "file", fName, "err", err)
+		fIdxName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
+		err = os.Remove(filepath.Join(li.dir, fIdxName))
+		log.Debug("[clean] remove", "file", fName, "err", err)
+	}
 }

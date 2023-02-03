@@ -33,7 +33,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
@@ -58,11 +57,12 @@ type History struct {
 	// Files:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	files            *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
-	historyValsTable string                     // key1+key2+txnNum -> oldValue , stores values BEFORE change
-	settingsTable    string
-	workers          int
-	compressVals     bool
+	files                   *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	historyValsTable        string                     // key1+key2+txnNum -> oldValue , stores values BEFORE change
+	settingsTable           string
+	compressWorkers         int
+	compressVals            bool
+	integrityFileExtensions []string
 
 	wal     *historyWAL
 	walLock sync.RWMutex
@@ -80,14 +80,15 @@ func NewHistory(
 	integrityFileExtensions []string,
 ) (*History, error) {
 	h := History{
-		files:            btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		historyValsTable: historyValsTable,
-		settingsTable:    settingsTable,
-		compressVals:     compressVals,
-		workers:          1,
+		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		historyValsTable:        historyValsTable,
+		settingsTable:           settingsTable,
+		compressVals:            compressVals,
+		compressWorkers:         1,
+		integrityFileExtensions: integrityFileExtensions,
 	}
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, true, append(integrityFileExtensions, "v"))
+	h.InvertedIndex, err = NewInvertedIndex(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, true, append(slices.Clone(h.integrityFileExtensions), "v"))
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -95,15 +96,16 @@ func NewHistory(
 	if err != nil {
 		return nil, err
 	}
-	_ = h.scanStateFiles(files, integrityFileExtensions)
-
+	_ = h.scanStateFiles(files, h.integrityFileExtensions)
 	if err = h.openFiles(); err != nil {
 		return nil, fmt.Errorf("NewHistory.openFiles: %s, %w", filenameBase, err)
 	}
 	return &h, nil
 }
 
-func (h *History) scanStateFiles(files []fs.DirEntry, integrityFileExtensions []string) (uselessFiles []string) {
+// scanStateFiles
+// returns `uselessFiles` where file "is useless" means: it's subset of frozen file. such files can be safely deleted. subset of non-frozen file may be useful
+func (h *History) scanStateFiles(files []fs.DirEntry, integrityFileExtensions []string) (uselessFiles []*filesItem) {
 	re := regexp.MustCompile("^" + h.filenameBase + ".([0-9]+)-([0-9]+).v$")
 	var err error
 Loop:
@@ -140,41 +142,37 @@ Loop:
 		for _, ext := range integrityFileExtensions {
 			requiredFile := fmt.Sprintf("%s.%d-%d.%s", h.filenameBase, startStep, endStep, ext)
 			if !dir.FileExist(filepath.Join(h.dir, requiredFile)) {
-				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists. %s", name, requiredFile, dbg.Stack()))
+				log.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
 				continue Loop
 			}
 		}
 
 		var newFile = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
-		{
-			var subSets []*filesItem
-			var superSet *filesItem
-			h.files.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.isSubsetOf(newFile) {
-						subSets = append(subSets, item)
-					} else if newFile.isSubsetOf(item) {
-						superSet = item
-					}
+		addNewFile := true
+		var subSets []*filesItem
+		h.files.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.isSubsetOf(newFile) {
+					subSets = append(subSets, item)
+					continue
 				}
-				return true
-			})
-			for _, subSet := range subSets {
-				h.files.Delete(subSet)
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.v", h.filenameBase, subSet.startTxNum/h.aggregationStep, subSet.endTxNum/h.aggregationStep),
-					fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, subSet.startTxNum/h.aggregationStep, subSet.endTxNum/h.aggregationStep),
-				)
+
+				if newFile.isSubsetOf(item) {
+					if item.frozen {
+						addNewFile = false
+						uselessFiles = append(uselessFiles, newFile)
+					}
+					continue
+				}
 			}
-			if superSet != nil {
-				uselessFiles = append(uselessFiles,
-					fmt.Sprintf("%s.%d-%d.v", h.filenameBase, startStep, endStep),
-					fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, startStep, endStep),
-				)
-				continue
-			}
+			return true
+		})
+		//for _, subSet := range subSets {
+		//	h.files.Delete(subSet)
+		//}
+		if addNewFile {
+			h.files.Set(newFile)
 		}
-		h.files.Set(newFile)
 	}
 	return uselessFiles
 }
@@ -275,6 +273,10 @@ func (h *History) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
+func (h *History) BuildOptionalMissedIndices(ctx context.Context) (err error) {
+	return h.localityIndex.BuildMissedIndices(ctx, h.InvertedIndex)
+}
+
 func (h *History) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
 	if err := h.InvertedIndex.BuildMissedIndices(ctx, sem); err != nil {
 		return err
@@ -641,7 +643,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlTrace); err != nil {
+	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace); err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
@@ -786,7 +788,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 	// Build history ef
 	efHistoryPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.ef", h.filenameBase, step, step+1))
-	efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.workers, log.LvlTrace)
+	efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 	}
@@ -1085,8 +1087,7 @@ type HistoryContext struct {
 	h                           *History
 	invIndexFiles, historyFiles *btree.BTreeG[ctxItem]
 
-	lr    *recsplit.IndexReader
-	locBm *bitmapdb.FixedSizeBitmaps
+	loc ctxLocalityItem
 
 	trace bool
 }
@@ -1095,6 +1096,7 @@ func (h *History) MakeContext() *HistoryContext {
 	var hc = HistoryContext{
 		h:             h,
 		invIndexFiles: btree.NewG[ctxItem](32, ctxItemLess),
+		historyFiles:  btree.NewG[ctxItem](32, ctxItemLess),
 		trace:         false,
 	}
 	h.InvertedIndex.files.Walk(func(items []*filesItem) bool {
@@ -1121,7 +1123,6 @@ func (h *History) MakeContext() *HistoryContext {
 		}
 		return true
 	})
-	hc.historyFiles = btree.NewG[ctxItem](32, ctxItemLess)
 	h.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || item.canDelete.Load() {
@@ -1147,8 +1148,12 @@ func (h *History) MakeContext() *HistoryContext {
 		return true
 	})
 	if hc.h.localityIndex != nil {
-		hc.lr = hc.h.localityIndex.NewIdxReader()
-		hc.locBm = hc.h.localityIndex.bm
+		hc.loc.file = hc.h.localityIndex.file
+		hc.loc.reader = hc.h.localityIndex.NewIdxReader()
+		hc.loc.bm = hc.h.localityIndex.bm
+		if hc.loc.file != nil {
+			hc.loc.file.refcount.Inc()
+		}
 	}
 
 	return &hc
@@ -1162,25 +1167,7 @@ func (hc *HistoryContext) Close() {
 		refCnt := item.src.refcount.Dec()
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
-			if item.src.decompressor != nil {
-				if err := item.src.decompressor.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				if err := os.Remove(item.src.decompressor.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				item.src.decompressor = nil
-			}
-			if item.src.index != nil {
-				if err := item.src.index.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.index.FileName())
-				}
-				//fmt.Printf("hist ctx del: %s\n", item.src.index.FilePath())
-				if err := os.Remove(item.src.index.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.index.FileName())
-				}
-				item.src.index = nil
-			}
+			item.src.closeFilesAndRemove()
 		}
 		return true
 	})
@@ -1189,34 +1176,23 @@ func (hc *HistoryContext) Close() {
 			return true
 		}
 		refCnt := item.src.refcount.Dec()
-		//fmt.Printf("cnt--: %d, %t, %s\n", refCnt, item.src.canDelete.Load(), item.src.decompressor.FilePath())
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
-			if item.src.decompressor != nil {
-				if err := item.src.decompressor.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				if err := os.Remove(item.src.decompressor.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				item.src.decompressor = nil
-			}
-			if item.src.index != nil {
-				if err := item.src.index.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.index.FileName())
-				}
-				if err := os.Remove(item.src.index.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.index.FileName())
-				}
-				item.src.index = nil
-			}
+			item.src.closeFilesAndRemove()
 		}
 		return true
 	})
+	if hc.loc.file != nil {
+		refCnt := hc.loc.file.refcount.Dec()
+		if refCnt == 0 && hc.loc.file.canDelete.Load() {
+			hc.h.localityIndex.closeFilesAndRemove(hc.loc)
+			hc.loc.file, hc.loc.bm = nil, nil
+		}
+	}
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.h.localityIndex.lookupIdxFiles(hc.lr, hc.locBm, key, txNum)
+	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.h.localityIndex.lookupIdxFiles(hc.loc.reader, hc.loc.bm, hc.loc.file, key, txNum)
 
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	var foundTxNum uint64
@@ -2173,4 +2149,22 @@ func u64or0(in []byte) (v uint64) {
 		v = binary.BigEndian.Uint64(in)
 	}
 	return v
+}
+
+func (h *History) CleanupDir() {
+	files, err := os.ReadDir(h.dir)
+	if err != nil {
+		log.Warn("[clean] can't read dir", "err", err, "dir", h.dir)
+		return
+	}
+	uselessFiles := h.scanStateFiles(files, h.integrityFileExtensions)
+	for _, f := range uselessFiles {
+		fName := fmt.Sprintf("%s.%d-%d.v", h.filenameBase, f.startTxNum/h.aggregationStep, f.endTxNum/h.aggregationStep)
+		err = os.Remove(filepath.Join(h.dir, fName))
+		log.Debug("[clean] remove", "file", fName, "err", err)
+		fIdxName := fmt.Sprintf("%s.%d-%d.vi", h.filenameBase, f.startTxNum/h.aggregationStep, f.endTxNum/h.aggregationStep)
+		err = os.Remove(filepath.Join(h.dir, fIdxName))
+		log.Debug("[clean] remove", "file", fName, "err", err)
+	}
+	h.InvertedIndex.CleanupDir()
 }

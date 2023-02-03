@@ -488,9 +488,7 @@ func TestScanStaticFiles(t *testing.T) {
 		}
 		return true
 	})
-	require.Equal(t, 2, len(found))
-	require.Equal(t, "0-4", found[0])
-	require.Equal(t, "4-5", found[1])
+	require.Equal(t, 6, len(found))
 
 	ii.files.Clear()
 	ii.files.Walk(func(items []*filesItem) bool {

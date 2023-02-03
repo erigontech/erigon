@@ -38,7 +38,8 @@ type Index struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
 	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
-	indexFile          string
+	filePath, fileName string
+
 	grData             []uint64
 	data               []byte // slice of correct size for the index to work with
 	startSeed          []uint64
@@ -68,12 +69,14 @@ func MustOpen(indexFile string) *Index {
 	return idx
 }
 
-func OpenIndex(indexFile string) (*Index, error) {
+func OpenIndex(indexFilePath string) (*Index, error) {
+	_, fName := filepath.Split(indexFilePath)
 	idx := &Index{
-		indexFile: indexFile,
+		filePath: indexFilePath,
+		fileName: fName,
 	}
 	var err error
-	idx.f, err = os.Open(indexFile)
+	idx.f, err = os.Open(indexFilePath)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +98,7 @@ func OpenIndex(indexFile string) (*Index, error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFile)
+		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFilePath)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -155,11 +158,8 @@ func OpenIndex(indexFile string) (*Index, error) {
 func (idx *Index) Size() int64        { return idx.size }
 func (idx *Index) ModTime() time.Time { return idx.modTime }
 func (idx *Index) BaseDataID() uint64 { return idx.baseDataID }
-func (idx *Index) FilePath() string   { return idx.indexFile }
-func (idx *Index) FileName() string {
-	_, fName := filepath.Split(idx.indexFile)
-	return fName
-}
+func (idx *Index) FilePath() string   { return idx.filePath }
+func (idx *Index) FileName() string   { return idx.fileName }
 
 func (idx *Index) Close() error {
 	if idx == nil {
@@ -200,7 +200,7 @@ func (idx *Index) KeyCount() uint64 {
 // Lookup is not thread-safe because it used id.hasher
 func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	if idx.keyCount == 0 {
-		_, fName := filepath.Split(idx.indexFile)
+		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
 	if idx.keyCount == 1 {

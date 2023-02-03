@@ -190,14 +190,14 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 func (a *Aggregator) SetBlockNum(bn uint64) { a.blockNum = bn }
 
 func (a *Aggregator) SetWorkers(i int) {
-	a.accounts.workers = i
-	a.storage.workers = i
-	a.code.workers = i
-	a.commitment.workers = i
-	a.logAddrs.workers = i
-	a.logTopics.workers = i
-	a.tracesFrom.workers = i
-	a.tracesTo.workers = i
+	a.accounts.compressWorkers = i
+	a.storage.compressWorkers = i
+	a.code.compressWorkers = i
+	a.commitment.compressWorkers = i
+	a.logAddrs.compressWorkers = i
+	a.logTopics.compressWorkers = i
+	a.tracesFrom.compressWorkers = i
+	a.tracesTo.compressWorkers = i
 }
 
 func (a *Aggregator) SetCommitmentMode(mode CommitmentMode) {
@@ -373,6 +373,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 		}
 	}()
 	a.integrateMergedFiles(outs, in)
+	a.cleanAfterFreeze(in)
 	closeAll = false
 	return true, nil
 }
@@ -649,7 +650,16 @@ func (a *Aggregator) integrateMergedFiles(outs SelectedStaticFiles, in MergedFil
 	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
 	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
 }
-
+func (a *Aggregator) cleanAfterFreeze(in MergedFiles) {
+	a.accounts.cleanAfterFreeze(in.accountsHist)
+	a.storage.cleanAfterFreeze(in.storageHist)
+	a.code.cleanAfterFreeze(in.codeHist)
+	a.commitment.cleanAfterFreeze(in.commitment)
+	a.logAddrs.cleanAfterFreeze(in.logAddrs)
+	a.logTopics.cleanAfterFreeze(in.logTopics)
+	a.tracesFrom.cleanAfterFreeze(in.tracesFrom)
+	a.tracesTo.cleanAfterFreeze(in.tracesTo)
+}
 func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
 	return ac.accounts.Get(addr, nil, roTx)
 }

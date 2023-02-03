@@ -431,25 +431,25 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	d.SetTx(tx)
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
+		c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx, logEvery)
+		require.NoError(t, err)
+		sf, err := d.buildFiles(ctx, step, c)
+		require.NoError(t, err)
+		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+		err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+		require.NoError(t, err)
+	}
+	var r DomainRanges
+	maxEndTxNum := d.endTxNumMinimax()
+	maxSpan := d.aggregationStep * StepsInBiggestFile
+	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 		func() {
-			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx, logEvery)
+			dc := d.MakeContext()
+			defer dc.Close()
+			valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
+			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
 			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c)
-			require.NoError(t, err)
-			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
-			err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
-			require.NoError(t, err)
-			var r DomainRanges
-			maxEndTxNum := d.endTxNumMinimax()
-			maxSpan := uint64(16 * 16)
-			for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
-				dc := d.MakeContext()
-				valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
-				valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
-				require.NoError(t, err)
-				d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-				dc.Close()
-			}
+			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 		}()
 	}
 	if !useExternalTx {
@@ -477,7 +477,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 
 	var r DomainRanges
 	maxEndTxNum := d.endTxNumMinimax()
-	maxSpan := d.aggregationStep * d.aggregationStep
+	maxSpan := d.aggregationStep * StepsInBiggestFile
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 		dc := d.MakeContext()
 		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)

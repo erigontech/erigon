@@ -74,7 +74,7 @@ func TestLocality(t *testing.T) {
 	t.Run("locality index: lookup", func(t *testing.T) {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], 1)
-		v1, v2, from, ok1, ok2 := li.lookupIdxFiles(recsplit.NewIndexReader(files.index), files.bm, k[:], 1*li.aggregationStep*StepsInBiggestFile)
+		v1, v2, from, ok1, ok2 := li.lookupIdxFiles(recsplit.NewIndexReader(files.index), files.bm, li.file, k[:], 1*li.aggregationStep*StepsInBiggestFile)
 		require.True(ok1)
 		require.False(ok2)
 		require.Equal(uint64(1*StepsInBiggestFile), v1)

@@ -42,6 +42,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
@@ -69,8 +70,6 @@ var (
 	queuedSubCounter        = metrics.GetOrCreateCounter(`txpool_queued`)
 	basefeeSubCounter       = metrics.GetOrCreateCounter(`txpool_basefee`)
 )
-
-const ASSERT = false
 
 type Config struct {
 	DBDir                 string
@@ -398,7 +397,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if err != nil {
 		return err
 	}
-	if ASSERT {
+	if assert.Enable {
 		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
 			log.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
 		}
@@ -429,7 +428,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	if ASSERT {
+	if assert.Enable {
 		for _, txn := range unwindTxs.Txs {
 			if txn.SenderID == 0 {
 				panic(fmt.Errorf("onNewBlock.unwindTxs: senderID can't be zero"))
@@ -984,7 +983,7 @@ func addTxs(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
 	pending *PendingPool, baseFee, queued *SubPool,
 	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) DiscardReason, discard func(*metaTx, DiscardReason)) ([]DiscardReason, error) {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
-	if ASSERT {
+	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
 				panic(fmt.Errorf("senderID can't be zero"))
@@ -1052,7 +1051,7 @@ func addTxsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges
 	pending *PendingPool, baseFee, queued *SubPool,
 	byNonce *BySenderAndNonce, byHash map[string]*metaTx, add func(*metaTx) DiscardReason, discard func(*metaTx, DiscardReason)) error {
 	protocolBaseFee := calcProtocolBaseFee(pendingBaseFee)
-	if ASSERT {
+	if assert.Enable {
 		for _, txn := range newTxs.Txs {
 			if txn.SenderID == 0 {
 				panic(fmt.Errorf("senderID can't be zero"))
@@ -1168,7 +1167,7 @@ func (p *TxPool) addLocked(mt *metaTx) DiscardReason {
 	p.byHash[string(mt.Tx.IDHash[:])] = mt
 
 	if replaced := p.all.replaceOrInsert(mt); replaced != nil {
-		if ASSERT {
+		if assert.Enable {
 			panic("must never happen")
 		}
 	}

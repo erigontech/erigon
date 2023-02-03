@@ -28,14 +28,13 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 )
-
-var ASSERT = false
 
 var ErrCollision = fmt.Errorf("duplicate key")
 
@@ -575,7 +574,7 @@ func (rs *RecSplit) Build() error {
 		}
 	}
 
-	if ASSERT {
+	if assert.Enable {
 		rs.indexW.Flush()
 		rs.indexF.Seek(0, 0)
 		b, _ := io.ReadAll(rs.indexF)

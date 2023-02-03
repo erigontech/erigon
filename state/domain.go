@@ -33,6 +33,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
@@ -69,7 +70,7 @@ type filesItem struct {
 }
 
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
-	return j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum
+	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
 
 func filesItemLess(i, j *filesItem) bool {
@@ -77,6 +78,26 @@ func filesItemLess(i, j *filesItem) bool {
 		return i.startTxNum > j.startTxNum
 	}
 	return i.endTxNum < j.endTxNum
+}
+func (i *filesItem) closeFilesAndRemove() {
+	if i.decompressor != nil {
+		if err := i.decompressor.Close(); err != nil {
+			log.Trace("close", "err", err, "file", i.decompressor.FileName())
+		}
+		if err := os.Remove(i.decompressor.FilePath()); err != nil {
+			log.Trace("close", "err", err, "file", i.decompressor.FileName())
+		}
+		i.decompressor = nil
+	}
+	if i.index != nil {
+		if err := i.index.Close(); err != nil {
+			log.Trace("close", "err", err, "file", i.index.FileName())
+		}
+		if err := os.Remove(i.index.FilePath()); err != nil {
+			log.Trace("close", "err", err, "file", i.index.FileName())
+		}
+		i.index = nil
+	}
 }
 
 type DomainStats struct {
@@ -450,6 +471,13 @@ type ctxItem struct {
 	endTxNum   uint64
 
 	src *filesItem
+}
+
+type ctxLocalityItem struct {
+	reader *recsplit.IndexReader
+	bm     *bitmapdb.FixedSizeBitmaps
+
+	file *filesItem
 }
 
 func ctxItemLess(i, j ctxItem) bool {

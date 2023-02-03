@@ -39,8 +39,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const ASSERT = false
-
 // Compressor is the main operating type for performing per-word compression
 // After creating a compression, one needs to add superstrings to it, using `AddWord` function
 // In order to add word without compression, function `AddUncompressedWord` needs to be used

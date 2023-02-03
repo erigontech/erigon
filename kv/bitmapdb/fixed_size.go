@@ -21,21 +21,24 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"time"
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 	mmap2 "github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type FixedSizeBitmaps struct {
-	f         *os.File
-	indexFile string
-	data      []uint64
-	metaData  []byte
-	amount    uint64
-	version   uint8
+	f                  *os.File
+	filePath, fileName string
+
+	data     []uint64
+	metaData []byte
+	amount   uint64
+	version  uint8
 
 	m             mmap2.MMap
 	bitsPerBitmap int
@@ -43,13 +46,16 @@ type FixedSizeBitmaps struct {
 	modTime       time.Time
 }
 
-func OpenFixedSizeBitmaps(indexFile string, bitsPerBitmap int) (*FixedSizeBitmaps, error) {
+func OpenFixedSizeBitmaps(filePath string, bitsPerBitmap int) (*FixedSizeBitmaps, error) {
+	_, fName := filepath.Split(filePath)
 	idx := &FixedSizeBitmaps{
-		indexFile:     indexFile,
+		filePath:      filePath,
+		fileName:      fName,
 		bitsPerBitmap: bitsPerBitmap,
 	}
+
 	var err error
-	idx.f, err = os.Open(indexFile)
+	idx.f, err = os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("OpenFile: %w", err)
 	}
@@ -72,13 +78,20 @@ func OpenFixedSizeBitmaps(indexFile string, bitsPerBitmap int) (*FixedSizeBitmap
 	return idx, nil
 }
 
-func (bm *FixedSizeBitmaps) Close() {
+func (bm *FixedSizeBitmaps) FileName() string { return bm.fileName }
+func (bm *FixedSizeBitmaps) FilePath() string { return bm.filePath }
+func (bm *FixedSizeBitmaps) Close() error {
 	if bm.m != nil {
-		_ = bm.m.Unmap()
+		if err := bm.m.Unmap(); err != nil {
+			log.Trace("unmap", "err", err, "file", bm.FileName())
+		}
 	}
 	if bm.f != nil {
-		_ = bm.f.Close()
+		if err := bm.f.Close(); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (bm *FixedSizeBitmaps) At(item uint64) (res []uint64, err error) {
@@ -202,7 +215,6 @@ func NewFixedSizeBitmapsWriter(indexFile string, bitsPerBitmap int, amount uint6
 	return idx, nil
 }
 func (w *FixedSizeBitmapsWriter) Close() {
-
 	_ = w.m.Unmap()
 	_ = w.f.Close()
 }

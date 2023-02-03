@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/sais"
@@ -827,7 +828,7 @@ func processSuperstring(superstringCh chan []byte, dictCollector *etl.Collector,
 		//log.Info("Kasai algorithm finished")
 		// Checking LCP array
 
-		if ASSERT {
+		if assert.Enable {
 			for i := 0; i < n-1; i++ {
 				var prefixLen int
 				p1 := int(filtered[i])
