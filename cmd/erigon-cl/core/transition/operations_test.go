@@ -414,3 +414,4 @@ func TestProcessAttestation(t *testing.T) {
 		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
 	}
 }
+
