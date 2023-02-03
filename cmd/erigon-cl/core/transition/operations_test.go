@@ -376,7 +376,6 @@ func TestProcessVoluntaryExits(t *testing.T) {
 }
 
 func TestProcessAttestation(t *testing.T) {
-	//beaconState, _ := util.DeterministicGenesisStateAltair(t, 64)
 	beaconState := state.GetEmptyBeaconState()
 	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
 	for i := 0; i < 64; i++ {

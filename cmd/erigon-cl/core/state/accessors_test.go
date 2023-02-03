@@ -315,7 +315,7 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 					Root: [32]byte{2},
 				},
 			},
-			inputDelay:           utils.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1,
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
 			participationIndices: []uint8{cfg.TimelySourceFlagIndex},
 		},
 		{
@@ -327,7 +327,7 @@ func TestAttestationParticipationFlagIndices(t *testing.T) {
 				Source: &cltypes.Checkpoint{},
 				Target: &cltypes.Checkpoint{},
 			},
-			inputDelay:           utils.IntegerSquareRoot(uint64(cfg.SlotsPerEpoch)) - 1,
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
 			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex},
 		},
 		{
