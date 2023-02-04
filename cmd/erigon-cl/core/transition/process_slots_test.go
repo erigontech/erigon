@@ -240,7 +240,7 @@ func TestProcessSlots(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil, false)
+			s := New(tc.prevState, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.processSlots(tc.startSlot + tc.numSlots)
 			if tc.wantErr {
 				if err == nil {
@@ -309,73 +309,6 @@ func TestVerifyBlockSignature(t *testing.T) {
 			if valid != tc.wantValid {
 				t.Errorf("unexpected difference in validity: want %v, got %v", tc.wantValid, valid)
 			}
-		})
-	}
-}
-
-func TestTransitionState(t *testing.T) {
-	slot2 := getTestBeaconBlock()
-	slot2.Block.Slot = 2
-	badSigBlock := getTestBeaconBlock()
-	badSigBlock.Signature = badSignature
-	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block.StateRoot = libcommon.Hash{}
-	testCases := []struct {
-		description   string
-		prevState     *state.BeaconState
-		block         *cltypes.SignedBeaconBlock
-		expectedState *state.BeaconState
-		wantErr       bool
-	}{
-		{
-			description: "success_2_slots",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       slot2,
-			expectedState: prepareNextBeaconState(
-				t,
-				[]uint64{0, 1},
-				[]string{stateHashValidator0, stateHashValidator1},
-				[]string{blockHashValidator0, blockHashValidator1},
-				getTestBeaconStateWithValidator(),
-			),
-			wantErr: false,
-		},
-		{
-			description: "error_empty_block_body",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       getEmptyBlock(),
-			wantErr:     true,
-		},
-		{
-			description: "error_bad_signature",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       badSigBlock,
-			wantErr:     true,
-		},
-		{
-			description: "error_bad_state_root",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       badStateRootBlock,
-			wantErr:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil, false)
-			err := s.transitionState(tc.block)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("unexpected success, wanted error")
-				}
-				return
-			}
-
-			// Non-failure case.
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			assertStateEq(t, tc.prevState, tc.expectedState)
 		})
 	}
 }

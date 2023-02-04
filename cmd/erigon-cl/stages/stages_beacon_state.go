@@ -3,12 +3,14 @@ package stages
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -52,6 +54,9 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		}
 		defer tx.Rollback()
 	}
+	// Initialize the transistor
+	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, true)
+
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {
 		return err
@@ -60,7 +65,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 
 	fromSlot := latestBlockHeader.Slot
 	for slot := fromSlot + 1; slot <= endSlot; slot++ {
-		block, err := rawdb.ReadBeaconBlock(tx, slot)
+		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, slot)
 		if err != nil {
 			return err
 		}
@@ -69,7 +74,17 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 			continue
 		}
 		// TODO: Pass this to state transition with the state
-		_ = block
+		if cfg.executionClient != nil {
+			if block.Block.Body.ExecutionPayload, err = cfg.executionClient.ReadExecutionPayload(eth1Number, eth1Hash); err != nil {
+				return err
+			}
+
+			if err := stateTransistor.TransitionState(block); err != nil {
+				log.Info("Found epoch, so stopping now...", "count", (fromSlot+1)-slot)
+				time.Sleep(5 * time.Second)
+				return err
+			}
+		}
 	}
 	// If successful update fork choice
 	if cfg.executionClient != nil {
