@@ -8,6 +8,8 @@ import (
 	"net"
 	"path/filepath"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -19,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Server struct {
@@ -109,8 +110,8 @@ func makeForksENREntry(chain string) (enr.Entry, error) {
 		return nil, fmt.Errorf("unknown chain %s", chain)
 	}
 
-	forks := forkid.GatherForks(chainConfig)
-	return eth.CurrentENREntryFromForks(forks, *genesisHash, 0), nil
+	heightForks, timeForks := forkid.GatherForks(chainConfig)
+	return eth.CurrentENREntryFromForks(heightForks, timeForks, *genesisHash, 0, 0), nil
 }
 
 func (server *Server) Bootnodes() []*enode.Node {

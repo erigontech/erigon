@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -17,7 +21,7 @@ import (
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	SerenityDifficulty = common.Big0        // Serenity block's difficulty is always 0.
+	SerenityDifficulty = libcommon.Big0     // Serenity block's difficulty is always 0.
 	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
 	RewardSerenity     = big.NewInt(300000000000000000)
 )
@@ -59,14 +63,14 @@ func (s *Serenity) InnerEngine() consensus.Engine {
 }
 
 // Type returns the type of the underlying consensus engine.
-func (s *Serenity) Type() params.ConsensusType {
+func (s *Serenity) Type() chain.ConsensusName {
 	return s.eth1Engine.Type()
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
 // This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
-func (s *Serenity) Author(header *types.Header) (common.Address, error) {
+func (s *Serenity) Author(header *types.Header) (libcommon.Address, error) {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
@@ -119,20 +123,26 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return nil
 }
 
-func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
 	}
+	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
+		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
+			return nil, nil, err
+		}
+	}
 	for _, w := range withdrawals {
-		state.AddBalance(w.Address, &w.Amount)
+		amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+		state.AddBalance(w.Address, amountInWei)
 	}
 	return txs, r, nil
 }
 
-func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
+func (s *Serenity) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
 	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
@@ -146,11 +156,11 @@ func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types
 	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
-func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
+func (s *Serenity) SealHash(header *types.Header) (hash libcommon.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) *big.Int {
+func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
@@ -191,7 +201,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(libcommon.Big1) != 0 {
 		return consensus.ErrInvalidNumber
 	}
 
@@ -225,11 +235,11 @@ func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, paren
 	return nil
 }
 
-func (s *Serenity) IsServiceTransaction(sender common.Address, syscall consensus.SystemCall) bool {
+func (s *Serenity) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+func (s *Serenity) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 	s.eth1Engine.Initialize(config, chain, e, header, state, txs, uncles, syscall)
 }
 
@@ -254,7 +264,7 @@ func IsPoSHeader(header *types.Header) bool {
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
-func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
+func IsTTDReached(chain consensus.ChainHeaderReader, parentHash libcommon.Hash, number uint64) (bool, error) {
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}

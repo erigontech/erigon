@@ -26,7 +26,11 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -37,7 +41,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -73,16 +76,16 @@ type btBlock struct {
 
 type btHeader struct {
 	Bloom            types.Bloom
-	Coinbase         common.Address
-	MixHash          common.Hash
+	Coinbase         libcommon.Address
+	MixHash          libcommon.Hash
 	Nonce            types.BlockNonce
 	Number           *big.Int
-	Hash             common.Hash
-	ParentHash       common.Hash
-	ReceiptTrie      common.Hash
-	StateRoot        common.Hash
-	TransactionsTrie common.Hash
-	UncleHash        common.Hash
+	Hash             libcommon.Hash
+	ParentHash       libcommon.Hash
+	ReceiptTrie      libcommon.Hash
+	StateRoot        libcommon.Hash
+	TransactionsTrie libcommon.Hash
+	UncleHash        libcommon.Hash
 	ExtraData        []byte
 	Difficulty       *big.Int
 	GasLimit         uint64
@@ -136,7 +139,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	}
 	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(t.json.BestBlock) != cmlast {
+	if libcommon.Hash(t.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
 	}
 	newDB := state.New(state.NewPlainStateReader(tx))
@@ -146,7 +149,7 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	return t.validateImportedHeaders(tx, validBlocks)
 }
 
-func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
+func (t *BlockTest) genesis(config *chain.Config) *core.Genesis {
 	return &core.Genesis{
 		Config:     config,
 		Nonce:      t.json.Genesis.Nonce.Uint64(),
@@ -294,13 +297,21 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		if nonce2 != acct.Nonce {
 			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
+		for loc, val := range acct.Storage {
+			val1 := uint256.NewInt(0).SetBytes(val.Bytes())
+			val2 := uint256.NewInt(0)
+			statedb.GetState(addr, &loc, val2)
+			if !val1.Eq(val2) {
+				return fmt.Errorf("storage mismatch for addr: %x loc: %x want: %d have: %d", addr, loc, val1, val2)
+			}
+		}
 	}
 	return nil
 }
 
 func (t *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
-	bmap := make(map[common.Hash]btBlock, len(t.json.Blocks))
+	bmap := make(map[libcommon.Hash]btBlock, len(t.json.Blocks))
 	for _, b := range validBlocks {
 		bmap[b.BlockHeader.Hash] = b
 	}

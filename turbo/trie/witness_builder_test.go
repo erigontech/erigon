@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 func TestBlockWitness(t *testing.T) {
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 	tr.Update([]byte("ABCD0001"), []byte("val1"))
 	tr.Update([]byte("ABCE0002"), []byte("val2"))
 
@@ -43,7 +44,7 @@ func TestBlockWitness(t *testing.T) {
 }
 
 func TestBlockWitnessAccount(t *testing.T) {
-	tr := New(common.Hash{})
+	tr := New(libcommon.Hash{})
 
 	account := accounts.NewAccount()
 	account.Balance.SetUint64(1 * 1000 * 1000)

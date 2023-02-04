@@ -1,37 +1,99 @@
 package cltypes
 
-type MetadataV1 struct {
+import (
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/common"
+)
+
+type Metadata struct {
 	SeqNumber uint64
 	Attnets   uint64
+	Syncnets  *uint64
 }
 
-type MetadataV2 struct {
-	SeqNumber uint64
-	Attnets   uint64
-	Syncnets  uint64
+func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
+	ret := buf
+	ret = append(ret, ssz_utils.Uint64SSZ(m.SeqNumber)...)
+	ret = append(ret, ssz_utils.Uint64SSZ(m.Attnets)...)
+	if m.Syncnets == nil {
+		return ret, nil
+	}
+	ret = append(ret, ssz_utils.Uint64SSZ(*m.Syncnets)...)
+
+	return ret, nil
 }
 
-// ENRForkID contains current fork id for ENR entries.
-type ENRForkID struct {
-	CurrentForkDigest [4]byte `ssz-size:"4" `
-	NextForkVersion   [4]byte `ssz-size:"4" `
-	NextForkEpoch     uint64
+func (m *Metadata) DecodeSSZ(buf []byte) error {
+	m.SeqNumber = ssz_utils.UnmarshalUint64SSZ(buf)
+	m.Attnets = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	if len(buf) < 24 {
+		return nil
+	}
+	m.Syncnets = new(uint64)
+	*m.Syncnets = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	return nil
 }
 
-// ForkData contains current fork id for gossip subscription.
-type ForkData struct {
-	CurrentVersion        [4]byte  `ssz-size:"4" `
-	GenesisValidatorsRoot [32]byte `ssz-size:"32" `
+func (m *Metadata) EncodingSizeSSZ() (ret int) {
+	ret = common.BlockNumberLength * 2
+	if m.Syncnets != nil {
+		ret += 8
+	}
+	return
+}
+
+func (m *Metadata) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return m.DecodeSSZ(buf)
 }
 
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.
 type Ping struct {
-	Id uint64 `json:"id" `
+	Id uint64
+}
+
+func (p *Ping) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, ssz_utils.Uint64SSZ(p.Id)...), nil
+}
+
+func (p *Ping) DecodeSSZ(buf []byte) error {
+	p.Id = ssz_utils.UnmarshalUint64SSZ(buf)
+	return nil
+}
+
+func (p *Ping) EncodingSizeSSZ() int {
+	return common.BlockNumberLength
+}
+
+func (p *Ping) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return p.DecodeSSZ(buf)
 }
 
 // P2P Message for bootstrap
 type SingleRoot struct {
-	Root [32]byte `ssz-size:"32" `
+	Root [32]byte
+}
+
+func (s *SingleRoot) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, s.Root[:]...), nil
+}
+
+func (s *SingleRoot) DecodeSSZ(buf []byte) error {
+	copy(s.Root[:], buf)
+	return nil
+}
+
+func (s *SingleRoot) EncodingSizeSSZ() int {
+	return length.Hash
+}
+
+func (s *SingleRoot) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
+}
+
+func (*SingleRoot) Clone() clonable.Clonable {
+	return &SingleRoot{}
 }
 
 /*
@@ -43,6 +105,28 @@ type LightClientUpdatesByRangeRequest struct {
 	Count  uint64
 }
 
+func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
+	return &LightClientUpdatesByRangeRequest{}
+}
+
+func (l *LightClientUpdatesByRangeRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return l.DecodeSSZ(buf)
+}
+
+func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, append(ssz_utils.Uint64SSZ(l.Period), ssz_utils.Uint64SSZ(l.Count)...)...), nil
+}
+
+func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte) error {
+	l.Period = ssz_utils.UnmarshalUint64SSZ(buf)
+	l.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	return nil
+}
+
+func (l *LightClientUpdatesByRangeRequest) EncodingSizeSSZ() int {
+	return 2 * common.BlockNumberLength
+}
+
 /*
  * BeaconBlocksByRangeRequest is the request for getting a range of blocks.
  */
@@ -50,6 +134,33 @@ type BeaconBlocksByRangeRequest struct {
 	StartSlot uint64
 	Count     uint64
 	Step      uint64 // Deprecated, must be set to 1
+}
+
+func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
+	dst = append(dst, ssz_utils.Uint64SSZ(b.StartSlot)...)
+	dst = append(dst, ssz_utils.Uint64SSZ(b.Count)...)
+	dst = append(dst, ssz_utils.Uint64SSZ(b.Step)...)
+	return dst, nil
+}
+
+func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte) error {
+	b.StartSlot = ssz_utils.UnmarshalUint64SSZ(buf)
+	b.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	b.Step = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	return nil
+}
+
+func (b *BeaconBlocksByRangeRequest) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return b.DecodeSSZ(buf)
+}
+
+func (b *BeaconBlocksByRangeRequest) EncodingSizeSSZ() int {
+	return 3 * common.BlockNumberLength
+}
+
+func (*BeaconBlocksByRangeRequest) Clone() clonable.Clonable {
+	return &BeaconBlocksByRangeRequest{}
 }
 
 /*
@@ -64,12 +175,29 @@ type Status struct {
 	HeadSlot       uint64
 }
 
-/*
- * SigningData is the message we want to verify against the sync committee signature.
- * Root is the HastTreeRoot() of the beacon block header,
- * while the domain is the sync committee identifier.
- */
-type SigningData struct {
-	Root   [32]byte `ssz-size:"32"`
-	Domain []byte   `ssz-size:"32"`
+func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
+	dst := buf
+	dst = append(dst, s.ForkDigest[:]...)
+	dst = append(dst, s.FinalizedRoot[:]...)
+	dst = append(dst, ssz_utils.Uint64SSZ(s.FinalizedEpoch)...)
+	dst = append(dst, s.HeadRoot[:]...)
+	dst = append(dst, ssz_utils.Uint64SSZ(s.HeadSlot)...)
+	return dst, nil
+}
+
+func (s *Status) DecodeSSZ(buf []byte) error {
+	copy(s.ForkDigest[:], buf)
+	copy(s.FinalizedRoot[:], buf[4:])
+	s.FinalizedEpoch = ssz_utils.UnmarshalUint64SSZ(buf[36:])
+	copy(s.HeadRoot[:], buf[44:])
+	s.HeadSlot = ssz_utils.UnmarshalUint64SSZ(buf[76:])
+	return nil
+}
+
+func (s *Status) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return s.DecodeSSZ(buf)
+}
+
+func (s *Status) EncodingSizeSSZ() int {
+	return 84
 }

@@ -4,11 +4,11 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type FakeEthash struct {
@@ -86,7 +86,7 @@ func (f *FakeEthash) VerifyUncles(chain consensus.ChainReader, header *types.Hea
 	return nil
 }
 
-func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[common.Hash]*types.Header, seal bool) error {
+func (f *FakeEthash) VerifyUncle(chain consensus.ChainHeaderReader, block *types.Header, uncle *types.Header, uncles mapset.Set, ancestors map[libcommon.Hash]*types.Header, seal bool) error {
 	err := f.Ethash.VerifyUncle(chain, block, uncle, uncles, ancestors, false)
 	if err != nil {
 		return err
@@ -114,7 +114,7 @@ func (f *FakeEthash) VerifySeal(_ consensus.ChainHeaderReader, header *types.Hea
 // If we're running a fake PoW, simply return a 0 nonce immediately
 func (f *FakeEthash) Seal(_ consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
 	header := block.Header()
-	header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
+	header.Nonce, header.MixDigest = types.BlockNonce{}, libcommon.Hash{}
 
 	select {
 	case results <- block.WithSeal(header):

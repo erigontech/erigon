@@ -6,17 +6,19 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -31,7 +33,7 @@ func DoCall(
 	header *types.Header,
 	overrides *ethapi2.StateOverrides,
 	gasCap uint64,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	stateReader state.StateReader,
 	headerReader services.HeaderReader,
 	callTimeout time.Duration,
@@ -105,15 +107,19 @@ func DoCall(
 }
 
 func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
-	return core.NewEVMBlockContext(header, getHashGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
+	return core.NewEVMBlockContext(header, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
 }
 
-func getHashGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) common.Hash {
-	return func(n uint64) common.Hash {
+func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
+	return func(n uint64) libcommon.Hash {
 		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
-			return common.Hash{}
+			return libcommon.Hash{}
+		}
+		if h == nil {
+			log.Warn("[evm] header is nil", "blockNum", n)
+			return libcommon.Hash{}
 		}
 		return h.Hash()
 	}
@@ -148,7 +154,7 @@ func (r *ReusableCaller) DoCallWithNewGas(
 
 	// reset the EVM so that we can continue to use it with the new context
 	txCtx := core.NewEVMTxContext(r.message)
-	r.intraBlockState.Reset()
+	r.intraBlockState = state.New(r.stateReader)
 	r.evm.Reset(txCtx, r.intraBlockState)
 
 	timedOut := false
@@ -182,13 +188,13 @@ func NewReusableCaller(
 	blockNrOrHash rpc.BlockNumberOrHash,
 	tx kv.Tx,
 	headerReader services.HeaderReader,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-	intraBlockState := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	if overrides != nil {
-		if err := overrides.Override(intraBlockState); err != nil {
+		if err := overrides.Override(ibs); err != nil {
 			return nil, err
 		}
 	}
@@ -210,11 +216,11 @@ func NewReusableCaller(
 	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
-	evm := vm.NewEVM(blockCtx, txCtx, intraBlockState, chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})
 
 	return &ReusableCaller{
 		evm:             evm,
-		intraBlockState: intraBlockState,
+		intraBlockState: ibs,
 		baseFee:         baseFee,
 		gasCap:          gasCap,
 		callTimeout:     callTimeout,

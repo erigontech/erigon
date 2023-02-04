@@ -2,28 +2,38 @@ package bodydownload
 
 import (
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/google/btree"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// DoubleHash is type to be used for the mapping between TxHash and UncleHash to the block header
-type DoubleHash [2 * common.HashLength]byte
+// TripleHash is type to be used for the mapping between TxHash, UncleHash, and WithdrawalsHash to the block header
+type TripleHash [3 * length.Hash]byte
 
 const MaxBodiesInRequest = 1024
 
 type Delivery struct {
 	peerID          [64]byte
-	txs             *[][][]byte
-	uncles          *[][]*types.Header
+	txs             [][][]byte
+	uncles          [][]*types.Header
+	withdrawals     []types.Withdrawals
 	lenOfP2PMessage uint64
+}
+
+// BodyQueueItem is part of the body cache kept in memory
+type BodyTreeItem struct {
+	blockNum    uint64
+	payloadSize int
+	rawBody     *types.RawBody
 }
 
 // BodyDownload represents the state of body downloading process
 type BodyDownload struct {
 	peerMap          map[[64]byte]int
-	requestedMap     map[DoubleHash]uint64
+	requestedMap     map[TripleHash]uint64
 	DeliveryNotify   chan struct{}
 	deliveryCh       chan Delivery
 	Engine           consensus.Engine
@@ -33,29 +43,26 @@ type BodyDownload struct {
 	requests         map[uint64]*BodyRequest
 	maxProgress      uint64
 	requestedLow     uint64 // Lower bound of block number for outstanding requests
-	requestHigh      uint64
-	lowWaitUntil     uint64 // Time to wait for before starting the next round request from requestedLow
-	outstandingLimit uint64 // Limit of number of outstanding blocks for body requests
 	deliveredCount   float64
 	wastedCount      float64
-	bodiesAdded      bool
-	bodyCache        map[uint64]*types.RawBody
-	UsingExternalTx  bool
+	bodyCache        *btree.BTreeG[BodyTreeItem]
+	bodyCacheSize    int
+	bodyCacheLimit   int // Limit of body Cache size
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)
 type BodyRequest struct {
 	BlockNums []uint64
-	Hashes    []common.Hash
+	Hashes    []libcommon.Hash
 	peerID    [64]byte
 	waitUntil uint64
 }
 
 // NewBodyDownload create a new body download state object
-func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownload {
+func NewBodyDownload(engine consensus.Engine, bodyCacheLimit int) *BodyDownload {
 	bd := &BodyDownload{
-		requestedMap:     make(map[DoubleHash]uint64),
-		outstandingLimit: uint64(outstandingLimit),
+		requestedMap:     make(map[TripleHash]uint64),
+		bodyCacheLimit:   bodyCacheLimit,
 		delivered:        roaring64.New(),
 		deliveriesH:      make(map[uint64]*types.Header),
 		requests:         make(map[uint64]*BodyRequest),
@@ -66,12 +73,10 @@ func NewBodyDownload(outstandingLimit int, engine consensus.Engine) *BodyDownloa
 		// that there is something to collect
 		DeliveryNotify: make(chan struct{}, 1),
 		// delivery channel needs to have enough capacity not to create contention
-		// between delivery and collections. since we assume that there will be
-		// no more than `outstandingLimit+MaxBodiesInRequest` requested
-		// deliveris, this is a good number for the channel capacity
-		deliveryCh: make(chan Delivery, outstandingLimit+MaxBodiesInRequest),
+		// between delivery and collections
+		deliveryCh: make(chan Delivery, 2*MaxBodiesInRequest),
 		Engine:     engine,
-		bodyCache:  make(map[uint64]*types.RawBody),
+		bodyCache:  btree.NewG[BodyTreeItem](32, func(a, b BodyTreeItem) bool { return a.blockNum < b.blockNum }),
 	}
 	return bd
 }

@@ -9,18 +9,20 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -28,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // The number of blocks we should be able to re-org sub-second on commodity hardware.
@@ -39,7 +40,7 @@ type HeadersCfg struct {
 	db                kv.RwDB
 	hd                *headerdownload.HeaderDownload
 	bodyDownload      *bodydownload.BodyDownload
-	chainConfig       params.ChainConfig
+	chainConfig       chain.Config
 	headerReqSend     func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool)
 	announceNewHashes func(context.Context, []headerdownload.Announce)
 	penalize          func(context.Context, []headerdownload.PenaltyItem)
@@ -57,7 +58,7 @@ func StageHeadersCfg(
 	db kv.RwDB,
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
-	chainConfig params.ChainConfig,
+	chainConfig chain.Config,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -175,7 +176,7 @@ func HeadersPOS(
 	}
 	interrupt, requestId, requestWithStatus := cfg.hd.BeaconRequestList.WaitForRequest(syncing, test)
 
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 	headerInserter := headerdownload.NewHeaderInserter(s.LogPrefix(), nil, s.BlockNumber, cfg.blockReader)
 
 	interrupted, err := handleInterrupt(interrupt, cfg, tx, headerInserter, useExternalTx)
@@ -239,7 +240,7 @@ func writeForkChoiceHashes(
 	tx kv.RwTx,
 	cfg HeadersCfg,
 ) (bool, error) {
-	if forkChoice.SafeBlockHash != (common.Hash{}) {
+	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
 		safeIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.SafeBlockHash)
 		if err != nil {
 			return false, err
@@ -250,7 +251,7 @@ func writeForkChoiceHashes(
 		}
 	}
 
-	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
 		finalizedIsCanonical, err := rawdb.IsCanonicalHash(tx, forkChoice.FinalizedBlockHash)
 		if err != nil {
 			return false, err
@@ -262,10 +263,10 @@ func writeForkChoiceHashes(
 	}
 
 	rawdb.WriteForkchoiceHead(tx, forkChoice.HeadBlockHash)
-	if forkChoice.SafeBlockHash != (common.Hash{}) {
+	if forkChoice.SafeBlockHash != (libcommon.Hash{}) {
 		rawdb.WriteForkchoiceSafe(tx, forkChoice.SafeBlockHash)
 	}
-	if forkChoice.FinalizedBlockHash != (common.Hash{}) {
+	if forkChoice.FinalizedBlockHash != (libcommon.Hash{}) {
 		rawdb.WriteForkchoiceFinalized(tx, forkChoice.FinalizedBlockHash)
 	}
 
@@ -289,24 +290,41 @@ func startHandlingForkChoice(
 	headerHash := forkChoice.HeadBlockHash
 	log.Debug(fmt.Sprintf("[%s] Handling fork choice", s.LogPrefix()), "headerHash", headerHash)
 
-	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
-	if currentHeadHash == headerHash { // no-op
-		log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
+	canonical, err := rawdb.IsCanonicalHash(tx, headerHash)
+	if err != nil {
+		log.Warn(fmt.Sprintf("[%s] Fork choice err (IsCanonicalHash)", s.LogPrefix()), "err", err)
 		cfg.hd.BeaconRequestList.Remove(requestId)
-		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
+		return nil, err
+	}
+	if canonical {
+		headerNumber := rawdb.ReadHeaderNumber(tx, headerHash)
+		ihProgress, err := s.IntermediateHashesAt(tx)
 		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+			log.Warn(fmt.Sprintf("[%s] Fork choice err (IntermediateHashesAt)", s.LogPrefix()), "err", err)
+			cfg.hd.BeaconRequestList.Remove(requestId)
 			return nil, err
 		}
-		if canonical {
-			return &engineapi.PayloadStatus{
-				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
-			}, nil
-		} else {
-			return &engineapi.PayloadStatus{
-				CriticalError: &privateapi.InvalidForkchoiceStateErr,
-			}, nil
+		if ihProgress >= *headerNumber {
+			// FCU points to a canonical and fully validated block in the past.
+			// Treat it as a no-op to avoid unnecessary unwind of block execution and other stages
+			// with subsequent rewind on a newer FCU.
+			log.Debug(fmt.Sprintf("[%s] Fork choice no-op", s.LogPrefix()))
+			cfg.hd.BeaconRequestList.Remove(requestId)
+			canonical, err = writeForkChoiceHashes(forkChoice, s, tx, cfg)
+			if err != nil {
+				log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
+				return nil, err
+			}
+			if canonical {
+				return &engineapi.PayloadStatus{
+					Status:          remote.EngineStatus_VALID,
+					LatestValidHash: headerHash,
+				}, nil
+			} else {
+				return &engineapi.PayloadStatus{
+					CriticalError: &privateapi.InvalidForkchoiceStateErr,
+				}, nil
+			}
 		}
 	}
 
@@ -337,7 +355,6 @@ func startHandlingForkChoice(
 		if err := cfg.forkValidator.FlushExtendingFork(tx, cfg.notifications.Accumulator); err != nil {
 			return nil, err
 		}
-		cfg.hd.BeaconRequestList.Remove(requestId)
 		canonical, err := writeForkChoiceHashes(forkChoice, s, tx, cfg)
 		if err != nil {
 			log.Warn(fmt.Sprintf("[%s] Fork choice err", s.LogPrefix()), "err", err)
@@ -353,7 +370,6 @@ func startHandlingForkChoice(
 		}
 	}
 
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 	forkingPoint, err := forkingPoint(ctx, tx, headerInserter, cfg.blockReader, header)
 	if err != nil {
 		return nil, err
@@ -371,7 +387,7 @@ func startHandlingForkChoice(
 			}
 		}
 
-		u.UnwindTo(forkingPoint, common.Hash{})
+		u.UnwindTo(forkingPoint, libcommon.Hash{})
 
 		cfg.hd.SetUnsettledForkChoice(forkChoice, headerNumber)
 	} else {
@@ -382,7 +398,7 @@ func startHandlingForkChoice(
 		if err = fixCanonicalChain(s.LogPrefix(), logEvery, headerNumber, headerHash, tx, cfg.blockReader); err != nil {
 			return nil, err
 		}
-		if err = rawdb.WriteHeadHeaderHash(tx, forkChoice.HeadBlockHash); err != nil {
+		if err = rawdb.WriteHeadHeaderHash(tx, headerHash); err != nil {
 			return nil, err
 		}
 
@@ -394,13 +410,11 @@ func startHandlingForkChoice(
 		if err := s.Update(tx, headerNumber); err != nil {
 			return nil, err
 		}
-		// Referesh currentHeadHash
-		currentHeadHash = rawdb.ReadHeadHeaderHash(tx)
 
 		if canonical {
 			return &engineapi.PayloadStatus{
 				Status:          remote.EngineStatus_VALID,
-				LatestValidHash: currentHeadHash,
+				LatestValidHash: headerHash,
 			}, nil
 		} else {
 			return &engineapi.PayloadStatus{
@@ -449,7 +463,7 @@ func finishHandlingForkChoice(
 	}
 
 	if !canonical {
-		if cfg.hd.GetPendingPayloadHash() != (common.Hash{}) {
+		if cfg.hd.GetPendingPayloadHash() != (libcommon.Hash{}) {
 			cfg.hd.PayloadStatusCh <- engineapi.PayloadStatus{
 				CriticalError: &privateapi.InvalidForkchoiceStateErr,
 			}
@@ -477,7 +491,6 @@ func handleNewPayload(
 	headerHash := block.Hash()
 
 	log.Info(fmt.Sprintf("[%s] Handling new payload", s.LogPrefix()), "height", headerNumber, "hash", headerHash)
-	cfg.hd.UpdateTopSeenHeightPoS(headerNumber)
 
 	parent, err := cfg.blockReader.HeaderByHash(ctx, tx, header.ParentHash)
 	if err != nil {
@@ -525,7 +538,7 @@ func handleNewPayload(
 	}
 
 	if cfg.bodyDownload != nil {
-		cfg.bodyDownload.AddToPrefetch(block)
+		cfg.bodyDownload.AddToPrefetch(header, block.RawBody())
 	}
 
 	return response, nil
@@ -562,7 +575,7 @@ func verifyAndSaveNewPoSHeader(
 	currentHeadHash := rawdb.ReadHeadHeaderHash(tx)
 
 	extendingHash := cfg.forkValidator.ExtendingForkHeadHash()
-	extendCanonical := (extendingHash == common.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
+	extendCanonical := (extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash) || extendingHash == header.ParentHash
 	status, latestValidHash, validationError, criticalError := cfg.forkValidator.ValidatePayload(tx, header, block.RawBody(), extendCanonical)
 	if criticalError != nil {
 		return nil, false, criticalError
@@ -583,9 +596,9 @@ func verifyAndSaveNewPoSHeader(
 
 func schedulePoSDownload(
 	requestId int,
-	hashToDownload common.Hash,
+	hashToDownload libcommon.Hash,
 	heightToDownload uint64,
-	downloaderTip common.Hash,
+	downloaderTip libcommon.Hash,
 	s *StageState,
 	cfg HeadersCfg,
 ) bool {
@@ -619,7 +632,7 @@ func schedulePoSDownload(
 }
 
 func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *headerdownload.HeaderInserter, validate bool) {
-	var lastValidHash common.Hash
+	var lastValidHash libcommon.Hash
 	var badChainError error
 	var foundPow bool
 
@@ -648,7 +661,7 @@ func saveDownloadedPoSHeaders(tx kv.RwTx, cfg HeadersCfg, headerInserter *header
 			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
 
-		foundPow = h.Difficulty.Cmp(common.Big0) != 0
+		foundPow = h.Difficulty.Cmp(libcommon.Big0) != 0
 		if foundPow {
 			return headerInserter.FeedHeaderPoS(tx, &h, h.Hash())
 		}
@@ -754,7 +767,7 @@ func HeadersPOW(
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
-	if hash == (common.Hash{}) {
+	if hash == (libcommon.Hash{}) {
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader); err != nil {
 			return err
@@ -782,14 +795,14 @@ func HeadersPOW(
 		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
 	}
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
-	cfg.hd.SetHeaderReader(&chainReader{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
+	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
-	var sentToPeer bool
 	stopped := false
 	prevProgress := headerProgress
 	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
+	var sentToPeer bool
 Loop:
 	for !stopped {
 
@@ -807,12 +820,12 @@ Loop:
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			_, sentToPeer = cfg.headerReqSend(ctx, req)
+			var peer [64]byte
+			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
-				cfg.hd.UpdateStats(req, false /* skeleton */)
+				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
+				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
-			// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-			cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 		}
 		if len(penalties) > 0 {
 			cfg.penalize(ctx, penalties)
@@ -821,12 +834,12 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				var peer [64]byte
+				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.UpdateStats(req, false /* skeleton */)
+					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
+					cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				}
-				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cfg.hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cfg.penalize(ctx, penalties)
@@ -838,16 +851,17 @@ Loop:
 		if time.Since(lastSkeletonTime) > 1*time.Second {
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				_, sentToPeer = cfg.headerReqSend(ctx, req)
+				var peer [64]byte
+				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
-					cfg.hd.UpdateStats(req, true /* skeleton */)
+					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
 					lastSkeletonTime = time.Now()
 				}
 			}
 		}
 		// Load headers into the database
 		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C); err != nil {
+		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
 			return err
 		}
 
@@ -861,10 +875,6 @@ Loop:
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
 			noProgressCounter = 0
 			wasProgress = true
-			if !initialCycle {
-				// if this is not an initial cycle, we need to react quickly when new headers are coming in
-				break
-			}
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
 				break
@@ -903,7 +913,7 @@ Loop:
 		timer.Stop()
 	}
 	if headerInserter.Unwind() {
-		u.UnwindTo(headerInserter.UnwindPoint(), common.Hash{})
+		u.UnwindTo(headerInserter.UnwindPoint(), libcommon.Hash{})
 	}
 	if headerInserter.GetHighest() != 0 {
 		if !headerInserter.Unwind() {
@@ -932,14 +942,14 @@ Loop:
 	return nil
 }
 
-func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash common.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader) error {
+func fixCanonicalChain(logPrefix string, logEvery *time.Ticker, height uint64, hash libcommon.Hash, tx kv.StatelessRwTx, headerReader services.FullBlockReader) error {
 	if height == 0 {
 		return nil
 	}
 	ancestorHash := hash
 	ancestorHeight := height
 
-	var ch common.Hash
+	var ch libcommon.Hash
 	var err error
 	for ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight); err == nil && ch != ancestorHash; ch, err = headerReader.CanonicalHash(context.Background(), tx, ancestorHeight) {
 		if err = rawdb.WriteCanonicalHash(tx, ancestorHash, ancestorHeight); err != nil {
@@ -979,7 +989,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		defer tx.Rollback()
 	}
 	// Delete canonical hashes that are being unwound
-	badBlock := u.BadBlock != (common.Hash{})
+	badBlock := u.BadBlock != (libcommon.Hash{})
 	if badBlock {
 		cfg.hd.ReportBadHeader(u.BadBlock)
 		// Mark all descendants of bad block as bad too
@@ -989,7 +999,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 		}
 		defer headerCursor.Close()
 		var k, v []byte
-		for k, v, err = headerCursor.Seek(dbutils.EncodeBlockNumber(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
+		for k, v, err = headerCursor.Seek(hexutility.EncodeTs(u.UnwindPoint + 1)); err == nil && k != nil; k, v, err = headerCursor.Next() {
 			var h types.Header
 			if err = rlp.DecodeBytes(v, &h); err != nil {
 				return err
@@ -1007,7 +1017,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 	}
 	if badBlock {
 		var maxTd big.Int
-		var maxHash common.Hash
+		var maxHash libcommon.Hash
 		var maxNum uint64 = 0
 
 		if test { // If we are not in the test, we can do searching for the heaviest chain in the next cycle
@@ -1026,7 +1036,7 @@ func HeadersUnwind(u *UnwindState, s *StageState, tx kv.RwTx, cfg HeadersCfg, te
 				if len(k) != 40 {
 					return fmt.Errorf("key in TD table has to be 40 bytes long: %x", k)
 				}
-				var hash common.Hash
+				var hash libcommon.Hash
 				copy(hash[:], k[8:])
 				if cfg.hd.IsBadHeader(hash) {
 					continue
@@ -1092,22 +1102,26 @@ func logProgressHeaders(logPrefix string, prev, now uint64) uint64 {
 	return now
 }
 
-type chainReader struct {
-	config      *params.ChainConfig
-	tx          kv.RwTx
+type ChainReaderImpl struct {
+	config      *chain.Config
+	tx          kv.Getter
 	blockReader services.FullBlockReader
 }
 
-func (cr chainReader) Config() *params.ChainConfig  { return cr.config }
-func (cr chainReader) CurrentHeader() *types.Header { panic("") }
-func (cr chainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+func NewChainReaderImpl(config *chain.Config, tx kv.Getter, blockReader services.FullBlockReader) *ChainReaderImpl {
+	return &ChainReaderImpl{config, tx, blockReader}
+}
+
+func (cr ChainReaderImpl) Config() *chain.Config        { return cr.config }
+func (cr ChainReaderImpl) CurrentHeader() *types.Header { panic("") }
+func (cr ChainReaderImpl) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 		return h
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
-func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByNumber(number uint64) *types.Header {
 	if cr.blockReader != nil {
 		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 		return h
@@ -1115,7 +1129,7 @@ func (cr chainReader) GetHeaderByNumber(number uint64) *types.Header {
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 
 }
-func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
+func (cr ChainReaderImpl) GetHeaderByHash(hash libcommon.Hash) *types.Header {
 	if cr.blockReader != nil {
 		number := rawdb.ReadHeaderNumber(cr.tx, hash)
 		if number == nil {
@@ -1126,7 +1140,7 @@ func (cr chainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
 	return h
 }
-func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
+func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
 		log.Error("ReadTd failed", "err", err)
@@ -1135,23 +1149,23 @@ func (cr chainReader) GetTd(hash common.Hash, number uint64) *big.Int {
 	return td
 }
 
-type epochReader struct {
+type EpochReaderImpl struct {
 	tx kv.RwTx
 }
 
-func (cr epochReader) GetEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
 }
-func (cr epochReader) GetPendingEpoch(hash common.Hash, number uint64) ([]byte, error) {
+func (cr EpochReaderImpl) GetPendingEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
 }
-func (cr epochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
+func (cr EpochReaderImpl) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
 }
-func (cr epochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
+func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 

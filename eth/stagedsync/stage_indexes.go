@@ -14,16 +14,19 @@ import (
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 type HistoryCfg struct {
@@ -221,7 +224,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		return nil
 	}
 
-	if err := collectorUpdates.Load(tx, changeset.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collectorUpdates.Load(tx, historyv2.Mapper[changesetBucket].IndexBucket, loaderFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return err
 	}
 	return nil
@@ -289,7 +292,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 	defer logEvery.Stop()
 
 	updates := map[string]struct{}{}
-	if err := changeset.ForEach(db, csBucket, dbutils.EncodeBlockNumber(to), func(blockN uint64, k, v []byte) error {
+	if err := historyv2.ForEach(db, csBucket, hexutility.EncodeTs(to), func(blockN uint64, k, v []byte) error {
 		select {
 		case <-logEvery.C:
 			var m runtime.MemStats
@@ -306,7 +309,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 		return err
 	}
 
-	if err := truncateBitmaps64(db, changeset.Mapper[csBucket].IndexBucket, updates, to); err != nil {
+	if err := truncateBitmaps64(db, historyv2.Mapper[csBucket].IndexBucket, updates, to); err != nil {
 		return err
 	}
 	return nil
@@ -435,7 +438,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		return err
 	}
 
-	c, err := tx.RwCursor(changeset.Mapper[csTable].IndexBucket)
+	c, err := tx.RwCursor(historyv2.Mapper[csTable].IndexBucket)
 	if err != nil {
 		return fmt.Errorf("failed to create cursor for pruning %w", err)
 	}
@@ -447,7 +450,7 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	if err := collector.Load(tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", changeset.Mapper[csTable].IndexBucket, "key", hex.EncodeToString(addr))
+			log.Info(fmt.Sprintf("[%s]", logPrefix), "table", historyv2.Mapper[csTable].IndexBucket, "key", hex.EncodeToString(addr))
 		case <-ctx.Done():
 			return libcommon.ErrStopped
 		default:

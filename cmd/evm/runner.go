@@ -30,7 +30,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -42,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -117,7 +121,7 @@ func runCmd(ctx *cli.Context) error {
 	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
 	//log.Root().SetHandler(glogger)
-	logconfig := &vm.LogConfig{
+	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
 		DisableStorage:    ctx.Bool(DisableStorageFlag.Name),
@@ -126,21 +130,21 @@ func runCmd(ctx *cli.Context) error {
 	}
 
 	var (
-		tracer        vm.Tracer
-		debugLogger   *vm.StructLogger
+		tracer        vm.EVMLogger
+		debugLogger   *logger.StructLogger
 		statedb       *state.IntraBlockState
-		chainConfig   *params.ChainConfig
-		sender        = common.BytesToAddress([]byte("sender"))
-		receiver      = common.BytesToAddress([]byte("receiver"))
+		chainConfig   *chain.Config
+		sender        = libcommon.BytesToAddress([]byte("sender"))
+		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *core.Genesis
 	)
 	if ctx.Bool(MachineFlag.Name) {
-		tracer = vm.NewJSONLogger(logconfig, os.Stdout)
+		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
 	} else if ctx.Bool(DebugFlag.Name) {
-		debugLogger = vm.NewStructLogger(logconfig)
+		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger
 	} else {
-		debugLogger = vm.NewStructLogger(logconfig)
+		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	db := memdb.New()
 	if ctx.String(GenesisFlag.Name) != "" {
@@ -159,12 +163,12 @@ func runCmd(ctx *cli.Context) error {
 
 	statedb = state.New(state.NewPlainStateReader(tx))
 	if ctx.String(SenderFlag.Name) != "" {
-		sender = common.HexToAddress(ctx.String(SenderFlag.Name))
+		sender = libcommon.HexToAddress(ctx.String(SenderFlag.Name))
 	}
 	statedb.CreateAccount(sender, true)
 
 	if ctx.String(ReceiverFlag.Name) != "" {
-		receiver = common.HexToAddress(ctx.String(ReceiverFlag.Name))
+		receiver = libcommon.HexToAddress(ctx.String(ReceiverFlag.Name))
 	}
 
 	var code []byte
@@ -284,7 +288,7 @@ func runCmd(ctx *cli.Context) error {
 	output, leftOverGas, stats, err := timedExec(bench, execFunc)
 
 	if ctx.Bool(DumpFlag.Name) {
-		rules := &params.Rules{}
+		rules := &chain.Rules{}
 		if chainConfig != nil {
 			rules = chainConfig.Rules(runtimeConfig.BlockNumber.Uint64(), runtimeConfig.Time.Uint64())
 		}
@@ -292,7 +296,11 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		fmt.Println(string(state.NewDumper(tx, 0).DefaultDump()))
+		historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(state.NewDumper(tx, 0, historyV3).DefaultDump()))
 	}
 
 	if memProfilePath := ctx.String(MemProfileFlag.Name); memProfilePath != "" {
@@ -317,13 +325,13 @@ func runCmd(ctx *cli.Context) error {
 			if printErr != nil {
 				log.Warn("Failed to print to stderr", "err", printErr)
 			}
-			vm.WriteTrace(os.Stderr, debugLogger.StructLogs())
+			logger.WriteTrace(os.Stderr, debugLogger.StructLogs())
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, "#### LOGS ####")
 		if printErr != nil {
 			log.Warn("Failed to print to stderr", "err", printErr)
 		}
-		vm.WriteLogs(os.Stderr, statedb.Logs())
+		logger.WriteLogs(os.Stderr, statedb.Logs())
 	}
 
 	if bench || ctx.Bool(StatDumpFlag.Name) {

@@ -3,11 +3,13 @@ package commands
 import (
 	"context"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/eth/filters"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -34,9 +36,6 @@ type ErigonAPI interface {
 	GetLatestLogs(ctx context.Context, crit filters.FilterCriteria, logOptions ethFilters.LogFilterOptions) (types.ErigonLogs, error)
 	// Gets cannonical block receipt through hash. If the block is not cannonical returns error
 	GetBlockReceiptsByBlockHash(ctx context.Context, cannonicalBlockHash common.Hash) ([]map[string]interface{}, error)
-
-	// WatchTheBurn / reward related (see ./erigon_issuance.go)
-	WatchTheBurn(ctx context.Context, blockNr rpc.BlockNumber) (Issuance, error)
 
 	// CumulativeChainTraffic / related to chain traffic (see ./erigon_cumulative_index.go)
 	CumulativeChainTraffic(ctx context.Context, blockNr rpc.BlockNumber) (ChainTraffic, error)

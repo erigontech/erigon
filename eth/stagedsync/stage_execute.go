@@ -5,20 +5,25 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	commonold "github.com/ledgerwatch/erigon/common"
-	ecom "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -33,14 +38,13 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -61,7 +65,7 @@ type WithSnapshots interface {
 }
 
 type headerDownloader interface {
-	ReportBadHeaderPoS(badHeader, lastValidAncestor ecom.Hash)
+	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
 type ExecuteBlockCfg struct {
@@ -69,7 +73,7 @@ type ExecuteBlockCfg struct {
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook ChangeSetHook
-	chainConfig   *params.ChainConfig
+	chainConfig   *chain.Config
 	engine        consensus.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
@@ -82,7 +86,7 @@ type ExecuteBlockCfg struct {
 	historyV3 bool
 	syncCfg   ethconfig.Sync
 	genesis   *core.Genesis
-	agg       *libstate.Aggregator22
+	agg       *libstate.AggregatorV3
 }
 
 func StageExecuteBlocksCfg(
@@ -90,7 +94,7 @@ func StageExecuteBlocksCfg(
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	accumulator *shards.Accumulator,
@@ -103,7 +107,7 @@ func StageExecuteBlocksCfg(
 	hd headerDownloader,
 	genesis *core.Genesis,
 	syncCfg ethconfig.Sync,
-	agg *libstate.Aggregator22,
+	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {
 	return ExecuteBlockCfg{
 		db:            db,
@@ -145,13 +149,13 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash commonold.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.Tracer, error) {
-		return vm.NewStructLogger(&vm.LogConfig{}), nil
+	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
+		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
 	callTracer := calltracer.NewCallTracer()
@@ -166,11 +170,11 @@ func executeBlock(
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
 	if isPoSa {
-		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyForBSC(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	} else if isBor {
-		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerallyBor(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	} else {
-		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, epochReader{tx: tx}, chainReader{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
+		execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, EpochReaderImpl{tx: tx}, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer)
 	}
 	if err != nil {
 		return err
@@ -244,7 +248,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	}
 	cfg.agg.SetWorkers(estimate.CompressSnapshot.WorkersQuarter())
 
-	if initialCycle && s.BlockNumber == 0 {
+	if initialCycle {
 		reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
 		if err != nil {
 			return err
@@ -254,6 +258,9 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			reconWorkers := cfg.syncCfg.ReconWorkerCount
 			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
+			}
+			if dbg.StopAfterReconst() {
+				os.Exit(1)
 			}
 		}
 	}
@@ -274,7 +281,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewState22()
+	rs := state.NewStateV3()
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
@@ -284,38 +291,38 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 }
 
 // reconstituteBlock - First block which is not covered by the history snapshot files
-func reconstituteBlock(agg *libstate.Aggregator22, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
+func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint64, ok bool, err error) {
 	sendersProgress, err := senderStageProgress(tx, db)
 	if err != nil {
 		return 0, false, err
 	}
-	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumMinimax())
+	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumFrozenAndIndexed())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
+			ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
 			return err
 		}); err != nil {
 			return
 		}
 	} else {
-		ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
+		ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
 	}
 	return
 }
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
-	rs := state.NewState22()
+	rs := state.NewStateV3()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := rawdb.TxNums.Min(tx, u.UnwindPoint+1)
+	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
 	if err := rs.Unwind(ctx, tx, txNum, cfg.agg, accumulator); err != nil {
-		return fmt.Errorf("State22.Unwind: %w", err)
+		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
-	if err := rs.Flush(tx); err != nil {
-		return fmt.Errorf("State22.Flush: %w", err)
+	if err := rs.Flush(ctx, tx, s.LogPrefix(), time.NewTicker(30*time.Second)); err != nil {
+		return fmt.Errorf("StateV3.Flush: %w", err)
 	}
 
 	if err := rawdb.TruncateReceipts(tx, u.UnwindPoint+1); err != nil {
@@ -463,10 +470,10 @@ Loop:
 			if err = batch.Commit(); err != nil {
 				return err
 			}
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
 			if !useExternalTx {
-				if err = s.Update(tx, stageProgress); err != nil {
-					return err
-				}
 				if err = tx.Commit(); err != nil {
 					return err
 				}
@@ -501,7 +508,7 @@ Loop:
 
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
-		log.Error("writing plain state version", "err", err)
+		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
 	if !useExternalTx {
@@ -612,7 +619,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address commonold.Address
+				var address common.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -640,7 +647,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				}
 			} else {
 				if accumulator != nil {
-					var address commonold.Address
+					var address common.Address
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
@@ -651,9 +658,9 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 			return nil
 		}
 		if accumulator != nil {
-			var address commonold.Address
+			var address common.Address
 			var incarnation uint64
-			var location commonold.Hash
+			var location common.Hash
 			copy(address[:], k[:length.Addr])
 			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
 			copy(location[:], k[length.Addr+length.Incarnation:])
@@ -675,7 +682,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 		return err
 	}
 
-	if err := changeset.Truncate(tx, u.UnwindPoint+1); err != nil {
+	if err := historyv2.Truncate(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
 
@@ -690,7 +697,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	// Truncate CallTraceSet
-	keyStart := dbutils.EncodeBlockNumber(u.UnwindPoint + 1)
+	keyStart := hexutility.EncodeTs(u.UnwindPoint + 1)
 	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
@@ -710,7 +717,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address commonold.Address
+	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {

@@ -1,14 +1,22 @@
 package ethconsensusconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"path/filepath"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/aura/consensusconfig"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/contract"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/db"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -16,10 +24,9 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
+func CreateConsensusEngine(chainConfig *chain.Config, logger log.Logger, config interface{}, notify []string, noverify bool, HeimdallgRPCAddress string, HeimdallURL string, WithoutHeimdall bool, datadir string, snapshots *snapshotsync.RoSnapshots, readonly bool, chainDb ...kv.RwDB) consensus.Engine {
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
@@ -46,24 +53,50 @@ func CreateConsensusEngine(chainConfig *params.ChainConfig, logger log.Logger, c
 		}
 	case *params.ConsensusSnapshotConfig:
 		if chainConfig.Clique != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "clique", "db")
+			}
 			eng = clique.New(chainConfig, consensusCfg, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly))
 		}
-	case *params.AuRaConfig:
+	case *chain.AuRaConfig:
 		if chainConfig.Aura != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "aura")
+			}
 			var err error
 			eng, err = aura.NewAuRa(chainConfig.Aura, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), chainConfig.Aura.Etherbase, consensusconfig.GetConfigByChain(chainConfig.ChainName))
 			if err != nil {
 				panic(err)
 			}
 		}
-	case *params.ParliaConfig:
+	case *chain.ParliaConfig:
 		if chainConfig.Parlia != nil {
+			if consensusCfg.DBPath == "" {
+				consensusCfg.DBPath = filepath.Join(datadir, "parlia")
+			}
 			eng = parlia.New(chainConfig, db.OpenDatabase(consensusCfg.DBPath, logger, consensusCfg.InMemory, readonly), snapshots, chainDb[0])
 		}
-	case *params.BorConfig:
-		if chainConfig.Bor != nil {
+	case *chain.BorConfig:
+		// If Matic bor consensus is requested, set it up
+		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
+		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
+		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
+			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract)
+			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig)
 			borDbPath := filepath.Join(datadir, "bor") // bor consensus path: datadir/bor
-			eng = bor.New(chainConfig, db.OpenDatabase(borDbPath, logger, false, readonly), HeimdallURL, WithoutHeimdall)
+			db := db.OpenDatabase(borDbPath, logger, false, readonly)
+
+			var heimdallClient bor.IHeimdallClient
+			if WithoutHeimdall {
+				return bor.New(chainConfig, db, spanner, nil, genesisContractsClient)
+			} else {
+				if HeimdallgRPCAddress != "" {
+					heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(HeimdallgRPCAddress)
+				} else {
+					heimdallClient = heimdall.NewHeimdallClient(HeimdallURL)
+				}
+				eng = bor.New(chainConfig, db, spanner, heimdallClient, genesisContractsClient)
+			}
 		}
 	}
 

@@ -7,18 +7,15 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -26,22 +23,20 @@ import (
 const BlockBufferSize = 128
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
-func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash common.Hash, headTd256 *uint256.Int, err error) {
+func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	bd.maxProgress = headerProgress + 1
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
-	bd.lowWaitUntil = 0
-	bd.requestHigh = bd.requestedLow + (bd.outstandingLimit / 2)
-	bd.requestedMap = make(map[DoubleHash]uint64)
+	bd.requestedMap = make(map[TripleHash]uint64)
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
@@ -51,12 +46,12 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, err
+		return 0, 0, libcommon.Hash{}, nil, err
 	}
 	var headTd *big.Int
 	headTd, err = rawdb.ReadTd(db, headHash, headHeight)
 	if err != nil {
-		return 0, common.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headTd == nil {
 		headTd = new(big.Int)
@@ -64,69 +59,53 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight uint64, headHash comm
 	headTd256 = new(uint256.Int)
 	overflow := headTd256.SetFromBig(headTd)
 	if overflow {
-		return 0, [32]byte{}, nil, fmt.Errorf("headTd higher than 2^256-1")
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("headTd higher than 2^256-1")
 	}
-	return headHeight, headHash, headTd256, nil
+	headTime = 0
+	headHeader := rawdb.ReadHeader(db, headHash, headHeight)
+	if headHeader != nil {
+		headTime = headHeader.Time
+	}
+	return headHeight, headTime, headHash, headTd256, nil
 }
 
 // RequestMoreBodies - returns nil if nothing to request
-func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, blockNum uint64, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, uint64, error) {
+func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullBlockReader, currentTime uint64, blockPropagator adapter.BlockPropagator) (*BodyRequest, error) {
 	var bodyReq *BodyRequest
 	blockNums := make([]uint64, 0, BlockBufferSize)
-	hashes := make([]common.Hash, 0, BlockBufferSize)
+	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	if blockNum < bd.requestedLow {
-		blockNum = bd.requestedLow
-	}
-
-	for ; len(blockNums) < BlockBufferSize && bd.requestedLow <= bd.maxProgress; blockNum++ {
-		// Check if we reached the highest allowed request block number, and turn back
-		if blockNum >= bd.requestedLow+bd.outstandingLimit || blockNum >= bd.maxProgress {
-			blockNum = 0
-			break // Avoid tight loop
-		}
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
 		}
 
-		req := bd.requests[blockNum]
-		if req != nil {
+		if req, ok := bd.requests[blockNum]; ok {
 			if currentTime < req.waitUntil {
 				continue
 			}
 			bd.peerMap[req.peerID]++
-			bd.requests[blockNum] = nil
+			delete(bd.requests, blockNum)
 		}
 
 		// check in the bucket if that has been received either in this run or a previous one.
 		// if we already have the body we can continue on to populate header info and then skip
 		// the body request altogether
 		var err error
-		key := dbutils.EncodeBlockNumber(blockNum)
-		var bodyInBucket bool
-		if !bd.UsingExternalTx {
-			bodyInBucket, err = tx.Has("BodiesStage", key)
-			if err != nil {
-				return nil, blockNum, err
-			}
-		} else {
-			_, bodyInBucket = bd.bodyCache[blockNum]
-		}
-
-		if bodyInBucket {
+		if _, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.delivered.Add(blockNum)
 			continue
 		}
 
-		var hash common.Hash
+		var hash libcommon.Hash
 		var header *types.Header
 		request := true
 		if bd.deliveriesH[blockNum] != nil {
 			// If this block was requested before, we don't need to fetch the headers from the database the second time
 			header = bd.deliveriesH[blockNum]
 			if header == nil {
-				return nil, blockNum, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			hash = header.Hash()
 
@@ -139,109 +118,103 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 		} else {
 			hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
-				return nil, blockNum, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+				return nil, fmt.Errorf("could not find canonical header: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 
 			header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 			if err != nil {
-				return nil, blockNum, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
+				return nil, fmt.Errorf("header not found: %w, blockNum=%d, trace=%s", err, blockNum, dbg.Stack())
 			}
 			if header == nil {
-				return nil, blockNum, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
+				return nil, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 			}
 
 			if hasPrefetched := bd.checkPrefetchedBlock(hash, tx, blockNum, blockPropagator); hasPrefetched {
 				request = false
 			} else {
 				bd.deliveriesH[blockNum] = header
-				if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash {
-					// Perhaps we already have this block
-					block := rawdb.ReadBlock(tx, hash, blockNum)
-					if block == nil {
-						var doubleHash DoubleHash
-						copy(doubleHash[:], header.UncleHash.Bytes())
-						copy(doubleHash[length.Hash:], header.TxHash.Bytes())
-						bd.requestedMap[doubleHash] = blockNum
-					} else {
-						err = bd.addBodyToBucket(tx, blockNum, block.RawBody())
-						if err != nil {
-							log.Error("Failed to add block body to bucket", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
-						}
-						request = false
-					}
-				} else {
-					err = bd.addBodyToBucket(tx, blockNum, &types.RawBody{})
-					if err != nil {
-						log.Error("Failed to add block body to bucket", "err", err, "number", blockNum, "hash", hash)
-					}
-					request = false
-				}
 			}
 		}
-
 		if request {
+			if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
+				(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
+				// Perhaps we already have this block
+				block := rawdb.ReadBlock(tx, hash, blockNum)
+				if block != nil {
+					bd.addBodyToCache(blockNum, block.RawBody())
+					request = false
+				}
+			} else {
+				bd.addBodyToCache(blockNum, &types.RawBody{})
+				request = false
+			}
+		}
+		if request {
+			var tripleHash TripleHash
+			copy(tripleHash[:], header.UncleHash.Bytes())
+			copy(tripleHash[length.Hash:], header.TxHash.Bytes())
+			if header.WithdrawalsHash != nil {
+				copy(tripleHash[2*length.Hash:], header.WithdrawalsHash.Bytes())
+			} else {
+				copy(tripleHash[2*length.Hash:], types.EmptyRootHash.Bytes())
+			}
+			bd.requestedMap[tripleHash] = blockNum
 			blockNums = append(blockNums, blockNum)
 			hashes = append(hashes, hash)
 		} else {
-			// Both uncleHash and txHash are empty (or block is prefetched), no need to request
+			// uncleHash, txHash, and withdrawalsHash are all empty (or block is prefetched), no need to request
 			bd.delivered.Add(blockNum)
 		}
 	}
 	if len(blockNums) > 0 {
 		bodyReq = &BodyRequest{BlockNums: blockNums, Hashes: hashes}
-		for _, num := range blockNums {
-			bd.requests[num] = bodyReq
-		}
 	}
-
-	return bodyReq, blockNum, nil
+	return bodyReq, nil
 }
 
 // checks if we have the block prefetched, returns true if found and stored or false if not present
-func (bd *BodyDownload) checkPrefetchedBlock(hash common.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
-	block := bd.prefetchedBlocks.Pop(hash)
+func (bd *BodyDownload) checkPrefetchedBlock(hash libcommon.Hash, tx kv.RwTx, blockNum uint64, blockPropagator adapter.BlockPropagator) bool {
+	header, body := bd.prefetchedBlocks.Get(hash)
 
-	if block == nil {
+	if body == nil {
 		return false
 	}
 
 	// Block is prefetched, no need to request
-	bd.deliveriesH[blockNum] = block.Header()
+	bd.deliveriesH[blockNum] = header
 
 	// make sure we have the body in the bucket for later use
-	bd.addBodyToBucket(tx, blockNum, block.RawBody())
+	bd.addBodyToCache(blockNum, body)
 
 	// Calculate the TD of the block (it's not imported yet, so block.Td is not valid)
-	if parent, err := rawdb.ReadTd(tx, block.ParentHash(), block.NumberU64()-1); err != nil {
-		log.Error("Failed to ReadTd", "err", err, "number", block.NumberU64()-1, "hash", block.ParentHash())
-	} else if parent != nil {
-		if block.Difficulty().Sign() != 0 { // don't propagate proof-of-stake blocks
-			td := new(big.Int).Add(block.Difficulty(), parent)
-			go blockPropagator(context.Background(), block, td)
+	if header.Difficulty.Sign() != 0 { // don't propagate proof-of-stake blocks
+		if parent, err := rawdb.ReadTd(tx, header.ParentHash, header.Number.Uint64()-1); err != nil {
+			log.Error("Failed to ReadTd", "err", err, "number", header.Number.Uint64()-1, "hash", header.ParentHash)
+		} else if parent != nil {
+			td := new(big.Int).Add(header.Difficulty, parent)
+			go blockPropagator(context.Background(), header, body, td)
+		} else {
+			log.Error("Propagating dangling block", "number", header.Number.Uint64(), "hash", hash)
 		}
-	} else {
-		log.Error("Propagating dangling block", "number", block.Number(), "hash", hash)
 	}
 
 	return true
 }
 
 func (bd *BodyDownload) RequestSent(bodyReq *BodyRequest, timeWithTimeout uint64, peer [64]byte) {
-	for _, blockNum := range bodyReq.BlockNums {
-		if blockNum < bd.requestedLow {
-			continue
-		}
-		req := bd.requests[blockNum]
-		if req != nil {
-			bd.requests[blockNum].waitUntil = timeWithTimeout
-			bd.requests[blockNum].peerID = peer
-		}
+	//if len(bodyReq.BlockNums) > 0 {
+	//	log.Debug("Sent Body request", "peer", fmt.Sprintf("%x", peer)[:8], "nums", fmt.Sprintf("%d", bodyReq.BlockNums))
+	//}
+	for _, num := range bodyReq.BlockNums {
+		bd.requests[num] = bodyReq
 	}
+	bodyReq.waitUntil = timeWithTimeout
+	bodyReq.peerID = peer
 }
 
 // DeliverBodies takes the block body received from a peer and adds it to the various data structures
-func (bd *BodyDownload) DeliverBodies(txs *[][][]byte, uncles *[][]*types.Header, lenOfP2PMsg uint64, peerID [64]byte) {
-	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
+func (bd *BodyDownload) DeliverBodies(txs [][][]byte, uncles [][]*types.Header, withdrawals []types.Withdrawals, lenOfP2PMsg uint64, peerID [64]byte) {
+	bd.deliveryCh <- Delivery{txs: txs, uncles: uncles, withdrawals: withdrawals, lenOfP2PMessage: lenOfP2PMsg, peerID: peerID}
 
 	select {
 	case bd.DeliveryNotify <- struct{}{}:
@@ -297,49 +270,55 @@ Loop:
 		if delivery.uncles == nil {
 			log.Warn("nil uncles delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
 		}
-		if delivery.txs == nil || delivery.uncles == nil {
+		if delivery.withdrawals == nil {
+			log.Warn("nil withdrawals delivered", "peer_id", delivery.peerID, "p2p_msg_len", delivery.lenOfP2PMessage)
+		}
+		if delivery.txs == nil || delivery.uncles == nil || delivery.withdrawals == nil {
 			log.Debug("delivery body processing has been skipped due to nil tx|data")
 			continue
 		}
 
-		reqMap := make(map[uint64]*BodyRequest)
-		txs, uncles, lenOfP2PMessage, _ := *delivery.txs, *delivery.uncles, delivery.lenOfP2PMessage, delivery.peerID
+		//var deliveredNums []uint64
+		toClean := map[uint64]struct{}{}
+		txs, uncles, withdrawals, lenOfP2PMessage := delivery.txs, delivery.uncles, delivery.withdrawals, delivery.lenOfP2PMessage
 
 		for i := range txs {
 			uncleHash := types.CalcUncleHash(uncles[i])
 			txHash := types.DeriveSha(RawTransactions(txs[i]))
-			var doubleHash DoubleHash
-			copy(doubleHash[:], uncleHash.Bytes())
-			copy(doubleHash[length.Hash:], txHash.Bytes())
+			withdrawalsHash := types.DeriveSha(withdrawals[i])
+			var tripleHash TripleHash
+			copy(tripleHash[:], uncleHash.Bytes())
+			copy(tripleHash[length.Hash:], txHash.Bytes())
+			copy(tripleHash[2*length.Hash:], withdrawalsHash.Bytes())
 
 			// Block numbers are added to the bd.delivered bitmap here, only for blocks for which the body has been received, and their double hashes are present in the bd.requestedMap
 			// Also, block numbers can be added to bd.delivered for empty blocks, above
-			blockNum, ok := bd.requestedMap[doubleHash]
+			blockNum, ok := bd.requestedMap[tripleHash]
 			if !ok {
 				undelivered++
 				continue
 			}
-			req := bd.requests[blockNum]
-			if req != nil {
-				if _, ok := reqMap[req.BlockNums[0]]; !ok {
-					reqMap[req.BlockNums[0]] = req
+			//deliveredNums = append(deliveredNums, blockNum)
+			if req, ok := bd.requests[blockNum]; ok {
+				for _, blockNum := range req.BlockNums {
+					toClean[blockNum] = struct{}{}
 				}
 			}
-			delete(bd.requestedMap, doubleHash) // Delivered, cleaning up
+			delete(bd.requestedMap, tripleHash) // Delivered, cleaning up
 
-			err := bd.addBodyToBucket(tx, blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i]})
-			if err != nil {
-				return 0, 0, err
-			}
+			bd.addBodyToCache(blockNum, &types.RawBody{Transactions: txs[i], Uncles: uncles[i], Withdrawals: withdrawals[i]})
 			bd.delivered.Add(blockNum)
 			delivered++
 		}
 		// Clean up the requests
-		for _, req := range reqMap {
-			for _, blockNum := range req.BlockNums {
-				bd.requests[blockNum] = nil
-			}
+		//var clearedNums []uint64
+		for blockNum := range toClean {
+			delete(bd.requests, blockNum)
+			//clearedNums = append(clearedNums, blockNum)
 		}
+		//sort.Slice(deliveredNums, func(i, j int) bool { return deliveredNums[i] < deliveredNums[j] })
+		//sort.Slice(clearedNums, func(i, j int) bool { return clearedNums[i] < clearedNums[j] })
+		//log.Debug("Delivered", "blockNums", fmt.Sprintf("%d", deliveredNums), "clearedNums", fmt.Sprintf("%d", clearedNums))
 		total := delivered + undelivered
 		if total > 0 {
 			// Approximate numbers
@@ -355,15 +334,21 @@ Loop:
 // the requestedLow count is increased by the number returned
 func (bd *BodyDownload) NextProcessingCount() uint64 {
 	var i uint64
-	for i = 0; !bd.delivered.IsEmpty() && bd.requestedLow+i == bd.delivered.Minimum(); i++ {
-		bd.delivered.Remove(bd.requestedLow + i)
+	for i = 0; bd.delivered.Contains(bd.requestedLow + i); i++ {
 	}
-	bd.requestedLow += i
 	return i
+}
+
+func (bd *BodyDownload) AdvanceLow() {
+	bd.requestedLow++
 }
 
 func (bd *BodyDownload) DeliveryCounts() (float64, float64) {
 	return bd.deliveredCount, bd.wastedCount
+}
+
+func (bd *BodyDownload) NotDelivered(blockNum uint64) {
+	bd.delivered.Remove(blockNum)
 }
 
 func (bd *BodyDownload) GetPenaltyPeers() [][64]byte {
@@ -385,105 +370,66 @@ func (bd *BodyDownload) PrintPeerMap() {
 	bd.peerMap = make(map[[64]byte]int)
 }
 
-func (bd *BodyDownload) AddToPrefetch(block *types.Block) {
-	if hash := types.CalcUncleHash(block.Uncles()); hash != block.UncleHash() {
-		log.Warn("Propagated block has invalid uncles", "have", hash, "exp", block.UncleHash())
-		return
-	}
-	if hash := types.DeriveSha(block.Transactions()); hash != block.TxHash() {
-		log.Warn("Propagated block has invalid body", "have", hash, "exp", block.TxHash())
-		return
-	}
-	bd.prefetchedBlocks.Add(block)
-}
-
-func (bd *BodyDownload) AddMinedBlock(block *types.Block) error {
-	bd.AddToPrefetch(block)
-	return nil
+func (bd *BodyDownload) AddToPrefetch(header *types.Header, body *types.RawBody) {
+	bd.prefetchedBlocks.Add(header, body)
 }
 
 // GetHeader returns a header by either loading from the deliveriesH slice populated when running RequestMoreBodies
 // or if the code is continuing from a previous run and this isn't present, by reading from the DB as the RequestMoreBodies would have.
 // as the requestedLow count is incremented before a call to this function we need the process count so that we can anticipate this,
 // effectively reversing time a little to get the actual position we need in the slice prior to requestedLow being incremented
-func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, common.Hash, error) {
+func (bd *BodyDownload) GetHeader(blockNum uint64, blockReader services.FullBlockReader, tx kv.Tx) (*types.Header, libcommon.Hash, error) {
 	var header *types.Header
 	if bd.deliveriesH[blockNum] != nil {
 		header = bd.deliveriesH[blockNum]
 	} else {
 		hash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
 		header, err = blockReader.Header(context.Background(), tx, hash, blockNum)
 		if err != nil {
-			return nil, common.Hash{}, err
+			return nil, libcommon.Hash{}, err
 		}
 		if header == nil {
-			return nil, common.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
+			return nil, libcommon.Hash{}, fmt.Errorf("header not found: blockNum=%d, hash=%x, trace=%s", blockNum, hash, dbg.Stack())
 		}
 	}
 	return header, header.Hash(), nil
 }
 
-func (bd *BodyDownload) addBodyToBucket(tx kv.RwTx, key uint64, body *types.RawBody) error {
-	if !bd.UsingExternalTx {
-		// use the kv store to hold onto bodies as we're anticipating a lot of memory usage
-		writer := bytes.NewBuffer(nil)
-		err := body.EncodeRLP(writer)
-		if err != nil {
-			return err
-		}
-		rlpBytes := common.CopyBytes(writer.Bytes())
-		writer.Reset()
-		writer.WriteString(hexutil.Encode(rlpBytes))
+func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
+	size := body.EncodingSize()
+	if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: key}); ok {
+		bd.bodyCacheSize -= item.payloadSize // It will be replaced, so subtracting
+	}
+	bd.bodyCache.ReplaceOrInsert(BodyTreeItem{payloadSize: size, blockNum: key, rawBody: body})
+	bd.bodyCacheSize += size
+	for bd.bodyCacheSize > bd.bodyCacheLimit {
+		item, _ := bd.bodyCache.DeleteMax()
+		bd.bodyCacheSize -= item.payloadSize
+		delete(bd.requests, item.blockNum)
+	}
+}
 
-		k := dbutils.EncodeBlockNumber(key)
-		err = tx.Put("BodiesStage", k, writer.Bytes())
-		if err != nil {
-			return err
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
+	if delete {
+		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
+			bd.bodyCacheSize -= item.payloadSize
+			return item.rawBody
 		}
 	} else {
-		// use an in memory cache as we're near the top of the chain
-		bd.bodyCache[key] = body
+		if item, ok := bd.bodyCache.Get(BodyTreeItem{blockNum: blockNum}); ok {
+			return item.rawBody
+		}
 	}
-
-	bd.bodiesAdded = true
 	return nil
 }
 
-func (bd *BodyDownload) GetBlockFromCache(tx kv.RwTx, blockNum uint64) (*types.RawBody, error) {
-	if !bd.UsingExternalTx {
-		key := dbutils.EncodeBlockNumber(blockNum)
-		body, err := tx.GetOne("BodiesStage", key)
-		if err != nil {
-			return nil, err
-		}
-
-		var rawBody types.RawBody
-		fromHex := common.CopyBytes(common.FromHex(string(body)))
-		bodyReader := bytes.NewReader(fromHex)
-		stream := rlp.NewStream(bodyReader, 0)
-		err = rawBody.DecodeRLP(stream)
-		if err != nil {
-			log.Error("Unexpected body from bucket", "err", err, "block", blockNum)
-			return nil, fmt.Errorf("%w, nextBlock=%d", err, blockNum)
-		}
-
-		return &rawBody, nil
-	} else {
-		return bd.bodyCache[blockNum], nil
-	}
-}
-
 func (bd *BodyDownload) ClearBodyCache() {
-	bd.bodyCache = make(map[uint64]*types.RawBody)
+	bd.bodyCache.Clear(true)
 }
 
-func (bd *BodyDownload) HasAddedBodies() bool {
-	return bd.bodiesAdded
-}
-
-func (bd *BodyDownload) ResetAddedBodies() {
-	bd.bodiesAdded = false
+func (bd *BodyDownload) BodyCacheSize() int {
+	return bd.bodyCacheSize
 }

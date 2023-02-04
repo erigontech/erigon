@@ -10,13 +10,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/require"
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, dir string) {
@@ -237,26 +237,4 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(f.T, snaptype.Bodies)
 	require.Equal(1_000, int(f.From))
 	require.Equal(2_000, int(f.To))
-}
-
-func BenchmarkName(b *testing.B) {
-	a := common.Address{}
-	c := a[:]
-	var x common.Address
-	b.Run("a1", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = common.BytesToAddress(c)
-		}
-	})
-	b.Run("a2", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = common.BytesToAddressNoCopy(c)
-		}
-	})
-	b.Run("a3", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			x = *(*common.Address)(c)
-		}
-	})
-	_ = x
 }

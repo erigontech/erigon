@@ -4,16 +4,18 @@ import (
 	"context"
 	"encoding/binary"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/cmd/hack/tool"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var resetBlocks4 = Migration{
@@ -82,8 +84,8 @@ var resetBlocks4 = Migration{
 			if blockNumber != lastBlockNum+1 {
 				continue
 			}
-			blockHash := common.BytesToHash(k[8:])
-			var hash common.Hash
+			blockHash := libcommon.BytesToHash(k[8:])
+			var hash libcommon.Hash
 			if hash, err = rawdb.ReadCanonicalHash(tx, blockNumber); err != nil {
 				return err
 			}
@@ -110,7 +112,8 @@ var resetBlocks4 = Migration{
 			log.Warn("NOTE: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, should not take very long")
 		}
 
-		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, dirs.Tmp); err != nil {
+		cc := tool.ChainConfig(tx)
+		if err := rawdbreset.ResetBlocks(tx, db, nil, nil, nil, dirs, *cc, nil); err != nil {
 			return err
 		}
 

@@ -21,7 +21,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -34,24 +39,25 @@ type Dumper struct {
 	blockNumber uint64
 	db          kv.Tx
 	hashedState bool
+	historyV3   bool
 }
 
 // DumpAccount represents an account in the state.
 type DumpAccount struct {
-	Balance   string            `json:"balance"`
-	Nonce     uint64            `json:"nonce"`
-	Root      hexutil.Bytes     `json:"root"`
-	CodeHash  hexutil.Bytes     `json:"codeHash"`
-	Code      hexutil.Bytes     `json:"code,omitempty"`
-	Storage   map[string]string `json:"storage,omitempty"`
-	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey *hexutil.Bytes    `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Balance   string             `json:"balance"`
+	Nonce     uint64             `json:"nonce"`
+	Root      hexutil.Bytes      `json:"root"`
+	CodeHash  hexutil.Bytes      `json:"codeHash"`
+	Code      hexutil.Bytes      `json:"code,omitempty"`
+	Storage   map[string]string  `json:"storage,omitempty"`
+	Address   *libcommon.Address `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	SecureKey *hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map.
 type Dump struct {
-	Root     string                         `json:"root"`
-	Accounts map[common.Address]DumpAccount `json:"accounts"`
+	Root     string                            `json:"root"`
+	Accounts map[libcommon.Address]DumpAccount `json:"accounts"`
 }
 
 // iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
@@ -61,41 +67,41 @@ type iterativeDump struct {
 
 // IteratorDump is an implementation for iterating over data.
 type IteratorDump struct {
-	Root     string                         `json:"root"`
-	Accounts map[common.Address]DumpAccount `json:"accounts"`
-	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
+	Root     string                            `json:"root"`
+	Accounts map[libcommon.Address]DumpAccount `json:"accounts"`
+	Next     []byte                            `json:"next,omitempty"` // nil if no more accounts
 }
 
 // DumpCollector interface which the state trie calls during iteration
 type DumpCollector interface {
 	// OnRoot is called with the state root
-	OnRoot(common.Hash)
+	OnRoot(libcommon.Hash)
 	// OnAccount is called once for each account in the trie
-	OnAccount(common.Address, DumpAccount)
+	OnAccount(libcommon.Address, DumpAccount)
 }
 
 // OnRoot implements DumpCollector interface
-func (d *Dump) OnRoot(root common.Hash) {
+func (d *Dump) OnRoot(root libcommon.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
 // OnAccount implements DumpCollector interface
-func (d *Dump) OnAccount(addr common.Address, account DumpAccount) {
+func (d *Dump) OnAccount(addr libcommon.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
 // OnRoot implements DumpCollector interface
-func (d *IteratorDump) OnRoot(root common.Hash) {
+func (d *IteratorDump) OnRoot(root libcommon.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
 // OnAccount implements DumpCollector interface
-func (d *IteratorDump) OnAccount(addr common.Address, account DumpAccount) {
+func (d *IteratorDump) OnAccount(addr libcommon.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
 // OnAccount implements DumpCollector interface
-func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
+func (d iterativeDump) OnAccount(addr libcommon.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
 		Balance:   account.Balance,
 		Nonce:     account.Nonce,
@@ -106,7 +112,7 @@ func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 		SecureKey: account.SecureKey,
 		Address:   nil,
 	}
-	if addr != (common.Address{}) {
+	if addr != (libcommon.Address{}) {
 		dumpAccount.Address = &addr
 	}
 	//nolint:errcheck
@@ -114,64 +120,118 @@ func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 }
 
 // OnRoot implements DumpCollector interface
-func (d iterativeDump) OnRoot(root common.Hash) {
+func (d iterativeDump) OnRoot(root libcommon.Hash) {
 	//nolint:errcheck
 	d.Encoder.Encode(struct {
-		Root common.Hash `json:"root"`
+		Root libcommon.Hash `json:"root"`
 	}{root})
 }
 
-func NewDumper(db kv.Tx, blockNumber uint64) *Dumper {
+func NewDumper(db kv.Tx, blockNumber uint64, historyV3 bool) *Dumper {
 	return &Dumper{
 		db:          db,
 		blockNumber: blockNumber,
 		hashedState: false,
+		historyV3:   historyV3,
 	}
 }
 
-func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress common.Address, maxResults int) ([]byte, error) {
+func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bool, startAddress libcommon.Address, maxResults int) ([]byte, error) {
 	var nextKey []byte
 	var emptyCodeHash = crypto.Keccak256Hash(nil)
-	var emptyHash = common.Hash{}
+	var emptyHash = libcommon.Hash{}
 	var accountList []*DumpAccount
 	var incarnationList []uint64
-	var addrList []common.Address
+	var addrList []libcommon.Address
 
 	c.OnRoot(emptyHash) // We do not calculate the root
 
 	var acc accounts.Account
 	numberOfResults := 0
 
-	if err := WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
-		if maxResults > 0 && numberOfResults >= maxResults {
-			if nextKey == nil {
-				nextKey = make([]byte, len(k))
+	var txNum, txNumForStorage uint64
+	if d.historyV3 {
+		ttx := d.db.(kv.TemporalTx)
+		var err error
+		// Why only account does +1?
+		txNum, err = rawdbv3.TxNums.Min(ttx, d.blockNumber+1)
+		if err != nil {
+			return nil, err
+		}
+		txNumForStorage, err = rawdbv3.TxNums.Min(ttx, d.blockNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		it, err := ttx.DomainRange(temporal.AccountsDomain, startAddress[:], nil, txNum, order.Asc, maxResults+1)
+		if err != nil {
+			return nil, err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return nil, err
 			}
-			copy(nextKey, k)
-			return false, nil
-		}
+			//TODO: what to do in this case? maybe iterator must skip this values??
+			if len(v) == 0 {
+				continue
+			}
+			if maxResults > 0 && numberOfResults >= maxResults {
+				if nextKey == nil {
+					nextKey = make([]byte, len(k))
+				}
+				copy(nextKey, k)
+				break
+			}
 
-		if len(k) > 32 {
+			if e := acc.DecodeForStorage(v); e != nil {
+				return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
+			}
+			account := DumpAccount{
+				Balance:  acc.Balance.ToBig().String(),
+				Nonce:    acc.Nonce,
+				Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+				CodeHash: hexutil.Bytes(emptyCodeHash[:]),
+				Storage:  make(map[string]string),
+			}
+			accountList = append(accountList, &account)
+			addrList = append(addrList, libcommon.BytesToAddress(k))
+			incarnationList = append(incarnationList, acc.Incarnation)
+
+			numberOfResults++
+		}
+	} else {
+		if err := WalkAsOfAccounts(d.db, startAddress, d.blockNumber+1, func(k, v []byte) (bool, error) {
+			if maxResults > 0 && numberOfResults >= maxResults {
+				if nextKey == nil {
+					nextKey = make([]byte, len(k))
+				}
+				copy(nextKey, k)
+				return false, nil
+			}
+
+			if len(k) > 32 {
+				return true, nil
+			}
+			if e := acc.DecodeForStorage(v); e != nil {
+				return false, fmt.Errorf("decoding %x for %x: %w", v, k, e)
+			}
+			account := DumpAccount{
+				Balance:  acc.Balance.ToBig().String(),
+				Nonce:    acc.Nonce,
+				Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+				CodeHash: hexutil.Bytes(emptyCodeHash[:]),
+				Storage:  make(map[string]string),
+			}
+			accountList = append(accountList, &account)
+			addrList = append(addrList, libcommon.BytesToAddress(k))
+			incarnationList = append(incarnationList, acc.Incarnation)
+
+			numberOfResults++
 			return true, nil
+		}); err != nil {
+			return nil, err
 		}
-		if e := acc.DecodeForStorage(v); e != nil {
-			return false, fmt.Errorf("decoding %x for %x: %w", v, k, e)
-		}
-		account := DumpAccount{
-			Balance:  acc.Balance.ToBig().String(),
-			Nonce:    acc.Nonce,
-			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
-			CodeHash: hexutil.Bytes(emptyCodeHash[:]),
-			Storage:  make(map[string]string),
-		}
-		accountList = append(accountList, &account)
-		addrList = append(addrList, common.BytesToAddress(k))
-		incarnationList = append(incarnationList, acc.Incarnation)
-
-		numberOfResults++
-		return true, nil
-	}); err != nil {
-		return nil, err
 	}
 
 	for i, addr := range addrList {
@@ -199,20 +259,41 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		}
 
 		if !excludeStorage {
-			t := trie.New(common.Hash{})
-			if err := WalkAsOfStorage(d.db,
-				addr,
-				incarnation,
-				common.Hash{}, /* startLocation */
-				d.blockNumber,
-				func(_, loc, vs []byte) (bool, error) {
-					account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+			t := trie.New(libcommon.Hash{})
+			if d.historyV3 {
+				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, -1)
+				if err != nil {
+					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+				}
+				for r.HasNext() {
+					k, vs, err := r.Next()
+					if err != nil {
+						return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+					}
+					if len(vs) == 0 {
+						continue // Skip deleted entries
+					}
+					loc := k[20:]
+					account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
 					h, _ := common.HashData(loc)
-					t.Update(h.Bytes(), common.CopyBytes(vs))
-					return true, nil
-				}); err != nil {
-				return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+					t.Update(h.Bytes(), libcommon.Copy(vs))
+				}
+			} else {
+				if err := WalkAsOfStorage(d.db,
+					addr,
+					incarnation,
+					libcommon.Hash{}, /* startLocation */
+					d.blockNumber,
+					func(_, loc, vs []byte) (bool, error) {
+						account.Storage[libcommon.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
+						h, _ := common.HashData(loc)
+						t.Update(h.Bytes(), libcommon.Copy(vs))
+						return true, nil
+					}); err != nil {
+					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
+				}
 			}
+
 			account.Root = t.Hash().Bytes()
 		}
 		c.OnAccount(addr, *account)
@@ -224,10 +305,10 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 // RawDump returns the entire state an a single large object
 func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	dump := &Dump{
-		Accounts: make(map[common.Address]DumpAccount),
+		Accounts: make(map[libcommon.Address]DumpAccount),
 	}
 	//nolint:errcheck
-	d.DumpToCollector(dump, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(dump, excludeCode, excludeStorage, libcommon.Address{}, 0)
 	return *dump
 }
 
@@ -244,13 +325,13 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
-	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
+	d.DumpToCollector(iterativeDump{output}, excludeCode, excludeStorage, libcommon.Address{}, 0)
 }
 
 // IteratorDump dumps out a batch of accounts starts with the given start key
-func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Address, maxResults int) (IteratorDump, error) {
+func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start libcommon.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
-		Accounts: make(map[common.Address]DumpAccount),
+		Accounts: make(map[libcommon.Address]DumpAccount),
 	}
 	var err error
 	iterator.Next, err = d.DumpToCollector(iterator, excludeCode, excludeStorage, start, maxResults)

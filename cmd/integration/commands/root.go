@@ -2,7 +2,6 @@ package commands
 
 import (
 	"path/filepath"
-	"runtime"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -39,7 +38,8 @@ func RootCommand() *cobra.Command {
 }
 
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
-	limiterB := semaphore.NewWeighted(int64(runtime.NumCPU()*10 + 1))
+	const ThreadsLimit = 9_000
+	limiterB := semaphore.NewWeighted(ThreadsLimit)
 	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
 	if label == kv.ChainDB {
 		opts = opts.MapSize(8 * datasize.TB)

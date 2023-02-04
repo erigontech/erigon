@@ -12,4 +12,10 @@ var CLDefaultFlags = []cli.Flag{
 	&SentinelTcpPort,
 	&NoDiscovery,
 	&ChaindataFlag,
+	&ELEnabledFlag,
+	&BeaconDBModeFlag,
+	&BootnodesFlag,
+	&BeaconConfigFlag,
+	&GenesisSSZFlag,
+	&CheckpointSyncUrlFlag,
 }

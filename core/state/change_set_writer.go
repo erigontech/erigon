@@ -4,43 +4,44 @@ import (
 	"fmt"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
-	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
 	db             kv.RwTx
-	accountChanges map[common.Address][]byte
-	storageChanged map[common.Address]bool
+	accountChanges map[libcommon.Address][]byte
+	storageChanged map[libcommon.Address]bool
 	storageChanges map[string][]byte
 	blockNumber    uint64
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
 	return &ChangeSetWriter{
-		accountChanges: make(map[common.Address][]byte),
-		storageChanged: make(map[common.Address]bool),
+		accountChanges: make(map[libcommon.Address][]byte),
+		storageChanged: make(map[libcommon.Address]bool),
 		storageChanges: make(map[string][]byte),
 	}
 }
 func NewChangeSetWriterPlain(db kv.RwTx, blockNumber uint64) *ChangeSetWriter {
 	return &ChangeSetWriter{
 		db:             db,
-		accountChanges: make(map[common.Address][]byte),
-		storageChanged: make(map[common.Address]bool),
+		accountChanges: make(map[libcommon.Address][]byte),
+		storageChanged: make(map[libcommon.Address]bool),
 		storageChanges: make(map[string][]byte),
 		blockNumber:    blockNumber,
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
-	cs := changeset.NewAccountChangeSet()
+func (w *ChangeSetWriter) GetAccountChanges() (*historyv22.ChangeSet, error) {
+	cs := historyv22.NewAccountChangeSet()
 	for address, val := range w.accountChanges {
 		if err := cs.Add(common.CopyBytes(address[:]), val); err != nil {
 			return nil, err
@@ -48,8 +49,8 @@ func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
 	}
 	return cs, nil
 }
-func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
-	cs := changeset.NewStorageChangeSet()
+func (w *ChangeSetWriter) GetStorageChanges() (*historyv22.ChangeSet, error) {
+	cs := historyv22.NewStorageChangeSet()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
 			return nil, err
@@ -83,7 +84,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	return true
 }
 
-func (w *ChangeSetWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (w *ChangeSetWriter) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	//fmt.Printf("balance,%x,%d\n", address, &account.Balance)
 	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = originalAccountData(original, true /*omitHashes*/)
@@ -91,12 +92,12 @@ func (w *ChangeSetWriter) UpdateAccountData(address common.Address, original, ac
 	return nil
 }
 
-func (w *ChangeSetWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+func (w *ChangeSetWriter) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	//fmt.Printf("code,%x,%x\n", address, code)
 	return nil
 }
 
-func (w *ChangeSetWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (w *ChangeSetWriter) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	//fmt.Printf("delete,%x\n", address)
 	if original == nil || !original.Initialised {
 		return nil
@@ -105,7 +106,7 @@ func (w *ChangeSetWriter) DeleteAccount(address common.Address, original *accoun
 	return nil
 }
 
-func (w *ChangeSetWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+func (w *ChangeSetWriter) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	//fmt.Printf("storage,%x,%x,%x\n", address, *key, value.Bytes())
 	if *original == *value {
 		return nil
@@ -119,7 +120,7 @@ func (w *ChangeSetWriter) WriteAccountStorage(address common.Address, incarnatio
 	return nil
 }
 
-func (w *ChangeSetWriter) CreateContract(address common.Address) error {
+func (w *ChangeSetWriter) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
@@ -128,7 +129,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if err != nil {
 		return err
 	}
-	if err = changeset.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
+	if err = historyv22.Mapper[kv.AccountChangeSet].Encode(w.blockNumber, accountChanges, func(k, v []byte) error {
 		if err = w.db.AppendDup(kv.AccountChangeSet, k, v); err != nil {
 			return err
 		}
@@ -144,7 +145,7 @@ func (w *ChangeSetWriter) WriteChangeSets() error {
 	if storageChanges.Len() == 0 {
 		return nil
 	}
-	if err = changeset.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
+	if err = historyv22.Mapper[kv.StorageChangeSet].Encode(w.blockNumber, storageChanges, func(k, v []byte) error {
 		if err = w.db.AppendDup(kv.StorageChangeSet, k, v); err != nil {
 			return err
 		}
@@ -180,7 +181,7 @@ func (w *ChangeSetWriter) WriteHistory() error {
 func (w *ChangeSetWriter) PrintChangedAccounts() {
 	fmt.Println("Account Changes")
 	for k := range w.accountChanges {
-		fmt.Println(hexutil.Encode(k.Bytes()))
+		fmt.Println(hexutility.Encode(k.Bytes()))
 	}
 	fmt.Println("------------------------------------------")
 }
