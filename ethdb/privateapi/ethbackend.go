@@ -268,30 +268,17 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	waiter := make(chan struct{})
-	defer libcommon.SafeClose(waiter)
-
-	busy := true
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-
-	go func() {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	wait, ok := s.hd.BeaconRequestList.WaitForWaiting(ctx)
+	if !ok {
 		select {
-		case <-time.After(1 * time.Second):
-			// timed out so just call done
-			wg.Done()
-		case <-waiter:
-			// state is now waiting so we're not busy
-			busy = false
-			wg.Done()
+		case <-wait:
+		case <-ctx.Done():
 		}
-	}()
+	}
 
-	s.hd.BeaconRequestList.WaitForWaiting(waiter)
-
-	wg.Wait()
-
-	return busy
+	return !s.hd.BeaconRequestList.IsWaiting()
 }
 
 // EngineNewPayload validates and possibly executes payload
