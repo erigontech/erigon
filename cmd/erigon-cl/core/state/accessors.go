@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -327,7 +328,7 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 	if err != nil {
 		return nil, err
 	}
-	headRoot, err := b.GetBlockRoot(data.Slot)
+	headRoot, err := b.GetBlockRootAtSlot(data.Slot)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +363,10 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation) (*
 	if err != nil {
 		return nil, err
 	}
+	// Sort the the attestation indicies.
+	sort.Slice(attestingIndicies, func(i, j int) bool {
+		return attestingIndicies[i] < attestingIndicies[j]
+	})
 	return &cltypes.IndexedAttestation{
 		AttestingIndices: attestingIndicies,
 		Data:             attestation.Data,

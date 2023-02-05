@@ -59,7 +59,7 @@ func GetSetIntersection(v1, v2 []uint64) []uint64 {
 func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if len(inds) == 0 || !IsSortedSet(inds) {
-		return false, fmt.Errorf("invalid attesting indices")
+		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}

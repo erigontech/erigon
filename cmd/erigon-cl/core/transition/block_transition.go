@@ -15,25 +15,27 @@ func (s *StateTransistor) processBlock(signedBlock *cltypes.SignedBeaconBlock) e
 		return fmt.Errorf("wrong state version for block at slot %d", block.Slot)
 	}
 	if err := s.ProcessBlockHeader(block); err != nil {
-		return err
+		return fmt.Errorf("ProcessBlockHeader: %s", err)
 	}
 	if s.state.Version() >= clparams.BellatrixVersion {
 		// Set execution header accordingly to state.
 		s.state.SetLatestExecutionPayloadHeader(block.Body.ExecutionPayload.Header)
 	}
 	if err := s.ProcessRandao(block.Body.RandaoReveal); err != nil {
-		return err
+		return fmt.Errorf("ProcessRandao: %s", err)
 	}
 	if err := s.ProcessEth1Data(block.Body.Eth1Data); err != nil {
-		return err
+		return fmt.Errorf("ProcessEth1Data: %s", err)
 	}
 	// Do operationns
 	if err := s.processOperations(block.Body); err != nil {
-		return err
+		return fmt.Errorf("processOperations: %s", err)
 	}
 	// Process altair data
 	if s.state.Version() >= clparams.AltairVersion {
-		return s.ProcessSyncAggregate(block.Body.SyncAggregate)
+		if err := s.ProcessSyncAggregate(block.Body.SyncAggregate); err != nil {
+			return fmt.Errorf("ProcessSyncAggregate: %s", err)
+		}
 	}
 	return nil
 }
@@ -45,31 +47,31 @@ func (s *StateTransistor) processOperations(blockBody *cltypes.BeaconBody) error
 	// Process each proposer slashing
 	for _, slashing := range blockBody.ProposerSlashings {
 		if err := s.ProcessProposerSlashing(slashing); err != nil {
-			return err
+			return fmt.Errorf("ProcessProposerSlashing: %s", err)
 		}
 	}
 	// Process each attester slashing
 	for _, slashing := range blockBody.AttesterSlashings {
 		if err := s.ProcessAttesterSlashing(slashing); err != nil {
-			return err
+			return fmt.Errorf("ProcessAttesterSlashing: %s", err)
 		}
 	}
 	// Process each attestations
 	for _, att := range blockBody.Attestations {
 		if err := s.ProcessAttestation(att); err != nil {
-			return err
+			return fmt.Errorf("ProcessAttestation: %s", err)
 		}
 	}
 	// Process each deposit
 	for _, dep := range blockBody.Deposits {
 		if err := s.ProcessDeposit(dep); err != nil {
-			return err
+			return fmt.Errorf("ProcessDeposit: %s", err)
 		}
 	}
 	// Process each voluntary exit.
 	for _, exit := range blockBody.VoluntaryExits {
 		if err := s.ProcessVoluntaryExit(exit); err != nil {
-			return err
+			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
 		}
 	}
 	return nil

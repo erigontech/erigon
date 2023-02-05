@@ -6,6 +6,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
@@ -87,10 +88,13 @@ func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock)
 	if err != nil {
 		return false, err
 	}
-	sigRoot, err := block.Block.Body.HashSSZ()
+	domain, err := s.state.GetDomain(s.beaconConfig.DomainBeaconProposer, s.state.Epoch())
 	if err != nil {
 		return false, err
 	}
-	sig := block.Signature
-	return bls.Verify(sig[:], sigRoot[:], proposer.PublicKey[:])
+	sigRoot, err := fork.ComputeSigningRoot(block.Block, domain)
+	if err != nil {
+		return false, err
+	}
+	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
 }

@@ -1,4 +1,4 @@
-package eth1
+package main
 
 import (
 	"context"
@@ -14,30 +14,21 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
 type Eth1Execution struct {
 	execution.UnimplementedExecutionServer
 
-	db                kv.RwDB
-	executionPipeline *stagedsync.Sync
-	blockReader       services.FullBlockReader
-	mu                sync.Mutex
+	db kv.RwDB
+	mu sync.Mutex
 }
 
-func NewEth1Execution(db kv.RwDB, blockReader services.FullBlockReader, executionPipeline *stagedsync.Sync) *Eth1Execution {
+func NewEth1Execution(db kv.RwDB) *Eth1Execution {
 	return &Eth1Execution{
-		db:                db,
-		executionPipeline: executionPipeline,
-		blockReader:       blockReader,
+		db: db,
 	}
 }
 
@@ -108,96 +99,10 @@ type canonicalEntry struct {
 func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256) (*execution.ForkChoiceReceipt, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	tx, err := e.db.BeginRw(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockHash := gointerfaces.ConvertH256ToHash(hash)
-	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	// If we dont have it, too bad
-	if fcuHeader == nil {
-		return &execution.ForkChoiceReceipt{
-			Success:         false,
-			LatestValidHash: &types2.H256{},
-		}, nil
-	}
-	currentParentHash := fcuHeader.ParentHash
-	currentParentNumber := fcuHeader.Number.Uint64() - 1
-	isCanonicalHash, err := rawdb.IsCanonicalHash(tx, currentParentHash)
-	if err != nil {
-		return nil, err
-	}
-	// Find such point, and collect all hashes
-	newCanonicals := make([]*canonicalEntry, 0, 2048)
-	newCanonicals = append(newCanonicals, &canonicalEntry{
-		hash:   fcuHeader.Hash(),
-		number: fcuHeader.Number.Uint64(),
-	})
-	for !isCanonicalHash {
-		newCanonicals = append(newCanonicals, &canonicalEntry{
-			hash:   currentParentHash,
-			number: currentParentNumber,
-		})
-		currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
-		if err != nil {
-			return nil, err
-		}
-		if currentHeader == nil {
-			return &execution.ForkChoiceReceipt{
-				Success:         false,
-				LatestValidHash: &types2.H256{},
-			}, nil
-		}
-		currentParentHash = currentHeader.ParentHash
-		currentParentNumber = currentHeader.Number.Uint64() - 1
-		isCanonicalHash, err = rawdb.IsCanonicalHash(tx, currentParentHash)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
-		e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
-	}
-	// Run the unwind
-	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
-		return nil, err
-	}
-	// Mark all new canonicals as canonicals
-	for _, canonicalSegment := range newCanonicals {
-		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
-			return nil, err
-		}
-	}
-	// Set Progress for headers and bodies accordingly.
-	if err := stages.SaveStageProgress(tx, stages.Headers, fcuHeader.Number.Uint64()); err != nil {
-		return nil, err
-	}
-	if err := stages.SaveStageProgress(tx, stages.Bodies, fcuHeader.Number.Uint64()); err != nil {
-		return nil, err
-	}
-	if err = rawdb.WriteHeadHeaderHash(tx, blockHash); err != nil {
-		return nil, err
-	}
-	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false, false); err != nil {
-		return nil, err
-	}
-	// if head hash was set then success otherwise no
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
-	if headNumber != nil {
-		log.Info("Current forkchoice", "hash", headHash, "number", *headNumber)
-	}
 	return &execution.ForkChoiceReceipt{
-		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
-		Success:         headHash == blockHash,
-	}, tx.Commit()
+		LatestValidHash: hash,
+		Success:         true,
+	}, nil
 }
 
 func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegmentRequest) (*execution.GetHeaderResponse, error) {
@@ -214,12 +119,12 @@ func (e *Eth1Execution) GetHeader(ctx context.Context, req *execution.GetSegment
 	var header *types.Header
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header, err = e.blockReader.Header(ctx, tx, blockHash, *req.BlockNumber)
+		header = rawdb.ReadHeader(tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		header, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
+		header, err = rawdb.ReadHeaderByHash(tx, blockHash)
 	} else if req.BlockNumber != nil {
-		header, err = e.blockReader.HeaderByNumber(ctx, tx, *req.BlockNumber)
+		header = rawdb.ReadHeaderByNumber(tx, *req.BlockNumber)
 	}
 	if err != nil {
 		return nil, err
@@ -247,21 +152,14 @@ func (e *Eth1Execution) GetBody(ctx context.Context, req *execution.GetSegmentRe
 	var body *types.Body
 	if req.BlockHash != nil && req.BlockNumber != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
-		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+		body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, *req.BlockNumber)
 	} else if req.BlockHash != nil {
 		blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 		blockNumber := rawdb.ReadHeaderNumber(tx, blockHash)
 		if blockNumber == nil {
 			return nil, nil
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *blockNumber)
-
-	} else if req.BlockNumber != nil {
-		blockHash, err2 := e.blockReader.CanonicalHash(ctx, tx, *req.BlockNumber)
-		if err2 != nil {
-			return nil, err
-		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, *req.BlockNumber)
+		body = rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, *blockNumber)
 	}
 	if err != nil {
 		return nil, err
@@ -292,18 +190,7 @@ func (e *Eth1Execution) IsCanonicalHash(ctx context.Context, req *types2.H256) (
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	tx, err := e.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockHash := gointerfaces.ConvertH256ToHash(req)
-	isCanonical, err := rawdb.IsCanonicalHash(tx, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	return &execution.IsCanonicalResponse{Canonical: isCanonical}, nil
+	return &execution.IsCanonicalResponse{Canonical: true}, nil
 }
 
 func (e *Eth1Execution) GetHeaderHashNumber(ctx context.Context, req *types2.H256) (*execution.GetHeaderHashNumberResponse, error) {
@@ -351,7 +238,6 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
-	h.BlockHashCL = blockHash
 	return h, nil
 }
 

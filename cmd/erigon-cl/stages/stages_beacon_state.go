@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -55,7 +54,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		defer tx.Rollback()
 	}
 	// Initialize the transistor
-	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, true)
+	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, false)
 
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {
@@ -78,12 +77,11 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 			if block.Block.Body.ExecutionPayload, err = cfg.executionClient.ReadExecutionPayload(eth1Number, eth1Hash); err != nil {
 				return err
 			}
-
 			if err := stateTransistor.TransitionState(block); err != nil {
-				log.Info("Found epoch, so stopping now...", "count", (fromSlot+1)-slot)
-				time.Sleep(5 * time.Second)
+				log.Info("Found epoch, so stopping now...", "count", slot-(fromSlot+1), "slot", slot)
 				return err
 			}
+			log.Info("Applied state transition", "from", slot, "to", slot+1)
 		}
 	}
 	// If successful update fork choice
