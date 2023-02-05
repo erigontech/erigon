@@ -454,6 +454,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
+			//log.Debug("NewBlockHashesMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewBlockMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
@@ -463,6 +464,7 @@ func runPeer(
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
 				log.Error(fmt.Sprintf("%s: reading msg into bytes: %v", peerID, err))
 			}
+			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.NewPooledTransactionHashesMsg:
 			if !hasSubscribers(eth.ToProto[protocol][msg.Code]) {
