@@ -1173,7 +1173,7 @@ func (c *Bor) CommitStates(
 	to := time.Unix(int64(chain.Chain.GetHeaderByNumber(number-c.config.CalculateSprint(number)).Time), 0)
 	lastStateID := _lastStateID.Uint64()
 
-	log.Info(
+	log.Debug(
 		"Fetching state updates from Heimdall",
 		"fromID", lastStateID+1,
 		"to", to.Format(time.RFC3339))
