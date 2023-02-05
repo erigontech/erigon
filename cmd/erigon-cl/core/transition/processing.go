@@ -14,7 +14,7 @@ import (
 func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {
 	b := make([]byte, 32)
 	binary.LittleEndian.PutUint64(b, epoch)
-	return utils.Keccak256(b[:], domain), nil
+	return utils.Keccak256(b, domain), nil
 }
 
 func (s *StateTransistor) ProcessBlockHeader(block *cltypes.BeaconBlock) error {
@@ -69,21 +69,24 @@ func (s *StateTransistor) ProcessRandao(randao [96]byte) error {
 	if err != nil {
 		return err
 	}
-	domain, err := s.state.GetDomain(s.beaconConfig.DomainRandao, epoch)
-	if err != nil {
-		return fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
+	if !s.noValidate {
+		domain, err := s.state.GetDomain(s.beaconConfig.DomainRandao, epoch)
+		if err != nil {
+			return fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
+		}
+		signingRoot, err := computeSigningRootEpoch(epoch, domain)
+		if err != nil {
+			return fmt.Errorf("ProcessRandao: unable to compute signing root: %v", err)
+		}
+		valid, err := bls.Verify(randao[:], signingRoot[:], proposer.PublicKey[:])
+		if err != nil {
+			return fmt.Errorf("ProcessRandao: unable to verify public key: %x, with signing root: %x, and signature: %x, %v", proposer.PublicKey[:], signingRoot[:], randao[:], err)
+		}
+		if !valid {
+			return fmt.Errorf("ProcessRandao: invalid signature: public key: %x, signing root: %x, signature: %x", proposer.PublicKey[:], signingRoot[:], randao[:])
+		}
 	}
-	signingRoot, err := computeSigningRootEpoch(epoch, domain)
-	if err != nil {
-		return fmt.Errorf("ProcessRandao: unable to compute signing root: %v", err)
-	}
-	valid, err := bls.Verify(randao[:], signingRoot[:], proposer.PublicKey[:])
-	if err != nil {
-		return fmt.Errorf("ProcessRandao: unable to verify public key: %x, with signing root: %x, and signature: %x, %v", proposer.PublicKey[:], signingRoot[:], randao[:], err)
-	}
-	if !valid {
-		return fmt.Errorf("ProcessRandao: invalid signature: public key: %x, signing root: %x, signature: %x", proposer.PublicKey[:], signingRoot[:], randao[:])
-	}
+
 	randaoMixes := s.state.GetRandaoMixes(epoch)
 	randaoHash := utils.Keccak256(randao[:])
 	mix := [32]byte{}
