@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
@@ -366,6 +367,10 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 }
 
 func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error) {
+	if len(hashes) > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
 	h := make([]*types2.H256, len(hashes))
 	for i, hash := range hashes {
 		h[i] = gointerfaces.ConvertHashToH256(hash)
@@ -380,6 +385,13 @@ func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []comm
 }
 
 func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
+	if start == 0 || count == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
+	}
+	if count > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
 	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
 	if err != nil {
 		return nil, err
