@@ -58,8 +58,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-const ASSERT = false
-
 var (
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
