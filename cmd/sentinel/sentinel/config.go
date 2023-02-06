@@ -26,7 +26,6 @@ import (
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/pkg/errors"
 )
 
 type SentinelConfig struct {
@@ -68,7 +67,7 @@ func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) {
 	parsedIP := net.ParseIP(ipAddr)
 	if parsedIP.To4() == nil && parsedIP.To16() == nil {
-		return nil, errors.Errorf("invalid ip address provided: %s", ipAddr)
+		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
 	}
 	if parsedIP.To4() != nil {
 		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%d", ipAddr, port))
