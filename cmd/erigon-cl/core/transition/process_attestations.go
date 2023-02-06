@@ -46,6 +46,13 @@ func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestatio
 	if err != nil {
 		return err
 	}
+	valid, err := s.verifyAttestations(attestations, attestingIndiciesSet)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return errors.New("ProcessAttestation: wrong bls data")
+	}
 	for i, attestation := range attestations {
 		if err := s.processAttestation(attestation, attestingIndiciesSet[i]); err != nil {
 			return err
@@ -85,13 +92,6 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 	}
 	var proposerRewardNumerator uint64
 
-	valid, err := s.verifyAttestation(attestation, attestingIndicies)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("ProcessAttestation: wrong bls data")
-	}
 	var epochParticipation cltypes.ParticipationFlagsList
 	if data.Target.Epoch == currentEpoch {
 		epochParticipation = s.state.CurrentEpochParticipation()
@@ -128,13 +128,39 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 	return s.state.IncreaseBalance(int(proposer), reward)
 }
 
-func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) (bool, error) {
+type verifyAttestationWorkersResult struct {
+	success bool
+	err     error
+}
+
+func verifyAttestationWorker(state *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
+	indexedAttestation, err := state.GetIndexedAttestation(attestation, attestingIndicies)
+	if err != nil {
+		resultCh <- verifyAttestationWorkersResult{err: err}
+		return
+	}
+	success, err := isValidIndexedAttestation(state, indexedAttestation)
+	resultCh <- verifyAttestationWorkersResult{success: success, err: err}
+}
+
+func (s *StateTransistor) verifyAttestations(attestations []*cltypes.Attestation, attestingIndicies [][]uint64) (bool, error) {
 	if s.noValidate {
 		return true, nil
 	}
-	indexedAttestation, err := s.state.GetIndexedAttestation(attestation, attestingIndicies)
-	if err != nil {
-		return false, err
+	resultCh := make(chan verifyAttestationWorkersResult, len(attestations))
+
+	for i, attestation := range attestations {
+		go verifyAttestationWorker(s.state, attestation, attestingIndicies[i], resultCh)
 	}
-	return isValidIndexedAttestation(s.state, indexedAttestation)
+	for i := 0; i < len(attestations); i++ {
+		result := <-resultCh
+		if result.err != nil {
+			return false, result.err
+		}
+		if !result.success {
+			return false, nil
+		}
+	}
+	close(resultCh)
+	return true, nil
 }
