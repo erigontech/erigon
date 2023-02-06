@@ -813,6 +813,9 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02000064
 	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
 	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
+	cfg.BaseRewardFactor = 25
+	cfg.SlotsPerEpoch = 16
+	cfg.EpochsPerSyncCommitteePeriod = 512
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -836,6 +839,9 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x0200006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
+	cfg.BaseRewardFactor = 25
+	cfg.SlotsPerEpoch = 16
+	cfg.EpochsPerSyncCommitteePeriod = 512
 	cfg.InitializeForkSchedule()
 	return cfg
 }
