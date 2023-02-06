@@ -731,24 +731,24 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 		return nil, err
 	}
 
-	bodies := make([]*types2.ExecutionPayloadBodyV1, request.Count)
+	bodies := make([]*types2.ExecutionPayloadBodyV1, 0, request.Count)
 
-	var i uint64
-	for i = 0; i < request.Count; i++ {
-		block, err := rawdb.ReadBlockByNumber(tx, request.Start+i)
+	for i := uint64(0); i < request.Count; i++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, request.Start+i)
 		if err != nil {
 			return nil, err
 		}
+		if hash == (libcommon.Hash{}) {
+			// break early if beyond the last known canonical header
+			break
+		}
+
+		block := rawdb.ReadBlock(tx, hash, request.Start+i)
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
 		}
-		if body == nil {
-			// break early if the body is nil to trim the response.  A missing body indicates we don't have the
-			// canonical block so can just stop outputting from here
-			break
-		}
-		bodies[i] = body
+		bodies = append(bodies, body)
 	}
 
 	return &remote.EngineGetPayloadBodiesV1Response{Bodies: bodies}, nil
