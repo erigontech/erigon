@@ -252,11 +252,11 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 		GenesisTime:          1616508000,
 	},
 	GnosisNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("0xf5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
+		GenesisValidatorRoot: libcommon.HexToHash("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
 		GenesisTime:          1638993340,
 	},
 	ChiadoNetwork: {
-		GenesisValidatorRoot: libcommon.HexToHash("0x9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
+		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
 		GenesisTime:          1665396300,
 	},
 }
@@ -282,7 +282,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
-		"	https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
