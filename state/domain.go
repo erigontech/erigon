@@ -529,11 +529,11 @@ func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 }
 
 func (d *Domain) MakeContext() *DomainContext {
-	dc := &DomainContext{d: d}
-	dc.hc = d.History.MakeContext()
-	bt := btree.NewG[ctxItem](32, ctxItemLess)
-	dc.files = bt
-
+	dc := &DomainContext{
+		d:     d,
+		hc:    d.History.MakeContext(),
+		files: btree.NewG[ctxItem](32, ctxItemLess),
+	}
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || item.canDelete.Load() {
@@ -544,7 +544,7 @@ func (d *Domain) MakeContext() *DomainContext {
 				item.refcount.Inc()
 			}
 
-			bt.ReplaceOrInsert(ctxItem{
+			dc.files.ReplaceOrInsert(ctxItem{
 				startTxNum: item.startTxNum,
 				endTxNum:   item.endTxNum,
 				getter:     item.decompressor.MakeGetter(),
@@ -567,24 +567,7 @@ func (dc *DomainContext) Close() {
 		refCnt := item.src.refcount.Dec()
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
-			if item.src.decompressor != nil {
-				if err := item.src.decompressor.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				if err := os.Remove(item.src.decompressor.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				item.src.decompressor = nil
-			}
-			if item.src.index != nil {
-				if err := item.src.index.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.src.decompressor.FileName())
-				}
-				if err := os.Remove(item.src.index.FilePath()); err != nil {
-					log.Trace("close", "err", err, "file", item.src.index.FileName())
-				}
-				item.src.index = nil
-			}
+			item.src.closeFilesAndRemove()
 		}
 		return true
 	})

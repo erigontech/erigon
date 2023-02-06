@@ -140,11 +140,16 @@ func (li *LocalityIndex) openFiles() (err error) {
 }
 
 func (li *LocalityIndex) closeFiles() {
-	if li.file.index != nil {
+	if li == nil {
+		return
+	}
+	if li.file != nil && li.file.index != nil {
 		li.file.index.Close()
+		li.file = nil
 	}
 	if li.bm != nil {
 		li.bm.Close()
+		li.bm = nil
 	}
 }
 

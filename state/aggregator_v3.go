@@ -108,6 +108,7 @@ func (a *AggregatorV3) Close() {
 	a.closeFiles()
 }
 
+/*
 // CleanDir - remove all useless files. call it manually on startup of Main application (don't call it from utilities)
 func (a *AggregatorV3) CleanDir() {
 	a.accounts.CleanupDir()
@@ -118,6 +119,7 @@ func (a *AggregatorV3) CleanDir() {
 	a.tracesFrom.CleanupDir()
 	a.tracesTo.CleanupDir()
 }
+*/
 
 func (a *AggregatorV3) SetWorkers(i int) {
 	a.accounts.compressWorkers = i
@@ -933,90 +935,69 @@ func (mf MergedFilesV3) Close() {
 
 func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3, maxSpan uint64, workers int) (MergedFilesV3, error) {
 	var mf MergedFilesV3
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
 	closeFiles := true
 	defer func() {
 		if closeFiles {
 			mf.Close()
 		}
 	}()
-	//var wg sync.WaitGroup
-	//wg.Add(7)
-	errCh := make(chan error, 7)
-	//go func() {
-	//	defer wg.Done()
-	var err error
 	if r.accounts.any() {
-		if mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
+
 	if r.storage.any() {
-		if mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
 	if r.code.any() {
-		if mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
 	if r.logAddrs {
-		if mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
 	if r.logTopics {
-		if mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
 	if r.tracesFrom {
-		if mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	defer wg.Done()
-	//	var err error
 	if r.tracesTo {
-		if mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers); err != nil {
-			errCh <- err
-		}
+		g.Go(func() error {
+			var err error
+			mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers)
+			return err
+		})
 	}
-	//}()
-	//go func() {
-	//	wg.Wait()
-	close(errCh)
-	//}()
-	var lastError error
-	for err := range errCh {
-		lastError = err
-	}
-	if lastError == nil {
+	err := g.Wait()
+	if err == nil {
 		closeFiles = false
 	}
-	return mf, lastError
+	return mf, err
 }
 
 func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) {

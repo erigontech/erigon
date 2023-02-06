@@ -1050,6 +1050,20 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 	d.History.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 	if valuesIn != nil {
 		d.files.Set(valuesIn)
+
+		// `kill -9` may leave some garbage
+		// but it still may be useful for merges, until we finish merge frozen file
+		if historyIn.frozen {
+			d.files.Walk(func(items []*filesItem) bool {
+				for _, item := range items {
+					if item.frozen || item.endTxNum > valuesIn.endTxNum {
+						continue
+					}
+					valuesOuts = append(valuesOuts, item)
+				}
+				return true
+			})
+		}
 	}
 	for _, out := range valuesOuts {
 		if out == nil {
