@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	eth2_shuffle "github.com/protolambda/eth2-shuffle"
 )
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
@@ -182,16 +183,23 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 }
 
 func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte, hashFunc utils.HashFunc) ([]uint64, error) {
-	ret := []uint64{}
 	lenIndicies := uint64(len(indicies))
-	for i := (lenIndicies * index) / count; i < (lenIndicies*(index+1))/count; i++ {
-		index, err := b.ComputeShuffledIndex(i, lenIndicies, seed, preInputs, hashFunc)
-		if err != nil {
-			return nil, err
+	start := (lenIndicies * index) / count
+	end := (lenIndicies * (index + 1)) / count
+	var shuffledIndicies []uint64
+	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
+		shuffledIndicies = shuffledIndicesInterface.([]uint64)
+	} else {
+		shuffledIndicies = make([]uint64, lenIndicies)
+		copy(shuffledIndicies, indicies)
+		eth2ShuffleHashFunc := func(data []byte) []byte {
+			hashed := hashFunc(data)
+			return hashed[:]
 		}
-		ret = append(ret, indicies[index])
+		eth2_shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(b.beaconConfig.ShuffleRoundCount), seed)
+		b.shuffledSetsCache.Add(seed, shuffledIndicies)
 	}
-	return ret, nil
+	return shuffledIndicies[start:end], nil
 }
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {

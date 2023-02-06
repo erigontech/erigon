@@ -8,43 +8,13 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type attestingIndiciesWorkersResult struct {
-	indicies []uint64
-	index    int
-	err      error
-}
-
-func attestingIndiciesWorker(state *state.BeaconState, index int, attestation *cltypes.Attestation, resultCh chan attestingIndiciesWorkersResult) {
-	attestingIndicies, err := state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
-	resultCh <- attestingIndiciesWorkersResult{
-		indicies: attestingIndicies,
-		index:    index,
-		err:      err,
-	}
-}
-
-// Takes attestations and concurently returns a batch of the indicies.
-func (s *StateTransistor) getAttestingIndiciesBatch(attestations []*cltypes.Attestation) ([][]uint64, error) {
-	attestingIndiciesSets := make([][]uint64, len(attestations))
-	resultCh := make(chan attestingIndiciesWorkersResult, len(attestations))
-	for i, attestation := range attestations {
-		go attestingIndiciesWorker(s.state, i, attestation, resultCh)
-	}
-	for i := 0; i < len(attestations); i++ {
-		result := <-resultCh
-		if result.err != nil {
-			return nil, result.err
-		}
-		attestingIndiciesSets[result.index] = result.indicies
-	}
-	close(resultCh)
-	return attestingIndiciesSets, nil
-}
-
 func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestation) error {
-	attestingIndiciesSet, err := s.getAttestingIndiciesBatch(attestations)
-	if err != nil {
-		return err
+	var err error
+	attestingIndiciesSet := make([][]uint64, len(attestations))
+	for i, attestation := range attestations {
+		if attestingIndiciesSet[i], err = s.processAttestation(attestation); err != nil {
+			return err
+		}
 	}
 	valid, err := s.verifyAttestations(attestations, attestingIndiciesSet)
 	if err != nil {
@@ -53,16 +23,11 @@ func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestatio
 	if !valid {
 		return errors.New("ProcessAttestation: wrong bls data")
 	}
-	for i, attestation := range attestations {
-		if err := s.processAttestation(attestation, attestingIndiciesSet[i]); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
 // ProcessAttestation takes an attestation and process it.
-func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) error {
+func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) ([]uint64, error) {
 	participationFlagWeights := []uint64{
 		s.beaconConfig.TimelySourceWeight,
 		s.beaconConfig.TimelyTargetWeight,
@@ -71,24 +36,29 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 
 	totalActiveBalance, err := s.state.GetTotalActiveBalance()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	data := attestation.Data
 	currentEpoch := s.state.Epoch()
 	previousEpoch := s.state.PreviousEpoch()
 	stateSlot := s.state.Slot()
 	if (data.Target.Epoch != currentEpoch && data.Target.Epoch != previousEpoch) || data.Target.Epoch != s.state.GetEpochAtSlot(data.Slot) {
-		return errors.New("ProcessAttestation: attestation with invalid epoch")
+		return nil, errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
 	if data.Slot+s.beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot+s.beaconConfig.SlotsPerEpoch {
-		return errors.New("ProcessAttestation: attestation slot not in range")
+		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if data.Index >= s.state.CommitteeCount(data.Target.Epoch) {
-		return errors.New("ProcessAttestation: attester index out of range")
+		return nil, errors.New("ProcessAttestation: attester index out of range")
 	}
 	participationFlagsIndicies, err := s.state.GetAttestationParticipationFlagIndicies(attestation.Data, stateSlot-data.Slot)
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	attestingIndicies, err := s.state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+	if err != nil {
+		return nil, err
 	}
 	var proposerRewardNumerator uint64
 
@@ -107,7 +77,7 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 			epochParticipation[attesterIndex] = epochParticipation[attesterIndex].Add(flagIndex)
 			baseReward, err := s.state.BaseReward(totalActiveBalance, attesterIndex)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			proposerRewardNumerator += baseReward * weight
 		}
@@ -115,7 +85,7 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 	// Reward proposer
 	proposer, err := s.state.GetBeaconProposerIndex()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Set participation
 	if data.Target.Epoch == currentEpoch {
@@ -125,7 +95,7 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, a
 	}
 	proposerRewardDenominator := (s.beaconConfig.WeightDenominator - s.beaconConfig.ProposerWeight) * s.beaconConfig.WeightDenominator / s.beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
-	return s.state.IncreaseBalance(int(proposer), reward)
+	return attestingIndicies, s.state.IncreaseBalance(int(proposer), reward)
 }
 
 type verifyAttestationWorkersResult struct {

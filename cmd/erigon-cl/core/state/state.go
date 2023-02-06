@@ -59,6 +59,7 @@ type BeaconState struct {
 	// Caches
 	activeValidatorsCache   *lru.Cache
 	committeeCache          *lru.Cache
+	shuffledSetsCache       *lru.Cache
 	totalActiveBalanceCache uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
@@ -122,6 +123,10 @@ func (b *BeaconState) initBeaconState() {
 	// 5 Epochs at a time is reasonable.
 	var err error
 	b.activeValidatorsCache, err = lru.New(5)
+	if err != nil {
+		panic(err)
+	}
+	b.shuffledSetsCache, err = lru.New(25)
 	if err != nil {
 		panic(err)
 	}
