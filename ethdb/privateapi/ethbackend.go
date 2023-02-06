@@ -48,7 +48,6 @@ const MaxBuilders = 128
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
-var InvalidParamsErr = rpc.CustomError{Code: -32602, Message: "Invalid params"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -294,6 +293,16 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 	return busy
 }
 
+func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+	if !s.config.IsShanghai(time) && withdrawals != nil {
+		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
+	}
+	if s.config.IsShanghai(time) && withdrawals == nil {
+		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	}
+	return nil
+}
+
 // EngineNewPayload validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
 	header := types.Header{
@@ -324,8 +333,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		header.WithdrawalsHash = &wh
 	}
 
-	if !s.config.IsShanghai(header.Time) && withdrawals != nil || s.config.IsShanghai(header.Time) && withdrawals == nil {
-		return nil, &InvalidParamsErr
+	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+		return nil, err
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -667,9 +676,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		param.Withdrawals = ConvertWithdrawalsFromRpc(payloadAttributes.Withdrawals)
 	}
 
-	if (!s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals != nil) ||
-		(s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals == nil) {
-		return nil, &InvalidParamsErr
+	if err := s.checkWithdrawalsPresence(payloadAttributes.Timestamp, param.Withdrawals); err != nil {
+		return nil, err
 	}
 
 	// Initiate payload building
