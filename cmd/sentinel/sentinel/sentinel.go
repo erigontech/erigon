@@ -37,7 +37,6 @@ import (
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
-	"github.com/pkg/errors"
 )
 
 type Sentinel struct {
@@ -65,7 +64,7 @@ func (s *Sentinel) createLocalNode(
 ) (*enode.LocalNode, error) {
 	db, err := enode.OpenDB("")
 	if err != nil {
-		return nil, errors.Wrap(err, "could not open node's peer database")
+		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 

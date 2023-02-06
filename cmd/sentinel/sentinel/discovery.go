@@ -15,6 +15,7 @@ package sentinel
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -26,7 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
-	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
@@ -35,7 +35,7 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skip
 		return nil
 	}
 	if s.peers.IsBadPeer(info.ID) {
-		return errors.New("refused to connect to bad peer")
+		return fmt.Errorf("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
