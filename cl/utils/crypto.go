@@ -40,6 +40,5 @@ func Keccak256(data []byte, extras ...[]byte) [32]byte {
 		h.Write(extra)
 	}
 	h.Sum(b[:0])
-
 	return b
 }

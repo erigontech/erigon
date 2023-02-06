@@ -31,15 +31,6 @@ func IsSlashableAttestationData(d1, d2 *cltypes.AttestationData) (bool, error) {
 	return (hash1 != hash2 && d1.Target.Epoch == d2.Target.Epoch) || (d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch), nil
 }
 
-func IsSortedSet(vals []uint64) bool {
-	for i := 0; i < len(vals)-1; i++ {
-		if vals[i] >= vals[i+1] {
-			return false
-		}
-	}
-	return true
-}
-
 func GetSetIntersection(v1, v2 []uint64) []uint64 {
 	intersection := []uint64{}
 	present := map[uint64]bool{}
@@ -58,7 +49,7 @@ func GetSetIntersection(v1, v2 []uint64) []uint64 {
 
 func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !IsSortedSet(inds) {
+	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
@@ -328,7 +319,13 @@ func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) e
 	if err != nil {
 		return err
 	}
-	valid, err := s.verifyAttestation(attestation)
+	var proposerRewardNumerator uint64
+	attestingIndicies, err := s.state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+	if err != nil {
+		return err
+	}
+
+	valid, err := s.verifyAttestation(attestation, attestingIndicies)
 	if err != nil {
 		return err
 	}
@@ -340,12 +337,6 @@ func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) e
 		epochParticipation = s.state.CurrentEpochParticipation()
 	} else {
 		epochParticipation = s.state.PreviousEpochParticipation()
-	}
-
-	var proposerRewardNumerator uint64
-	attestingIndicies, err := s.state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
-	if err != nil {
-		return err
 	}
 
 	for _, attesterIndex := range attestingIndicies {
@@ -377,11 +368,11 @@ func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) e
 	return s.state.IncreaseBalance(int(proposer), reward)
 }
 
-func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation) (bool, error) {
+func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) (bool, error) {
 	if s.noValidate {
 		return true, nil
 	}
-	indexedAttestation, err := s.state.GetIndexedAttestation(attestation)
+	indexedAttestation, err := s.state.GetIndexedAttestation(attestation, attestingIndicies)
 	if err != nil {
 		return false, err
 	}

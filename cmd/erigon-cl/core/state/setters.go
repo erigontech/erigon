@@ -61,6 +61,8 @@ func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) er
 		return InvalidValidatorIndex
 	}
 	b.validators[index] = validator
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
 	return nil
 }
 
@@ -95,6 +97,8 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
 	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
