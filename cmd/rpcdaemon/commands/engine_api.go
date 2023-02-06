@@ -71,7 +71,7 @@ type TransitionConfiguration struct {
 }
 
 type ExecutionPayloadBodyV1 struct {
-	Transactions [][]byte            `json:"transactions" gencodec:"required"`
+	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
@@ -448,8 +448,11 @@ func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response
 			result[idx] = nil
 		} else {
 			pl := &ExecutionPayloadBodyV1{
-				Transactions: body.Transactions,
+				Transactions: make([]hexutil.Bytes, len(body.Transactions)),
 				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			}
+			for i := range body.Transactions {
+				pl.Transactions[i] = body.Transactions[i]
 			}
 			result[idx] = pl
 		}
