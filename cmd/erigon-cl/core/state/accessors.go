@@ -144,7 +144,7 @@ func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
 	return ret
 }
 
-func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte, preInputs [][32]byte) (uint64, error) {
+func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte, preInputs [][32]byte, hashFunc utils.HashFunc) (uint64, error) {
 	if ind >= ind_count {
 		return 0, fmt.Errorf("index=%d must be less than the index count=%d", ind, ind_count)
 	}
@@ -170,7 +170,7 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 		binary.LittleEndian.PutUint32(positionByteArray, uint32(position>>8))
 		input2 := append(seed[:], byte(i))
 		input2 = append(input2, positionByteArray...)
-		hashedInput2 := utils.Keccak256(input2)
+		hashedInput2 := hashFunc(input2)
 		// Read hash value.
 		byteVal := hashedInput2[(position%256)/8]
 		bitVal := (byteVal >> (position % 8)) % 2
@@ -181,18 +181,17 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 	return ind, nil
 }
 
-func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte) ([]uint64, error) {
+func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte, hashFunc utils.HashFunc) ([]uint64, error) {
 	ret := []uint64{}
 	lenIndicies := uint64(len(indicies))
 	for i := (lenIndicies * index) / count; i < (lenIndicies*(index+1))/count; i++ {
-		index, err := b.ComputeShuffledIndex(i, lenIndicies, seed, preInputs)
+		index, err := b.ComputeShuffledIndex(i, lenIndicies, seed, preInputs, hashFunc)
 		if err != nil {
 			return nil, err
 		}
 		ret = append(ret, indicies[index])
 	}
 	return ret, nil
-	//return [indices[compute_shuffled_index(uint64(i), uint64(len(indices)), seed)] for i in range(start, end)]
 }
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
@@ -205,7 +204,7 @@ func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uin
 	buf := make([]byte, 8)
 	preInputs := b.ComputeShuffledIndexPreInputs(seed)
 	for {
-		shuffled, err := b.ComputeShuffledIndex(i%total, total, seed, preInputs)
+		shuffled, err := b.ComputeShuffledIndex(i%total, total, seed, preInputs, utils.Keccak256)
 		if err != nil {
 			return 0, err
 		}
@@ -371,12 +370,14 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	committeesPerSlot := b.CommitteeCount(epoch)
 	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
 	preInputs := b.ComputeShuffledIndexPreInputs(seed)
+	hashFunc := utils.OptimizedKeccak256()
 	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
 		seed,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
 		preInputs,
+		hashFunc,
 	)
 	if err != nil {
 		return nil, err
