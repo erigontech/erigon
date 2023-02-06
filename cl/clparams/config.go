@@ -213,7 +213,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         4367322,
+		ContractDeploymentBlock:         19475089,
 		BootNodes:                       GnosisBootstrapNodes,
 	},
 
@@ -233,7 +233,7 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
 		MinimumPeersInSubnetSearch:      20,
-		ContractDeploymentBlock:         4367322,
+		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
 }
