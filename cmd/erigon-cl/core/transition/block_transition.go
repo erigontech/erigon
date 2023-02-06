@@ -21,7 +21,7 @@ func (s *StateTransistor) processBlock(signedBlock *cltypes.SignedBeaconBlock) e
 		// Set execution header accordingly to state.
 		s.state.SetLatestExecutionPayloadHeader(block.Body.ExecutionPayload.Header)
 	}
-	if err := s.ProcessRandao(block.Body.RandaoReveal); err != nil {
+	if err := s.ProcessRandao(block.Body.RandaoReveal, block.ProposerIndex); err != nil {
 		return fmt.Errorf("ProcessRandao: %s", err)
 	}
 	if err := s.ProcessEth1Data(block.Body.Eth1Data); err != nil {
