@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"golang.org/x/exp/slices"
 )
 
 func IsSlashableValidator(validator *cltypes.Validator, epoch uint64) bool {
@@ -287,93 +286,4 @@ func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.Sign
 	}
 	// Do the exit (same process in slashing).
 	return s.state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
-}
-
-// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) error {
-	participationFlagWeights := []uint64{
-		s.beaconConfig.TimelySourceWeight,
-		s.beaconConfig.TimelyTargetWeight,
-		s.beaconConfig.TimelyHeadWeight,
-	}
-
-	totalActiveBalance, err := s.state.GetTotalActiveBalance()
-	if err != nil {
-		return err
-	}
-	data := attestation.Data
-	currentEpoch := s.state.Epoch()
-	previousEpoch := s.state.PreviousEpoch()
-	stateSlot := s.state.Slot()
-	if (data.Target.Epoch != currentEpoch && data.Target.Epoch != previousEpoch) || data.Target.Epoch != s.state.GetEpochAtSlot(data.Slot) {
-		return errors.New("ProcessAttestation: attestation with invalid epoch")
-	}
-	if data.Slot+s.beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot+s.beaconConfig.SlotsPerEpoch {
-		return errors.New("ProcessAttestation: attestation slot not in range")
-	}
-	if data.Index >= s.state.CommitteeCount(data.Target.Epoch) {
-		return errors.New("ProcessAttestation: attester index out of range")
-	}
-	participationFlagsIndicies, err := s.state.GetAttestationParticipationFlagIndicies(attestation.Data, stateSlot-data.Slot)
-	if err != nil {
-		return err
-	}
-	var proposerRewardNumerator uint64
-	attestingIndicies, err := s.state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
-	if err != nil {
-		return err
-	}
-
-	valid, err := s.verifyAttestation(attestation, attestingIndicies)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("ProcessAttestation: wrong bls data")
-	}
-	var epochParticipation cltypes.ParticipationFlagsList
-	if data.Target.Epoch == currentEpoch {
-		epochParticipation = s.state.CurrentEpochParticipation()
-	} else {
-		epochParticipation = s.state.PreviousEpochParticipation()
-	}
-
-	for _, attesterIndex := range attestingIndicies {
-		for flagIndex, weight := range participationFlagWeights {
-			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
-				continue
-			}
-			epochParticipation[attesterIndex] = epochParticipation[attesterIndex].Add(flagIndex)
-			baseReward, err := s.state.BaseReward(totalActiveBalance, attesterIndex)
-			if err != nil {
-				return err
-			}
-			proposerRewardNumerator += baseReward * weight
-		}
-	}
-	// Reward proposer
-	proposer, err := s.state.GetBeaconProposerIndex()
-	if err != nil {
-		return err
-	}
-	// Set participation
-	if data.Target.Epoch == currentEpoch {
-		s.state.SetCurrentEpochParticipation(epochParticipation)
-	} else {
-		s.state.SetPreviousEpochParticipation(epochParticipation)
-	}
-	proposerRewardDenominator := (s.beaconConfig.WeightDenominator - s.beaconConfig.ProposerWeight) * s.beaconConfig.WeightDenominator / s.beaconConfig.ProposerWeight
-	reward := proposerRewardNumerator / proposerRewardDenominator
-	return s.state.IncreaseBalance(int(proposer), reward)
-}
-
-func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) (bool, error) {
-	if s.noValidate {
-		return true, nil
-	}
-	indexedAttestation, err := s.state.GetIndexedAttestation(attestation, attestingIndicies)
-	if err != nil {
-		return false, err
-	}
-	return isValidIndexedAttestation(s.state, indexedAttestation)
 }

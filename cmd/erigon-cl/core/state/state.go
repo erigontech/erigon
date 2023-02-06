@@ -103,9 +103,9 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 func (b *BeaconState) _refreshActiveBalances() {
 	epoch := b.Epoch()
 	b.totalActiveBalanceCache = 0
-	for i, bal := range b.balances {
-		if b.validators[i].Active(epoch) {
-			b.totalActiveBalanceCache += bal
+	for _, validator := range b.validators {
+		if validator.Active(epoch) {
+			b.totalActiveBalanceCache += validator.EffectiveBalance
 		}
 	}
 }

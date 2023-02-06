@@ -93,6 +93,9 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
+	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
+		return b.beaconConfig.EffectiveBalanceIncrement, nil
+	}
 	return b.totalActiveBalanceCache, nil
 }
 
@@ -149,11 +152,8 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 		preInputs = b.ComputeShuffledIndexPreInputs(seed)
 	}
 	for i := uint64(0); i < b.beaconConfig.ShuffleRoundCount; i++ {
-		// Construct first hash input.
-		hashedInput := preInputs[i]
-
 		// Read hash value.
-		hashValue := binary.LittleEndian.Uint64(hashedInput[:8])
+		hashValue := binary.LittleEndian.Uint64(preInputs[i][:8])
 
 		// Caclulate pivot and flip.
 		pivot := hashValue % ind_count

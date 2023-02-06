@@ -41,12 +41,9 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance := state.Balances()[testInd]
-	beforeActiveBalance, _ := state.GetTotalActiveBalance()
 	state.IncreaseBalance(int(testInd), amount)
 	afterBalance := state.Balances()[testInd]
-	afterActiveBalance, _ := state.GetTotalActiveBalance()
 	require.Equal(t, afterBalance, beforeBalance+amount)
-	require.Equal(t, afterActiveBalance, beforeActiveBalance+amount)
 }
 
 func TestDecreaseBalance(t *testing.T) {
@@ -79,16 +76,9 @@ func TestDecreaseBalance(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			state := getTestStateBalances(t)
-			beforeActiveBalance, _ := state.GetTotalActiveBalance()
 			require.NoError(t, state.DecreaseBalance(testInd, tc.delta))
 			afterBalance := state.Balances()[testInd]
-			afterActiveBalance, _ := state.GetTotalActiveBalance()
 			require.Equal(t, afterBalance, tc.expectedBalance)
-			delta := tc.delta
-			if afterBalance == 0 {
-				delta = beforeBalance
-			}
-			require.Equal(t, beforeActiveBalance-delta, afterActiveBalance)
 		})
 	}
 }

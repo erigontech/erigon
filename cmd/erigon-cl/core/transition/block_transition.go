@@ -57,10 +57,8 @@ func (s *StateTransistor) processOperations(blockBody *cltypes.BeaconBody) error
 		}
 	}
 	// Process each attestations
-	for _, att := range blockBody.Attestations {
-		if err := s.ProcessAttestation(att); err != nil {
-			return fmt.Errorf("ProcessAttestation: %s", err)
-		}
+	if err := s.ProcessAttestations(blockBody.Attestations); err != nil {
+		return fmt.Errorf("ProcessAttestation: %s", err)
 	}
 	// Process each deposit
 	for _, dep := range blockBody.Deposits {

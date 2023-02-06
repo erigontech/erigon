@@ -1,6 +1,8 @@
 package transition
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
@@ -89,6 +91,7 @@ func (s *StateTransistor) processJustificationBitsAndFinalityAltair() error {
 	if err != nil {
 		return err
 	}
+	fmt.Println(totalActiveBalance > 1000000000)
 	previousTargetBalance, err := s.state.GetTotalBalance(previousIndices)
 	if err != nil {
 		return err

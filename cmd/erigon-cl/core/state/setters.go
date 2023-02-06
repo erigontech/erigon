@@ -101,7 +101,7 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64)
 	b.validators = append(b.validators, validator)
 	b.balances = append(b.balances, balance)
 	if validator.Active(b.Epoch()) {
-		b.totalActiveBalanceCache += balance
+		b.totalActiveBalanceCache += validator.EffectiveBalance
 	}
 	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 	// change in validator set means cache purging
@@ -118,14 +118,6 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	if index >= len(b.balances) {
 		return InvalidValidatorIndex
-	}
-	previousBalance := b.balances[index]
-	if b.validators[index].Active(b.Epoch()) {
-		if previousBalance > balance {
-			b.totalActiveBalanceCache -= previousBalance - balance
-		} else {
-			b.totalActiveBalanceCache += balance - previousBalance
-		}
 	}
 
 	b.touchedLeaves[BalancesLeafIndex] = true

@@ -380,7 +380,7 @@ func TestProcessAttestation(t *testing.T) {
 	}
 	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
 
-	require.NoError(t, s.ProcessAttestation(att))
+	require.NoError(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
 
 	p := beaconState.CurrentEpochParticipation()
 	require.NoError(t, err)
