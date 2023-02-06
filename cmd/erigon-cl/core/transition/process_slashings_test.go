@@ -16,8 +16,7 @@ func TestProcessSlashingsNoSlash(t *testing.T) {
 	base := state.GetEmptyBeaconStateWithVersion(clparams.AltairVersion)
 	base.AddValidator(&cltypes.Validator{
 		Slashed: true,
-	})
-	base.AddBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+	}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	base.SetSlashingSegmentAt(0, 0)
 	base.SetSlashingSegmentAt(1, 1e9)
 	s := transition.New(base, &clparams.MainnetBeaconConfig, nil, false)
@@ -30,8 +29,8 @@ func getTestStateSlashings1() *state.BeaconState {
 	state := state.GetEmptyBeaconStateWithVersion(clparams.AltairVersion)
 	state.AddValidator(&cltypes.Validator{Slashed: true,
 		WithdrawableEpoch: clparams.MainnetBeaconConfig.EpochsPerSlashingsVector / 2,
-		EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance})
-	state.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance})
+		EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+	state.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	state.SetBalances([]uint64{clparams.MainnetBeaconConfig.MaxEffectiveBalance, clparams.MainnetBeaconConfig.MaxEffectiveBalance})
 	state.SetSlashingSegmentAt(0, 0)
 	state.SetSlashingSegmentAt(1, 1e9)
@@ -40,7 +39,7 @@ func getTestStateSlashings1() *state.BeaconState {
 
 func getTestStateSlashings2() *state.BeaconState {
 	state := getTestStateSlashings1()
-	state.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance})
+	state.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	return state
 }
 

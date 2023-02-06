@@ -232,8 +232,7 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		}
 		if valid {
 			// Append validator
-			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit))
-			s.state.AddBalance(amount)
+			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit), amount)
 			// Altair only
 			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))

@@ -93,7 +93,7 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
-	return b.GetTotalBalance(b.GetActiveValidatorsIndices(b.Epoch()))
+	return b.totalActiveBalanceCache, nil
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -140,6 +140,7 @@ func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
 	}
 	return ret
 }
+
 func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte, preInputs [][32]byte) (uint64, error) {
 	if ind >= ind_count {
 		return 0, fmt.Errorf("index=%d must be less than the index count=%d", ind, ind_count)
@@ -169,7 +170,6 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 		binary.LittleEndian.PutUint32(positionByteArray, uint32(position>>8))
 		input2 := append(seed[:], byte(i))
 		input2 = append(input2, positionByteArray...)
-
 		hashedInput2 := utils.Keccak256(input2)
 		// Read hash value.
 		byteVal := hashedInput2[(position%256)/8]
@@ -361,19 +361,28 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 }
 
 func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error) {
-	fmt.Println(slot, committeeIndex)
-
+	var cacheKey [16]byte
+	binary.BigEndian.PutUint64(cacheKey[:], slot)
+	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
+	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
+		return cachedCommittee.([]uint64), nil
+	}
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
 	preInputs := b.ComputeShuffledIndexPreInputs(seed)
-	return b.ComputeCommittee(
+	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
 		seed,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
 		preInputs,
 	)
+	if err != nil {
+		return nil, err
+	}
+	b.committeeCache.Add(cacheKey, committee)
+	return committee, nil
 }
 
 func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, attestingIndicies []uint64) (*cltypes.IndexedAttestation, error) {

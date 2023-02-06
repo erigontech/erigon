@@ -41,13 +41,13 @@ func TestActiveValidatorIndices(t *testing.T) {
 		ActivationEpoch:  3,
 		ExitEpoch:        9,
 		EffectiveBalance: 2e9,
-	})
+	}, 2e9)
 	// Active Validator
 	testState.AddValidator(&cltypes.Validator{
 		ActivationEpoch:  1,
 		ExitEpoch:        9,
 		EffectiveBalance: 2e9,
-	})
+	}, 2e9)
 	testState.SetSlot(epoch * 32) // Epoch
 	testFlags := cltypes.ParticipationFlagsListFromBytes([]byte{1, 1})
 	testState.SetCurrentEpochParticipation(testFlags)
@@ -165,7 +165,7 @@ func TestComputeShuffledIndex(t *testing.T) {
 func generateBeaconStateWithValidators(n int) *state.BeaconState {
 	b := state.GetEmptyBeaconState()
 	for i := 0; i < n; i++ {
-		b.AddValidator(&cltypes.Validator{EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance})
+		b.AddValidator(&cltypes.Validator{EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	}
 	return b
 }
@@ -238,7 +238,7 @@ func TestComputeProposerIndex(t *testing.T) {
 
 func TestSyncReward(t *testing.T) {
 	s := state.GetEmptyBeaconState()
-	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2})
+	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2}, 3099999999909)
 	propReward, partRew, err := s.SyncRewards()
 	require.NoError(t, err)
 	require.Equal(t, propReward, uint64(30))

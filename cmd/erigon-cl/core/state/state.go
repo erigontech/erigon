@@ -52,11 +52,14 @@ type BeaconState struct {
 	nextWithdrawalValidatorIndex uint64
 	historicalSummaries          []*cltypes.HistoricalSummary
 	// Internals
-	version               clparams.StateVersion   // State version
-	leaves                [32][32]byte            // Pre-computed leaves.
-	touchedLeaves         map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
-	publicKeyIndicies     map[[48]byte]uint64
-	activeValidatorsCache *lru.Cache
+	version           clparams.StateVersion   // State version
+	leaves            [32][32]byte            // Pre-computed leaves.
+	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
+	publicKeyIndicies map[[48]byte]uint64
+	// Caches
+	activeValidatorsCache   *lru.Cache
+	committeeCache          *lru.Cache
+	totalActiveBalanceCache uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -97,17 +100,32 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 	}).HashSSZ()
 }
 
+func (b *BeaconState) _refreshActiveBalances() {
+	epoch := b.Epoch()
+	b.totalActiveBalanceCache = 0
+	for i, bal := range b.balances {
+		if b.validators[i].Active(epoch) {
+			b.totalActiveBalanceCache += bal
+		}
+	}
+}
+
 func (b *BeaconState) initBeaconState() {
 	if b.touchedLeaves == nil {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
 	}
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
+	b._refreshActiveBalances()
 	for i, validator := range b.validators {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
 	// 5 Epochs at a time is reasonable.
 	var err error
 	b.activeValidatorsCache, err = lru.New(5)
+	if err != nil {
+		panic(err)
+	}
+	b.committeeCache, err = lru.New(256)
 	if err != nil {
 		panic(err)
 	}
