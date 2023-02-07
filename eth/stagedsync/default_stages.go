@@ -74,7 +74,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return BodiesForward(s, u, ctx, tx, bodies, test, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindBodiesStage(u, tx, bodies, ctx, false)
+				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx) error {
 				return PruneBodiesStage(p, tx, bodies, ctx)
@@ -246,7 +246,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return BodiesForward(s, u, ctx, tx, bodies, false, false, quiet)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				return UnwindBodiesStage(u, tx, bodies, ctx, false)
+				return UnwindBodiesStage(u, tx, bodies, ctx)
 			},
 		},
 		{
