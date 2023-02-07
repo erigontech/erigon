@@ -21,7 +21,7 @@ func (s *StateTransistor) processBlock(signedBlock *cltypes.SignedBeaconBlock) e
 		// Set execution header accordingly to state.
 		s.state.SetLatestExecutionPayloadHeader(block.Body.ExecutionPayload.Header)
 	}
-	if err := s.ProcessRandao(block.Body.RandaoReveal); err != nil {
+	if err := s.ProcessRandao(block.Body.RandaoReveal, block.ProposerIndex); err != nil {
 		return fmt.Errorf("ProcessRandao: %s", err)
 	}
 	if err := s.ProcessEth1Data(block.Body.Eth1Data); err != nil {
@@ -57,10 +57,8 @@ func (s *StateTransistor) processOperations(blockBody *cltypes.BeaconBody) error
 		}
 	}
 	// Process each attestations
-	for _, att := range blockBody.Attestations {
-		if err := s.ProcessAttestation(att); err != nil {
-			return fmt.Errorf("ProcessAttestation: %s", err)
-		}
+	if err := s.ProcessAttestations(blockBody.Attestations); err != nil {
+		return fmt.Errorf("ProcessAttestation: %s", err)
 	}
 	// Process each deposit
 	for _, dep := range blockBody.Deposits {

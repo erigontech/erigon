@@ -25,10 +25,10 @@ func getJustificationAndFinalizationState() *state.BeaconState {
 	bits := cltypes.JustificationBits{}
 	bits.FromByte(0x3)
 	state.SetJustificationBits(bits)
-	state.SetValidators([]*cltypes.Validator{
-		{ExitEpoch: epoch}, {ExitEpoch: epoch}, {ExitEpoch: epoch}, {ExitEpoch: epoch},
-	})
-	state.SetBalances([]uint64{bal, bal, bal, bal})
+	state.AddValidator(&cltypes.Validator{ExitEpoch: epoch}, bal)
+	state.AddValidator(&cltypes.Validator{ExitEpoch: epoch}, bal)
+	state.AddValidator(&cltypes.Validator{ExitEpoch: epoch}, bal)
+	state.AddValidator(&cltypes.Validator{ExitEpoch: epoch}, bal)
 	state.SetCurrentEpochParticipation(cltypes.ParticipationFlagsList{0b01, 0b01, 0b01, 0b01})
 	state.SetPreviousEpochParticipation(cltypes.ParticipationFlagsList{0b01, 0b01, 0b01, 0b01})
 

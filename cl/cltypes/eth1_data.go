@@ -14,6 +14,10 @@ type Eth1Data struct {
 	DepositCount uint64
 }
 
+func (e *Eth1Data) Equal(b *Eth1Data) bool {
+	return e.BlockHash == b.BlockHash && e.Root == b.Root && b.DepositCount == e.DepositCount
+}
+
 // MarshalSSZTo ssz marshals the Eth1Data object to a target array
 func (e *Eth1Data) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
