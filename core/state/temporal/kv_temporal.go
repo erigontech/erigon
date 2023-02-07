@@ -27,10 +27,10 @@ import (
 
 //Methods Naming:
 // Get: exact match of criterias
-// Dual: [from, to)
+// Range: [from, to)
 // Each: [from, INF)
 // Prefix: Has(k, prefix)
-// Amount: [from, INF) AND maximum N records
+// Limit: [from, INF) AND maximum N records
 
 type tRestoreCodeHash func(tx kv.Getter, key, v []byte, force *common.Hash) ([]byte, error)
 type tConvertV3toV2 func(v []byte) ([]byte, error)
@@ -77,7 +77,6 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	tx := &Tx{Tx: kvTx, db: db}
 
 	tx.agg = db.agg.MakeContext()
-	tx.agg.SetTx(kvTx)
 	return tx, nil
 }
 func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) error {
@@ -113,7 +112,9 @@ func (tx *Tx) Rollback() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	tx.agg.Close()
+	if tx.agg != nil {
+		tx.agg.Close()
+	}
 	tx.Tx.Rollback()
 }
 
@@ -147,13 +148,16 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, limit int) (pairs iter.KV, err error) {
+func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not supported yet")
+	}
 	switch name {
 	case AccountsDomain:
-		it := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
 		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
-		// Is it possible to increase keys lifetime to: 2 .Next() calls??
-		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
+		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
 			if len(v) == 0 {
 				return k[:20], v, nil
 			}
@@ -177,16 +181,16 @@ func (tx *Tx) DomainRangeAscend(name kv.Domain, k1, k2 []byte, asOfTs uint64, li
 			}
 			return k[:20], v, nil
 		})
-		it2, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
 		if err != nil {
 			return nil, err
 		}
 		// TODO: instead of iterate over whole storage, need implement iterator which does cursor.Seek(nextAccount)
-		it3 := iter.FilterKV(it2, func(k, v []byte) bool {
+		latestStateIt2 := iter.FilterKV(lastestStateIt, func(k, v []byte) bool {
 			return len(k) == 20
 		})
 		//TODO: seems UnionKV can't handle "amount" request
-		return iter.UnionKV(it11, it3), nil
+		return iter.UnionKV(histStateIt2, latestStateIt2), nil
 	case StorageDomain:
 		toKey, _ := kv.NextSubtree(k1)
 		fromKey2 := append(common.Copy(k1), k2...)
@@ -267,7 +271,7 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts)
+		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.Tx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -294,24 +298,12 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 		}
 		return v, true, nil
 	case StorageHistory:
-		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts)
+		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.Tx)
 	case CodeHistory:
-		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts)
+		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.Tx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
-}
-
-type Cursor struct {
-	kv  kv.Cursor
-	agg *state.AggregatorV3Context
-
-	//HistoryV2 fields
-	accHistoryC, storageHistoryC kv.Cursor
-	accChangesC, storageChangesC kv.CursorDupSort
-
-	//HistoryV3 fields
-	hitoryV3 bool
 }
 
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
@@ -340,4 +332,26 @@ func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc or
 		tx.resourcesToClose = append(tx.resourcesToClose, closer)
 	}
 	return timestamps, nil
+}
+
+func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error) {
+	if asc == order.Desc {
+		panic("not implemented yet")
+	}
+	if limit >= 0 {
+		panic("not implemented yet")
+	}
+	switch name {
+	case AccountsHistory:
+		it = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
+	case StorageHistory:
+		it = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
+	case CodeHistory:
+		it = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		return it, nil
+	default:
+		return nil, fmt.Errorf("unexpected history name: %s", name)
+	}
 }

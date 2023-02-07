@@ -88,10 +88,6 @@ func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct CommonTx) IsStarkNet() bool {
-	return false
-}
-
 // LegacyTx is the transaction data of regular Ethereum transactions.
 type LegacyTx struct {
 	CommonTx

@@ -56,8 +56,12 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.historicalRoots[index] = root
 }
 
-func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
+	if index >= len(b.validators) {
+		return InvalidValidatorIndex
+	}
 	b.validators[index] = validator
+	return nil
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -80,14 +84,17 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
+// Should not be called if not for testing
 func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
+	b.initBeaconState()
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
+	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
@@ -100,9 +107,13 @@ func (b *BeaconState) AddBalance(balance uint64) {
 	b.balances = append(b.balances, balance)
 }
 
-func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
+	if index >= len(b.balances) {
+		return InvalidValidatorIndex
+	}
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances[index] = balance
+	return nil
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
@@ -170,4 +181,16 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 	b.historicalSummaries = append(b.historicalSummaries, summary)
+}
+
+func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.inactivityScores = append(b.inactivityScores, score)
+}
+
+func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
+}
+
+func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }

@@ -10,14 +10,15 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
@@ -47,7 +48,7 @@ const MaxBuilders = 128
 var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
 var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
 var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
-var InvalidParamsErr = rpc.CustomError{Code: -32602, Message: "Invalid params"}
+var TooLargeRequestErr = rpc.CustomError{Code: -38004, Message: "Too large request"}
 
 type EthBackendServer struct {
 	remote.UnimplementedETHBACKENDServer // must be embedded to have forward compatible implementations.
@@ -267,20 +268,27 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	for i := 0; i < 20; i++ {
-		if !s.hd.BeaconRequestList.IsWaiting() {
-			// This might happen, for example, in the following scenario:
-			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
-			// 2) We happily process NewPayload and stage loop is at the end.
-			// 3) We start processing ForkChoiceUpdated,
-			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
-			// and thus requestList.WaitForRequest() is not called yet.
-
-			// TODO(yperbasis): find a more elegant solution
-			time.Sleep(5 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	wait, ok := s.hd.BeaconRequestList.WaitForWaiting(ctx)
+	if !ok {
+		select {
+		case <-wait:
+		case <-ctx.Done():
 		}
 	}
+
 	return !s.hd.BeaconRequestList.IsWaiting()
+}
+
+func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
+	if !s.config.IsShanghai(time) && withdrawals != nil {
+		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
+	}
+	if s.config.IsShanghai(time) && withdrawals == nil {
+		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
+	}
+	return nil
 }
 
 // EngineNewPayload validates and possibly executes payload
@@ -313,8 +321,8 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		header.WithdrawalsHash = &wh
 	}
 
-	if !s.config.IsShanghai(header.Time) && withdrawals != nil || s.config.IsShanghai(header.Time) && withdrawals == nil {
-		return nil, &InvalidParamsErr
+	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+		return nil, err
 	}
 
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
@@ -656,9 +664,8 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 		param.Withdrawals = ConvertWithdrawalsFromRpc(payloadAttributes.Withdrawals)
 	}
 
-	if (!s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals != nil) ||
-		(s.config.IsShanghai(payloadAttributes.Timestamp) && param.Withdrawals == nil) {
-		return nil, &InvalidParamsErr
+	if err := s.checkWithdrawalsPresence(payloadAttributes.Timestamp, param.Withdrawals); err != nil {
+		return nil, err
 	}
 
 	// Initiate payload building
@@ -711,24 +718,24 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 		return nil, err
 	}
 
-	bodies := make([]*types2.ExecutionPayloadBodyV1, request.Count)
+	bodies := make([]*types2.ExecutionPayloadBodyV1, 0, request.Count)
 
-	var i uint64
-	for i = 0; i < request.Count; i++ {
-		block, err := rawdb.ReadBlockByNumber(tx, request.Start+i)
+	for i := uint64(0); i < request.Count; i++ {
+		hash, err := rawdb.ReadCanonicalHash(tx, request.Start+i)
 		if err != nil {
 			return nil, err
 		}
+		if hash == (libcommon.Hash{}) {
+			// break early if beyond the last known canonical header
+			break
+		}
+
+		block := rawdb.ReadBlock(tx, hash, request.Start+i)
 		body, err := extractPayloadBodyFromBlock(block)
 		if err != nil {
 			return nil, err
 		}
-		if body == nil {
-			// break early if the body is nil to trim the response.  A missing body indicates we don't have the
-			// canonical block so can just stop outputting from here
-			break
-		}
-		bodies[i] = body
+		bodies = append(bodies, body)
 	}
 
 	return &remote.EngineGetPayloadBodiesV1Response{Bodies: bodies}, nil

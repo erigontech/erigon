@@ -28,18 +28,17 @@ import (
 	"github.com/libp2p/go-libp2p-core/crypto"
 	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/multiformats/go-multiaddr"
-	"github.com/pkg/errors"
 )
 
 func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
 	if overflows {
-		return nil, errors.Errorf("X value overflows")
+		return nil, fmt.Errorf("X value overflows")
 	}
 	overflows = yVal.SetByteSlice(pubkey.Y.Bytes())
 	if overflows {
-		return nil, errors.Errorf("Y value overflows")
+		return nil, fmt.Errorf("Y value overflows")
 	}
 	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
 	// Zero out temporary values.
@@ -64,11 +63,11 @@ func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 	pubkey := node.Pubkey()
 	assertedKey, err := convertToInterfacePubkey(pubkey)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not get pubkey")
+		return nil, fmt.Errorf("could not get pubkey: %w", err)
 	}
 	id, err := peer.IDFromPublicKey(assertedKey)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not get peer id")
+		return nil, fmt.Errorf("could not get peer id: %w", err)
 	}
 	return multiAddressBuilderWithID(node.IP().String(), "tcp", uint(node.TCP()), id)
 }
@@ -76,10 +75,10 @@ func convertToSingleMultiAddr(node *enode.Node) (multiaddr.Multiaddr, error) {
 func multiAddressBuilderWithID(ipAddr, protocol string, port uint, id peer.ID) (multiaddr.Multiaddr, error) {
 	parsedIP := net.ParseIP(ipAddr)
 	if parsedIP.To4() == nil && parsedIP.To16() == nil {
-		return nil, errors.Errorf("invalid ip address provided: %s", ipAddr)
+		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
 	}
 	if id.String() == "" {
-		return nil, errors.New("empty peer id given")
+		return nil, fmt.Errorf("empty peer id given")
 	}
 	if parsedIP.To4() != nil {
 		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/%s/%d/p2p/%s", ipAddr, protocol, port, id.String()))

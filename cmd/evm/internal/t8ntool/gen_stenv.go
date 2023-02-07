@@ -18,17 +18,17 @@ var _ = (*stEnvMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (s stEnv) MarshalJSON() ([]byte, error) {
 	type stEnv struct {
-		Coinbase         common.UnprefixedAddress            `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
-		Random           *math.HexOrDecimal256               `json:"currentRandom"`
-		ParentDifficulty *math.HexOrDecimal256               `json:"parentDifficulty"`
-		GasLimit         math.HexOrDecimal64                 `json:"currentGasLimit"   gencodec:"required"`
-		Number           math.HexOrDecimal64                 `json:"currentNumber"     gencodec:"required"`
-		Timestamp        math.HexOrDecimal64                 `json:"currentTimestamp"  gencodec:"required"`
-		ParentTimestamp  math.HexOrDecimal64                 `json:"parentTimestamp,omitempty"`
+		Coinbase         common.UnprefixedAddress               `json:"currentCoinbase"   gencodec:"required"`
+		Difficulty       *math.HexOrDecimal256                  `json:"currentDifficulty"`
+		Random           *math.HexOrDecimal256                  `json:"currentRandom"`
+		ParentDifficulty *math.HexOrDecimal256                  `json:"parentDifficulty"`
+		GasLimit         math.HexOrDecimal64                    `json:"currentGasLimit"   gencodec:"required"`
+		Number           math.HexOrDecimal64                    `json:"currentNumber"     gencodec:"required"`
+		Timestamp        math.HexOrDecimal64                    `json:"currentTimestamp"  gencodec:"required"`
+		ParentTimestamp  math.HexOrDecimal64                    `json:"parentTimestamp,omitempty"`
 		BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
-		Ommers           []ommer                             `json:"ommers,omitempty"`
-		BaseFee          *math.HexOrDecimal256               `json:"currentBaseFee,omitempty"`
+		Ommers           []ommer                                `json:"ommers,omitempty"`
+		BaseFee          *math.HexOrDecimal256                  `json:"currentBaseFee,omitempty"`
 		ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
 	}
 	var enc stEnv
@@ -50,17 +50,17 @@ func (s stEnv) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (s *stEnv) UnmarshalJSON(input []byte) error {
 	type stEnv struct {
-		Coinbase         *common.UnprefixedAddress           `json:"currentCoinbase"   gencodec:"required"`
-		Difficulty       *math.HexOrDecimal256               `json:"currentDifficulty"`
-		Random           *math.HexOrDecimal256               `json:"currentRandom"`
-		ParentDifficulty *math.HexOrDecimal256               `json:"parentDifficulty"`
-		GasLimit         *math.HexOrDecimal64                `json:"currentGasLimit"   gencodec:"required"`
-		Number           *math.HexOrDecimal64                `json:"currentNumber"     gencodec:"required"`
-		Timestamp        *math.HexOrDecimal64                `json:"currentTimestamp"  gencodec:"required"`
-		ParentTimestamp  *math.HexOrDecimal64                `json:"parentTimestamp,omitempty"`
+		Coinbase         *common.UnprefixedAddress              `json:"currentCoinbase"   gencodec:"required"`
+		Difficulty       *math.HexOrDecimal256                  `json:"currentDifficulty"`
+		Random           *math.HexOrDecimal256                  `json:"currentRandom"`
+		ParentDifficulty *math.HexOrDecimal256                  `json:"parentDifficulty"`
+		GasLimit         *math.HexOrDecimal64                   `json:"currentGasLimit"   gencodec:"required"`
+		Number           *math.HexOrDecimal64                   `json:"currentNumber"     gencodec:"required"`
+		Timestamp        *math.HexOrDecimal64                   `json:"currentTimestamp"  gencodec:"required"`
+		ParentTimestamp  *math.HexOrDecimal64                   `json:"parentTimestamp,omitempty"`
 		BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
-		Ommers           []ommer                             `json:"ommers,omitempty"`
-		BaseFee          *math.HexOrDecimal256               `json:"currentBaseFee,omitempty"`
+		Ommers           []ommer                                `json:"ommers,omitempty"`
+		BaseFee          *math.HexOrDecimal256                  `json:"currentBaseFee,omitempty"`
 		ParentUncleHash  *libcommon.Hash                        `json:"parentUncleHash"`
 	}
 	var dec stEnv

@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 const propInd = 49
@@ -168,7 +170,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessProposerSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
@@ -280,7 +282,7 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.ProcessAttesterSlashing(tc.slashing)
 			if tc.wantErr {
 				if err == nil {
@@ -293,5 +295,120 @@ func TestProcessAttesterSlashing(t *testing.T) {
 				t.Errorf("unexpected error, wanted success: %v", err)
 			}
 		})
+	}
+}
+
+func makeBytes48FromHex(s string) (ret [48]byte) {
+	bytesString := common.Hex2Bytes(s)
+	copy(ret[:], bytesString)
+	return
+}
+
+func makeBytes96FromHex(s string) (ret [96]byte) {
+	bytesString := common.Hex2Bytes(s)
+	copy(ret[:], bytesString)
+	return
+}
+
+func TestProcessDeposit(t *testing.T) {
+	eth1Data := &cltypes.Eth1Data{
+		Root:         libcommon.HexToHash("efe26a8b16ed08bbb7989418a34e6f2073bc68ce4cc88176909a850f3b47099e"),
+		BlockHash:    libcommon.HexToHash("efe26a8b16ed08bbb7989418a34e6f2073bc68ce4cc88176909a850f3b47099e"),
+		DepositCount: 1,
+	}
+	deposit := &cltypes.Deposit{
+		Data: &cltypes.DepositData{
+			PubKey:                makeBytes48FromHex("a99a76ed7796f7be22d5b7e85deeb7c5677e88e511e0b337618f8c4eb61349b4bf2d153f649f7b53359fe8b94a38e44c"),
+			Signature:             makeBytes96FromHex("953b44ee497f9fc9abbc1340212597c264b77f3dea441921d65b2542d64195171ba0598fad34905f03c0c1b6d5540faa10bb2c26084fc5eacbafba119d9a81721f56821cae7044a2ff374e9a128f68dee68d3b48406ea60306148498ffe007c7"),
+			Amount:                32000000000,
+			WithdrawalCredentials: libcommon.HexToHash("00ec7ef7780c9d151597924036262dd28dc60e1228f4da6fecf9d402cb3f3594"),
+		},
+	}
+	testState := state.GetEmptyBeaconState()
+	testState.SetBalances([]uint64{0})
+	testState.AddValidator(&cltypes.Validator{
+		PublicKey:             [48]byte{1},
+		WithdrawalCredentials: [32]byte{1, 2, 3},
+	})
+	testState.SetEth1Data(eth1Data)
+	s := New(testState, &clparams.MainnetBeaconConfig, nil, true)
+	require.NoError(t, s.ProcessDeposit(deposit))
+	if testState.Balances()[1] != deposit.Data.Amount {
+		t.Errorf(
+			"Expected state validator balances index 0 to equal %d, received %d",
+			deposit.Data.Amount,
+			testState.Balances()[1],
+		)
+	}
+	/*
+		beaconState, err := state_native.InitializeFromProtoAltair(&ethpb.BeaconStateAltair{
+			Validators: registry,
+			Balances:   balances,
+			Eth1Data:   eth1Data,
+			Fork: &ethpb.Fork{
+				PreviousVersion: params.BeaconConfig().GenesisForkVersion,
+				CurrentVersion:  params.BeaconConfig().GenesisForkVersion,
+			},
+		})*/
+	//s := New()
+}
+
+func TestProcessVoluntaryExits(t *testing.T) {
+	state := state.GetEmptyBeaconState()
+	exit := &cltypes.SignedVoluntaryExit{
+		VolunaryExit: &cltypes.VoluntaryExit{
+			ValidatorIndex: 0,
+			Epoch:          0,
+		},
+	}
+	state.AddValidator(&cltypes.Validator{
+		ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
+		ActivationEpoch: 0,
+	})
+	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
+	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
+	newRegistry := state.Validators()
+	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
+}
+
+func TestProcessAttestation(t *testing.T) {
+	beaconState := state.GetEmptyBeaconState()
+	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
+	for i := 0; i < 64; i++ {
+		beaconState.AddValidator(&cltypes.Validator{
+			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
+			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
+			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
+		})
+		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+		beaconState.AddBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+	}
+
+	aggBits := []byte{7}
+	r, err := beaconState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	att := &cltypes.Attestation{
+		Data: &cltypes.AttestationData{
+			BeaconBlockHash: r,
+			Source:          &cltypes.Checkpoint{},
+			Target:          &cltypes.Checkpoint{},
+		},
+		AggregationBits: aggBits,
+	}
+	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, s.ProcessAttestation(att))
+
+	p := beaconState.CurrentEpochParticipation()
+	require.NoError(t, err)
+
+	indices, err := beaconState.GetAttestingIndicies(att.Data, att.AggregationBits)
+	require.NoError(t, err)
+	for _, index := range indices {
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyHeadFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelySourceFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
 	}
 }

@@ -41,12 +41,13 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
-			return nil, nil
+
+		ok = blockNumPtr != nil
+		if ok {
+			blockNum = *blockNumPtr
 		}
-		blockNum = *blockNumPtr
 	}
-	if ok || (chainConfig.Bor != nil && blockNum != 0) {
+	if ok {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
 		if err != nil {
 			return nil, err
