@@ -104,19 +104,13 @@ func (cs *MultiClient) SendHeaderRequest(ctx context.Context, req *headerdownloa
 		}
 		minBlock := req.Number
 
-		var maxPeers uint64
-		if cs.sendHeaderRequestsToMultiplePeers {
-			maxPeers = 5
-		} else {
-			maxPeers = 1
-		}
 		outreq := proto_sentry.SendMessageByMinBlockRequest{
 			MinBlock: minBlock,
 			Data: &proto_sentry.OutboundMessageData{
 				Id:   proto_sentry.MessageId_GET_BLOCK_HEADERS_66,
 				Data: bytes,
 			},
-			MaxPeers: maxPeers,
+			MaxPeers: 5,
 		}
 		sentPeers, err1 := cs.sentries[i].SendMessageByMinBlock(ctx, &outreq, &grpc.EmptyCallOption{})
 		if err1 != nil {

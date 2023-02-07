@@ -1,7 +1,6 @@
 package transition
 
 import (
-	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -326,32 +325,14 @@ func TestProcessDeposit(t *testing.T) {
 		},
 	}
 	testState := state.GetEmptyBeaconState()
-	testState.SetBalances([]uint64{0})
 	testState.AddValidator(&cltypes.Validator{
 		PublicKey:             [48]byte{1},
 		WithdrawalCredentials: [32]byte{1, 2, 3},
-	})
+	}, 0)
 	testState.SetEth1Data(eth1Data)
 	s := New(testState, &clparams.MainnetBeaconConfig, nil, true)
 	require.NoError(t, s.ProcessDeposit(deposit))
-	if testState.Balances()[1] != deposit.Data.Amount {
-		t.Errorf(
-			"Expected state validator balances index 0 to equal %d, received %d",
-			deposit.Data.Amount,
-			testState.Balances()[1],
-		)
-	}
-	/*
-		beaconState, err := state_native.InitializeFromProtoAltair(&ethpb.BeaconStateAltair{
-			Validators: registry,
-			Balances:   balances,
-			Eth1Data:   eth1Data,
-			Fork: &ethpb.Fork{
-				PreviousVersion: params.BeaconConfig().GenesisForkVersion,
-				CurrentVersion:  params.BeaconConfig().GenesisForkVersion,
-			},
-		})*/
-	//s := New()
+	require.Equal(t, deposit.Data.Amount, testState.Balances()[1])
 }
 
 func TestProcessVoluntaryExits(t *testing.T) {
@@ -365,9 +346,8 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	state.AddValidator(&cltypes.Validator{
 		ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
 		ActivationEpoch: 0,
-	})
+	}, 0)
 	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
-	fmt.Println(state.Slot())
 	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
 
 	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
@@ -383,9 +363,8 @@ func TestProcessAttestation(t *testing.T) {
 			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
 			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
 			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
-		})
+		}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-		beaconState.AddBalance(clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	}
 
 	aggBits := []byte{7}
@@ -401,7 +380,7 @@ func TestProcessAttestation(t *testing.T) {
 	}
 	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
 
-	require.NoError(t, s.ProcessAttestation(att))
+	require.NoError(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
 
 	p := beaconState.CurrentEpochParticipation()
 	require.NoError(t, err)

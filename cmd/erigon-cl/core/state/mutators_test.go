@@ -15,12 +15,10 @@ const (
 
 func getTestStateBalances(t *testing.T) *state.BeaconState {
 	numVals := uint64(2048)
-	balances := make([]uint64, numVals)
-	for i := uint64(0); i < numVals; i++ {
-		balances[i] = i
-	}
 	b := state.GetEmptyBeaconState()
-	b.SetBalances(balances)
+	for i := uint64(0); i < numVals; i++ {
+		b.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, i)
+	}
 	return b
 }
 
@@ -45,9 +43,7 @@ func TestIncreaseBalance(t *testing.T) {
 	beforeBalance := state.Balances()[testInd]
 	state.IncreaseBalance(int(testInd), amount)
 	afterBalance := state.Balances()[testInd]
-	if afterBalance != beforeBalance+amount {
-		t.Errorf("unepected after balance: %d, before balance: %d, increase: %d", afterBalance, beforeBalance, amount)
-	}
+	require.Equal(t, afterBalance, beforeBalance+amount)
 }
 
 func TestDecreaseBalance(t *testing.T) {
@@ -82,9 +78,7 @@ func TestDecreaseBalance(t *testing.T) {
 			state := getTestStateBalances(t)
 			require.NoError(t, state.DecreaseBalance(testInd, tc.delta))
 			afterBalance := state.Balances()[testInd]
-			if afterBalance != tc.expectedBalance {
-				t.Errorf("unexpected resulting balance: got %d, want %d", afterBalance, tc.expectedBalance)
-			}
+			require.Equal(t, afterBalance, tc.expectedBalance)
 		})
 	}
 }

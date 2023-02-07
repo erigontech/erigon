@@ -142,8 +142,6 @@ func (l *LightClientBootstrap) DecodeSSZWithVersion(buf []byte, version int) err
 	l.version = clparams.StateVersion(version)
 
 	if len(buf) < l.EncodingSizeSSZ() {
-		fmt.Println(len(buf))
-		fmt.Println(l.EncodingSizeSSZ())
 		return ssz_utils.ErrLowBufferSize
 	}
 	l.Header = new(LightClientHeader)

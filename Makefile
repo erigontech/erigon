@@ -106,6 +106,7 @@ erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
+COMMANDS += erigon-el-mock
 COMMANDS += downloader
 COMMANDS += erigon-cl
 COMMANDS += hack
