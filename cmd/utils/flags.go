@@ -746,6 +746,15 @@ var (
 		Usage: "Port for sentinel",
 		Value: 7777,
 	}
+	PriaveApiAddrFlag = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "private api network address, for example: 127.0.0.1:9090",
+		Value: "127.0.0.1:9090",
+	}
+	DiagnosticsURLFlag = cli.StringFlag{
+		Name:  "diagnostics.url",
+		Usage: "URL of the diagnostics system provided by the support team",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
