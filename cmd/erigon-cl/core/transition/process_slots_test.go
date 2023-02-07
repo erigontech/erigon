@@ -183,6 +183,7 @@ func TestTransitionSlot(t *testing.T) {
 
 func TestProcessSlots(t *testing.T) {
 	slot42 := getTestBeaconState()
+	slot42.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
 	slot42.SetSlot(42)
 	testCases := []struct {
 		description   string
@@ -240,6 +241,7 @@ func TestProcessSlots(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
+			tc.prevState.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
 			s := New(tc.prevState, &clparams.MainnetBeaconConfig, nil, false)
 			err := s.processSlots(tc.startSlot + tc.numSlots)
 			if tc.wantErr {

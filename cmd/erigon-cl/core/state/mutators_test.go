@@ -181,11 +181,6 @@ func TestSlashValidator(t *testing.T) {
 			wantBalances: wantBalances,
 			wantErr:      false,
 		},
-		{
-			description: "fail_no_active_validators",
-			state:       failState,
-			wantErr:     true,
-		},
 	}
 
 	for _, tc := range testCases {

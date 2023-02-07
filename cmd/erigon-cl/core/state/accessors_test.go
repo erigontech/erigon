@@ -266,13 +266,12 @@ func TestComputeCommittee(t *testing.T) {
 	epoch := state.Epoch()
 	indices := state.GetActiveValidatorsIndices(epoch)
 	seed := state.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
-	preInputs := state.ComputeShuffledIndexPreInputs(seed)
-	committees, err := state.ComputeCommittee(indices, seed, 0, 1, preInputs, utils.Keccak256)
+	committees, err := state.ComputeCommittee(indices, seed, 0, 1, utils.Keccak256)
 	require.NoError(t, err, "Could not compute committee")
 
 	// Test shuffled indices are correct for index 5 committee
 	index := uint64(5)
-	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount, preInputs, utils.Keccak256)
+	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount, utils.Keccak256)
 	require.NoError(t, err, "Could not compute committee")
 	start := (validatorCount * index) / committeeCount
 	end := (validatorCount * (index + 1)) / committeeCount

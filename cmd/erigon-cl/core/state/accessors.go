@@ -1,7 +1,6 @@
 package state
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -240,28 +239,7 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	epoch := b.Epoch()
-
-	hash := sha256.New()
-	// Input for the seed hash.
-	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
-	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
-
-	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
-
-	// Calculate the hash.
-	hash.Write(inputWithSlot)
-	seed := hash.Sum(nil)
-
-	indices := b.GetActiveValidatorsIndices(epoch)
-
-	// Write the seed to an array.
-	seedArray := [32]byte{}
-	copy(seedArray[:], seed)
-
-	return b.ComputeProposerIndex(indices, seedArray)
+	return b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {

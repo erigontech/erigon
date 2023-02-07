@@ -21,11 +21,13 @@ func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Ha
 	b.genesisValidatorsRoot = genesisValidatorRoot
 }
 
-func (b *BeaconState) SetSlot(slot uint64) {
+func (b *BeaconState) SetSlot(slot uint64) error {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
 	// If there is a new slot update the active balance cache.
 	b._refreshActiveBalances()
+	// Also re-update proposer index
+	return b._updateProposerIndex()
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -90,10 +92,10 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 }
 
 // Should not be called if not for testing
-func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
+func (b *BeaconState) SetValidators(validators []*cltypes.Validator) error {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
-	b.initBeaconState()
+	return b.initBeaconState()
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
