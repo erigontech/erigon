@@ -755,6 +755,11 @@ var (
 		Name:  "diagnostics.url",
 		Usage: "URL of the diagnostics system provided by the support team",
 	}
+	DiagnosticsMockAddrFlag = cli.StringFlag{
+		Name:  "diag.mock.addr",
+		Usage: "diagnostics mock web server network address, for example: 127.0.0.1:8080",
+		Value: "127.0.0.1:8080",
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}

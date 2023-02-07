@@ -26,18 +26,3 @@ func connectDiagnostics(ctx *cli.Context) error {
 	fmt.Printf("Hello, world!\n")
 	return nil
 }
-
-var diagnosticsMockCommand = cli.Command{
-	Action:   MigrateFlags(diagnosticsMock),
-	Name:     "diagnostics",
-	Usage:    "Run mock of the diagnostics system",
-	Category: "SUPPORT COMMANDS",
-	Description: `
-The support command connects a running Erigon instance to a diagnostics system specified
-by the URL.`,
-}
-
-func diagnosticsMock(ctx *cli.Context) error {
-	fmt.Printf("Diagnostics mock!\n")
-	return nil
-}
