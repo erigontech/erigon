@@ -185,6 +185,8 @@ func TraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+		} else {
+			stream.WriteNil()
 		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
