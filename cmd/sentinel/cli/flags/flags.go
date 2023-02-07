@@ -78,4 +78,9 @@ var (
 		Usage: "checkpoint sync endpoint",
 		Value: "",
 	}
+	ErigonPrivateApiFlag = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "connect to existing erigon instance",
+		Value: "",
+	}
 )
