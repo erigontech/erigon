@@ -182,7 +182,7 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 	return ind, nil
 }
 
-func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte, hashFunc utils.HashFunc) ([]uint64, error) {
+func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, hashFunc utils.HashFunc) ([]uint64, error) {
 	lenIndicies := uint64(len(indicies))
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
@@ -377,14 +377,12 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
-	preInputs := b.ComputeShuffledIndexPreInputs(seed)
 	hashFunc := utils.OptimizedKeccak256()
 	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
 		seed,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
-		preInputs,
 		hashFunc,
 	)
 	if err != nil {
