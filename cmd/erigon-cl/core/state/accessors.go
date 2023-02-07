@@ -1,7 +1,6 @@
 package state
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -182,7 +181,7 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 	return ind, nil
 }
 
-func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte, hashFunc utils.HashFunc) ([]uint64, error) {
+func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, hashFunc utils.HashFunc) ([]uint64, error) {
 	lenIndicies := uint64(len(indicies))
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
@@ -240,28 +239,7 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	epoch := b.Epoch()
-
-	hash := sha256.New()
-	// Input for the seed hash.
-	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
-	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
-
-	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
-
-	// Calculate the hash.
-	hash.Write(inputWithSlot)
-	seed := hash.Sum(nil)
-
-	indices := b.GetActiveValidatorsIndices(epoch)
-
-	// Write the seed to an array.
-	seedArray := [32]byte{}
-	copy(seedArray[:], seed)
-
-	return b.ComputeProposerIndex(indices, seedArray)
+	return b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
@@ -377,14 +355,12 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
-	preInputs := b.ComputeShuffledIndexPreInputs(seed)
 	hashFunc := utils.OptimizedKeccak256()
 	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
 		seed,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
-		preInputs,
 		hashFunc,
 	)
 	if err != nil {

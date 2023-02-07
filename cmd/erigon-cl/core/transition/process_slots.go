@@ -78,7 +78,9 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
-		s.state.SetSlot(stateSlot)
+		if err := s.state.SetSlot(stateSlot); err != nil {
+			return err
+		}
 	}
 	return nil
 }
