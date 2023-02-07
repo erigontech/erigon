@@ -114,7 +114,7 @@ func callContractTx() (*libcommon.Hash, error) {
 	fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 	fmt.Println()
 
-	eventHash, err := services.EmitFallbackEvent(models.ReqId, subscriptionContract, transactOpts, address)
+	eventHash, err := services.EmitFallbackEvent(subscriptionContract, transactOpts)
 	if err != nil {
 		fmt.Printf("failed to emit events: %v\n", err)
 		return nil, err

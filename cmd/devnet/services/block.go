@@ -161,7 +161,7 @@ func txHashInBlock(client *rpc.Client, hashmap map[libcommon.Hash]bool, blockNum
 }
 
 // EmitFallbackEvent emits an event from the contract using the fallback method
-func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bind.TransactOpts, address libcommon.Address) (*libcommon.Hash, error) {
+func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactOpts) (*libcommon.Hash, error) {
 	fmt.Println("EMITTING EVENT FROM FALLBACK...")
 
 	// adding one to the nonce before initiating another transaction
@@ -182,8 +182,6 @@ func EmitFallbackEvent(reqId int, subContract *contracts.Subscription, opts *bin
 		return nil, fmt.Errorf("failed to send fallback transaction: %v", err)
 	}
 	fmt.Printf("Tx submitted, adding tx with hash %q to txpool\n", hash)
-
-	// TODO: Get all the logs across the blocks that mined the transactions and check that they are logged
 
 	return hash, nil
 }
