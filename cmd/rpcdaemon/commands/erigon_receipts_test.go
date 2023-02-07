@@ -40,39 +40,24 @@ func TestGetLogs(t *testing.T) {
 		assert.NoError(err)
 		assert.Equal(uint64(10), logs[0].BlockNumber)
 
-		//filer by wrong address
+		// filter by wrong address
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+			FromBlock: big.NewInt(10),
+			ToBlock:   big.NewInt(10),
 			Addresses: common.Addresses{libcommon.Address{}},
 		})
 		assert.NoError(err)
 		assert.Equal(0, len(logs))
 
-		//filer by wrong address
+		// filter by wrong address
 		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
-			Topics: [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+			FromBlock: big.NewInt(10),
+			ToBlock:   big.NewInt(10),
+			Topics:    [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
 		assert.NoError(err)
 		assert.Equal(1, len(logs))
 	}
-	//
-	//api := NewErigonAPI(baseApi, m.DB, nil)
-	//logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
-	//assert.NoError(err)s
-	//assert.Equal(uint64(10), logs[0].BlockNumber)
-	//
-	////filer by wrong address
-	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
-	//	Addresses: common.Addresses{common.Address{}},
-	//})
-	//assert.NoError(err)
-	//assert.Equal(0, len(logs))
-	//
-	////filer by wrong address
-	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
-	//	Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
-	//})
-	//assert.NoError(err)
-	//assert.Equal(1, len(logs))
 }
 
 func TestErigonGetLatestLogs(t *testing.T) {
