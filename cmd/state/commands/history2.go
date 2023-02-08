@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"os"
 	"os/signal"
 	"path"
@@ -147,19 +146,15 @@ func History2(genesis *core.Genesis, logger log.Logger) error {
 
 func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww state.StateWriter, chainConfig *chain2.Config, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config) (uint64, types.Receipts, error) {
 	header := block.Header()
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	vmConfig.TraceJumpDest = true
 	engine := ethash.NewFullFaker()
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	var receipts types.Receipts
 	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	txNum := txNumStart
-
-	var excessDataGas *big.Int
-	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
 
 	for i, tx := range block.Transactions() {
 		hw.r.SetNums(blockNum, txNum, false)
@@ -169,7 +164,7 @@ func runHistory2(trace bool, blockNum, txNumStart uint64, hw *HistoryWrapper, ww
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, excessDataGas, tx, usedGas, usedDataGas, vmConfig)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

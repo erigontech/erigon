@@ -30,7 +30,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -66,6 +65,10 @@ func (tx DynamicFeeTransaction) Cost() *uint256.Int {
 	total.Mul(total, tx.Tip)
 	total.Add(total, tx.Value)
 	return total
+}
+
+func (tx *DynamicFeeTransaction) Unwrap() Transaction {
+	return tx
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -480,17 +483,3 @@ func NewEIP1559Transaction(chainID uint256.Int, nonce uint64, to libcommon.Addre
 		FeeCap: gasFeeCap,
 	}
 }
-
-func (tx *DynamicFeeTransaction) DataHashes() []libcommon.Hash { return nil }
-
-func (tx *DynamicFeeTransaction) DataGas() *big.Int {
-	r := new(big.Int)
-	l := int64(len(tx.DataHashes()))
-	if l != 0 {
-		r.SetInt64(l)
-		r.Mul(r, big.NewInt(params.DataGasPerBlob))
-	}
-	return r
-}
-
-func (tx *DynamicFeeTransaction) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }

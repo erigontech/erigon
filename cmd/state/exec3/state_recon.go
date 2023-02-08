@@ -351,19 +351,21 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 				return
 			}
 		}
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddDataGas(txTask.Tx.DataGas().Uint64())
+		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas()).AddDataGas(txTask.Tx.GetDataGas())
 		vmConfig := vm.Config{NoReceipts: true, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txTask.Tx.Hash(), txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		var vmenv vm.VMInterface
-		if txTask.Tx.IsStarkNet() {
-			rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
-			vmenv = rw.starkNetEvm
-		} else {
-			rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
-			vmenv = rw.evm
-		}
+		// if txTask.Tx.IsStarkNet() {
+		// 	rw.starkNetEvm.Reset(evmtypes.TxContext{}, ibs)
+		// 	vmenv = rw.starkNetEvm
+		// } else {
+		// 	rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		// 	vmenv = rw.evm
+		// }
+		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
+		vmenv = rw.evm
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {

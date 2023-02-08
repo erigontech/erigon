@@ -584,6 +584,13 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
+	if block.ExcessDataGas() != nil {
+		payload.Version = 3
+		var excessDataGas uint256.Int
+		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
+		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
+	}
+
 	blockValue := blockValue(block, baseFee)
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,

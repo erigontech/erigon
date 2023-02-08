@@ -31,7 +31,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -84,6 +83,10 @@ func (tx AccessListTx) GetAccessList() types2.AccessList {
 
 func (tx AccessListTx) Protected() bool {
 	return true
+}
+
+func (tx *AccessListTx) Unwrap() Transaction {
+	return tx
 }
 
 // EncodingSize returns the RLP encoding size of the whole transaction envelope
@@ -551,17 +554,3 @@ func (tx *AccessListTx) Sender(signer Signer) (libcommon.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
-
-func (tx *AccessListTx) DataHashes() []libcommon.Hash { return nil }
-
-func (tx *AccessListTx) DataGas() *big.Int {
-	r := new(big.Int)
-	l := int64(len(tx.DataHashes()))
-	if l != 0 {
-		r.SetInt64(l)
-		r.Mul(r, big.NewInt(params.DataGasPerBlob))
-	}
-	return r
-}
-
-func (tx *AccessListTx) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }

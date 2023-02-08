@@ -48,6 +48,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
 	noopWriter := state.NewNoopWriter()
@@ -61,15 +62,12 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 		}
 		return h
 	}
-	var excessDataGas *big.Int
-	ph, _ := api._blockReader.HeaderByHash(ctx, tx, block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
+	header := block.Header()
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, txn := range block.Transactions() {
 		ibs.Prepare(txn.Hash(), block.Hash(), i)
 		header := block.Header()
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, txn, usedGas, vm.Config{}, excessDataGas)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, noopWriter, header, excessDataGas, txn, usedGas, usedDataGas, vm.Config{})
 		if err != nil {
 			return nil, err
 		}

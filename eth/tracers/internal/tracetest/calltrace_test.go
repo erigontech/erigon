@@ -163,7 +163,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to prepare transaction for tracing: %v", err)
 			}
-			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.DataGas().Uint64()), true /* refunds */, false /* gasBailout */)
+			vmRet, err := core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.GetDataGas()), true /* refunds */, false /* gasBailout */)
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
@@ -265,7 +265,7 @@ func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
 		}
 		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 		snap := statedb.Snapshot()
-		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.DataGas().Uint64()))
+		st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.GetDataGas()))
 		if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 			b.Fatalf("failed to execute transaction: %v", err)
 		}
@@ -338,7 +338,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to prepare transaction for tracing: %v", err)
 	}
-	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.DataGas().Uint64()))
+	st := core.NewStateTransition(evm, msg, new(core.GasPool).AddGas(tx.GetGas()).AddDataGas(tx.GetDataGas()))
 	if _, err = st.TransitionDb(true /* refunds */, false /* gasBailout */); err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}

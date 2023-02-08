@@ -52,7 +52,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	StarknetType
+	// StarknetType
 	BlobTxType = 5
 )
 
@@ -66,7 +66,9 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
+	GetDataHashes() []libcommon.Hash
 	GetGas() uint64
+	GetDataGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time
 	GetTo() *libcommon.Address
@@ -91,15 +93,8 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
-	IsStarkNet() bool
-
-	// eip-4844. DataHashes returns the blob versioned hashes of the transaction.
-	DataHashes() []libcommon.Hash
-	// DataGas implements get_total_data_gas from EIP-4844. While this returns a big.Int for
-	// convenience, it should never exceed math.MaxUint64.
-	DataGas() *big.Int
-	// MaxFeePerDataGas returns the max_fee_per_data_gas value for the transaction
-	MaxFeePerDataGas() *uint256.Int
+	// IsStarkNet() bool
+	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwiwes returns itself.
 }
 
 // TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
@@ -129,6 +124,58 @@ func (tm TransactionMisc) Time() time.Time {
 
 func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
+}
+
+func DecodeRLPTransaction(s *rlp.Stream) (Transaction, error) {
+	kind, size, err := s.Kind()
+	if err != nil {
+		return nil, err
+	}
+	if rlp.List == kind {
+		tx := &LegacyTx{}
+		if err = tx.DecodeRLP(s, size); err != nil {
+			return nil, err
+		}
+		return tx, nil
+	}
+	if rlp.String != kind {
+		return nil, fmt.Errorf("Not an RLP encoded transaction. If this is a canonical encoded transaction, use UnmarshalTransactionFromBinary instead. Got %v for kind, expected String", kind)
+	}
+	// Decode the EIP-2718 typed TX envelope.
+	var b []byte
+	if b, err = s.Bytes(); err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, rlp.EOL
+	}
+	return UnmarshalTransactionFromBinary(b)
+}
+
+func DecodeWrappedTransaction(data []byte) (Transaction, error) {
+	if len(data) == 0 {
+		return nil, io.EOF
+	}
+	if data[0] < 0x80 {
+		// the encoding is canonical, not RLP
+		return UnmarshalWrappedTransactionFromBinary(data)
+	}
+	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
+	return DecodeRLPTransaction(s)
+}
+
+func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
+	if len(data) <= 1 {
+		return nil, fmt.Errorf("short input: %v", len(data))
+	}
+	if data[0] != BlobTxType {
+		return UnmarshalTransactionFromBinary(data)
+	}
+	t := &BlobTxWrapper{}
+	if err := DecodeSSZ(data[1:], t); err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
@@ -167,12 +214,12 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		tx = t
-	case StarknetType:
-		t := &StarknetTransaction{}
-		if err = t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		tx = t
+	// case StarknetType:
+	// 	t := &StarknetTransaction{}
+	// 	if err = t.DecodeRLP(s); err != nil {
+	// 		return nil, err
+	// 	}
+	// 	tx = t
 	case BlobTxType:
 		// TODO
 		t := &SignedBlobTx{}

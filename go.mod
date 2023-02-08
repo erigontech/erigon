@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230129035339-c8e1b58da166
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230208055044-6254a32e4bfd
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230120022649-cd9409a200da
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -92,6 +92,11 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.20.3
 	pgregory.net/rapid v0.5.3
+)
+
+require (
+	github.com/ledgerwatch/interfaces v0.0.0-20230206100308-90995b4ec0a6 // indirect
+	github.com/matryer/moq v0.3.0 // indirect
 )
 
 require (
@@ -221,7 +226,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
-	github.com/protolambda/go-kzg v0.0.0-20221211233411-5a63dd26efb2
+	github.com/protolambda/go-kzg v0.0.0-20221224134646-c91cee5e954e
 	github.com/protolambda/ztyp v0.2.2
 	github.com/raulk/go-watchdog v1.3.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20200410134404-eec4a21b6bb0 // indirect
@@ -259,3 +264,5 @@ require (
 )
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+
+replace github.com/ledgerwatch/erigon-lib => github.com/racytech/erigon-lib v0.0.0-20230208184247-548b81fe543a

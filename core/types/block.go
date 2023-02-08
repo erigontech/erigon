@@ -113,6 +113,17 @@ type Header struct {
 	TxHashSSZ   libcommon.Hash // They decided to hash txs differently than EL :(
 }
 
+// ParentExcessDataGas is a helper that returns the excess data gas value of the parent block.  It
+// returns nil if the parent header could not be fetched, or if the parent block's excess data gas
+// is nil.
+func (h *Header) ParentExcessDataGas(getHeader func(hash libcommon.Hash, number uint64) *Header) *big.Int {
+	p := getHeader(h.ParentHash, h.Number.Uint64())
+	if p != nil {
+		return p.ExcessDataGas
+	}
+	return nil
+}
+
 func bitsToBytes(bitLen int) (byteLen int) {
 	return (bitLen + 7) / 8
 }
@@ -512,11 +523,11 @@ func (h *Header) Size() common.StorageSize {
 	if h.BaseFee != nil {
 		s += common.StorageSize(bitsToBytes(h.BaseFee.BitLen()))
 	}
-	if h.ExcessDataGas != nil {
-		s += common.StorageSize(h.ExcessDataGas.BitLen())
-	}
 	if h.WithdrawalsHash != nil {
 		s += common.StorageSize(32)
+	}
+	if h.ExcessDataGas != nil {
+		s += common.StorageSize(bitsToBytes(h.ExcessDataGas.BitLen()))
 	}
 	return s
 }
@@ -583,6 +594,8 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	if h.WithdrawalsHash != nil {
 		offset += 32
 	}
+
+	// TODO: encode excess data gas
 
 	buf, err = h.EncodeHeaderMetadataForSSZ(buf, offset)
 	if err != nil {
@@ -653,6 +666,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	} else {
 		h.WithdrawalsHash = nil
 	}
+	// TODO: decode excess data gas
 	h.Extra = common.CopyBytes(buf[pos:])
 	return nil
 }
@@ -664,7 +678,7 @@ func (h *Header) EncodingSizeSSZ(version clparams.StateVersion) int {
 	if h.WithdrawalsHash != nil || version >= clparams.CapellaVersion {
 		size += 32
 	}
-
+	// TODO: excess data gas
 	return size + len(h.Extra)
 }
 
@@ -725,6 +739,7 @@ func (h *Header) HashSSZ() ([32]byte, error) {
 	if h.WithdrawalsHash != nil {
 		leaves = append(leaves, *h.WithdrawalsHash)
 	}
+	// TODO: excess data gas
 	return merkle_tree.ArraysRoot(leaves, 16)
 }
 
@@ -1486,8 +1501,8 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 			txLen = t.EncodingSize()
 		case *DynamicFeeTransaction:
 			txLen = t.EncodingSize()
-		case *StarknetTransaction:
-			txLen = t.EncodingSize()
+			// case *StarknetTransaction:
+			// 	txLen = t.EncodingSize()
 		}
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
@@ -1569,10 +1584,10 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 			if err := t.EncodeRLP(w); err != nil {
 				return err
 			}
-		case *StarknetTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+			// case *StarknetTransaction:
+			// 	if err := t.EncodeRLP(w); err != nil {
+			// 		return err
+			// 	}
 		}
 	}
 	// encode Uncles

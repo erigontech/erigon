@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"math/bits"
 	"os"
 	"os/signal"
@@ -336,6 +335,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	vmConfig.Debug = true
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	var receipts types.Receipts
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
@@ -364,20 +364,14 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	}
 
 	getHashFn := core.GetHashFn(header, getHeader)
-
-	var excessDataGas *big.Int
-	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	for i, tx := range block.Transactions() {
 		if txNum >= startTxNum {
 			ibs := state.New(rw)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
+			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, engine, nil, gp, ibs, ww, header, excessDataGas, tx, usedGas, usedDataGas, vmConfig)
 			if err != nil {
 				return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}

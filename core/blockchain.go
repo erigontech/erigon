@@ -90,6 +90,7 @@ func ExecuteBlockEphemerallyForBSC(
 	ibs := state.New(stateReader)
 	header := block.Header()
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -98,6 +99,12 @@ func ExecuteBlockEphemerallyForBSC(
 		includedTxs types.Transactions
 		receipts    types.Receipts
 	)
+
+	var excessDataGas *big.Int
+	ph := chainReader.GetHeaderByHash(block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
@@ -112,12 +119,6 @@ func ExecuteBlockEphemerallyForBSC(
 	noop := state.NewNoopWriter()
 	posa, isPoSA := engine.(consensus.PoSA)
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-
-	var excessDataGas *big.Int
-	ph := chainReader.GetHeaderByHash(block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
 
 	for i, tx := range block.Transactions() {
 		if isPoSA {
@@ -138,7 +139,7 @@ func ExecuteBlockEphemerallyForBSC(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, excessDataGas, tx, usedGas, usedDataGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -246,8 +247,8 @@ func ExecuteBlockEphemerally(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -256,6 +257,12 @@ func ExecuteBlockEphemerally(
 		includedTxs types.Transactions
 		receipts    types.Receipts
 	)
+
+	var excessDataGas *big.Int
+	ph := chainReader.GetHeaderByHash(block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
@@ -269,12 +276,6 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 
-	var excessDataGas *big.Int
-	ph := chainReader.GetHeaderByHash(block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -287,7 +288,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, excessDataGas, tx, usedGas, usedDataGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -364,8 +365,8 @@ func ExecuteBlockEphemerallyBor(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 
@@ -374,6 +375,12 @@ func ExecuteBlockEphemerallyBor(
 		includedTxs types.Transactions
 		receipts    types.Receipts
 	)
+
+	var excessDataGas *big.Int
+	ph := chainReader.GetHeaderByHash(block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, epochReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs); err != nil {
@@ -386,11 +393,6 @@ func ExecuteBlockEphemerallyBor(
 	}
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-	var excessDataGas *big.Int
-	ph := chainReader.GetHeaderByHash(block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
 	for i, tx := range block.Transactions() {
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -403,7 +405,7 @@ func ExecuteBlockEphemerallyBor(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, excessDataGas, tx, usedGas, usedDataGas, *vmConfig)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -566,10 +568,11 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 	return ret, err
 }
 
-func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header, engine consensus.Engine, excessDataGas *big.Int) (result []byte, err error) {
+func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Config, ibs *state.IntraBlockState, header *types.Header, excessDataGas *big.Int, engine consensus.Engine) (result []byte, err error) {
 	gp := new(GasPool)
-	gp.AddGas(50_000_000).AddDataGas(params.MaxDataGasPerBlock) // TODO: see how much of dataGas is required here
+	gp.AddGas(50_000_000) //.AddDataGas(params.MaxDataGasPerBlock) // TODO: see how much of dataGas is required here
 	var gasUsed uint64
+	var dataGasUsed uint64
 
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
@@ -580,7 +583,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, excessDataGas)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, excessDataGas, tx, &gasUsed, &dataGasUsed, vmConfig)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}

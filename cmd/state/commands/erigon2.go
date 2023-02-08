@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"math/bits"
 	"os"
 	"os/signal"
@@ -401,19 +400,15 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
+	excessDataGas := header.ParentExcessDataGas(getHeader)
 	vmConfig.TraceJumpDest = true
 	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	var receipts types.Receipts
 	daoBlock := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
-
-	var excessDataGas *big.Int
-	ph := getHeader(header.ParentHash, header.Number.Uint64()-1)
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
 
 	for i, tx := range block.Transactions() {
 		ibs := state.New(rw)
@@ -422,7 +417,7 @@ func processBlock(trace bool, txNumStart uint64, rw *ReaderWrapper, ww *WriterWr
 			daoBlock = false
 		}
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, tx, usedGas, vmConfig, excessDataGas)
+		receipt, _, err := core.ApplyTransaction(chainConfig, core.GetHashFn(header, getHeader), engine, nil, gp, ibs, ww, header, excessDataGas, tx, usedGas, usedDataGas, vmConfig)
 		if err != nil {
 			return 0, nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 		}

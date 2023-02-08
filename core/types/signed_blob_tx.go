@@ -8,17 +8,17 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/protolambda/ztyp/codec"
 	"github.com/protolambda/ztyp/conv"
-	"github.com/protolambda/ztyp/tree"
 	. "github.com/protolambda/ztyp/view"
 )
 
@@ -80,12 +80,6 @@ func (*AddressSSZ) ByteLength() uint64 {
 func (*AddressSSZ) FixedLength() uint64 {
 	return 20
 }
-
-// func (addr *AddressSSZ) HashTreeRoot(hFn tree.HashFn) tree.Root {
-// 	var out tree.Root
-// 	copy(out[0:20], addr[:])
-// 	return out
-// }
 
 // AddressOptionalSSZ implements Union[None, Address]
 type AddressOptionalSSZ struct {
@@ -176,6 +170,9 @@ func ReadHashes(dr *codec.DecodingReader, hashes *[]libcommon.Hash, length uint6
 		} else {
 			*hashes = make([]libcommon.Hash, length)
 		}
+	} else if *hashes == nil {
+		// make sure the output is never nil
+		*hashes = []libcommon.Hash{}
 	}
 	dst := *hashes
 	for i := uint64(0); i < length; i++ {
@@ -241,16 +238,6 @@ func (skv StorageKeysView) ByteLength() (out uint64) {
 
 func (skv *StorageKeysView) FixedLength() uint64 {
 	return 0 // it's a list, no fixed length
-}
-
-func (skv StorageKeysView) HashTreeRoot(hFn tree.HashFn) tree.Root {
-	length := uint64(len(skv))
-	return hFn.ComplexListHTR(func(i uint64) tree.HTR {
-		if i < length {
-			return (*tree.Root)(&skv[i])
-		}
-		return nil
-	}, length, MAX_ACCESS_LIST_STORAGE_KEYS)
 }
 
 type AccessTupleView types2.AccessTuple
@@ -354,10 +341,11 @@ func (tx *BlobTxMessage) copy() *BlobTxMessage {
 type SignedBlobTx struct {
 	TransactionMisc
 
-	WrapData  TxWrapData
 	Message   BlobTxMessage
 	Signature ECDSASignature
 }
+
+var _ Transaction = &SignedBlobTx{}
 
 const (
 	MAX_CALLDATA_SIZE              = 1 << 24
@@ -365,23 +353,6 @@ const (
 	MAX_ACCESS_LIST_STORAGE_KEYS   = 1 << 24
 	MAX_VERSIONED_HASHES_LIST_SIZE = 1 << 24
 )
-
-func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
-	err := dr.Container(&stx.Message, &stx.Signature)
-	return err
-}
-
-func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {
-	return w.Container(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) ByteLength() uint64 {
-	return codec.ContainerLength(&stx.Message, &stx.Signature)
-}
-
-func (stx *SignedBlobTx) FixedLength() uint64 {
-	return 0
-}
 
 // copy creates a deep copy of the transaction data and initializes all fields.
 func (stx SignedBlobTx) copy() *SignedBlobTx {
@@ -393,10 +364,6 @@ func (stx SignedBlobTx) copy() *SignedBlobTx {
 	return cpy
 }
 
-func u256ToBig(v *Uint256View) *big.Int {
-	return (*uint256.Int)(v).ToBig()
-}
-
 func (stx SignedBlobTx) Type() byte { return BlobTxType }
 
 func (stx SignedBlobTx) GetChainID() *uint256.Int {
@@ -406,6 +373,9 @@ func (stx SignedBlobTx) GetChainID() *uint256.Int {
 
 func (stx SignedBlobTx) GetNonce() uint64 { return uint64(stx.Message.Nonce) }
 func (stx SignedBlobTx) GetGas() uint64   { return uint64(stx.Message.Gas) }
+func (stx SignedBlobTx) GetDataGas() uint64 {
+	return params.DataGasPerBlob * uint64(len(stx.Message.BlobVersionedHashes))
+}
 func (stx SignedBlobTx) GetTo() *libcommon.Address {
 	return (*libcommon.Address)(stx.Message.To.Address)
 }
@@ -447,7 +417,6 @@ func (stx *SignedBlobTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-// Double check this part: see if this requires dataGasFee inclusion
 func (stx *SignedBlobTx) Cost() *uint256.Int {
 	total := new(uint256.Int).SetUint64(uint64(stx.Message.Gas))
 	tip := uint256.Int(stx.Message.GasTipCap)
@@ -458,14 +427,14 @@ func (stx *SignedBlobTx) Cost() *uint256.Int {
 	return total
 }
 
-// func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int { // 1
-// 	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
-// 	return &fee
-// }
+func (stx *SignedBlobTx) GetMaxFeePerDataGas() *uint256.Int {
+	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
+	return &fee
+}
 
-// func (stx *SignedBlobTx) GetDataHashes() []common.Hash { // 2
-// 	return stx.Message.BlobVersionedHashes
-// }
+func (stx *SignedBlobTx) GetDataHashes() []libcommon.Hash {
+	return []libcommon.Hash(stx.Message.BlobVersionedHashes)
+}
 
 // TODO
 func (stx *SignedBlobTx) Sender(signer Signer) (libcommon.Address, error) {
@@ -499,6 +468,10 @@ func (stx *SignedBlobTx) IsContractDeploy() bool {
 
 func (stx *SignedBlobTx) IsStarkNet() bool {
 	return false
+}
+
+func (stx *SignedBlobTx) Unwrap() Transaction {
+	return stx
 }
 
 func (stx SignedBlobTx) Protected() bool {
@@ -543,10 +516,9 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules
 		amount:           stx.GetAmount(),
 		data:             stx.Message.Data,
 		accessList:       stx.GetAccessList(),
-		maxFeePerDataGas: *stx.MaxFeePerDataGas(),
-		// make sure following field isn't required in other tx types
-		dataHashes: stx.Message.BlobVersionedHashes,
-		checkNonce: true,
+		maxFeePerDataGas: *stx.GetMaxFeePerDataGas(),
+		dataHashes:       stx.GetDataHashes(),
+		checkNonce:       true,
 	}
 
 	if baseFee != nil {
@@ -567,9 +539,7 @@ func (stx SignedBlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules
 
 // Hash computes the hash (but not for signatures!)
 func (stx *SignedBlobTx) Hash() libcommon.Hash {
-	hash := prefixedSSZHash(stx.Type(), stx)
-	stx.hash.Store(&hash) // TODO: make sure this part is correct!
-	return hash
+	return prefixedSSZHash(BlobTxType, stx)
 }
 
 // MarshalBinary returns the canonical encoding of the transaction.
@@ -582,24 +552,8 @@ func (tx SignedBlobTx) MarshalBinary(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	if err := tx.encodePayload(w); err != nil {
-		return err
-	}
-	return nil
-}
-
-// TODO: review field order
-// by trangtran
-func (stx SignedBlobTx) payloadSize() (payloadSize int, nonceLen, gasLen, accessListLen int) {
-	nonceLen = rlp.IntLenExcludingHead(stx.GetNonce())
-	gasLen = rlp.IntLenExcludingHead(stx.GetGas())
-	accessListLen = accessListSize(stx.GetAccessList())
-	return int(codec.ContainerLength(&stx.Message, &stx.Signature)), nonceLen, gasLen, accessListLen
-}
-
-func (stx SignedBlobTx) encodePayload(w io.Writer) error {
 	wcodec := codec.NewEncodingWriter(w)
-	return wcodec.Container(&stx.Message, &stx.Signature)
+	return tx.Serialize(wcodec)
 }
 
 func (stx SignedBlobTx) EncodeRLP(w io.Writer) error {
@@ -615,42 +569,29 @@ func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *
 }
 
 func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
-	// return prefixedRlpHash(
-	return prefixedSSZHash(
-		BlobTxType,
-		&stx.Message)
+	return prefixedSSZHash(BlobTxType, &stx.Message)
 }
 
-// func (tx SignedBlobTx) EncodingSize() int {
-// 	payloadSize, _, _, _ := tx.payloadSize()
-// 	envelopeSize := payloadSize
-// 	// Add envelope size and type size
-// 	if payloadSize >= 56 {
-// 		envelopeSize += (bits.Len(uint(payloadSize)) + 7) / 8
-// 	}
-// 	envelopeSize += 2
-// 	return envelopeSize
-// }
-
-func (stx *SignedBlobTx) GetBlobHashVersion() VersionedHashesView {
-	return stx.Message.BlobVersionedHashes
+func (tx SignedBlobTx) EncodingSize() int {
+	envelopeSize := int(codec.ContainerLength(&tx.Message, &tx.Signature))
+	// Add type byte
+	envelopeSize++
+	return envelopeSize
 }
 
-func (stx *SignedBlobTx) DataHashes() []libcommon.Hash { return stx.Message.BlobVersionedHashes }
-
-// DataGas implements get_total_data_gas from EIP-4844. While this returns a big.Int for
-// convenience, it should never exceed math.MaxUint64.
-func (stx *SignedBlobTx) DataGas() *big.Int {
-	r := new(big.Int)
-	l := int64(len(stx.DataHashes()))
-	if l != 0 {
-		r.SetInt64(l)
-		r.Mul(r, big.NewInt(params.DataGasPerBlob))
-	}
-	return r
+func (stx *SignedBlobTx) Deserialize(dr *codec.DecodingReader) error {
+	err := dr.Container(&stx.Message, &stx.Signature)
+	return err
 }
 
-func (stx *SignedBlobTx) MaxFeePerDataGas() *uint256.Int {
-	fee := (uint256.Int)(stx.Message.MaxFeePerDataGas)
-	return &fee
+func (stx *SignedBlobTx) Serialize(w *codec.EncodingWriter) error {
+	return w.Container(&stx.Message, &stx.Signature)
+}
+
+func (stx *SignedBlobTx) ByteLength() uint64 {
+	return codec.ContainerLength(&stx.Message, &stx.Signature)
+}
+
+func (stx *SignedBlobTx) FixedLength() uint64 {
+	return 0
 }

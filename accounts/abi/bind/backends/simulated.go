@@ -710,12 +710,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Get the last block
-	block, err := b.BlockByHash(ctx, b.pendingBlock.ParentHash())
-	if err != nil {
-		return fmt.Errorf("could not fetch parent")
-	}
-
 	// Check transaction validity.
 	signer := types.MakeSigner(b.m.ChainConfig, b.pendingBlock.NumberU64(), b.pendingBlock.Time()) // or block.Time()?
 	sender, senderErr := tx.Sender(*signer)
@@ -729,17 +723,15 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 
 	b.pendingState.Prepare(tx.Hash(), libcommon.Hash{}, len(b.pendingBlock.Transactions()))
 	//fmt.Printf("==== Start producing block %d, header: %d\n", b.pendingBlock.NumberU64(), b.pendingHeader.Number.Uint64())
-	var excessDataGas *big.Int
-	ph, _ := b.HeaderByHash(ctx, block.Header().Hash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
+	dataGasUsed := new(uint64)
 	if _, _, err := core.ApplyTransaction(
 		b.m.ChainConfig, core.GetHashFn(b.pendingHeader, b.getHeader), b.m.Engine,
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
-		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}, excessDataGas); err != nil {
+		b.pendingHeader,
+		b.pendingHeader.ParentExcessDataGas(b.getHeader),
+		tx,
+		&b.pendingHeader.GasUsed, dataGasUsed, vm.Config{}); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))

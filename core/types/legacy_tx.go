@@ -30,7 +30,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -89,8 +88,13 @@ func (ct CommonTx) IsContractDeploy() bool {
 	return ct.GetTo() == nil
 }
 
-func (ct CommonTx) IsStarkNet() bool {
-	return false
+func (ct CommonTx) GetDataGas() uint64 {
+	return 0
+}
+
+func (ct *CommonTx) GetDataHashes() []libcommon.Hash {
+	// Only blob txs have data hashes
+	return []libcommon.Hash{}
 }
 
 // LegacyTx is the transaction data of regular Ethereum transactions.
@@ -132,6 +136,10 @@ func (tx LegacyTx) GetAccessList() types2.AccessList {
 
 func (tx LegacyTx) Protected() bool {
 	return isProtectedV(&tx.V)
+}
+
+func (tx *LegacyTx) Unwrap() Transaction {
+	return tx
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -461,17 +469,3 @@ func (tx *LegacyTx) Sender(signer Signer) (libcommon.Address, error) {
 	tx.from.Store(addr)
 	return addr, nil
 }
-
-func (tx *LegacyTx) DataHashes() []libcommon.Hash { return nil }
-
-func (tx *LegacyTx) DataGas() *big.Int {
-	r := new(big.Int)
-	l := int64(len(tx.DataHashes()))
-	if l != 0 {
-		r.SetInt64(l)
-		r.Mul(r, big.NewInt(params.DataGasPerBlob))
-	}
-	return r
-}
-
-func (tx *LegacyTx) MaxFeePerDataGas() *uint256.Int { return new(uint256.Int) }
