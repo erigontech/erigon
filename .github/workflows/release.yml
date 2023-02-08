@@ -49,6 +49,9 @@ jobs:
         run: |
           make release
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
 
 
