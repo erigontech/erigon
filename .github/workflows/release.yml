@@ -27,7 +27,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@master
         with:
-          go-version: 1.19.x
+          go-version: 1.18.x
 
       - name: Prepare
         id: prepare
