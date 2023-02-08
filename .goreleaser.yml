@@ -82,8 +82,6 @@ builds:
     goos: [ windows ]
     goarch: [ arm64 ]
     env:
-      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/arm64
-      - PKG_CONFIG_PATH=/sysroot/macos/arm64/usr/local/lib/pkgconfig
       - CC=oa64-clang
       - CXX=oa64-clang++
     ldflags:
