@@ -14,6 +14,8 @@ builds:
     goarch:
       - amd64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/amd64
+      - PKG_CONFIG_PATH=/sysroot/macos/amd64/usr/local/lib/pkgconfig
       - CC=o64-clang
       - CXX=o64-clang++
     tags:
@@ -29,6 +31,8 @@ builds:
     goarch:
       - arm64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/arm64
+      - PKG_CONFIG_PATH=/sysroot/macos/arm64/usr/local/lib/pkgconfig
       - CC=oa64-clang
       - CXX=oa64-clang++
     tags:
@@ -44,6 +48,8 @@ builds:
     goarch:
       - amd64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/amd64
+      - PKG_CONFIG_PATH=/sysroot/linux/amd64/usr/local/lib/pkgconfig
       - CC=gcc
       - CXX=g++
     tags:
@@ -60,6 +66,8 @@ builds:
     goarch:
       - arm64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/aarch64
+      - PKG_CONFIG_PATH=/sysroot/linux/aarch64/usr/local/lib/pkgconfig
       - CC=aarch64-linux-gnu-gcc
       - CXX=aarch64-linux-gnu-g++
     tags:
