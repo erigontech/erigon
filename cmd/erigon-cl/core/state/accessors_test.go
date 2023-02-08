@@ -57,9 +57,7 @@ func TestActiveValidatorIndices(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, set, []uint64{1})
 	// Check if balances are retrieved correctly
-	totalBalance, err := testState.GetTotalActiveBalance()
-	require.NoError(t, err)
-	require.Equal(t, totalBalance, uint64(2e9))
+	require.Equal(t, testState.GetTotalActiveBalance(), uint64(2e9))
 }
 
 func TestGetBlockRoot(t *testing.T) {

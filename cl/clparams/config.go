@@ -446,6 +446,14 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	return fvn
 }
 
+func (b *BeaconChainConfig) ParticipationWeights() []uint64 {
+	return []uint64{
+		b.TimelySourceWeight,
+		b.TimelyTargetWeight,
+		b.TimelyHeadWeight,
+	}
+}
+
 var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Constants (Non-configurable)
 	FarFutureEpoch:           math.MaxUint64,

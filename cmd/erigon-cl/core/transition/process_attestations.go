@@ -28,16 +28,7 @@ func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestatio
 
 // ProcessAttestation takes an attestation and process it.
 func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) ([]uint64, error) {
-	participationFlagWeights := []uint64{
-		s.beaconConfig.TimelySourceWeight,
-		s.beaconConfig.TimelyTargetWeight,
-		s.beaconConfig.TimelyHeadWeight,
-	}
-
-	totalActiveBalance, err := s.state.GetTotalActiveBalance()
-	if err != nil {
-		return nil, err
-	}
+	totalActiveBalance := s.state.GetTotalActiveBalance()
 	data := attestation.Data
 	currentEpoch := s.state.Epoch()
 	previousEpoch := s.state.PreviousEpoch()
@@ -70,7 +61,7 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) (
 	}
 
 	for _, attesterIndex := range attestingIndicies {
-		for flagIndex, weight := range participationFlagWeights {
+		for flagIndex, weight := range s.beaconConfig.ParticipationWeights() {
 			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
 				continue
 			}

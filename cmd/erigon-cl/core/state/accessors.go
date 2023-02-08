@@ -13,6 +13,8 @@ import (
 	eth2_shuffle "github.com/protolambda/eth2-shuffle"
 )
 
+const PreAllocatedRewardsAndPenalties = 8192
+
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok {
@@ -92,11 +94,11 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
-func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
+func (b *BeaconState) GetTotalActiveBalance() uint64 {
 	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
-		return b.beaconConfig.EffectiveBalanceIncrement, nil
+		return b.beaconConfig.EffectiveBalanceIncrement
 	}
-	return b.totalActiveBalanceCache, nil
+	return b.totalActiveBalanceCache
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -267,7 +269,7 @@ func (b *BeaconState) BaseReward(totalActiveBalance, index uint64) (uint64, erro
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
 func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
-	activeBalance, err := b.GetTotalActiveBalance()
+	activeBalance := b.GetTotalActiveBalance()
 	if err != nil {
 		return 0, 0, err
 	}
@@ -399,4 +401,73 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 		}
 	}
 	return attestingIndices, nil
+}
+
+// Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
+func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64) {
+	eligibleValidators = make([]uint64, 0, len(b.validators))
+	previousEpoch := b.PreviousEpoch()
+	// TODO(Giulio2002): Proper caching
+	for i, validator := range b.validators {
+		if validator.Active(previousEpoch) || (validator.Slashed && previousEpoch+1 < validator.WithdrawableEpoch) {
+			eligibleValidators = append(eligibleValidators, uint64(i))
+		}
+	}
+	return
+}
+
+// Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
+func (b *BeaconState) inactivityLeaking() bool {
+	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
+}
+
+// Implementation defined in ETH 2.0 specs: https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#get_flag_index_deltas.
+// Although giulio made it efficient hopefully. results will be written in the input map.
+func (b *BeaconState) getFlagIndexDeltas(flagIdx int, balanceDeltaMap map[uint64]int64) (err error) {
+	// Initialize variables
+	var (
+		unslashedParticipatingIndicies     []uint64
+		unslashedParticipatingTotalBalance uint64
+		baseReward                         uint64
+	)
+	// Find unslashedParticipatingIndicies for this specific flag index.
+	previousEpoch := b.PreviousEpoch()
+	unslashedParticipatingIndicies, err = b.GetUnslashedParticipatingIndices(flagIdx, previousEpoch)
+	if err != nil {
+		return
+	}
+	// Find current weight for flag index.
+	weights := b.beaconConfig.ParticipationWeights()
+	weight := weights[flagIdx]
+	// Compute participating indices total balance (required in rewards/penalties computation).
+	unslashedParticipatingTotalBalance, err = b.GetTotalBalance(unslashedParticipatingIndicies)
+	if err != nil {
+		return
+	}
+	// Make it a map to make the existence check O(1) time-complexity.
+	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	for _, index := range unslashedParticipatingIndicies {
+		isUnslashedParticipatingIndicies[index] = struct{}{}
+	}
+	// Compute relative increments.
+	unslashedParticipatingIncrements := unslashedParticipatingTotalBalance / b.beaconConfig.EffectiveBalanceIncrement
+	activeIncrements := b.GetTotalActiveBalance() / b.beaconConfig.EffectiveBalanceIncrement
+	totalActiveBalance := b.GetTotalActiveBalance()
+	// Now process deltas and whats nots.
+	for _, index := range b.EligibleValidatorsIndicies() {
+		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
+			if b.inactivityLeaking() {
+				continue
+			}
+			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
+			balanceDeltaMap[index] += int64(rewardNumerator / (activeIncrements * b.beaconConfig.WeightDenominator))
+		} else if flagIdx != int(b.beaconConfig.TimelyHeadFlagIndex) {
+			baseReward, err = b.BaseReward(totalActiveBalance, index)
+			if err != nil {
+				return
+			}
+			balanceDeltaMap[index] -= int64(baseReward * weight / b.beaconConfig.WeightDenominator)
+		}
+	}
+	return
 }
