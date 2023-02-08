@@ -19,12 +19,15 @@ import (
 	"sync"
 )
 
+type HashFunc func(data []byte, extras ...[]byte) [32]byte
+
 var hasherPool = sync.Pool{
 	New: func() interface{} {
 		return sha256.New()
 	},
 }
 
+// General purpose Keccak256
 func Keccak256(data []byte, extras ...[]byte) [32]byte {
 	h, ok := hasherPool.Get().(hash.Hash)
 	if !ok {
@@ -40,6 +43,20 @@ func Keccak256(data []byte, extras ...[]byte) [32]byte {
 		h.Write(extra)
 	}
 	h.Sum(b[:0])
-
 	return b
+}
+
+// Optimized Keccak256, avoid pool.put/pool.get, meant for intensive operations.
+func OptimizedKeccak256() HashFunc {
+	h := sha256.New()
+	return func(data []byte, extras ...[]byte) [32]byte {
+		h.Reset()
+		var b [32]byte
+		h.Write(data)
+		for _, extra := range extras {
+			h.Write(extra)
+		}
+		h.Sum(b[:0])
+		return b
+	}
 }

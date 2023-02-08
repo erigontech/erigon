@@ -1,16 +1,18 @@
 package transition
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
-func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, validate bool) error {
+func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
 	s.processSlots(currentBlock.Slot)
-	if validate {
+	if !s.noValidate {
 		valid, err := s.verifyBlockSignature(block)
 		if err != nil {
 			return fmt.Errorf("error validating block signature: %v", err)
@@ -19,8 +21,12 @@ func (s *StateTransistor) transitionState(block *cltypes.SignedBeaconBlock, vali
 			return fmt.Errorf("block not valid")
 		}
 	}
-	// TODO add logic to process block and update state.
-	if validate {
+	// Transition block
+	if err := s.processBlock(block); err != nil {
+		return err
+	}
+
+	if !s.noValidate {
 		expectedStateRoot, err := s.state.HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)
@@ -66,19 +72,31 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 		if err != nil {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
+		// TODO(Someone): Add epoch transition.
+		if (stateSlot+1)%s.beaconConfig.SlotsPerEpoch == 0 {
+			return errors.New("cannot transition epoch: not implemented")
+		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
-		s.state.SetSlot(stateSlot)
+		if err := s.state.SetSlot(stateSlot); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock) (bool, error) {
-	proposer := s.state.ValidatorAt(int(block.Block.ProposerIndex))
-	sigRoot, err := block.Block.Body.HashSSZ()
+	proposer, err := s.state.ValidatorAt(int(block.Block.ProposerIndex))
 	if err != nil {
 		return false, err
 	}
-	sig := block.Signature
-	return bls.Verify(sig[:], sigRoot[:], proposer.PublicKey[:])
+	domain, err := s.state.GetDomain(s.beaconConfig.DomainBeaconProposer, s.state.Epoch())
+	if err != nil {
+		return false, err
+	}
+	sigRoot, err := fork.ComputeSigningRoot(block.Block, domain)
+	if err != nil {
+		return false, err
+	}
+	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
 }

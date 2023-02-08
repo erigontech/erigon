@@ -52,7 +52,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	// StarknetType
+
 	BlobTxType = 5
 )
 
@@ -81,6 +81,8 @@ type Transaction interface {
 	GetAccessList() types2.AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
+	EncodingSize() int
+	EncodeRLP(w io.Writer) error
 	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
@@ -93,7 +95,6 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
-	// IsStarkNet() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwiwes returns itself.
 }
 
@@ -213,19 +214,6 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		if err = t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		tx = t
-	// case StarknetType:
-	// 	t := &StarknetTransaction{}
-	// 	if err = t.DecodeRLP(s); err != nil {
-	// 		return nil, err
-	// 	}
-	// 	tx = t
-	case BlobTxType:
-		// TODO
-		t := &SignedBlobTx{}
-		// if err = t.DecoreRLP(s); err != nil  {
-		// 	return nil, err
-		// }
 		tx = t
 	default:
 		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])

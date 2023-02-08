@@ -393,7 +393,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		require.Equal(t, 3, len(result))
 	})
 	t.Run("invalid input", func(t *testing.T) {
-		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(10)
+		n, n2 := rpc.BlockNumber(0), rpc.BlockNumber(11)
 		_, err := api.GetModifiedAccountsByNumber(m.Ctx, n, &n2)
 		require.Error(t, err)
 
@@ -473,14 +473,14 @@ func TestAccountAt(t *testing.T) {
 	base := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	api := NewPrivateDebugAPI(base, m.DB, 0)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash11 common.Hash
+	var blockHash0, blockHash1, blockHash3, blockHash10, blockHash12 common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _ = rawdb.ReadCanonicalHash(tx, 0)
 		blockHash1, _ = rawdb.ReadCanonicalHash(tx, 1)
 		blockHash3, _ = rawdb.ReadCanonicalHash(tx, 3)
 		blockHash10, _ = rawdb.ReadCanonicalHash(tx, 10)
-		blockHash11, _ = rawdb.ReadCanonicalHash(tx, 11)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash11
+		blockHash12, _ = rawdb.ReadCanonicalHash(tx, 12)
+		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHash12
 		return nil
 	})
 
@@ -500,8 +500,8 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(1, int(results.Nonce))
 
-		//only 10 blocks in chain
-		results, err = api.AccountAt(m.Ctx, blockHash11, 0, addr)
+		//only 11 blocks in chain
+		results, err = api.AccountAt(m.Ctx, blockHash12, 0, addr)
 		require.NoError(err)
 		require.Nil(results)
 	})

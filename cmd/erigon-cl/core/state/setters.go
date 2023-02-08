@@ -21,9 +21,13 @@ func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Ha
 	b.genesisValidatorsRoot = genesisValidatorRoot
 }
 
-func (b *BeaconState) SetSlot(slot uint64) {
+func (b *BeaconState) SetSlot(slot uint64) error {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
+	// If there is a new slot update the active balance cache.
+	b._refreshActiveBalances()
+	// Also re-update proposer index
+	return b._updateProposerIndex()
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -56,8 +60,15 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.historicalRoots[index] = root
 }
 
-func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
+	if index >= len(b.validators) {
+		return InvalidValidatorIndex
+	}
 	b.validators[index] = validator
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
+	b._refreshActiveBalances()
+	return nil
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -80,29 +91,40 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.eth1DepositIndex = eth1DepositIndex
 }
 
-func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
+// Should not be called if not for testing
+func (b *BeaconState) SetValidators(validators []*cltypes.Validator) error {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
+	return b.initBeaconState()
 }
 
-func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
+func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
+	b.balances = append(b.balances, balance)
+	if validator.Active(b.Epoch()) {
+		b.totalActiveBalanceCache += validator.EffectiveBalance
+	}
+	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
+
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances = balances
+	b._refreshActiveBalances()
 }
 
-func (b *BeaconState) AddBalance(balance uint64) {
-	b.touchedLeaves[BalancesLeafIndex] = true
-	b.balances = append(b.balances, balance)
-}
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
+	if index >= len(b.balances) {
+		return InvalidValidatorIndex
+	}
 
-func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances[index] = balance
+	return nil
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
@@ -170,4 +192,16 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
 	b.historicalSummaries = append(b.historicalSummaries, summary)
+}
+
+func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.inactivityScores = append(b.inactivityScores, score)
+}
+
+func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
+}
+
+func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }

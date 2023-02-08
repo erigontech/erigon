@@ -37,7 +37,6 @@ import (
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
-	"github.com/pkg/errors"
 )
 
 type Sentinel struct {
@@ -65,7 +64,7 @@ func (s *Sentinel) createLocalNode(
 ) (*enode.LocalNode, error) {
 	db, err := enode.OpenDB("")
 	if err != nil {
-		return nil, errors.Wrap(err, "could not open node's peer database")
+		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
@@ -246,10 +245,10 @@ func (s *Sentinel) Start() error {
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: s.onConnection,
 	})
+	s.subManager = NewGossipManager(s.ctx)
 	if !s.cfg.NoDiscovery {
 		go s.listenForPeers()
 	}
-	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 
@@ -262,7 +261,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
+	sub := s.subManager.GetMatchingSubscription(string(LightClientFinalityUpdateTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())

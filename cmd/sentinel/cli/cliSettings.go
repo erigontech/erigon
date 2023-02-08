@@ -12,20 +12,21 @@ import (
 )
 
 type ConsensusClientCliCfg struct {
-	GenesisCfg     *clparams.GenesisConfig     `json:"genesisCfg"`
-	BeaconCfg      *clparams.BeaconChainConfig `json:"beaconCfg"`
-	NetworkCfg     *clparams.NetworkConfig     `json:"networkCfg"`
-	BeaconDataCfg  *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
-	Port           uint                        `json:"port"`
-	Addr           string                      `json:"address"`
-	ServerAddr     string                      `json:"serverAddr"`
-	ServerProtocol string                      `json:"serverProtocol"`
-	ServerTcpPort  uint                        `json:"serverTcpPort"`
-	LogLvl         uint                        `json:"logLevel"`
-	NoDiscovery    bool                        `json:"noDiscovery"`
-	CheckpointUri  string                      `json:"checkpointUri"`
-	Chaindata      string                      `json:"chaindata"`
-	ELEnabled      bool                        `json:"elEnabled"`
+	GenesisCfg       *clparams.GenesisConfig     `json:"genesisCfg"`
+	BeaconCfg        *clparams.BeaconChainConfig `json:"beaconCfg"`
+	NetworkCfg       *clparams.NetworkConfig     `json:"networkCfg"`
+	BeaconDataCfg    *rawdb.BeaconDataConfig     `json:"beaconDataConfig"`
+	Port             uint                        `json:"port"`
+	Addr             string                      `json:"address"`
+	ServerAddr       string                      `json:"serverAddr"`
+	ServerProtocol   string                      `json:"serverProtocol"`
+	ServerTcpPort    uint                        `json:"serverTcpPort"`
+	LogLvl           uint                        `json:"logLevel"`
+	NoDiscovery      bool                        `json:"noDiscovery"`
+	CheckpointUri    string                      `json:"checkpointUri"`
+	Chaindata        string                      `json:"chaindata"`
+	ELEnabled        bool                        `json:"elEnabled"`
+	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
@@ -37,6 +38,7 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.ErigonPrivateApi = ctx.String(flags.ErigonPrivateApiFlag.Name)
 	if ctx.String(flags.BeaconConfigFlag.Name) != "" {
 		cfg.BeaconCfg = new(clparams.BeaconChainConfig)
 		if *cfg.BeaconCfg, err = clparams.CustomConfig(ctx.String(flags.BeaconConfigFlag.Name)); err != nil {
