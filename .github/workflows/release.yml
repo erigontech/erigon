@@ -13,6 +13,12 @@ on:
       - 'v*.*.*'
       # to be used by fork patch-releases ^^
       - 'v*.*.*-*'
+  workflow_dispatch:
+    inputs:
+      tags:
+        - 'v*.*.*'
+        # to be used by fork patch-releases ^^
+        - 'v*.*.*-*'
 
 jobs:
   goreleaser:
