@@ -25,7 +25,6 @@ jobs:
           fetch-depth: 0
 
       - name: dockerhub-login
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKERHUB }}
