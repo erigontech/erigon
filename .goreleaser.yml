@@ -100,8 +100,8 @@ docker_manifests:
 
   - name_template: thorax/{{ .ProjectName }}:latest
     image_templates:
-    - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
-    - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+      - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
+      - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
 
 announce:
   slack:

@@ -44,14 +44,26 @@ jobs:
       - name: Prepare
         id: prepare
         run: |
-            TAG=${GITHUB_REF#refs/tags/}
-            echo ::set-output name=tag_name::${TAG}
+          TAG=${GITHUB_REF#refs/tags/}
+          echo ::set-output name=tag_name::${TAG}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v4
+        with:
+          args: release --clean --rm-dist --skip-validate
+        env:
+          CGO_ENABLED: 1
+          VERSION: ${{ steps.prepare.outputs.tag_name }}
+          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
       - name: Run GoReleaser
         run: |
-            make release
+          make release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
