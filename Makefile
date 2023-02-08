@@ -229,7 +229,7 @@ release-dry-run: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate --skip-publish
+		--rm-dist --skip-validate --skip-publish --parallelism 2
 
 .PHONY: release
 release: git-submodules
@@ -244,7 +244,7 @@ release: git-submodules
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
 		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate
+		--rm-dist --skip-validate --parallelism 2
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
