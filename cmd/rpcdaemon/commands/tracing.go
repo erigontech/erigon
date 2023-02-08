@@ -276,15 +276,7 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	if err != nil {
 		return fmt.Errorf("convert args to msg: %v", err)
 	}
-	var excessDataGas *big.Int
-	ph, err := api._blockReader.HeaderByHash(ctx, dbtx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, excessDataGas)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader)
 	txCtx := core.NewEVMTxContext(msg)
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)

@@ -516,7 +516,7 @@ Loop:
 		if ph != nil {
 			excessDataGas = ph.ExcessDataGas
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, excessDataGas)
+		blockContext := core.NewEVMBlockContext(header, excessDataGas, getHashFn, engine, nil /* author */)
 
 		if parallel {
 			select {
@@ -1026,7 +1026,7 @@ func reconstituteStep(last bool,
 			excessDataGas = ph.ExcessDataGas
 		}
 
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, excessDataGas)
+		blockContext := core.NewEVMBlockContext(header, excessDataGas, getHashFn, engine, nil /* author */)
 		rules := chainConfig.Rules(bn, b.Time())
 
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {

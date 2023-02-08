@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"math/big"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -965,16 +964,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	var excessDataGas *big.Int
-	ph, err := api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, excessDataGas)
+	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader)
 	txCtx := core.NewEVMTxContext(msg)
 
 	blockCtx.GasLimit = math.MaxUint64
@@ -1157,15 +1147,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		useParent = true
 	}
 
-	var excessDataGas *big.Int
-	ph, err := api._blockReader.HeaderByHash(ctx, dbtx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
 	for txIndex, msg := range msgs {
 		if err := libcommon.Stopped(ctx.Done()); err != nil {
 			return nil, err
@@ -1202,7 +1183,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		}
 
 		// Get a new instance of the EVM.
-		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader, excessDataGas)
+		blockCtx := transactions.NewEVMBlockContext(engine, header, parentNrOrHash.RequireCanonical, dbtx, api._blockReader)
 		txCtx := core.NewEVMTxContext(msg)
 
 		if useParent {

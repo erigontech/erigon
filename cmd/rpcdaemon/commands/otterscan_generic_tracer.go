@@ -38,21 +38,12 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 			log.Warn("[rpc] header is nil", "blockNum", blockNum)
 			return nil
 		}
-
-		var excessDataGas *big.Int
 		// Get the last block header
 		if header != nil {
 			blockTime = header.Time
-			ph, err := api._blockReader.HeaderByHash(ctx, dbtx, header.ParentHash)
-			if err != nil {
-				// TODO log, panic or return?
-			}
-			if ph != nil {
-				excessDataGas = ph.ExcessDataGas
-			}
 		}
 
-		executor.changeBlock(header, excessDataGas)
+		executor.changeBlock(header)
 
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, ttx, blockNum, txIndex)
 		if err != nil {
@@ -115,7 +106,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
 
-		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, excessDataGas)
+		BlockContext := core.NewEVMBlockContext(header, excessDataGas, core.GetHashFn(header, getHeader), engine, nil)
 		TxContext := core.NewEVMTxContext(msg)
 
 		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})

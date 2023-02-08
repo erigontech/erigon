@@ -105,7 +105,7 @@ func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) common.
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author, excessDataGas)
+	blockContext := NewEVMBlockContext(header, excessDataGas, blockHashFunc, engine, author)
 	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
 	return applyTransaction(config, engine, gp, ibs, stateWriter, header, excessDataGas, tx, usedGas, usedDataGas, vmenv, cfg)

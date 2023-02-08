@@ -37,7 +37,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -237,17 +236,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	// Prepare the EVM.
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-
-	var excessDataGas *big.Int
-	ph, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
-	context := core.NewEVMBlockContext(header, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase, excessDataGas)
+	context := core.NewEVMBlockContext(header, nil, core.GetHashFn(header, nil), nil, &t.json.Env.Coinbase)
 	context.GetHash = vmTestBlockHash
 	if baseFee != nil {
 		context.BaseFee = new(uint256.Int)

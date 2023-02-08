@@ -398,8 +398,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 
 	var blockHash common.Hash
-	var header, parent *types.Header
-	var excessDataGas *big.Int
+	var header *types.Header
 
 	iter := MapTxNum2BlockNum(tx, txNumbers)
 	for iter.HasNext() {
@@ -423,15 +422,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
-			parent, err = api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
-			if err != nil {
-				// TODO log, panic or return?
-			}
-			if parent != nil {
-				excessDataGas = parent.ExcessDataGas
-			}
 			blockHash = header.Hash()
-			exec.changeBlock(header, excessDataGas)
+			exec.changeBlock(header)
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
@@ -508,9 +500,9 @@ func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.E
 	return ie
 }
 
-func (e *intraBlockExec) changeBlock(header *types.Header, excessDataGas *big.Int) {
+func (e *intraBlockExec) changeBlock(header *types.Header) {
 	e.blockNum = header.Number.Uint64()
-	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br, excessDataGas)
+	blockCtx := transactions.NewEVMBlockContext(e.engine, header, true /* requireCanonical */, e.tx, e.br)
 	e.blockCtx = &blockCtx
 	e.blockHash = header.Hash()
 	e.header = header

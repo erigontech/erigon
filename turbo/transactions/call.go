@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 
@@ -83,15 +82,7 @@ func DoCall(
 	if err != nil {
 		return nil, err
 	}
-	var excessDataGas *big.Int
-	ph, err := headerReader.HeaderByHash(ctx, tx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, excessDataGas)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
@@ -116,8 +107,17 @@ func DoCall(
 	return result, nil
 }
 
-func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader, excessDataGas *big.Int) evmtypes.BlockContext {
-	return core.NewEVMBlockContext(header, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */, excessDataGas)
+func NewEVMBlockContext(engine consensus.EngineReader, header *types.Header, requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) evmtypes.BlockContext {
+	var excessDataGas *big.Int
+	parentHeader, err := headerReader.HeaderByHash(context.Background(), tx, header.ParentHash)
+	if err != nil {
+		// TODO(eip-4844): Do we need to propagate this error?
+		log.Error("Can't get parent block's header:", err)
+	} else if parentHeader != nil {
+		excessDataGas = parentHeader.ExcessDataGas
+	}
+
+	return core.NewEVMBlockContext(header, excessDataGas, MakeHeaderGetter(requireCanonical, tx, headerReader), engine, nil /* author */)
 }
 
 func MakeHeaderGetter(requireCanonical bool, tx kv.Tx, headerReader services.HeaderReader) func(uint64) libcommon.Hash {
@@ -222,15 +222,7 @@ func NewReusableCaller(
 	if err != nil {
 		return nil, err
 	}
-	var excessDataGas *big.Int
-	ph, err := rawdb.ReadHeaderByHash(tx, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader, excessDataGas)
+	blockCtx := NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, headerReader)
 	txCtx := core.NewEVMTxContext(msg)
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{NoBaseFee: true})

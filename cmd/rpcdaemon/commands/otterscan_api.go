@@ -280,8 +280,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash
-	var header, parent *types.Header
-	var excessDataGas *big.Int
+	var header *types.Header
 	txs := make([]*RPCTransaction, 0, pageSize)
 	receipts := make([]map[string]interface{}, 0, pageSize)
 	resultCount := uint16(0)
@@ -303,15 +302,8 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
-			parent, err = api._blockReader.HeaderByHash(ctx, tx, header.ParentHash)
-			if err != nil {
-				// TODO log, panic or return?
-			}
-			if parent != nil {
-				excessDataGas = parent.ExcessDataGas
-			}
 			blockHash = header.Hash()
-			exec.changeBlock(header, excessDataGas)
+			exec.changeBlock(header)
 		}
 
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)

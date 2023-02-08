@@ -628,7 +628,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	var lastHeader *types.Header
 	var lastSigner *types.Signer
 	var lastRules *chain.Rules
-	var excessDataGas *big.Int
 
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
@@ -671,15 +670,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
-
-			ph, err := api._blockReader.HeaderByHash(ctx, dbtx, lastHeader.ParentHash)
-			if err != nil {
-				// TODO log, panic or return?
-			}
-			if ph != nil {
-				excessDataGas = ph.ExcessDataGas
-			}
-
 			lastBlockHash = lastHeader.Hash()
 			lastSigner = types.MakeSigner(chainConfig, blockNum, lastHeader.Time)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
@@ -825,7 +815,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		vmConfig.Tracer = &ot
 		ibs := state.New(cachedReader)
 
-		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader, excessDataGas)
+		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
 		txCtx := core.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 

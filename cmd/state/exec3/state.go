@@ -196,7 +196,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 		blockContext := txTask.EvmBlockContext
 		if !rw.background {
 			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext = core.NewEVMBlockContext(header, txTask.ExcessDataGas, getHashFn, rw.engine, nil /* author */)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm

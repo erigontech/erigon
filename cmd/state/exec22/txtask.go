@@ -2,6 +2,7 @@ package exec22
 
 import (
 	"bytes"
+	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -20,6 +21,7 @@ type TxTask struct {
 	BlockNum        uint64
 	Rules           *chain.Rules
 	Header          *types.Header
+	ExcessDataGas   *big.Int
 	Txs             types.Transactions
 	Uncles          []*types.Header
 	Coinbase        libcommon.Address
