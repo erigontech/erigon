@@ -169,6 +169,9 @@ func ReadHashes(dr *codec.DecodingReader, hashes *[]libcommon.Hash, length uint6
 		} else {
 			*hashes = make([]libcommon.Hash, length)
 		}
+	} else if *hashes == nil {
+		// make sure the output is never nil
+		*hashes = []libcommon.Hash{}
 	}
 	dst := *hashes
 	for i := uint64(0); i < length; i++ {
@@ -257,6 +260,7 @@ func (atv *AccessTupleView) FixedLength() uint64 {
 type AccessListView AccessList
 
 func (alv *AccessListView) Deserialize(dr *codec.DecodingReader) error {
+	*alv = AccessListView([]AccessTuple{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*alv)
 		*alv = append(*alv, AccessTuple{})

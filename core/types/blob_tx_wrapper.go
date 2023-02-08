@@ -204,6 +204,7 @@ func (bk BlobKzgs) At(i int) eth.KZGCommitment {
 }
 
 func (li *BlobKzgs) Deserialize(dr *codec.DecodingReader) error {
+	*li = BlobKzgs([]KZGCommitment{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*li)
 		*li = append(*li, KZGCommitment{})
@@ -244,6 +245,7 @@ func (blobs Blobs) At(i int) eth.Blob {
 }
 
 func (a *Blobs) Deserialize(dr *codec.DecodingReader) error {
+	*a = Blobs([]Blob{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*a)
 		*a = append(*a, Blob{})
