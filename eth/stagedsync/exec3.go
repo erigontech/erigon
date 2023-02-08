@@ -280,7 +280,6 @@ func ExecV3(ctx context.Context,
 			}
 
 			defer applyLoopWg.Wait()
-
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
@@ -434,8 +433,10 @@ func ExecV3(ctx context.Context,
 
 		rwLoopErrCh = make(chan error, 1)
 
-		rwLoopWg.Add(1)
 		defer rwLoopWg.Wait()
+		rwLoopCtx, rwLoopCancel := context.WithCancel(ctx)
+		defer rwLoopCancel()
+		rwLoopWg.Add(1)
 		go func() {
 			defer close(rwLoopErrCh)
 			defer rwLoopWg.Done()
@@ -444,7 +445,7 @@ func ExecV3(ctx context.Context,
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
 
-			if err := rwLoop(ctx); err != nil {
+			if err := rwLoop(rwLoopCtx); err != nil {
 				rwLoopErrCh <- err
 			}
 		}()
