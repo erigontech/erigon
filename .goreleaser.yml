@@ -14,6 +14,8 @@ builds:
     goarch:
       - amd64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/amd64
+      - PKG_CONFIG_PATH=/sysroot/macos/amd64/usr/local/lib/pkgconfig
       - CC=o64-clang
       - CXX=o64-clang++
     tags:
@@ -29,6 +31,8 @@ builds:
     goarch:
       - arm64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/arm64
+      - PKG_CONFIG_PATH=/sysroot/macos/arm64/usr/local/lib/pkgconfig
       - CC=oa64-clang
       - CXX=oa64-clang++
     tags:
@@ -44,6 +48,8 @@ builds:
     goarch:
       - amd64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/amd64
+      - PKG_CONFIG_PATH=/sysroot/linux/amd64/usr/local/lib/pkgconfig
       - CC=gcc
       - CXX=g++
     tags:
@@ -60,6 +66,8 @@ builds:
     goarch:
       - arm64
     env:
+      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/aarch64
+      - PKG_CONFIG_PATH=/sysroot/linux/aarch64/usr/local/lib/pkgconfig
       - CC=aarch64-linux-gnu-gcc
       - CXX=aarch64-linux-gnu-g++
     tags:
@@ -74,8 +82,10 @@ snapshot:
 dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
     dockerfile: Dockerfile.release
     use: buildx
+    skip_push: true
     goarch: amd64
     ids:
       - linux-amd64
@@ -84,7 +94,9 @@ dockers:
 
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
     dockerfile: Dockerfile.release
+    skip_push: true
     use: buildx
     goarch: arm64
     ids:
@@ -94,14 +106,28 @@ dockers:
 
 docker_manifests:
   - name_template: thorax/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
 
-  - name_template: thorax/{{ .ProjectName }}:latest
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
     image_templates:
-    - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
-    - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: thorax/{{ .ProjectName }}:latest
+    skip_push: true
+    image_templates:
+      - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
+      - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:latest
+    skip_push: true
+    image_templates:
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
 announce:
   slack:
