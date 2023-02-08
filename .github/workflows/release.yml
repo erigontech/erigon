@@ -48,17 +48,12 @@ jobs:
           echo ::set-output name=tag_name::${TAG}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2
 
       - name: Run GoReleaser
         run: |
           make release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.prepare.outputs.tag_name }}
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
 
-      - run: docker images
-      - run: docker image push --all-tags thorax/erigon
 
