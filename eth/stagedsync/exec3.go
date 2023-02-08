@@ -825,9 +825,9 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
+	log.Info(fmt.Sprintf("[%s] Reconstitution", s.LogPrefix()), "startTxNum", startTxNum, "endTxNum", endTxNum, "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
 
-	var maxTxNum uint64 = startTxNum
+	var maxTxNum = startTxNum
 
 	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
@@ -837,19 +837,25 @@ func reconstituteStep(last bool,
 	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	}
 	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
@@ -1328,13 +1334,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
 	fillWorker.FillAccounts(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillStorage(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillCode(codeCollector, plainContractCollector)
-	log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	// Load all collections into the main collector
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {
