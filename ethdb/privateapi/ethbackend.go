@@ -359,7 +359,6 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		return nil, err
 	}
 	if possibleStatus != nil {
-		log.Info("[NewPayload] got quick reply", "payloadStatus", possibleStatus)
 		return convertPayloadStatus(possibleStatus), nil
 	}
 
@@ -370,7 +369,7 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 	s.hd.BeaconRequestList.AddPayloadRequest(block)
 
 	payloadStatus := <-s.hd.PayloadStatusCh
-	log.Info("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	log.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
