@@ -423,7 +423,7 @@ func (b *BeaconState) inactivityLeaking() bool {
 
 // Implementation defined in ETH 2.0 specs: https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#get_flag_index_deltas.
 // Although giulio made it efficient hopefully. results will be written in the input map.
-func (b *BeaconState) getFlagIndexDeltas(flagIdx int, balanceDeltaMap map[uint64]int64) (err error) {
+func (b *BeaconState) processFlagIndexDeltas(flagIdx int, balanceDeltaMap map[uint64]int64) (err error) {
 	// Initialize variables
 	var (
 		unslashedParticipatingIndicies     []uint64
@@ -469,5 +469,61 @@ func (b *BeaconState) getFlagIndexDeltas(flagIdx int, balanceDeltaMap map[uint64
 			balanceDeltaMap[index] -= int64(baseReward * weight / b.beaconConfig.WeightDenominator)
 		}
 	}
+	return
+}
+
+// Implemention defined in https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#modified-get_inactivity_penalty_deltas.
+func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64) (err error) {
+	var (
+		unslashedParticipatingIndicies []uint64
+		validator                      cltypes.Validator
+	)
+	// Find unslashedParticipatingIndicies for this specific flag index.
+	previousEpoch := b.PreviousEpoch()
+	unslashedParticipatingIndicies, err = b.GetUnslashedParticipatingIndices(int(b.beaconConfig.TimelyHeadFlagIndex), previousEpoch)
+	if err != nil {
+		return
+	}
+	// Make it a map to make the existence check O(1) time-complexity.
+	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	for _, index := range unslashedParticipatingIndicies {
+		isUnslashedParticipatingIndicies[index] = struct{}{}
+	}
+	// retrieve penalty quotient based on fork
+	var penaltyQuotient uint64
+	switch b.version {
+	case clparams.Phase0Version:
+		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotient
+	case clparams.AltairVersion:
+		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientAltair
+	case clparams.BellatrixVersion:
+		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientBellatrix
+	}
+	for _, index := range b.EligibleValidatorsIndicies() {
+		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
+			continue
+		}
+		// Process inactivity penalties.
+		validator, err = b.ValidatorAt(int(index))
+		if err != nil {
+			return err
+		}
+		penaltyNumerator := validator.EffectiveBalance * b.inactivityScores[index]
+		balanceDeltaMap[index] -= int64(penaltyNumerator / (b.beaconConfig.InactivityScoreBias * penaltyQuotient))
+	}
+	return
+}
+
+// BalanceDeltas return the delta for each validator index.
+func (b *BeaconState) BalanceDeltas() (balanceDeltaMap map[uint64]int64, err error) {
+	balanceDeltaMap = map[uint64]int64{}
+	// process each flag indexes by weight.
+	for i := range b.beaconConfig.ParticipationWeights() {
+		if err = b.processFlagIndexDeltas(i, balanceDeltaMap); err != nil {
+			return
+		}
+	}
+	// process inactivity scores now.
+	err = b.processInactivityDeltas(balanceDeltaMap)
 	return
 }
