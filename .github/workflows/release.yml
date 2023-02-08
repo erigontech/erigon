@@ -50,14 +50,16 @@ jobs:
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v4
         with:
-          verrsion: 1.19.1
-          args: release --clean --skip-validate
+          verrsion: v1.11.4
+          args: release --clean --skip-validate --skip-push
         env:
           CGO_ENABLED: 1
           VERSION: ${{ steps.prepare.outputs.tag_name }}
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: docker images
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
