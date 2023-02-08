@@ -110,6 +110,10 @@ docker_manifests:
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
+    image_templates:
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
@@ -118,6 +122,10 @@ docker_manifests:
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:latest
+    skip_push: true
+    image_templates:
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
       - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
