@@ -47,20 +47,6 @@ jobs:
           TAG=${GITHUB_REF#refs/tags/}
           echo ::set-output name=tag_name::${TAG}
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v4
-        with:
-          verrsion: v1.11.4
-          args: release --clean --skip-validate --skip-push
-        env:
-          CGO_ENABLED: 1
-          VERSION: ${{ steps.prepare.outputs.tag_name }}
-          DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
-          DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - run: docker images
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v1
 
@@ -72,3 +58,7 @@ jobs:
           VERSION: ${{ steps.prepare.outputs.tag_name }}
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
+
+      - run: docker images
+      - run: docker image push --all-tags thorax/erigon
+
