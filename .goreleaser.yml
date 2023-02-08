@@ -12,13 +12,10 @@ builds:
     goos: [ darwin ]
     goarch: [ amd64 ]
     env:
-      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/amd64
-      - PKG_CONFIG_PATH=/sysroot/macos/amd64/usr/local/lib/pkgconfig
       - CC=o64-clang
       - CXX=o64-clang++
     tags: [ nosqlite, noboltdb ]
-    ldflags:
-      -s -w
+    ldflags: -s -w
 
   - id: darwin-arm64
     main: ./cmd/erigon
@@ -26,13 +23,10 @@ builds:
     goos: [ darwin ]
     goarch: [ arm64 ]
     env:
-      - PKG_CONFIG_SYSROOT_DIR=/sysroot/macos/arm64
-      - PKG_CONFIG_PATH=/sysroot/macos/arm64/usr/local/lib/pkgconfig
       - CC=oa64-clang
       - CXX=oa64-clang++
     tags: [ nosqlite, noboltdb ]
-    ldflags:
-      -s -w
+    ldflags: -s -w
 
   - id: linux-amd64
     main: ./cmd/erigon
@@ -40,14 +34,10 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     env:
-      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/amd64
-      - PKG_CONFIG_PATH=/sysroot/linux/amd64/usr/local/lib/pkgconfig
       - CC=gcc
       - CXX=g++
     tags: [ nosqlite, noboltdb ]
-    ldflags:
-      # We need to build a static binary because we are building in a glibc based system and running in a musl container
-      -s -w -extldflags "-static"
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: linux-arm64
     main: ./cmd/erigon
@@ -55,26 +45,21 @@ builds:
     goos: [ linux ]
     goarch: [ arm64 ]
     env:
-      - PKG_CONFIG_SYSROOT_DIR=/sysroot/linux/aarch64
-      - PKG_CONFIG_PATH=/sysroot/linux/aarch64/usr/local/lib/pkgconfig
       - CC=aarch64-linux-gnu-gcc
       - CXX=aarch64-linux-gnu-g++
     tags: [ nosqlite, noboltdb ]
-    ldflags:
-      # We need to build a static binary because we are building in a glibc based system and running in a musl container
-      -s -w -extldflags "-static"
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: windows-amd64
     main: ./cmd/erigon
     binary: erigon
     goos: [ windows ]
     goarch: [ amd64 ]
-    tags: [ nosqlite, noboltdb ]
     env:
       - CC=x86_64-w64-mingw32-gcc
       - CXX=x86_64-w64-mingw32-g++
-    ldflags:
-      -s -w
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
 
   - id: windows-arm64
     main: ./cmd/erigon
@@ -82,10 +67,10 @@ builds:
     goos: [ windows ]
     goarch: [ arm64 ]
     env:
-      - CC=oa64-clang
-      - CXX=oa64-clang++
-    ldflags:
-      -s -w
+      - CC=/llvm-mingw/bin/aarch64-w64-mingw32-gcc
+      - CXX=/llvm-mingw/bin/aarch64-w64-mingw32-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
 
 snapshot:
   name_template: "{{ .Tag }}.next"
