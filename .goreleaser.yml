@@ -76,6 +76,7 @@ dockers:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
     dockerfile: Dockerfile.release
     use: buildx
+    skip_push: true
     goarch: amd64
     ids:
       - linux-amd64
@@ -85,6 +86,7 @@ dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
     dockerfile: Dockerfile.release
+    skip_push: true
     use: buildx
     goarch: arm64
     ids:
@@ -94,11 +96,13 @@ dockers:
 
 docker_manifests:
   - name_template: thorax/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
 
   - name_template: thorax/{{ .ProjectName }}:latest
+    skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
