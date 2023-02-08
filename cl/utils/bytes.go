@@ -98,3 +98,13 @@ func DecompressZstd(b []byte) ([]byte, error) {
 	}
 	return r.DecodeAll(b, nil)
 }
+
+// Check if it is sorted and check if there are duplicates. O(N) complexity.
+func IsSliceSortedSet(vals []uint64) bool {
+	for i := 0; i < len(vals)-1; i++ {
+		if vals[i] >= vals[i+1] {
+			return false
+		}
+	}
+	return true
+}

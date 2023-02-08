@@ -25,7 +25,7 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 	if err := s.processBlock(block); err != nil {
 		return err
 	}
-	// TODO add logic to process block and update state.
+
 	if !s.noValidate {
 		expectedStateRoot, err := s.state.HashSSZ()
 		if err != nil {
@@ -78,7 +78,9 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
-		s.state.SetSlot(stateSlot)
+		if err := s.state.SetSlot(stateSlot); err != nil {
+			return err
+		}
 	}
 	return nil
 }

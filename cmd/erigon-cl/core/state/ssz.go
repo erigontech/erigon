@@ -207,7 +207,11 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	// Initialize beacon state
-	defer b.initBeaconState()
+	defer func() {
+		if err := b.initBeaconState(); err != nil {
+			panic(err)
+		}
+	}()
 
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {

@@ -1,6 +1,10 @@
 package state
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+
+	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -55,6 +59,12 @@ type BeaconState struct {
 	leaves            [32][32]byte            // Pre-computed leaves.
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
+	// Caches
+	activeValidatorsCache   *lru.Cache
+	committeeCache          *lru.Cache
+	shuffledSetsCache       *lru.Cache
+	totalActiveBalanceCache uint64
+	proposerIndex           uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -95,10 +105,63 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 	}).HashSSZ()
 }
 
-func (b *BeaconState) initBeaconState() {
-	b.touchedLeaves = make(map[StateLeafIndex]bool)
+func (b *BeaconState) _refreshActiveBalances() {
+	epoch := b.Epoch()
+	b.totalActiveBalanceCache = 0
+	for _, validator := range b.validators {
+		if validator.Active(epoch) {
+			b.totalActiveBalanceCache += validator.EffectiveBalance
+		}
+	}
+}
+
+func (b *BeaconState) _updateProposerIndex() (err error) {
+	epoch := b.Epoch()
+
+	hash := sha256.New()
+	// Input for the seed hash.
+	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
+	slotByteArray := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
+
+	// Add slot to the end of the input.
+	inputWithSlot := append(input[:], slotByteArray...)
+
+	// Calculate the hash.
+	hash.Write(inputWithSlot)
+	seed := hash.Sum(nil)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed)
+
+	b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
+	return
+}
+
+func (b *BeaconState) initBeaconState() error {
+	if b.touchedLeaves == nil {
+		b.touchedLeaves = make(map[StateLeafIndex]bool)
+	}
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
+	b._refreshActiveBalances()
 	for i, validator := range b.validators {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
+	var err error
+	if b.activeValidatorsCache, err = lru.New(5); err != nil {
+		return err
+	}
+	if b.shuffledSetsCache, err = lru.New(25); err != nil {
+		return err
+	}
+	if b.committeeCache, err = lru.New(256); err != nil {
+		return err
+	}
+	if err := b._updateProposerIndex(); err != nil {
+		return err
+	}
+	return nil
 }

@@ -130,6 +130,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		peerId := conn.RemotePeer()
 		invalid := !s.handshaker.ValidatePeer(peerId)
 		if invalid {
+			log.Trace("Handshake was unsuccessful")
 			s.peers.DisconnectPeer(peerId)
 		}
 	}()
