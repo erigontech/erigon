@@ -412,26 +412,25 @@ func (si *LocalityIterator) Next() ([]byte, []uint64) {
 
 func (ic *InvertedIndexContext) iterateKeysLocality(uptoTxNum uint64) *LocalityIterator {
 	si := &LocalityIterator{hc: ic}
-	ic.files.Ascend(func(item ctxItem) bool {
+	for _, item := range ic.files {
 		if !item.src.frozen || item.startTxNum > uptoTxNum {
-			return true
+			continue
 		}
 		if assert.Enable {
 			if (item.endTxNum-item.startTxNum)/ic.ii.aggregationStep != StepsInBiggestFile {
 				panic(fmt.Errorf("frozen file of small size: %s", item.src.decompressor.FileName()))
 			}
 		}
-		g := item.getter
+		g := item.src.decompressor.MakeGetter()
 		if g.HasNext() {
 			key, offset := g.NextUncompressed()
 
 			heapItem := &ReconItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum, g: g, txNum: ^item.endTxNum, key: key, startOffset: offset, lastOffset: offset}
 			heap.Push(&si.h, heapItem)
 		}
-		si.totalOffsets += uint64(item.getter.Size())
+		si.totalOffsets += uint64(g.Size())
 		si.filesAmount++
-		return true
-	})
+	}
 	si.advance()
 	return si
 }

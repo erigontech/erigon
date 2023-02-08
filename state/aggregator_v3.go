@@ -24,6 +24,7 @@ import (
 	math2 "math"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -66,6 +67,8 @@ type AggregatorV3 struct {
 	warmupWorking          atomic.Bool
 	ctx                    context.Context
 	ctxCancel              context.CancelFunc
+
+	wg sync.WaitGroup
 }
 
 func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
@@ -105,6 +108,7 @@ func (a *AggregatorV3) ReopenFiles() error {
 
 func (a *AggregatorV3) Close() {
 	a.ctxCancel()
+	a.wg.Wait()
 	a.closeFiles()
 }
 
@@ -172,7 +176,9 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 	}
 	a.workingOptionalIndices.Store(true)
 
+	a.wg.Add(1)
 	go func() {
+		a.wg.Done()
 		defer a.workingOptionalIndices.Store(false)
 		if err := a.BuildOptionalMissedIndices(ctx, workers); err != nil {
 			log.Warn("merge", "err", err)
@@ -586,7 +592,9 @@ func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) {
 		return
 	}
 	a.warmupWorking.Store(true)
+	a.wg.Add(1)
 	go func() {
+		defer a.wg.Done()
 		defer a.warmupWorking.Store(false)
 		if err := a.db.View(ctx, func(tx kv.Tx) error {
 			if err := a.accounts.warmup(ctx, txFrom, limit, tx); err != nil {
@@ -1037,7 +1045,9 @@ func (a *AggregatorV3) BuildFilesInBackground(db kv.RoDB) error {
 	hasData := false
 
 	a.working.Store(true)
+	a.wg.Add(1)
 	go func() {
+		defer a.wg.Done()
 		defer a.working.Store(false)
 
 		// check if db has enough data (maybe we didn't commit them yet)
@@ -1053,6 +1063,9 @@ func (a *AggregatorV3) BuildFilesInBackground(db kv.RoDB) error {
 		// - during files build, may happen commit of new data. on each loop step getting latest id in db
 		for step < lastIdInDB(db, a.accounts.indexKeysTable)/a.aggregationStep {
 			if err := a.buildFilesInBackground(a.ctx, step, db); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Warn("buildFilesInBackground", "err", err)
 				break
 			}
@@ -1063,7 +1076,9 @@ func (a *AggregatorV3) BuildFilesInBackground(db kv.RoDB) error {
 			return
 		}
 		a.workingMerge.Store(true)
+		a.wg.Add(1)
 		go func() {
+			defer a.wg.Done()
 			defer a.workingMerge.Store(false)
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
 				log.Warn("merge", "err", err)
@@ -1362,7 +1377,6 @@ func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
 	}
 	steps := make([]*AggregatorStep, len(accountSteps))
 	for i, accountStep := range accountSteps {
-		log.Warn("dbg", "step", accountStep.historyItem.decompressor.FileName(), "startTx", accountStep.indexFile.startTxNum, "endTx", accountStep.indexFile.endTxNum)
 		steps[i] = &AggregatorStep{
 			a:        a,
 			accounts: accountStep,

@@ -31,13 +31,14 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 		h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil)
 		require.NotNil(lastOnFs.decompressor)
 
-		lastInView, _ := hc.historyFiles.Max()
+		lastInView := hc.historyFiles[len(hc.historyFiles)-1]
+		g := lastInView.src.decompressor.MakeGetter()
 		require.Equal(lastInView.startTxNum, lastOnFs.startTxNum)
 		require.Equal(lastInView.endTxNum, lastOnFs.endTxNum)
-		if lastInView.getter.HasNext() {
-			k, _ := lastInView.getter.Next(nil)
+		if g.HasNext() {
+			k, _ := g.Next(nil)
 			require.Equal(8, len(k))
-			v, _ := lastInView.getter.Next(nil)
+			v, _ := g.Next(nil)
 			require.Equal(8, len(v))
 		}
 
@@ -54,7 +55,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 		require.NotNil(nonDeletedOnFs.decompressor) // non-canDelete files are not closed
 
 		hc = h.MakeContext()
-		newLastInView, _ := hc.historyFiles.Max()
+		newLastInView := hc.historyFiles[len(hc.historyFiles)-1]
 		require.False(lastOnFs.frozen)
 		require.False(lastInView.startTxNum == newLastInView.startTxNum && lastInView.endTxNum == newLastInView.endTxNum)
 

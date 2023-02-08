@@ -55,8 +55,8 @@ func ExpectEqual[V comparable](tb testing.TB, s1, s2 Unary[V]) {
 	for s1.HasNext() && s2.HasNext() {
 		k1, e1 := s1.Next()
 		k2, e2 := s2.Next()
-		require.Equal(tb, k1, k2)
 		require.Equal(tb, e1 == nil, e2 == nil)
+		require.Equal(tb, k1, k2)
 	}
 
 	has1 := s1.HasNext()
