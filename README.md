@@ -369,7 +369,7 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process.
+Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
