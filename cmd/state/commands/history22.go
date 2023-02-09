@@ -76,6 +76,10 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
+	if err := h.ReopenFolder(); err != nil {
+		return err
+	}
+
 	defer h.Close()
 	readDbPath := path.Join(datadirCli, "readdb")
 	if block == 0 {
