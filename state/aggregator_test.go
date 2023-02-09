@@ -154,6 +154,8 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 	// Start another aggregator on same datadir
 	anotherAgg, err := NewAggregator(path, path, aggStep)
 	require.NoError(t, err)
+	require.NoError(t, anotherAgg.ReopenFolder())
+
 	defer anotherAgg.Close()
 
 	rwTx, err := db.BeginRw(context.Background())
@@ -273,6 +275,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 
 	newAgg, err := NewAggregator(path, path, aggStep)
 	require.NoError(t, err)
+	require.NoError(t, newAgg.ReopenFolder())
 	defer newAgg.Close()
 
 	newAgg.SetTx(newTx)

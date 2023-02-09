@@ -391,16 +391,16 @@ func TestHistoryMergeFiles(t *testing.T) {
 }
 
 func TestHistoryScanFiles(t *testing.T) {
-	path, db, h, txs := filledHistory(t)
+	_, db, h, txs := filledHistory(t)
 	var err error
 
 	collateAndMergeHistory(t, db, h, txs)
 	// Recreate domain and re-scan the files
 	txNum := h.txNum
-	h.Close()
-	h, err = NewHistory(path, path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals, nil)
+	require.NoError(t, h.reOpenFolder())
+	//h.Close()
+	//h, err = NewHistory(path, path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals, nil)
 	require.NoError(t, err)
-	defer h.Close()
 	h.SetTxNum(txNum)
 	// Check the history
 	checkHistoryHistory(t, db, h, txs)

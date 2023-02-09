@@ -150,8 +150,8 @@ func NewDomain(
 		valsTable: valsTable,
 		prefixLen: prefixLen,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		roFiles:   *atomic2.NewPointer(&[]ctxItem{}),
 	}
-	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals, []string{"kv"}); err != nil {
@@ -303,6 +303,8 @@ func (d *Domain) closeFiles() {
 		}
 		return true
 	})
+	d.files.Clear()
+	d.reCalcRoFiles()
 }
 
 func (d *Domain) reCalcRoFiles() {
@@ -1204,21 +1206,21 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	var found bool
 	var anyItem bool // Whether any filesItem has been looked at in the loop below
 	var topState ctxItem
-	for _, item := range dc.hc.invIndexFiles {
+	for _, item := range dc.hc.ic.files {
 		if item.endTxNum < txNum {
 			continue
 		}
 		topState = item
 		break
 	}
-	for _, item := range dc.hc.invIndexFiles {
+	for _, item := range dc.hc.ic.files {
 		if item.endTxNum < txNum {
 			continue
 		}
 		anyItem = true
-		reader := dc.hc.invStatelessIdxReader(item.i)
+		reader := dc.hc.ic.statelessIdxReader(item.i)
 		offset := reader.Lookup(key)
-		g := dc.hc.invStatelessGetter(item.i)
+		g := dc.hc.ic.statelessGetter(item.i)
 		g.Reset(offset)
 		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
 			eliasVal, _ := g.NextUncompressed()
@@ -1305,13 +1307,13 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-	historyItem, ok := dc.hc.getHistFile(foundStartTxNum, foundEndTxNum)
+	historyItem, ok := dc.hc.getFile(foundStartTxNum, foundEndTxNum)
 	if !ok {
 		return nil, false, fmt.Errorf("no %s file found for [%x]", dc.d.filenameBase, key)
 	}
-	reader := dc.hc.histStatelessIdxReader(historyItem.i)
+	reader := dc.hc.statelessIdxReader(historyItem.i)
 	offset := reader.Lookup2(txKey[:], key)
-	g := dc.hc.histStatelessGetter(historyItem.i)
+	g := dc.hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 	if dc.d.compressVals {
 		v, _ := g.Next(nil)

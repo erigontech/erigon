@@ -53,8 +53,7 @@ import (
 )
 
 type InvertedIndex struct {
-	integrityFileExtensions []string
-	files                   *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
@@ -66,8 +65,11 @@ type InvertedIndex struct {
 	filenameBase    string
 	aggregationStep uint64
 	compressWorkers int
-	localityIndex   *LocalityIndex
-	tx              kv.RwTx
+
+	integrityFileExtensions []string
+	withLocalityIndex       bool
+	localityIndex           *LocalityIndex
+	tx                      kv.RwTx
 
 	// fields for history write
 	txNum      uint64
@@ -89,32 +91,39 @@ func NewInvertedIndex(
 		dir:                     dir,
 		tmpdir:                  tmpdir,
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
+		roFiles:                 *atomic2.NewPointer(&[]ctxItem{}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
 		indexKeysTable:          indexKeysTable,
 		indexTable:              indexTable,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,
+		withLocalityIndex:       withLocalityIndex,
 	}
-	ii.roFiles.Store(&[]ctxItem{})
-
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
-	}
-	_ = ii.scanStateFiles(files, ii.integrityFileExtensions)
-	if err := ii.openFiles(); err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
-	}
-
-	if withLocalityIndex {
-		ii.localityIndex, err = NewLocalityIndex(dir, tmpdir, aggregationStep, filenameBase)
+	if ii.withLocalityIndex {
+		var err error
+		ii.localityIndex, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase)
 		if err != nil {
-			return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
+			return nil, fmt.Errorf("NewHistory: %s, %w", ii.filenameBase, err)
 		}
 	}
-
+	//if err := ii.reOpenFolder(); err != nil {
+	//	return nil, err
+	//}
 	return &ii, nil
+}
+func (ii *InvertedIndex) reOpenFolder() error {
+	ii.closeFiles()
+	files, err := os.ReadDir(ii.dir)
+	if err != nil {
+		return err
+	}
+	_ = ii.scanStateFiles(files, ii.integrityFileExtensions)
+	if err = ii.openFiles(); err != nil {
+		return fmt.Errorf("NewHistory.openFiles: %s, %w", ii.filenameBase, err)
+	}
+
+	return ii.localityIndex.reOpenFolder()
 }
 
 func (ii *InvertedIndex) scanStateFiles(files []fs.DirEntry, integrityFileExtensions []string) (uselessFiles []*filesItem) {
@@ -331,13 +340,15 @@ func (ii *InvertedIndex) closeFiles() {
 		}
 		return true
 	})
+	if ii.localityIndex != nil {
+		ii.localityIndex.Close()
+	}
+	ii.files.Clear()
+	ii.reCalcRoFiles()
 }
 
 func (ii *InvertedIndex) Close() {
 	ii.closeFiles()
-	if ii.localityIndex != nil {
-		ii.localityIndex.Close()
-	}
 }
 
 func (ii *InvertedIndex) Files() (res []string) {
@@ -780,9 +791,43 @@ func (it *InvertedIterator) ToBitmap() (*roaring64.Bitmap, error) {
 }
 
 type InvertedIndexContext struct {
-	ii    *InvertedIndex
-	files []ctxItem // have no garbage (overlaps, etc...)
-	loc   ctxLocalityItem
+	ii      *InvertedIndex
+	files   []ctxItem // have no garbage (overlaps, etc...)
+	getters []*compress.Getter
+	readers []*recsplit.IndexReader
+	loc     ctxLocalityItem
+}
+
+func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {
+	if ic.getters == nil {
+		ic.getters = make([]*compress.Getter, len(ic.files))
+	}
+	r := ic.getters[i]
+	if r == nil {
+		r = ic.files[i].src.decompressor.MakeGetter()
+		ic.getters[i] = r
+	}
+	return r
+}
+func (ic *InvertedIndexContext) statelessIdxReader(i int) *recsplit.IndexReader {
+	if ic.readers == nil {
+		ic.readers = make([]*recsplit.IndexReader, len(ic.files))
+	}
+	r := ic.readers[i]
+	if r == nil {
+		r = recsplit.NewIndexReader(ic.files[i].src.index)
+		ic.readers[i] = r
+	}
+	return r
+}
+
+func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
+	for _, item := range ic.files {
+		if item.startTxNum == from && item.endTxNum == to {
+			return item, true
+		}
+	}
+	return it, false
 }
 
 // IterateRange is to be used in public API, therefore it relies on read-only transaction

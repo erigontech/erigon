@@ -114,6 +114,35 @@ func NewAggregator(
 	return a, nil
 }
 
+func (a *Aggregator) ReopenFolder() error {
+	var err error
+	if err = a.accounts.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.storage.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.code.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.commitment.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.logAddrs.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.logTopics.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.tracesFrom.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	if err = a.tracesTo.reOpenFolder(); err != nil {
+		return fmt.Errorf("ReopenFolder: %w", err)
+	}
+	return nil
+}
+
 func (a *Aggregator) GetAndResetStats() DomainStats {
 	stats := DomainStats{}
 	stats.Accumulate(a.accounts.GetAndResetStats())

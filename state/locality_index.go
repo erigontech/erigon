@@ -60,15 +60,23 @@ func NewLocalityIndex(
 		aggregationStep: aggregationStep,
 		filenameBase:    filenameBase,
 	}
-	files, err := os.ReadDir(dir)
+	return li, nil
+}
+func (li *LocalityIndex) reOpenFolder() error {
+	if li == nil {
+		return nil
+	}
+
+	li.closeFiles()
+	files, err := os.ReadDir(li.dir)
 	if err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
+		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
 	}
 	_ = li.scanStateFiles(files)
 	if err = li.openFiles(); err != nil {
-		return nil, fmt.Errorf("NewInvertedIndex: %s, %w", filenameBase, err)
+		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
 	}
-	return li, nil
+	return nil
 }
 
 func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []*filesItem) {
