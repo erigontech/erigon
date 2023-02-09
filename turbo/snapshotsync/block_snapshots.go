@@ -1716,11 +1716,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if err != nil {
 		return err
 	}
-	idxLogLvl := log.LvlDebug
-	if d.Count() > 1_000_000 {
-		idxLogLvl = log.LvlInfo
-	}
-	txnHashIdx.LogLvl(idxLogLvl)
+	txnHashIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 	parseCtx := types2.NewTxParseContext(chainID)
@@ -1901,7 +1897,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(lvl)
+	rs.LogLvl(log.LvlDebug)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
