@@ -87,7 +87,18 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	signer := types.MakeSigner(chainConfig, block.NumberU64())
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
-	for idx, txn := range block.Transactions() {
+
+	var borTx types.Transaction
+	borTx, _, _, _, err = rawdb.ReadBorTransactionForBlockNumber(tx, block.NumberU64())
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	txns := block.Transactions()
+	txns = append(txns, borTx)
+
+	for idx, txn := range txns {
 		stream.WriteObjectStart()
 		stream.WriteObjectField("result")
 		select {
@@ -112,7 +123,13 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+		if borTx != nil && idx == len(block.Transactions()) {
+			config.BorTx = newBoolPtr(true)
+			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+		} else {
+			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+		}
+
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
@@ -459,4 +476,9 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 	stream.WriteArrayEnd()
 	return nil
+}
+
+func newBoolPtr(bb bool) *bool {
+	b := bb
+	return &b
 }
