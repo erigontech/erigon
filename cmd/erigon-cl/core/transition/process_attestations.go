@@ -86,7 +86,7 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) (
 	}
 	proposerRewardDenominator := (s.beaconConfig.WeightDenominator - s.beaconConfig.ProposerWeight) * s.beaconConfig.WeightDenominator / s.beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
-	return attestingIndicies, s.state.IncreaseBalance(int(proposer), reward)
+	return attestingIndicies, s.state.IncreaseBalance(proposer, reward)
 }
 
 type verifyAttestationWorkersResult struct {
