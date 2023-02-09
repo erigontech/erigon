@@ -30,6 +30,7 @@ func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpec
 }
 
 /* Broken tests lol.
+
 //go:embed test_data/rewards_penalty_test_expected.ssz_snappy
 var expectedRewardsPenaltyState []byte
 
