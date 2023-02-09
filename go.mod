@@ -78,8 +78,8 @@ require (
 	github.com/tidwall/btree v1.5.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli/v2 v2.23.7
-	github.com/valyala/fastjson v1.6.3
+	github.com/urfave/cli/v2 v2.24.3
+	github.com/valyala/fastjson v1.6.4
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.10.0
 	go.uber.org/zap v1.23.0
