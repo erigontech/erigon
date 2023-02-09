@@ -358,6 +358,18 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 
+	if to == 0 {
+		var forwardProgress uint64
+		db.View(ctx, func(tx kv.Tx) error {
+			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			return err
+		})
+		from2, to2, ok := snapshotsync.CanRetire(forwardProgress, br.Snapshots())
+		if ok {
+			from, to, every = from2, to2, to2-from2
+		}
+	}
+
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
@@ -387,7 +399,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
@@ -432,7 +444,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
