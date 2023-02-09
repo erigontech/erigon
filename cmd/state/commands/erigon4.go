@@ -15,11 +15,12 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -243,7 +244,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return nil
 	}
 
-	agg.SetCommitFn(commitFn)
+	mergedRoots := agg.AggregatedRoots()
+	defer close(mergedRoots)
 
 	for !interrupt {
 		blockNum++
@@ -272,9 +274,13 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		select {
 		case interrupt = <-interruptCh:
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --block %d", blockNum))
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
 			if err := commitFn(txNum); err != nil {
 				log.Error("db commit", "err", err)
+			}
+		case <-mergedRoots:
+			if err := commitFn(txNum); err != nil {
+				log.Error("db commit on merge", "err", err)
 			}
 		default:
 		}
