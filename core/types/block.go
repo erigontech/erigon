@@ -1196,19 +1196,8 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.Transactions {
-		switch t := tx.(type) {
-		case *LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
@@ -1385,8 +1374,13 @@ func CopyHeader(h *Header) *Header {
 		cpy.BaseFee = new(big.Int)
 		cpy.BaseFee.Set(h.BaseFee)
 	}
+	if h.WithdrawalsHash != nil {
+		cpy.WithdrawalsHash = new(libcommon.Hash)
+		*cpy.WithdrawalsHash = *h.WithdrawalsHash
+	}
 	if h.ExcessDataGas != nil {
-		cpy.SetExcessDataGas(h.ExcessDataGas)
+		cpy.ExcessDataGas = new(big.Int)
+		cpy.ExcessDataGas.Set(h.ExcessDataGas)
 	}
 	if len(h.Extra) > 0 {
 		cpy.Extra = make([]byte, len(h.Extra))
@@ -1395,10 +1389,6 @@ func CopyHeader(h *Header) *Header {
 	if len(h.AuRaSeal) > 0 {
 		cpy.AuRaSeal = make([]byte, len(h.AuRaSeal))
 		copy(cpy.AuRaSeal, h.AuRaSeal)
-	}
-	if h.WithdrawalsHash != nil {
-		cpy.WithdrawalsHash = new(libcommon.Hash)
-		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
 	}
 	return &cpy
 }

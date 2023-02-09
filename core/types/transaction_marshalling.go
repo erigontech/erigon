@@ -419,9 +419,10 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, err
 	}
 	tx := SignedBlobTx{}
-	// Access list is optional for now.
 	if dec.AccessList != nil {
 		tx.Message.AccessList = AccessListView(*dec.AccessList)
+	} else {
+		tx.Message.AccessList = AccessListView([]types2.AccessTuple{})
 	}
 	if dec.ChainID == nil {
 		return nil, errors.New("missing required field 'chainId' in transaction")
@@ -475,7 +476,11 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	}
 	tx.Message.MaxFeePerDataGas = Uint256View(*maxFeePerDataGas)
 
-	tx.Message.BlobVersionedHashes = VersionedHashesView(dec.BlobVersionedHashes)
+	if dec.BlobVersionedHashes != nil {
+		tx.Message.BlobVersionedHashes = VersionedHashesView(dec.BlobVersionedHashes)
+	} else {
+		tx.Message.BlobVersionedHashes = VersionedHashesView([]libcommon.Hash{})
+	}
 
 	if dec.V == nil {
 		return nil, errors.New("missing required field 'v' in transaction")
@@ -529,6 +534,13 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		BlobKzgs:           dec.BlobKzgs,
 		Blobs:              dec.Blobs,
 		KzgAggregatedProof: dec.KzgAggregatedProof,
+	}
+	// Make sure the blob & kzg lists are non-nil
+	if btx.Blobs == nil {
+		btx.Blobs = Blobs([]Blob{})
+	}
+	if btx.BlobKzgs == nil {
+		btx.BlobKzgs = BlobKzgs([]KZGCommitment{})
 	}
 	err := btx.VerifyBlobs()
 	if err != nil {

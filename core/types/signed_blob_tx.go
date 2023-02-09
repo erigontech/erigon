@@ -261,6 +261,7 @@ func (atv *AccessTupleView) FixedLength() uint64 {
 type AccessListView types2.AccessList
 
 func (alv *AccessListView) Deserialize(dr *codec.DecodingReader) error {
+	*alv = AccessListView([]types2.AccessTuple{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*alv)
 		*alv = append(*alv, types2.AccessTuple{})

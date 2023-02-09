@@ -522,6 +522,70 @@ func blockValue(block *types.Block, baseFee *uint256.Int) *uint256.Int {
 	return blockValue
 }
 
+// GetBlobsBundleV1 returns a bundle of all blobs and their corresponding KZG commitments by payload id
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	if !s.proposing {
+		return nil, fmt.Errorf("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
+	}
+
+	if s.config.TerminalTotalDifficulty == nil {
+		return nil, fmt.Errorf("not a proof-of-stake chain")
+	}
+
+	log.Debug("[GetBlobsBundleV1] acquiring lock")
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	log.Debug("[GetBlobsBundleV1] lock acquired")
+
+	builder, ok := s.builders[req.PayloadId]
+	if !ok {
+		log.Warn("Payload not stored", "payloadId", req.PayloadId)
+		return nil, &UnknownPayloadErr
+	}
+
+	block, err := builder.Stop()
+	if err != nil {
+		log.Error("Failed to build PoS block", "err", err)
+		return nil, err
+	}
+
+	blobsBundle := &types2.BlobsBundleV1{
+		BlockHash: gointerfaces.ConvertHashToH256(block.Header().Hash()),
+	}
+	for i, tx := range block.Transactions() {
+		if tx.Type() != types.BlobTxType {
+			continue
+		}
+		blobtx, ok := tx.(*types.BlobTxWrapper)
+		if !ok {
+			return nil, fmt.Errorf("expected blob transaction to be type BlobTxWrapper, got: %T", blobtx)
+		}
+		versionedHashes, kzgs, blobs, aggProof := blobtx.GetDataHashes(), blobtx.BlobKzgs, blobtx.Blobs, blobtx.KzgAggregatedProof
+		if len(versionedHashes) != len(kzgs) || len(versionedHashes) != len(blobs) {
+			return nil, fmt.Errorf("tx %d in block %s has inconsistent blobs (%d) / kzgs (%d)"+
+				" / versioned hashes (%d)", i, block.Hash(), len(blobs), len(kzgs), len(versionedHashes))
+		}
+		var zProof types.KZGProof
+		if zProof == aggProof {
+			return nil, errors.New("aggregated proof is missing")
+		}
+		// Convert each blob of field elements into a flat blob of bytes
+		for _, blob := range blobs {
+			out := make([]byte, params.FieldElementsPerBlob*32)
+			j := 0
+			for _, elem := range blob {
+				copy(out[j:j+32], elem[:])
+				j += 32
+			}
+			blobsBundle.Blobs = append(blobsBundle.Blobs, out)
+		}
+		for _, kzg := range kzgs {
+			blobsBundle.Kzgs = append(blobsBundle.Kzgs, kzg[:])
+		}
+	}
+	return blobsBundle, nil
+}
+
 // EngineGetPayload retrieves previously assembled payload (Validators only)
 func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.EngineGetPayloadRequest) (*remote.EngineGetPayloadResponse, error) {
 	if !s.proposing {
@@ -552,10 +616,18 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	baseFee := new(uint256.Int)
 	baseFee.SetFromBig(block.Header().BaseFee)
 
-	encodedTransactions, err := types.MarshalTransactionsBinary(block.Transactions())
+	// The builder gives us blocks in "Network" (aka wrapped) format. We need to unwrap them &
+	// recompute the block hash for the payload.  TODO: This unwrapping should be performed
+	// by the builder, not here.
+	unwrappedTxs := make(types.Transactions, len(block.Transactions()))
+	for i, tx := range block.Transactions() {
+		unwrappedTxs[i] = tx.Unwrap()
+	}
+	encodedTransactions, err := types.MarshalTransactionsBinary(unwrappedTxs)
 	if err != nil {
 		return nil, err
 	}
+	block.HeaderNoCopy().TxHash = types.DeriveSha(types.Transactions(unwrappedTxs))
 
 	payload := &types2.ExecutionPayload{
 		Version:       1,
@@ -571,7 +643,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		BlockNumber:   block.NumberU64(),
 		ExtraData:     block.Extra(),
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(block.Header().Hash()),
+		BlockHash:     gointerfaces.ConvertHashToH256(block.HeaderNoCopy().Hash()),
 		Transactions:  encodedTransactions,
 	}
 	if block.Withdrawals() != nil {

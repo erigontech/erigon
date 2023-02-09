@@ -66,6 +66,7 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		return nil, nil, err
 	}
 	*usedGas += result.UsedGas
+	*usedDataGas = result.UsedDataGas
 
 	// Set the receipt logs and create the bloom filter.
 	// based on the eip phase, we're passing whether the root touch-delete accounts.

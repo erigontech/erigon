@@ -259,9 +259,12 @@ func ExecuteBlockEphemerally(
 	)
 
 	var excessDataGas *big.Int
-	ph := chainReader.GetHeaderByHash(block.ParentHash())
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
+	if chainReader != nil {
+		// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
+		ph := chainReader.GetHeaderByHash(block.ParentHash())
+		if ph != nil {
+			excessDataGas = ph.ExcessDataGas
+		}
 	}
 
 	if !vmConfig.ReadOnly {

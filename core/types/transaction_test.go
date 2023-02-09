@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"math/bits"
 	"reflect"
 	"testing"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/protolambda/go-kzg/bls"
 	"github.com/protolambda/ztyp/view"
 )
 
@@ -447,7 +449,7 @@ func TestTransactionCoding(t *testing.T) {
 	)
 	for i := uint64(0); i < 500; i++ {
 		var txdata Transaction
-		switch i % 5 {
+		switch i % 6 {
 		case 0:
 			// Legacy tx.
 			txdata = &LegacyTx{
@@ -511,17 +513,54 @@ func TestTransactionCoding(t *testing.T) {
 				},
 				AccessList: accesses,
 			}
+		case 5:
+			hashVersion := []libcommon.Hash{libcommon.BytesToHash([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})}
+			txdata = &SignedBlobTx{
+				Message: BlobTxMessage{
+					ChainID:             view.Uint256View(*uint256.NewInt(1)),
+					Nonce:               view.Uint64View(i),
+					AccessList:          AccessListView(accesses),
+					MaxFeePerDataGas:    view.Uint256View(*uint256.NewInt(10)),
+					BlobVersionedHashes: VersionedHashesView(hashVersion),
+				},
+			}
+		case 6:
+			hashVersion := []libcommon.Hash{libcommon.BytesToHash([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9})}
+			inner := SignedBlobTx{
+				Message: BlobTxMessage{
+					ChainID:             view.Uint256View(*uint256.NewInt(1)),
+					Nonce:               view.Uint64View(i),
+					AccessList:          AccessListView(accesses),
+					MaxFeePerDataGas:    view.Uint256View(*uint256.NewInt(10)),
+					BlobVersionedHashes: VersionedHashesView(hashVersion),
+				},
+			}
+			var kzgProof KZGProof
+			copy(kzgProof[:], bls.ToCompressedG1((*bls.G1Point)(&bls.ZeroG1)))
+			txdata = &BlobTxWrapper{
+				Tx:                 inner,
+				BlobKzgs:           BlobKzgs{KZGCommitment{0: 0xc0}},
+				Blobs:              Blobs{Blob{}},
+				KzgAggregatedProof: kzgProof,
+			}
 		}
 		tx, err := SignNewTx(key, *signer, txdata)
 		if err != nil {
 			t.Fatalf("could not sign transaction: %v", err)
 		}
-		// RLP
+		// RLP or SSZ
 		parsedTx, err := encodeDecodeBinary(tx)
 		if err != nil {
+			t.Errorf("fail on test %v: %v", i, err)
+		} else if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
-		if err = assertEqual(parsedTx, tx); err != nil {
+
+		// RLP
+		parsedTx, err = encodeDecodeRLPAndCheckSize(tx)
+		if err != nil {
+			t.Errorf("fail %v: %v", i, err)
+		} else if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
 
@@ -533,42 +572,6 @@ func TestTransactionCoding(t *testing.T) {
 		if err = assertEqual(parsedTx, tx); err != nil {
 			t.Fatal(err)
 		}
-	}
-}
-
-func TestBlobTransactionMinimalCodec(t *testing.T) {
-	key, err := crypto.GenerateKey()
-	if err != nil {
-		t.Fatalf("could not generate key: %v", err)
-	}
-	var (
-		signer   = LatestSignerForChainID(libcommon.Big1)
-		addr     = libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
-		accesses = types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
-	)
-
-	txdata := &SignedBlobTx{
-		Message: BlobTxMessage{
-			ChainID:             view.Uint256View(*uint256.NewInt(1)),
-			Nonce:               view.Uint64View(1),
-			Gas:                 view.Uint64View(123457),
-			GasTipCap:           view.Uint256View(*uint256.NewInt(42)),
-			GasFeeCap:           view.Uint256View(*uint256.NewInt(10)),
-			AccessList:          AccessListView(accesses),
-			BlobVersionedHashes: VersionedHashesView{libcommon.HexToHash("0x01624652859a6e98ffc1608e2af0147ca4e86e1ce27672d8d3f3c9d4ffd6ef7e")},
-			MaxFeePerDataGas:    view.Uint256View(*uint256.NewInt(10000000)),
-		},
-	}
-	tx, err := SignNewTx(key, *signer, txdata)
-	if err != nil {
-		t.Fatalf("could not sign transaction: %v", err)
-	}
-	parsedTx, err := encodeDecodeJSON(tx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := assertEqual(parsedTx, tx); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -592,6 +595,36 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 	}
 	var parsedTx Transaction
 	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
+		return nil, fmt.Errorf("rlp decoding failed: %w", err)
+	}
+	return parsedTx, nil
+}
+
+func encodeDecodeRLPAndCheckSize(tx Transaction) (Transaction, error) {
+	var buf bytes.Buffer
+	var err error
+
+	if err := tx.EncodeRLP(&buf); err != nil {
+		return nil, err
+	}
+
+	// Confirm tx.Size() computes the right value
+	computedSize := tx.EncodingSize()
+
+	// Adjust the size to account for the struct size prefix value
+	if computedSize >= 56 {
+		computedSize += (bits.Len(uint(computedSize)) + 7) / 8
+	}
+	computedSize++
+
+	actualSize := buf.Len()
+	if computedSize != actualSize {
+		return nil, fmt.Errorf("Computed size (%v) doesn't equal actual size (%v)", computedSize, actualSize)
+	}
+
+	var parsedTx Transaction
+	s := rlp.NewStream(&buf, 0)
+	if parsedTx, err = DecodeRLPTransaction(s); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %w", err)
 	}
 	return parsedTx, nil
