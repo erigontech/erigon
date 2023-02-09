@@ -358,6 +358,18 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 
+	if to == 0 {
+		var forwardProgress uint64
+		db.View(ctx, func(tx kv.Tx) error {
+			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
+			return err
+		})
+		from2, to2, ok := snapshotsync.CanRetire(forwardProgress, br.Snapshots())
+		if ok {
+			from, to = from2, to2
+		}
+	}
+
 	log.Info("Params", "from", from, "to", to, "every", every)
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo); err != nil {
