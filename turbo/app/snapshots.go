@@ -366,7 +366,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		})
 		from2, to2, ok := snapshotsync.CanRetire(forwardProgress, br.Snapshots())
 		if ok {
-			from, to = from2, to2
+			from, to, every = from2, to2, to2-from2
 		}
 	}
 
