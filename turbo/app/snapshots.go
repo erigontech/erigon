@@ -399,7 +399,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
@@ -444,7 +444,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	for i := 0; i < 1024; i++ {
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
 			agg.SetTx(tx)
-			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep); err != nil {
+			if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil {
 				return err
 			}
 			return err
