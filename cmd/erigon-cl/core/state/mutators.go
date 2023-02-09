@@ -4,12 +4,12 @@ import (
 	"fmt"
 )
 
-func (b *BeaconState) IncreaseBalance(index int, delta uint64) error {
-	currentBalance, err := b.ValidatorBalance(index)
+func (b *BeaconState) IncreaseBalance(index, delta uint64) error {
+	currentBalance, err := b.ValidatorBalance(int(index))
 	if err != nil {
 		return err
 	}
-	return b.SetValidatorBalance(index, currentBalance+delta)
+	return b.SetValidatorBalance(int(index), currentBalance+delta)
 }
 
 func (b *BeaconState) DecreaseBalance(index, delta uint64) error {
@@ -101,8 +101,8 @@ func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error 
 	}
 	whistleBlowerReward := newValidator.EffectiveBalance / b.beaconConfig.WhistleBlowerRewardQuotient
 	proposerReward := whistleBlowerReward / b.beaconConfig.ProposerRewardQuotient
-	if err := b.IncreaseBalance(int(proposerInd), proposerReward); err != nil {
+	if err := b.IncreaseBalance(proposerInd, proposerReward); err != nil {
 		return err
 	}
-	return b.IncreaseBalance(int(whistleblowerInd), whistleBlowerReward)
+	return b.IncreaseBalance(whistleblowerInd, whistleBlowerReward)
 }
