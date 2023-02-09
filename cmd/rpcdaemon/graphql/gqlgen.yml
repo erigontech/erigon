@@ -37,12 +37,12 @@ resolver:
 # resolvers_always_return_pointers: true
 
 # Optional: set to speed up generation time by not performing a final validation pass.
-skip_validation: false
+skip_validation: true
 
 # gqlgen will search for any type names in the schema in these go packages
 # if they match it will use them, otherwise it will generate them.
 autobind:
-#  - "github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
+  - "github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
 
 # This section declares type mapping between the GraphQL and go type systems
 #
@@ -61,3 +61,22 @@ models:
       - github.com/99designs/gqlgen/graphql.Int
       - github.com/99designs/gqlgen/graphql.Int64
       - github.com/99designs/gqlgen/graphql.Int32
+  Long:
+    model:
+      - github.com/99designs/gqlgen/graphql.Int64
+  ULong:
+    model:
+      - github.com/99designs/gqlgen/graphql.Uint64
+  BigInt:
+    model:
+      - github.com/99designs/gqlgen/graphql.String
+#  Block:
+#    fields:
+#      logs:
+#        resolver: true # force a resolver to be generated
+#      ommers:
+#        resolver: true # force a resolver to be generated
+#      transactions:
+#        resolver: true # force a resolver to be generated
+
+omit_getters: true

@@ -6,15 +6,10 @@ package graph
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
-	"reflect"
 	"strconv"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
-	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -23,109 +18,26 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 	panic(fmt.Errorf("not implemented: SendRawTransaction - sendRawTransaction"))
 }
 
-func convertDataToStringP(abstractMap map[string]interface{}, field string, transforms ...string) *string {
-	var result string
-
-	switch abstractMap[field].(type) {
-	case int64:
-		result = strconv.FormatInt(abstractMap[field].(int64), 10)
-		break
-	case *hexutil.Big:
-		result = abstractMap[field].(*hexutil.Big).String()
-		// result = mapp[field].(*hexutil.Big).ToInt().String()
-		break
-	case hexutil.Bytes:
-		result = abstractMap[field].(hexutil.Bytes).String()
-		break
-	case hexutil.Uint:
-		result = abstractMap[field].(hexutil.Uint).String()
-		break
-	case hexutil.Uint64:
-		result = abstractMap[field].(hexutil.Uint64).String()
-		break
-	case *libcommon.Address:
-		result = abstractMap[field].(*libcommon.Address).String()
-		break
-	case libcommon.Address:
-		result = abstractMap[field].(libcommon.Address).String()
-		break
-	case libcommon.Hash:
-		result = abstractMap[field].(libcommon.Hash).String()
-		break
-	case types.Bloom:
-		result = hex.EncodeToString(abstractMap[field].(types.Bloom).Bytes())
-		break
-	case types.BlockNonce:
-		result = "0x" + strconv.FormatInt(int64(abstractMap[field].(types.BlockNonce).Uint64()), 16)
-		break
-	default:
-		fmt.Println("string", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
-		result = "unhandled"
-	}
-	return &result
-}
-
-func convertDataToIntP(abstractMap map[string]interface{}, field string, transforms ...string) *int {
-	var result int
-
-	switch abstractMap[field].(type) {
-	case hexutil.Uint64:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint64).String())
-		if err != nil {
-			result = 0
-		} else {
-			result = int(resultUint)
-		}
-		break
-	case hexutil.Uint:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint).String())
-		if err != nil {
-			result = 0
-		} else {
-			result = int(resultUint)
-		}
-		break
-	case int:
-		result = abstractMap[field].(int)
-		break
-
-	default:
-		fmt.Println("int", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
-		result = 0
-	}
-
-	return &result
-}
-
-func convertStrHexToDec(hexString *string) *string {
-	var result string
-
-	resUInt64, err := hexutil.DecodeUint64(*hexString)
-	if err != nil {
-		fmt.Println(err)
-		result = "0"
-	}
-	result = strconv.FormatUint(resUInt64, 10)
-
-	return &result
-}
-
 // Block is the resolver for the block field.
-func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
-	blockNumberInt64, _ := strconv.ParseInt(*number, 10, 64)
-	blockNumber := rpc.BlockNumber(blockNumberInt64)
+func (r *queryResolver) Block(ctx context.Context, number *int64, hash *string) (*model.Block, error) {
+	var blockNumber rpc.BlockNumber
+
+	// If number is not specified (nil), we should deliver "latest" block
+	if number == nil {
+		blockNumber = rpc.LatestExecutedBlockNumber
+	} else {
+		if *number < 0 {
+			var err error
+			return nil, err
+		}
+		blockNumber = rpc.BlockNumber(*number)
+	}
 
 	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber)
 	if err != nil {
 		fmt.Println(err)
 		return nil, err
 	}
-	/*
-		fmt.Println(res["blocks"])
-		fmt.Println(res["issuance"])
-		fmt.Println(res["receipts"])
-		fmt.Println(res["totalFees"])
-	*/
 
 	absBlk := res["block"]
 	blk := absBlk.(map[string]interface{})
@@ -133,20 +45,20 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	block := &model.Block{}
 	block.Difficulty = *convertDataToStringP(blk, "difficulty")
 	block.ExtraData = *convertDataToStringP(blk, "extraData")
-	block.GasLimit = *convertStrHexToDec(convertDataToStringP(blk, "gasLimit"))
-	block.GasUsed = *convertStrHexToDec(convertDataToStringP(blk, "gasUsed"))
+	block.GasLimit = int64(*convertDataToInt64P(blk, "gasLimit"))
+	block.GasUsed = convertDataToInt64P(blk, "gasUsed")
 	block.Hash = *convertDataToStringP(blk, "hash")
 	block.Miner = &model.Account{}
 	block.Miner.Address = *convertDataToStringP(blk, "miner")
 	block.MixHash = *convertDataToStringP(blk, "mixHash")
 	block.Nonce = *convertDataToStringP(blk, "nonce")
-	block.Number = *convertStrHexToDec(convertDataToStringP(blk, "number"))
+	block.Number, _ = strconv.ParseInt(*convertDataToStringP(blk, "number"), 10, 64)
 	block.Ommers = []*model.Block{}
 	block.Parent = &model.Block{}
 	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
 	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = *convertDataToStringP(blk, "timestamp")
+	block.Timestamp = int64(*convertDataToIntP(blk, "timestamp"))
 	block.TransactionCount = convertDataToIntP(blk, "transactionCount")
 	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
@@ -156,12 +68,12 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	rcp := absRcp.([]map[string]interface{})
 	for _, transReceipt := range rcp {
 		trans := &model.Transaction{}
-		trans.CumulativeGasUsed = convertStrHexToDec(convertDataToStringP(transReceipt, "cumulativeGasUsed"))
-		trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
-		trans.GasUsed = convertStrHexToDec(convertDataToStringP(transReceipt, "gasUsed"))
+		trans.CumulativeGasUsed = convertDataToInt64P(transReceipt, "cumulativeGasUsed")
+		trans.EffectiveGasPrice = convertDataToInt64P(transReceipt, "effectiveGasPrice")
+		trans.GasUsed = convertDataToInt64P(transReceipt, "gasUsed")
 		trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
 		trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
-		trans.Status = convertStrHexToDec(convertDataToStringP(transReceipt, "status"))
+		trans.Status = convertDataToInt64P(transReceipt, "status")
 		trans.Type = convertDataToIntP(transReceipt, "type")
 		// convertDataToStringP(transReceipt, "logsBloom")
 
@@ -178,9 +90,8 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 }
 
 // Blocks is the resolver for the blocks field.
-func (r *queryResolver) Blocks(ctx context.Context, from *string, to *string) ([]*model.Block, error) {
-	blocks := []*model.Block{}
-	return blocks, ctx.Err()
+func (r *queryResolver) Blocks(ctx context.Context, from *int64, to *int64) ([]*model.Block, error) {
+	panic(fmt.Errorf("not implemented: Blocks - blocks"))
 }
 
 // Pending is the resolver for the pending field.

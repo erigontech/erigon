@@ -20,8 +20,6 @@ import (
 
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
-	// GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]interface{}, error)
-	// GetBlockTransactions(ctx context.Context, number rpc.BlockNumber, pageNumber uint8, pageSize uint8) (map[string]interface{}, error)
 }
 
 type GraphQLAPIImpl struct {
@@ -36,19 +34,24 @@ func NewGraphQLAPI(base *BaseAPI, db kv.RoDB) *GraphQLAPIImpl {
 	}
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error) {
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	b, senders, err := api.getBlockWithSenders(ctx, number, tx)
+	block, _, err := api.getBlockWithSenders(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
-	if b == nil {
+	if block == nil {
 		return nil, nil
+	}
+
+	getBlockRes, err := api.delegateGetBlockByNumber(tx, block, blockNumber, false)
+	if err != nil {
+		return nil, err
 	}
 
 	chainConfig, err := api.chainConfig(tx)
@@ -56,20 +59,17 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Block
 		return nil, err
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, b, b.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
-		txn := b.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true))
+		txn := block.Transactions()[receipt.TransactionIndex]
+		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
-	getBlockRes, err := api.delegateGetBlockByNumber(tx, b, number, false)
-	if err != nil {
-		return nil, err
-	}
+	/*
 	getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
 	if err != nil {
 		return nil, err
@@ -78,12 +78,14 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Block
 	if err != nil {
 		return nil, err
 	}
+	*/
 
 	response := map[string]interface{}{}
 	response["block"] = getBlockRes
-	response["issuance"] = getIssuanceRes
-	response["totalFees"] = hexutil.Uint64(feesRes)
 	response["receipts"] = result
+	//	response["issuance"] = getIssuanceRes
+	//	response["totalFees"] = hexutil.Uint64(feesRes)
+
 	return response, nil
 }
 
@@ -92,12 +94,12 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(number), tx, api.filters)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, hash, n)
+	block, senders, err := api._blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
 	return block, senders, err
 }
 

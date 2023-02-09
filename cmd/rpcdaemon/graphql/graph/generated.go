@@ -69,7 +69,7 @@ type ComplexityRoot struct {
 		Hash              func(childComplexity int) int
 		Logs              func(childComplexity int, filter model.BlockFilterCriteria) int
 		LogsBloom         func(childComplexity int) int
-		Miner             func(childComplexity int, block *string) int
+		Miner             func(childComplexity int, block *int64) int
 		MixHash           func(childComplexity int) int
 		NextBaseFeePerGas func(childComplexity int) int
 		Nonce             func(childComplexity int) int
@@ -98,7 +98,7 @@ type ComplexityRoot struct {
 	}
 
 	Log struct {
-		Account     func(childComplexity int, block *string) int
+		Account     func(childComplexity int, block *int64) int
 		Data        func(childComplexity int) int
 		Index       func(childComplexity int) int
 		Topics      func(childComplexity int) int
@@ -118,8 +118,8 @@ type ComplexityRoot struct {
 	}
 
 	Query struct {
-		Block                func(childComplexity int, number *string, hash *string) int
-		Blocks               func(childComplexity int, from *string, to *string) int
+		Block                func(childComplexity int, number *int64, hash *string) int
+		Blocks               func(childComplexity int, from *int64, to *int64) int
 		ChainID              func(childComplexity int) int
 		GasPrice             func(childComplexity int) int
 		Logs                 func(childComplexity int, filter model.FilterCriteria) int
@@ -138,11 +138,11 @@ type ComplexityRoot struct {
 	Transaction struct {
 		AccessList           func(childComplexity int) int
 		Block                func(childComplexity int) int
-		CreatedContract      func(childComplexity int, block *string) int
+		CreatedContract      func(childComplexity int, block *int64) int
 		CumulativeGasUsed    func(childComplexity int) int
 		EffectiveGasPrice    func(childComplexity int) int
 		EffectiveTip         func(childComplexity int) int
-		From                 func(childComplexity int, block *string) int
+		From                 func(childComplexity int, block *int64) int
 		Gas                  func(childComplexity int) int
 		GasPrice             func(childComplexity int) int
 		GasUsed              func(childComplexity int) int
@@ -158,7 +158,7 @@ type ComplexityRoot struct {
 		RawReceipt           func(childComplexity int) int
 		S                    func(childComplexity int) int
 		Status               func(childComplexity int) int
-		To                   func(childComplexity int, block *string) int
+		To                   func(childComplexity int, block *int64) int
 		Type                 func(childComplexity int) int
 		V                    func(childComplexity int) int
 		Value                func(childComplexity int) int
@@ -169,8 +169,8 @@ type MutationResolver interface {
 	SendRawTransaction(ctx context.Context, data string) (string, error)
 }
 type QueryResolver interface {
-	Block(ctx context.Context, number *string, hash *string) (*model.Block, error)
-	Blocks(ctx context.Context, from *string, to *string) ([]*model.Block, error)
+	Block(ctx context.Context, number *int64, hash *string) (*model.Block, error)
+	Blocks(ctx context.Context, from *int64, to *int64) ([]*model.Block, error)
 	Pending(ctx context.Context) (*model.Pending, error)
 	Transaction(ctx context.Context, hash string) (*model.Transaction, error)
 	Logs(ctx context.Context, filter model.FilterCriteria) ([]*model.Log, error)
@@ -356,7 +356,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Block.Miner(childComplexity, args["block"].(*string)), true
+		return e.complexity.Block.Miner(childComplexity, args["block"].(*int64)), true
 
 	case "Block.mixHash":
 		if e.complexity.Block.MixHash == nil {
@@ -532,7 +532,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Log.Account(childComplexity, args["block"].(*string)), true
+		return e.complexity.Log.Account(childComplexity, args["block"].(*int64)), true
 
 	case "Log.data":
 		if e.complexity.Log.Data == nil {
@@ -634,7 +634,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Query.Block(childComplexity, args["number"].(*string), args["hash"].(*string)), true
+		return e.complexity.Query.Block(childComplexity, args["number"].(*int64), args["hash"].(*string)), true
 
 	case "Query.blocks":
 		if e.complexity.Query.Blocks == nil {
@@ -646,7 +646,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Query.Blocks(childComplexity, args["from"].(*string), args["to"].(*string)), true
+		return e.complexity.Query.Blocks(childComplexity, args["from"].(*int64), args["to"].(*int64)), true
 
 	case "Query.chainID":
 		if e.complexity.Query.ChainID == nil {
@@ -752,7 +752,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Transaction.CreatedContract(childComplexity, args["block"].(*string)), true
+		return e.complexity.Transaction.CreatedContract(childComplexity, args["block"].(*int64)), true
 
 	case "Transaction.cumulativeGasUsed":
 		if e.complexity.Transaction.CumulativeGasUsed == nil {
@@ -785,7 +785,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Transaction.From(childComplexity, args["block"].(*string)), true
+		return e.complexity.Transaction.From(childComplexity, args["block"].(*int64)), true
 
 	case "Transaction.gas":
 		if e.complexity.Transaction.Gas == nil {
@@ -902,7 +902,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Transaction.To(childComplexity, args["block"].(*string)), true
+		return e.complexity.Transaction.To(childComplexity, args["block"].(*int64)), true
 
 	case "Transaction.type":
 		if e.complexity.Transaction.Type == nil {
@@ -1093,10 +1093,10 @@ func (ec *executionContext) field_Block_logs_args(ctx context.Context, rawArgs m
 func (ec *executionContext) field_Block_miner_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["block"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("block"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1138,10 +1138,10 @@ func (ec *executionContext) field_Block_transactionAt_args(ctx context.Context, 
 func (ec *executionContext) field_Log_account_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["block"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("block"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1228,10 +1228,10 @@ func (ec *executionContext) field_Query___type_args(ctx context.Context, rawArgs
 func (ec *executionContext) field_Query_block_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["number"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("number"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1252,19 +1252,19 @@ func (ec *executionContext) field_Query_block_args(ctx context.Context, rawArgs 
 func (ec *executionContext) field_Query_blocks_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["from"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("from"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
 	}
 	args["from"] = arg0
-	var arg1 *string
+	var arg1 *int64
 	if tmp, ok := rawArgs["to"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("to"))
-		arg1, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg1, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1306,10 +1306,10 @@ func (ec *executionContext) field_Query_transaction_args(ctx context.Context, ra
 func (ec *executionContext) field_Transaction_createdContract_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["block"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("block"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1321,10 +1321,10 @@ func (ec *executionContext) field_Transaction_createdContract_args(ctx context.C
 func (ec *executionContext) field_Transaction_from_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["block"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("block"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1336,10 +1336,10 @@ func (ec *executionContext) field_Transaction_from_args(ctx context.Context, raw
 func (ec *executionContext) field_Transaction_to_args(ctx context.Context, rawArgs map[string]interface{}) (map[string]interface{}, error) {
 	var err error
 	args := map[string]interface{}{}
-	var arg0 *string
+	var arg0 *int64
 	if tmp, ok := rawArgs["block"]; ok {
 		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("block"))
-		arg0, err = ec.unmarshalOLong2ᚖstring(ctx, tmp)
+		arg0, err = ec.unmarshalOLong2ᚖint64(ctx, tmp)
 		if err != nil {
 			return nil, err
 		}
@@ -1588,9 +1588,9 @@ func (ec *executionContext) _Account_transactionCount(ctx context.Context, field
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Account_transactionCount(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -1731,9 +1731,9 @@ func (ec *executionContext) _Block_number(ctx context.Context, field graphql.Col
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_number(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2252,9 +2252,9 @@ func (ec *executionContext) _Block_gasLimit(ctx context.Context, field graphql.C
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_gasLimit(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2291,14 +2291,11 @@ func (ec *executionContext) _Block_gasUsed(ctx context.Context, field graphql.Co
 		return graphql.Null
 	}
 	if resTmp == nil {
-		if !graphql.HasFieldError(ctx, fc) {
-			ec.Errorf(ctx, "must not be null")
-		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(*int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalOLong2ᚖint64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2422,9 +2419,9 @@ func (ec *executionContext) _Block_timestamp(ctx context.Context, field graphql.
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_timestamp(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3343,9 +3340,9 @@ func (ec *executionContext) _Block_estimateGas(ctx context.Context, field graphq
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_estimateGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3530,9 +3527,9 @@ func (ec *executionContext) _CallResult_gasUsed(ctx context.Context, field graph
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_CallResult_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -3574,9 +3571,9 @@ func (ec *executionContext) _CallResult_status(ctx context.Context, field graphq
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_CallResult_status(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4235,9 +4232,9 @@ func (ec *executionContext) _Pending_estimateGas(ctx context.Context, field grap
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Pending_estimateGas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -4278,7 +4275,7 @@ func (ec *executionContext) _Query_block(ctx context.Context, field graphql.Coll
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Block(rctx, fc.Args["number"].(*string), fc.Args["hash"].(*string))
+		return ec.resolvers.Query().Block(rctx, fc.Args["number"].(*int64), fc.Args["hash"].(*string))
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -4393,7 +4390,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (interface{}, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Query().Blocks(rctx, fc.Args["from"].(*string), fc.Args["to"].(*string))
+		return ec.resolvers.Query().Blocks(rctx, fc.Args["from"].(*int64), fc.Args["to"].(*int64))
 	})
 	if err != nil {
 		ec.Error(ctx, err)
@@ -5053,9 +5050,9 @@ func (ec *executionContext) _SyncState_startingBlock(ctx context.Context, field 
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_SyncState_startingBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5097,9 +5094,9 @@ func (ec *executionContext) _SyncState_currentBlock(ctx context.Context, field g
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_SyncState_currentBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5141,9 +5138,9 @@ func (ec *executionContext) _SyncState_highestBlock(ctx context.Context, field g
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_SyncState_highestBlock(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5229,9 +5226,9 @@ func (ec *executionContext) _Transaction_nonce(ctx context.Context, field graphq
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_nonce(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5656,9 +5653,9 @@ func (ec *executionContext) _Transaction_gas(ctx context.Context, field graphql.
 		}
 		return graphql.Null
 	}
-	res := resTmp.(string)
+	res := resTmp.(int64)
 	fc.Result = res
-	return ec.marshalNLong2string(ctx, field.Selections, res)
+	return ec.marshalNLong2int64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_gas(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5846,9 +5843,9 @@ func (ec *executionContext) _Transaction_status(ctx context.Context, field graph
 	if resTmp == nil {
 		return graphql.Null
 	}
-	res := resTmp.(*string)
+	res := resTmp.(*int64)
 	fc.Result = res
-	return ec.marshalOLong2ᚖstring(ctx, field.Selections, res)
+	return ec.marshalOLong2ᚖint64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_status(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5887,9 +5884,9 @@ func (ec *executionContext) _Transaction_gasUsed(ctx context.Context, field grap
 	if resTmp == nil {
 		return graphql.Null
 	}
-	res := resTmp.(*string)
+	res := resTmp.(*int64)
 	fc.Result = res
-	return ec.marshalOLong2ᚖstring(ctx, field.Selections, res)
+	return ec.marshalOLong2ᚖint64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_gasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5928,9 +5925,9 @@ func (ec *executionContext) _Transaction_cumulativeGasUsed(ctx context.Context, 
 	if resTmp == nil {
 		return graphql.Null
 	}
-	res := resTmp.(*string)
+	res := resTmp.(*int64)
 	fc.Result = res
-	return ec.marshalOLong2ᚖstring(ctx, field.Selections, res)
+	return ec.marshalOLong2ᚖint64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_cumulativeGasUsed(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5969,9 +5966,9 @@ func (ec *executionContext) _Transaction_effectiveGasPrice(ctx context.Context, 
 	if resTmp == nil {
 		return graphql.Null
 	}
-	res := resTmp.(*string)
+	res := resTmp.(*int64)
 	fc.Result = res
-	return ec.marshalOBigInt2ᚖstring(ctx, field.Selections, res)
+	return ec.marshalOLong2ᚖint64(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_effectiveGasPrice(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5981,7 +5978,7 @@ func (ec *executionContext) fieldContext_Transaction_effectiveGasPrice(ctx conte
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type BigInt does not have child fields")
+			return nil, errors.New("field of type Long does not have child fields")
 		},
 	}
 	return fc, nil
@@ -8255,7 +8252,7 @@ func (ec *executionContext) unmarshalInputCallData(ctx context.Context, obj inte
 			var err error
 
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("gas"))
-			it.Gas, err = ec.unmarshalOLong2ᚖstring(ctx, v)
+			it.Gas, err = ec.unmarshalOLong2ᚖint64(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -8323,7 +8320,7 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			var err error
 
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("fromBlock"))
-			it.FromBlock, err = ec.unmarshalOLong2ᚖstring(ctx, v)
+			it.FromBlock, err = ec.unmarshalOLong2ᚖint64(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -8331,7 +8328,7 @@ func (ec *executionContext) unmarshalInputFilterCriteria(ctx context.Context, ob
 			var err error
 
 			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("toBlock"))
-			it.ToBlock, err = ec.unmarshalOLong2ᚖstring(ctx, v)
+			it.ToBlock, err = ec.unmarshalOLong2ᚖint64(ctx, v)
 			if err != nil {
 				return it, err
 			}
@@ -8541,9 +8538,6 @@ func (ec *executionContext) _Block(ctx context.Context, sel ast.SelectionSet, ob
 
 			out.Values[i] = ec._Block_gasUsed(ctx, field, obj)
 
-			if out.Values[i] == graphql.Null {
-				invalids++
-			}
 		case "baseFeePerGas":
 
 			out.Values[i] = ec._Block_baseFeePerGas(ctx, field, obj)
@@ -9848,13 +9842,13 @@ func (ec *executionContext) marshalNLog2ᚖgithubᚗcomᚋledgerwatchᚋerigon�
 	return ec._Log(ctx, sel, v)
 }
 
-func (ec *executionContext) unmarshalNLong2string(ctx context.Context, v interface{}) (string, error) {
-	res, err := graphql.UnmarshalString(v)
+func (ec *executionContext) unmarshalNLong2int64(ctx context.Context, v interface{}) (int64, error) {
+	res, err := graphql.UnmarshalInt64(v)
 	return res, graphql.ErrorOnPath(ctx, err)
 }
 
-func (ec *executionContext) marshalNLong2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
-	res := graphql.MarshalString(v)
+func (ec *executionContext) marshalNLong2int64(ctx context.Context, sel ast.SelectionSet, v int64) graphql.Marshaler {
+	res := graphql.MarshalInt64(v)
 	if res == graphql.Null {
 		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
 			ec.Errorf(ctx, "the requested element is null which the schema does not allow")
@@ -10493,19 +10487,19 @@ func (ec *executionContext) marshalOLog2ᚕᚖgithubᚗcomᚋledgerwatchᚋerigo
 	return ret
 }
 
-func (ec *executionContext) unmarshalOLong2ᚖstring(ctx context.Context, v interface{}) (*string, error) {
+func (ec *executionContext) unmarshalOLong2ᚖint64(ctx context.Context, v interface{}) (*int64, error) {
 	if v == nil {
 		return nil, nil
 	}
-	res, err := graphql.UnmarshalString(v)
+	res, err := graphql.UnmarshalInt64(v)
 	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
-func (ec *executionContext) marshalOLong2ᚖstring(ctx context.Context, sel ast.SelectionSet, v *string) graphql.Marshaler {
+func (ec *executionContext) marshalOLong2ᚖint64(ctx context.Context, sel ast.SelectionSet, v *int64) graphql.Marshaler {
 	if v == nil {
 		return graphql.Null
 	}
-	res := graphql.MarshalString(*v)
+	res := graphql.MarshalInt64(*v)
 	return res
 }
 

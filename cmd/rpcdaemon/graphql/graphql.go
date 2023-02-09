@@ -29,7 +29,6 @@ func CreateHandler(api []rpc.API) *handler.Server {
 		}
 	}
 
-	// db, _ := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), logger, remoteKvClient).Open()
 	resolver := graph.Resolver{}
 	resolver.GraphQLAPI = graphqlAPI
 

@@ -11,7 +11,9 @@
     scalar BigInt
     # Long is a 64 bit unsigned integer.
     scalar Long
-
+    # ULong is a 64 bit signed integer.
+    scalar ULong
+    
     schema {
         query: Query
         mutation: Mutation
@@ -107,7 +109,7 @@
         # maxPriorityFeePerGas). Legacy transactions and EIP-2930 transactions are
         # coerced into the EIP-1559 format by setting both maxFeePerGas and
         # maxPriorityFeePerGas as the transaction's gas price.
-        effectiveGasPrice: BigInt
+        effectiveGasPrice: Long
         # CreatedContract is the account that was created by a contract creation
         # transaction. If the transaction was not a contract creation transaction,
         # or it has not yet been mined, this field will be null.
@@ -176,7 +178,7 @@
         # GasLimit is the maximum amount of gas that was available to transactions in this block.
         gasLimit: Long!
         # GasUsed is the amount of gas that was used executing transactions in this block.
-        gasUsed: Long!
+        gasUsed: Long
         # BaseFeePerGas is the fee per unit of gas burned by the protocol in this block.
         baseFeePerGas: BigInt
         # NextBaseFeePerGas is the fee per unit of gas which needs to be burned in the next block.
