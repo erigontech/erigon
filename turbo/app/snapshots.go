@@ -224,7 +224,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = agg.ReopenFiles()
+	err = agg.ReopenFolder()
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = agg.ReopenFiles()
+	err = agg.ReopenFolder()
 	if err != nil {
 		return err
 	}

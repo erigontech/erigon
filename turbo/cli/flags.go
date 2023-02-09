@@ -49,7 +49,7 @@ var (
 
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
-		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
+		Usage: "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "127.0.0.1:9090",
 	}
 
