@@ -528,3 +528,26 @@ func (b *BeaconState) BalanceDeltas() (balanceDeltaMap map[uint64]int64, err err
 	err = b.processInactivityDeltas(balanceDeltaMap, eligibleValidators)
 	return
 }
+
+// Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
+func (b *BeaconState) IsValidatorEligibleForActivationQueue(validator *cltypes.Validator) bool {
+	return validator.ActivationEligibilityEpoch == b.beaconConfig.FarFutureEpoch &&
+		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance
+}
+
+// Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
+func (b *BeaconState) IsValidatorEligibleForActivation(validator *cltypes.Validator) bool {
+	return validator.ActivationEligibilityEpoch <= b.finalizedCheckpoint.Epoch &&
+		validator.ActivationEpoch == b.beaconConfig.FarFutureEpoch
+}
+
+// Implementation of get_validator_churn_limit. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
+func (b *BeaconState) ValidatorChurnLimit() (limit uint64) {
+	activeValidatorsCount := uint64(len(b.GetActiveValidatorsIndices(b.Epoch())))
+	limit = activeValidatorsCount / b.beaconConfig.ChurnLimitQuotient
+	if limit < b.beaconConfig.MinPerEpochChurnLimit {
+		limit = b.beaconConfig.MinPerEpochChurnLimit
+	}
+	return
+
+}
