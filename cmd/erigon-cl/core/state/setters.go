@@ -183,25 +183,36 @@ func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
 	b.nextWithdrawalIndex = index
 }
 
 func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
 	b.nextWithdrawalValidatorIndex = index
 }
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
 
+func (b *BeaconState) AddHistoricalRoot(root libcommon.Hash) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.historicalRoots = append(b.historicalRoots, root)
+}
+
 func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores = append(b.inactivityScores, score)
 }
 
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }
