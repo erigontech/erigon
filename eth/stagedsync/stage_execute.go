@@ -743,11 +743,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if initialCycle {
-			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		} else {
-			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.PruneWithTiemout(ctx, 1*time.Second); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		}

@@ -556,7 +556,7 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		}
 	}
 
-	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
+	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
 
 	return nil
 }
