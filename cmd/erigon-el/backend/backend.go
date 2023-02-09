@@ -897,7 +897,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err = agg.ReopenFiles(); err != nil {
+	if err = agg.ReopenFolder(); err != nil {
 		return nil, nil, nil, err
 	}
 
