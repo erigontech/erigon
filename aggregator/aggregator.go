@@ -584,6 +584,8 @@ func buildIndex(d *compress.Decompressor, idxPath, tmpDir string, count int) (*r
 		return nil, err
 	}
 	defer rs.Close()
+	rs.LogLvl(log.LvlDebug)
+
 	word := make([]byte, 0, 256)
 	var pos uint64
 	g := d.MakeGetter()
@@ -1621,6 +1623,8 @@ func (a *Aggregator) reduceHistoryFiles(fType FileType, item *byEndBlockItem) er
 	}); err != nil {
 		return fmt.Errorf("reduceHistoryFiles NewRecSplit: %w", err)
 	}
+	rs.LogLvl(log.LvlDebug)
+
 	g1 := d.MakeGetter()
 	for {
 		g.Reset(0)

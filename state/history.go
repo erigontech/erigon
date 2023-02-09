@@ -404,6 +404,7 @@ func buildVi(historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, coun
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
+	rs.LogLvl(log.LvlTrace)
 	defer rs.Close()
 	var historyKey []byte
 	var txKey [8]byte
