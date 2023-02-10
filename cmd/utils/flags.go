@@ -908,6 +908,7 @@ func NewP2PConfig(
 		Log:             log.New(),
 		NodeDatabase:    enodeDBPath,
 		AllowedPorts:    allowedPorts,
+		TmpDir:          dirs.Tmp,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)

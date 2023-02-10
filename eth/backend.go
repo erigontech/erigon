@@ -574,6 +574,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
+			TmpDir:        tmpdir,
 		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, nil, handshake.LightClientRule)
 		if err != nil {
 			return nil, err

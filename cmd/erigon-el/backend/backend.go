@@ -325,6 +325,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+			cfg.TmpDir = stack.Config().Dirs.Tmp
 
 			// pick port from allowed list
 			var picked bool
