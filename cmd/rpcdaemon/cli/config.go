@@ -374,6 +374,8 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						allSnapshots.LogStat()
 					}
 
+					_ = reply.HistoryFiles
+
 					if err = agg.ReopenFolder(); err != nil {
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
