@@ -328,6 +328,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 			w.ResetTx(nil)
 		}
 		applyWorker.ResetTx(nil)
+		close(resultCh)
 	}
 	if background {
 		wg.Add(workerCount)
