@@ -569,6 +569,8 @@ func (tx SignedBlobTx) RawSignatureValues() (v *uint256.Int, r *uint256.Int, s *
 }
 
 func (stx SignedBlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
+	// stx is a shallow copy of the tx so we can modify ChainID without mutating the input
+	stx.Message.ChainID.SetFromBig(chainID)
 	return prefixedSSZHash(BlobTxType, &stx.Message)
 }
 
