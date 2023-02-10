@@ -7,8 +7,6 @@ import (
 	"math/big"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -23,7 +21,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )
@@ -32,7 +30,7 @@ var (
 const ReviveABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // ReviveBin is the compiled bytecode used for deploying new contracts.
-var ReviveBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea26469706673582212205d3337629b15c78b9915ebb927a3e974fe4df0d021b8c091ca1923cf2258ed2564736f6c63430007020033"
+var ReviveBin = "0x608060405234801561001057600080fd5b50610104806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b603c603836600460b6565b603e565b005b6040805180820190915260138082527260424355603060005360ff60015360026000f360681b60208301908152600091849183f56040516001600160a01b03821681529091507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb9060200160405180910390a1505050565b60006020828403121560c757600080fd5b503591905056fea2646970667358221220b61bb695add290cdbf0ff67e4c8ab1ba07b8c524eba258b30c036a0c75a291f064736f6c63430008120033"
 
 // DeployRevive deploys a new Ethereum contract, binding an instance of Revive to it.
 func DeployRevive(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Revive, error) {
@@ -341,5 +339,6 @@ func (_Revive *ReviveFilterer) ParseDeployEvent(log types.Log) (*ReviveDeployEve
 	if err := _Revive.contract.UnpackLog(event, "DeployEvent", log); err != nil {
 		return nil, err
 	}
+	event.Raw = log
 	return event, nil
 }

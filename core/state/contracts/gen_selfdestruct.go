@@ -7,8 +7,6 @@ import (
 	"math/big"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -23,7 +21,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )
@@ -32,7 +30,7 @@ var (
 const SelfdestructABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"destruct\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
 
 // SelfdestructBin is the compiled bytecode used for deploying new contracts.
-var SelfdestructBin = "0x6080604052348015600f57600080fd5b50640100000000600055600260018190556003905560b0806100326000396000f3fe60806040526004361060295760003560e01c80632b68b9c61460345780632ee79ded14604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605d565b30ff5b60008054600190810190915580548101815560028054909101905556fea2646970667358221220caae26a119b18c374d0a657f2582ca8ab59c89f78ec97da1efbc9d426f23a5c764736f6c63430007020033"
+var SelfdestructBin = "0x608060405234801561001057600080fd5b50640100000000600055600260018190556003905560f8806100336000396000f3fe608060405260043610602a5760003560e01c80632b68b9c61460355780632ee79ded14604857600080fd5b36603057005b600080fd5b348015604057600080fd5b50604630ff5b005b348015605357600080fd5b506046600160008082825460669190609c565b925050819055506001806000828254607d9190609c565b9250508190555060016002600082825460959190609c565b9091555050565b8082018082111560bc57634e487b7160e01b600052601160045260246000fd5b9291505056fea264697066735822122057d997eac01cb18edb1f870824875c09252156eddb8f5868a22ee6b16db8ea7764736f6c63430008120033"
 
 // DeploySelfdestruct deploys a new Ethereum contract, binding an instance of Selfdestruct to it.
 func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Selfdestruct, error) {

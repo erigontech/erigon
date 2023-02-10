@@ -7,8 +7,6 @@ import (
 	"math/big"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
@@ -23,7 +21,7 @@ var (
 	_ = strings.NewReader
 	_ = ethereum.NotFound
 	_ = bind.Bind
-	_ = libcommon.Big1
+	_ = common.Big1
 	_ = types.BloomLookup
 	_ = event.NewSubscription
 )
@@ -32,7 +30,7 @@ var (
 const PolyABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"anonymous\":false,\"inputs\":[{\"indexed\":false,\"internalType\":\"address\",\"name\":\"d\",\"type\":\"address\"}],\"name\":\"DeployEvent\",\"type\":\"event\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"salt\",\"type\":\"uint256\"}],\"name\":\"deploy\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // PolyBin is the compiled bytecode used for deploying new contracts.
-var PolyBin = "0x6080604052348015600f57600080fd5b5060f88061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f5604080516001600160a01b038316815290519192507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb919081900360200190a150505056fea264697066735822122032d356806c978fb0bf45bc0b927ecf2af1ebbc7036396fe43793a0d0a312cac164736f6c63430007020033"
+var PolyBin = "0x608060405234801561001057600080fd5b50610104806100206000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063a5e3875114602d575b600080fd5b603c603836600460b6565b603e565b005b6040805180820190915260138082527260606000534360015360ff60025360036000f360681b60208301908152600091849183f56040516001600160a01b03821681529091507f68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb9060200160405180910390a1505050565b60006020828403121560c757600080fd5b503591905056fea264697066735822122027699585e8b976fa03ec67ec254e7fd23ebf598eabaed04b5dfa9888b767fa3364736f6c63430008120033"
 
 // DeployPoly deploys a new Ethereum contract, binding an instance of Poly to it.
 func DeployPoly(auth *bind.TransactOpts, backend bind.ContractBackend) (libcommon.Address, types.Transaction, *Poly, error) {
@@ -341,5 +339,6 @@ func (_Poly *PolyFilterer) ParseDeployEvent(log types.Log) (*PolyDeployEvent, er
 	if err := _Poly.contract.UnpackLog(event, "DeployEvent", log); err != nil {
 		return nil, err
 	}
+	event.Raw = log
 	return event, nil
 }
