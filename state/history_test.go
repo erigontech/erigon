@@ -342,7 +342,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ctx := context.Background()
-	tx, err := db.BeginRwAsync(ctx)
+	tx, err := db.BeginRwNosync(ctx)
 	require.NoError(err)
 	h.SetTx(tx)
 	defer tx.Rollback()

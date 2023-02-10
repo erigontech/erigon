@@ -37,7 +37,7 @@ func testDbAndAggregator(t *testing.T, prefixLen int, aggStep uint64) (string, k
 func TestAggregator_Merge(t *testing.T) {
 	_, db, agg := testDbAndAggregator(t, 0, 100)
 
-	tx, err := db.BeginRwAsync(context.Background())
+	tx, err := db.BeginRwNosync(context.Background())
 	require.NoError(t, err)
 	defer func() {
 		if tx != nil {

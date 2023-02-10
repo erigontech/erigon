@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -29,7 +30,7 @@ import (
 
 func TestMdbxPieceCompletion(t *testing.T) {
 	db := memdb.NewTestDownloaderDB(t)
-	pc, err := NewMdbxPieceCompletion(db)
+	pc, err := NewMdbxPieceCompletion(context.Background(), db)
 	require.NoError(t, err)
 	defer pc.Close()
 

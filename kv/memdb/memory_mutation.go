@@ -416,7 +416,3 @@ func (m *MemoryMutation) Cursor(bucket string) (kv.Cursor, error) {
 func (m *MemoryMutation) ViewID() uint64 {
 	panic("ViewID Not implemented")
 }
-
-func (m *MemoryMutation) Reset() error {
-	panic("MemoryMutation.Reset not implemented")
-}

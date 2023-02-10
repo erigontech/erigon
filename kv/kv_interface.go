@@ -238,10 +238,10 @@ type RwDB interface {
 	RoDB
 
 	Update(ctx context.Context, f func(tx RwTx) error) error
-	UpdateAsync(ctx context.Context, f func(tx RwTx) error) error
+	UpdateNosync(ctx context.Context, f func(tx RwTx) error) error
 
 	BeginRw(ctx context.Context) (RwTx, error)
-	BeginRwAsync(ctx context.Context) (RwTx, error)
+	BeginRwNosync(ctx context.Context) (RwTx, error)
 }
 
 type StatelessReadTx interface {
@@ -361,7 +361,6 @@ type RwTx interface {
 	// CollectMetrics - does collect all DB-related and Tx-related metrics
 	// this method exists only in RwTx to avoid concurrency
 	CollectMetrics()
-	Reset() error
 }
 
 // BucketMigrator used for buckets migration, don't use it in usual app code

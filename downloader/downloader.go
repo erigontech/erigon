@@ -34,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
 )
@@ -68,7 +67,7 @@ type AggStats struct {
 	UploadRate, DownloadRate   uint64
 }
 
-func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 	if err := portMustBeTCPAndUDPOpen(cfg.ListenPort); err != nil {
 		return nil, err
 	}
@@ -84,7 +83,7 @@ func New(cfg *downloadercfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(ctx, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -240,7 +239,8 @@ func (d *Downloader) verify() error {
 	}
 	wg.Wait()
 
-	return nil
+	// force fsync of db. to not loose results of validation on power-off
+	return d.db.Update(context.Background(), func(tx kv.RwTx) error { return nil })
 }
 
 func (d *Downloader) addSegments() error {
@@ -322,10 +322,9 @@ func (d *Downloader) Torrent() *torrent.Client {
 	return d.torrentClient
 }
 
-func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+func openClient(ctx context.Context, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	snapDir := cfg.DataDir
 	db, err = mdbx.NewMDBX(log.New()).
-		Flags(func(f uint) uint { return f | mdbx2.SafeNoSync }).
 		Label(kv.DownloaderDB).
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		SyncPeriod(15 * time.Second).
@@ -334,7 +333,7 @@ func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletio
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	c, err = NewMdbxPieceCompletion(db)
+	c, err = NewMdbxPieceCompletion(ctx, db)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.NewMdbxPieceCompletion: %w", err)
 	}
@@ -390,6 +389,8 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 	statInterval := 20 * time.Second
 	statEvery := time.NewTicker(statInterval)
 	defer statEvery.Stop()
+
+	justCompleted := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -410,6 +411,12 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 			}
 
 			if stats.Completed {
+				if justCompleted {
+					justCompleted = false
+					// force fsync of db. to not loose results of downloading on power-off
+					_ = d.db.Update(ctx, func(tx kv.RwTx) error { return nil })
+				}
+
 				log.Info("[Snapshots] Seeding",
 					"up", common2.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
@@ -425,6 +432,7 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 				"peers", stats.PeersUnique,
 				"connections", stats.ConnectionsTotal,
 				"files", stats.FilesTotal)
+
 			if stats.PeersUnique == 0 {
 				ips := d.Torrent().BadPeerIPs()
 				if len(ips) > 0 {
