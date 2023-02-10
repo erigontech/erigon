@@ -46,8 +46,8 @@ filippo.io/edwards25519 v1.0.0-rc.1 h1:m0VOOB23frXZvAOK44usCgLWvtsxIoMCTBGJZlpmG
 git.apache.org/thrift.git v0.0.0-20180902110319-2566ecd5d999/go.mod h1:fPE2ZNJGynbRyZ4dJvy6G277gSllfV2HJqblrnkyeyg=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
-github.com/Giulio2002/bls v0.0.0-20221130111651-ff2d397f3b99 h1:sPBnhlSCncFbnzRamE/7f0CWw76ok/Mn9z8XFC+EueI=
-github.com/Giulio2002/bls v0.0.0-20221130111651-ff2d397f3b99/go.mod h1:xmItuVMbOARz49adX3QpSAjBf8yQei9XQHzKwp9YWgo=
+github.com/Giulio2002/bls v0.0.0-20230210152409-898d831f215e h1:L82i5amWncPiHr/nbCDn/lO8unE8fINWSpnmeUNYW6k=
+github.com/Giulio2002/bls v0.0.0-20230210152409-898d831f215e/go.mod h1:xmItuVMbOARz49adX3QpSAjBf8yQei9XQHzKwp9YWgo=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=
 github.com/RoaringBitmap/roaring v0.4.7/go.mod h1:8khRDP4HmeXns4xIj9oGrKSz7XTQiJx2zgh7AcNke4w=
 github.com/RoaringBitmap/roaring v0.4.17/go.mod h1:D3qVegWTmfCaX4Bl5CrBE9hfrSrrXIr8KVNvRsDi1NI=
