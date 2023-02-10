@@ -875,7 +875,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			s.downloaderClient, err = downloadergrpc.NewClient(ctx, snConfig.DownloaderAddr)
 		} else {
 			// start embedded Downloader
-			s.downloader, err = downloader3.New(downloaderCfg)
+			s.downloader, err = downloader3.New(ctx, downloaderCfg)
 			if err != nil {
 				return nil, nil, nil, err
 			}
