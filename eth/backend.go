@@ -198,6 +198,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 
 	dirs := stack.Config().Dirs
 	tmpdir := dirs.Tmp
+	fmt.Printf("tmpdir = %s\n", tmpdir)
 	if err := RemoveContents(tmpdir); err != nil { // clean it on startup
 		return nil, fmt.Errorf("clean tmp dir: %s, %w", tmpdir, err)
 	}
