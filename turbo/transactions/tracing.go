@@ -190,12 +190,13 @@ func TraceTx(
 
 	if *config.BorTx {
 		callmsg := prepareCallMessage(message)
+		fmt.Println(callmsg)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
+		fmt.Println(result)
 	} else {
 		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	}
 
-	result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
 	if err != nil {
 		if streaming {
 			stream.WriteArrayEnd()

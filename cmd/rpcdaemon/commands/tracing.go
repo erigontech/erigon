@@ -89,14 +89,15 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	var borTx types.Transaction
-	borTx, _, _, _, err = rawdb.ReadBorTransactionForBlockNumber(tx, block.NumberU64())
-	if err != nil {
-		fmt.Println(err)
-		return err
+	borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
+	if borTx != nil {
+		fmt.Println("State sync")
 	}
 
 	txns := block.Transactions()
-	txns = append(txns, borTx)
+	if borTx != nil {
+		txns = append(txns, borTx)
+	}
 
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
@@ -123,10 +124,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		if borTx != nil && idx == len(block.Transactions()) {
+		if borTx != nil && idx == len(txns)-1 {
+			fmt.Println(idx)
 			config.BorTx = newBoolPtr(true)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
+			fmt.Println(err)
 		} else {
+			fmt.Println(idx)
+			config.BorTx = newBoolPtr(false)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		}
 
@@ -145,7 +150,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				return err
 			}
 		}
-		if idx != len(block.Transactions())-1 {
+		if idx != len(txns)-1 {
 			stream.WriteMore()
 		}
 		stream.Flush()
