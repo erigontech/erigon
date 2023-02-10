@@ -314,6 +314,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func()) {
+	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	queueSize := workerCount * 2
 	reconWorkers = make([]*Worker, workerCount)
@@ -323,6 +324,7 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	clear = func() {
+		cancel()
 		wg.Wait()
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
