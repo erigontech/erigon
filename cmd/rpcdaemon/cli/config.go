@@ -368,7 +368,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 						log.Warn("[Snapshots] reopen", "err", err)
 						return
 					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
+					if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 						log.Error("[Snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()
