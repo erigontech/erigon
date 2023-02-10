@@ -99,7 +99,11 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 func (rw *Worker) Run() {
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
-		rw.resultCh <- txTask // Needs to have outside of the lock
+		select {
+		case rw.resultCh <- txTask: // Needs to have outside of the lock
+		case <-rw.ctx.Done():
+			return
+		}
 	}
 }
 
