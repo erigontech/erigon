@@ -49,11 +49,15 @@ func init() {
 	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	erigon4Cmd.Flags().Int64Var(&aggregateStep, "step-size", ethconfig.HistoryV3AggregationStep, "aggregation step size")
+	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
 	rootCmd.AddCommand(erigon4Cmd)
 }
 
 var (
 	commitmentsMode string // flag --commitments.mode [direct|update]
+	startTxNumFrom  uint64 // flag --tx
+	aggregateStep   int64  // flag --step-size
 )
 
 var erigon4Cmd = &cobra.Command{
@@ -112,7 +116,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, uint64(aggregateStep))
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -141,7 +145,13 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
-	startTxNum = latestTx
+	if latestTx > startTxNum {
+		fmt.Printf("Max txNum in DB: %d\n", latestTx)
+		startTxNum = latestTx
+	}
+	if startTxNumFrom != 0 {
+		startTxNum = startTxNumFrom
+	}
 
 	interrupt := false
 	if startTxNum == 0 {
@@ -245,8 +255,6 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	}
 
 	mergedRoots := agg.AggregatedRoots()
-	defer close(mergedRoots)
-
 	for !interrupt {
 		blockNum++
 		trace = traceBlock > 0 && blockNum == uint64(traceBlock)
@@ -267,6 +275,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		agg.SetTxNum(txNum)
 
 		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
+			log.Error("processing error", "block", blockNum, "err", err)
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 
