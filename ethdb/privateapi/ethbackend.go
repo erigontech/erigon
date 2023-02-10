@@ -11,7 +11,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -293,7 +292,7 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 	return nil
 }
 
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest, opts ...grpc.CallOption) (*types2.BlobsBundleV1, error) {
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
 	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
 }
 
