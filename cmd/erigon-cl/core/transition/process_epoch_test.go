@@ -59,6 +59,36 @@ var expectedParticipationFlagState []byte
 //go:embed test_data/participation_flag_updates_state_test.ssz_snappy
 var startingParticipationFlagState []byte
 
+//go:embed test_data/slashings_expected_test.ssz_snappy
+var expectedSlashingsState []byte
+
+//go:embed test_data/slashings_state_test.ssz_snappy
+var startingSlashingsState []byte
+
+//go:embed test_data/justification_and_finality_expected_test.ssz_snappy
+var expectedJustificationAndFinalityState []byte
+
+//go:embed test_data/justification_and_finality_state_test.ssz_snappy
+var startingJustificationAndFinalityState []byte
+
+//go:embed test_data/eth1_data_reset_expected_test.ssz_snappy
+var expectedEth1DataResetState []byte
+
+//go:embed test_data/eth1_data_reset_state_test.ssz_snappy
+var startingEth1DataResetState []byte
+
+//go:embed test_data/randao_mixes_reset_expected_test.ssz_snappy
+var expectedRandaoMixesResetState []byte
+
+//go:embed test_data/randao_mixes_reset_state_test.ssz_snappy
+var startingRandaoMixesResetState []byte
+
+//go:embed test_data/slashings_reset_expected_test.ssz_snappy
+var expectedSlashingsResetState []byte
+
+//go:embed test_data/slashings_reset_state_test.ssz_snappy
+var startingSlashingsResetState []byte
+
 func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s *transition.StateTransistor) error {
 		return s.ProcessRewardsAndPenalties()
@@ -86,6 +116,39 @@ func TestProcessHistoricalRoots(t *testing.T) {
 func TestProcessParticipationFlagUpdates(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingParticipationFlagState, expectedParticipationFlagState, func(s *transition.StateTransistor) error {
 		s.ProcessParticipationFlagUpdates()
+		return nil
+	})
+}
+
+func TestProcessSlashings(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingSlashingsState, expectedSlashingsState, func(s *transition.StateTransistor) error {
+		return s.ProcessSlashings()
+	})
+}
+
+func TestProcessJustificationAndFinality(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingJustificationAndFinalityState, expectedJustificationAndFinalityState, func(s *transition.StateTransistor) error {
+		return s.ProcessJustificationBitsAndFinality()
+	})
+}
+
+func TestEth1DataReset(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingEth1DataResetState, expectedEth1DataResetState, func(s *transition.StateTransistor) error {
+		s.ProcessEth1DataReset()
+		return nil
+	})
+}
+
+func TestRandaoMixesReset(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingRandaoMixesResetState, expectedRandaoMixesResetState, func(s *transition.StateTransistor) error {
+		s.ProcessRandaoMixesReset()
+		return nil
+	})
+}
+
+func TestSlashingsReset(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingSlashingsResetState, expectedSlashingsResetState, func(s *transition.StateTransistor) error {
+		s.ProcessSlashingsReset()
 		return nil
 	})
 }
