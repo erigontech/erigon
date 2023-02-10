@@ -56,6 +56,12 @@ var expectedHistoricalRootsState []byte
 //go:embed test_data/historical_roots_state_test.ssz_snappy
 var startingHistoricalRootsState []byte
 
+//go:embed test_data/participation_flag_updates_expected_test.ssz_snappy
+var expectedParticipationFlagState []byte
+
+//go:embed test_data/participation_flag_updates_state_test.ssz_snappy
+var startingParticipationFlagState []byte
+
 /*func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s *transition.StateTransistor) error {
 		return s.ProcessRewardsAndPenalties()
@@ -77,5 +83,12 @@ func TestProcessEffectiveBalances(t *testing.T) {
 func TestProcessHistoricalRoots(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, func(s *transition.StateTransistor) error {
 		return s.ProcessHistoricalRootsUpdate()
+	})
+}
+
+func TestProcessParticipationFlagUpdates(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingParticipationFlagState, expectedParticipationFlagState, func(s *transition.StateTransistor) error {
+		s.ProcessParticipationFlagUpdates()
+		return nil
 	})
 }
