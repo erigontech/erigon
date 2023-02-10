@@ -143,7 +143,7 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 	} else {
 		wlMap2 := make(map[string]struct{}, len(whiteListHistory))
 		for _, fName := range whiteListHistory {
-			wlMap2[fName] = struct{}{}
+			wlMap2[filepath.Join("history", fName)] = struct{}{}
 		}
 
 		result2 = make(Preverified, 0, len(c.PreverifiedHistory))
