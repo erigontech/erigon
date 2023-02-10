@@ -62,7 +62,9 @@ const MaxTxTTL = 60 * time.Second
 // 5.0 - BlockTransaction table now has canonical ids (txs of non-canonical blocks moving to NonCanonicalTransaction table)
 // 5.1.0 - Added blockGasLimit to the StateChangeBatch
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
-var KvServiceAPIVersion = &types.VersionReply{Major: 6, Minor: 0, Patch: 0}
+// 6.1.0 - Add methods Range, IndexRange, HistoryGet, HistoryRange
+// 6.2.0 - Add HistoryFiles to reply of Snapshots() method
+var KvServiceAPIVersion = &types.VersionReply{Major: 6, Minor: 2, Patch: 0}
 
 type KvServer struct {
 	remote.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -449,10 +451,10 @@ func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeB
 
 func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
-		return &remote.SnapshotsReply{Files: []string{}}, nil
+		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
 
-	return &remote.SnapshotsReply{Files: s.blockSnapshots.Files()}, nil
+	return &remote.SnapshotsReply{BlocksFiles: s.blockSnapshots.Files(), HistoryFiles: s.historySnapshots.Files()}, nil
 }
 
 type StateChangePubSub struct {

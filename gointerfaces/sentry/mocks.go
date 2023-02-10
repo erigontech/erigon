@@ -17,64 +17,64 @@ var _ SentryServer = &SentryServerMock{}
 
 // SentryServerMock is a mock implementation of SentryServer.
 //
-// 	func TestSomethingThatUsesSentryServer(t *testing.T) {
+//	func TestSomethingThatUsesSentryServer(t *testing.T) {
 //
-// 		// make and configure a mocked SentryServer
-// 		mockedSentryServer := &SentryServerMock{
-// 			HandShakeFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error) {
-// 				panic("mock out the HandShake method")
-// 			},
-// 			MessagesFunc: func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error {
-// 				panic("mock out the Messages method")
-// 			},
-// 			NodeInfoFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error) {
-// 				panic("mock out the NodeInfo method")
-// 			},
-// 			PeerByIdFunc: func(contextMoqParam context.Context, peerByIdRequest *PeerByIdRequest) (*PeerByIdReply, error) {
-// 				panic("mock out the PeerById method")
-// 			},
-// 			PeerCountFunc: func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error) {
-// 				panic("mock out the PeerCount method")
-// 			},
-// 			PeerEventsFunc: func(peerEventsRequest *PeerEventsRequest, sentry_PeerEventsServer Sentry_PeerEventsServer) error {
-// 				panic("mock out the PeerEvents method")
-// 			},
-// 			PeerMinBlockFunc: func(contextMoqParam context.Context, peerMinBlockRequest *PeerMinBlockRequest) (*emptypb.Empty, error) {
-// 				panic("mock out the PeerMinBlock method")
-// 			},
-// 			PeerUselessFunc: func(contextMoqParam context.Context, peerUselessRequest *PeerUselessRequest) (*emptypb.Empty, error) {
-// 				panic("mock out the PeerUseless method")
-// 			},
-// 			PeersFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*PeersReply, error) {
-// 				panic("mock out the Peers method")
-// 			},
-// 			PenalizePeerFunc: func(contextMoqParam context.Context, penalizePeerRequest *PenalizePeerRequest) (*emptypb.Empty, error) {
-// 				panic("mock out the PenalizePeer method")
-// 			},
-// 			SendMessageByIdFunc: func(contextMoqParam context.Context, sendMessageByIdRequest *SendMessageByIdRequest) (*SentPeers, error) {
-// 				panic("mock out the SendMessageById method")
-// 			},
-// 			SendMessageByMinBlockFunc: func(contextMoqParam context.Context, sendMessageByMinBlockRequest *SendMessageByMinBlockRequest) (*SentPeers, error) {
-// 				panic("mock out the SendMessageByMinBlock method")
-// 			},
-// 			SendMessageToAllFunc: func(contextMoqParam context.Context, outboundMessageData *OutboundMessageData) (*SentPeers, error) {
-// 				panic("mock out the SendMessageToAll method")
-// 			},
-// 			SendMessageToRandomPeersFunc: func(contextMoqParam context.Context, sendMessageToRandomPeersRequest *SendMessageToRandomPeersRequest) (*SentPeers, error) {
-// 				panic("mock out the SendMessageToRandomPeers method")
-// 			},
-// 			SetStatusFunc: func(contextMoqParam context.Context, statusData *StatusData) (*SetStatusReply, error) {
-// 				panic("mock out the SetStatus method")
-// 			},
-// 			mustEmbedUnimplementedSentryServerFunc: func()  {
-// 				panic("mock out the mustEmbedUnimplementedSentryServer method")
-// 			},
-// 		}
+//		// make and configure a mocked SentryServer
+//		mockedSentryServer := &SentryServerMock{
+//			HandShakeFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error) {
+//				panic("mock out the HandShake method")
+//			},
+//			MessagesFunc: func(messagesRequest *MessagesRequest, sentry_MessagesServer Sentry_MessagesServer) error {
+//				panic("mock out the Messages method")
+//			},
+//			NodeInfoFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*types.NodeInfoReply, error) {
+//				panic("mock out the NodeInfo method")
+//			},
+//			PeerByIdFunc: func(contextMoqParam context.Context, peerByIdRequest *PeerByIdRequest) (*PeerByIdReply, error) {
+//				panic("mock out the PeerById method")
+//			},
+//			PeerCountFunc: func(contextMoqParam context.Context, peerCountRequest *PeerCountRequest) (*PeerCountReply, error) {
+//				panic("mock out the PeerCount method")
+//			},
+//			PeerEventsFunc: func(peerEventsRequest *PeerEventsRequest, sentry_PeerEventsServer Sentry_PeerEventsServer) error {
+//				panic("mock out the PeerEvents method")
+//			},
+//			PeerMinBlockFunc: func(contextMoqParam context.Context, peerMinBlockRequest *PeerMinBlockRequest) (*emptypb.Empty, error) {
+//				panic("mock out the PeerMinBlock method")
+//			},
+//			PeerUselessFunc: func(contextMoqParam context.Context, peerUselessRequest *PeerUselessRequest) (*emptypb.Empty, error) {
+//				panic("mock out the PeerUseless method")
+//			},
+//			PeersFunc: func(contextMoqParam context.Context, empty *emptypb.Empty) (*PeersReply, error) {
+//				panic("mock out the Peers method")
+//			},
+//			PenalizePeerFunc: func(contextMoqParam context.Context, penalizePeerRequest *PenalizePeerRequest) (*emptypb.Empty, error) {
+//				panic("mock out the PenalizePeer method")
+//			},
+//			SendMessageByIdFunc: func(contextMoqParam context.Context, sendMessageByIdRequest *SendMessageByIdRequest) (*SentPeers, error) {
+//				panic("mock out the SendMessageById method")
+//			},
+//			SendMessageByMinBlockFunc: func(contextMoqParam context.Context, sendMessageByMinBlockRequest *SendMessageByMinBlockRequest) (*SentPeers, error) {
+//				panic("mock out the SendMessageByMinBlock method")
+//			},
+//			SendMessageToAllFunc: func(contextMoqParam context.Context, outboundMessageData *OutboundMessageData) (*SentPeers, error) {
+//				panic("mock out the SendMessageToAll method")
+//			},
+//			SendMessageToRandomPeersFunc: func(contextMoqParam context.Context, sendMessageToRandomPeersRequest *SendMessageToRandomPeersRequest) (*SentPeers, error) {
+//				panic("mock out the SendMessageToRandomPeers method")
+//			},
+//			SetStatusFunc: func(contextMoqParam context.Context, statusData *StatusData) (*SetStatusReply, error) {
+//				panic("mock out the SetStatus method")
+//			},
+//			mustEmbedUnimplementedSentryServerFunc: func()  {
+//				panic("mock out the mustEmbedUnimplementedSentryServer method")
+//			},
+//		}
 //
-// 		// use mockedSentryServer in code that requires SentryServer
-// 		// and then make assertions.
+//		// use mockedSentryServer in code that requires SentryServer
+//		// and then make assertions.
 //
-// 	}
+//	}
 type SentryServerMock struct {
 	// HandShakeFunc mocks the HandShake method.
 	HandShakeFunc func(contextMoqParam context.Context, empty *emptypb.Empty) (*HandShakeReply, error)
@@ -277,7 +277,8 @@ func (mock *SentryServerMock) HandShake(contextMoqParam context.Context, empty *
 
 // HandShakeCalls gets all the calls that were made to HandShake.
 // Check the length with:
-//     len(mockedSentryServer.HandShakeCalls())
+//
+//	len(mockedSentryServer.HandShakeCalls())
 func (mock *SentryServerMock) HandShakeCalls() []struct {
 	ContextMoqParam context.Context
 	Empty           *emptypb.Empty
@@ -315,7 +316,8 @@ func (mock *SentryServerMock) Messages(messagesRequest *MessagesRequest, sentry_
 
 // MessagesCalls gets all the calls that were made to Messages.
 // Check the length with:
-//     len(mockedSentryServer.MessagesCalls())
+//
+//	len(mockedSentryServer.MessagesCalls())
 func (mock *SentryServerMock) MessagesCalls() []struct {
 	MessagesRequest       *MessagesRequest
 	Sentry_MessagesServer Sentry_MessagesServer
@@ -354,7 +356,8 @@ func (mock *SentryServerMock) NodeInfo(contextMoqParam context.Context, empty *e
 
 // NodeInfoCalls gets all the calls that were made to NodeInfo.
 // Check the length with:
-//     len(mockedSentryServer.NodeInfoCalls())
+//
+//	len(mockedSentryServer.NodeInfoCalls())
 func (mock *SentryServerMock) NodeInfoCalls() []struct {
 	ContextMoqParam context.Context
 	Empty           *emptypb.Empty
@@ -393,7 +396,8 @@ func (mock *SentryServerMock) PeerById(contextMoqParam context.Context, peerById
 
 // PeerByIdCalls gets all the calls that were made to PeerById.
 // Check the length with:
-//     len(mockedSentryServer.PeerByIdCalls())
+//
+//	len(mockedSentryServer.PeerByIdCalls())
 func (mock *SentryServerMock) PeerByIdCalls() []struct {
 	ContextMoqParam context.Context
 	PeerByIdRequest *PeerByIdRequest
@@ -432,7 +436,8 @@ func (mock *SentryServerMock) PeerCount(contextMoqParam context.Context, peerCou
 
 // PeerCountCalls gets all the calls that were made to PeerCount.
 // Check the length with:
-//     len(mockedSentryServer.PeerCountCalls())
+//
+//	len(mockedSentryServer.PeerCountCalls())
 func (mock *SentryServerMock) PeerCountCalls() []struct {
 	ContextMoqParam  context.Context
 	PeerCountRequest *PeerCountRequest
@@ -470,7 +475,8 @@ func (mock *SentryServerMock) PeerEvents(peerEventsRequest *PeerEventsRequest, s
 
 // PeerEventsCalls gets all the calls that were made to PeerEvents.
 // Check the length with:
-//     len(mockedSentryServer.PeerEventsCalls())
+//
+//	len(mockedSentryServer.PeerEventsCalls())
 func (mock *SentryServerMock) PeerEventsCalls() []struct {
 	PeerEventsRequest       *PeerEventsRequest
 	Sentry_PeerEventsServer Sentry_PeerEventsServer
@@ -509,7 +515,8 @@ func (mock *SentryServerMock) PeerMinBlock(contextMoqParam context.Context, peer
 
 // PeerMinBlockCalls gets all the calls that were made to PeerMinBlock.
 // Check the length with:
-//     len(mockedSentryServer.PeerMinBlockCalls())
+//
+//	len(mockedSentryServer.PeerMinBlockCalls())
 func (mock *SentryServerMock) PeerMinBlockCalls() []struct {
 	ContextMoqParam     context.Context
 	PeerMinBlockRequest *PeerMinBlockRequest
@@ -548,7 +555,8 @@ func (mock *SentryServerMock) PeerUseless(contextMoqParam context.Context, peerU
 
 // PeerUselessCalls gets all the calls that were made to PeerUseless.
 // Check the length with:
-//     len(mockedSentryServer.PeerUselessCalls())
+//
+//	len(mockedSentryServer.PeerUselessCalls())
 func (mock *SentryServerMock) PeerUselessCalls() []struct {
 	ContextMoqParam    context.Context
 	PeerUselessRequest *PeerUselessRequest
@@ -587,7 +595,8 @@ func (mock *SentryServerMock) Peers(contextMoqParam context.Context, empty *empt
 
 // PeersCalls gets all the calls that were made to Peers.
 // Check the length with:
-//     len(mockedSentryServer.PeersCalls())
+//
+//	len(mockedSentryServer.PeersCalls())
 func (mock *SentryServerMock) PeersCalls() []struct {
 	ContextMoqParam context.Context
 	Empty           *emptypb.Empty
@@ -626,7 +635,8 @@ func (mock *SentryServerMock) PenalizePeer(contextMoqParam context.Context, pena
 
 // PenalizePeerCalls gets all the calls that were made to PenalizePeer.
 // Check the length with:
-//     len(mockedSentryServer.PenalizePeerCalls())
+//
+//	len(mockedSentryServer.PenalizePeerCalls())
 func (mock *SentryServerMock) PenalizePeerCalls() []struct {
 	ContextMoqParam     context.Context
 	PenalizePeerRequest *PenalizePeerRequest
@@ -665,7 +675,8 @@ func (mock *SentryServerMock) SendMessageById(contextMoqParam context.Context, s
 
 // SendMessageByIdCalls gets all the calls that were made to SendMessageById.
 // Check the length with:
-//     len(mockedSentryServer.SendMessageByIdCalls())
+//
+//	len(mockedSentryServer.SendMessageByIdCalls())
 func (mock *SentryServerMock) SendMessageByIdCalls() []struct {
 	ContextMoqParam        context.Context
 	SendMessageByIdRequest *SendMessageByIdRequest
@@ -704,7 +715,8 @@ func (mock *SentryServerMock) SendMessageByMinBlock(contextMoqParam context.Cont
 
 // SendMessageByMinBlockCalls gets all the calls that were made to SendMessageByMinBlock.
 // Check the length with:
-//     len(mockedSentryServer.SendMessageByMinBlockCalls())
+//
+//	len(mockedSentryServer.SendMessageByMinBlockCalls())
 func (mock *SentryServerMock) SendMessageByMinBlockCalls() []struct {
 	ContextMoqParam              context.Context
 	SendMessageByMinBlockRequest *SendMessageByMinBlockRequest
@@ -743,7 +755,8 @@ func (mock *SentryServerMock) SendMessageToAll(contextMoqParam context.Context, 
 
 // SendMessageToAllCalls gets all the calls that were made to SendMessageToAll.
 // Check the length with:
-//     len(mockedSentryServer.SendMessageToAllCalls())
+//
+//	len(mockedSentryServer.SendMessageToAllCalls())
 func (mock *SentryServerMock) SendMessageToAllCalls() []struct {
 	ContextMoqParam     context.Context
 	OutboundMessageData *OutboundMessageData
@@ -782,7 +795,8 @@ func (mock *SentryServerMock) SendMessageToRandomPeers(contextMoqParam context.C
 
 // SendMessageToRandomPeersCalls gets all the calls that were made to SendMessageToRandomPeers.
 // Check the length with:
-//     len(mockedSentryServer.SendMessageToRandomPeersCalls())
+//
+//	len(mockedSentryServer.SendMessageToRandomPeersCalls())
 func (mock *SentryServerMock) SendMessageToRandomPeersCalls() []struct {
 	ContextMoqParam                 context.Context
 	SendMessageToRandomPeersRequest *SendMessageToRandomPeersRequest
@@ -821,7 +835,8 @@ func (mock *SentryServerMock) SetStatus(contextMoqParam context.Context, statusD
 
 // SetStatusCalls gets all the calls that were made to SetStatus.
 // Check the length with:
-//     len(mockedSentryServer.SetStatusCalls())
+//
+//	len(mockedSentryServer.SetStatusCalls())
 func (mock *SentryServerMock) SetStatusCalls() []struct {
 	ContextMoqParam context.Context
 	StatusData      *StatusData
@@ -851,7 +866,8 @@ func (mock *SentryServerMock) mustEmbedUnimplementedSentryServer() {
 
 // mustEmbedUnimplementedSentryServerCalls gets all the calls that were made to mustEmbedUnimplementedSentryServer.
 // Check the length with:
-//     len(mockedSentryServer.mustEmbedUnimplementedSentryServerCalls())
+//
+//	len(mockedSentryServer.mustEmbedUnimplementedSentryServerCalls())
 func (mock *SentryServerMock) mustEmbedUnimplementedSentryServerCalls() []struct {
 } {
 	var calls []struct {
@@ -868,61 +884,61 @@ var _ SentryClient = &SentryClientMock{}
 
 // SentryClientMock is a mock implementation of SentryClient.
 //
-// 	func TestSomethingThatUsesSentryClient(t *testing.T) {
+//	func TestSomethingThatUsesSentryClient(t *testing.T) {
 //
-// 		// make and configure a mocked SentryClient
-// 		mockedSentryClient := &SentryClientMock{
-// 			HandShakeFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
-// 				panic("mock out the HandShake method")
-// 			},
-// 			MessagesFunc: func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error) {
-// 				panic("mock out the Messages method")
-// 			},
-// 			NodeInfoFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
-// 				panic("mock out the NodeInfo method")
-// 			},
-// 			PeerByIdFunc: func(ctx context.Context, in *PeerByIdRequest, opts ...grpc.CallOption) (*PeerByIdReply, error) {
-// 				panic("mock out the PeerById method")
-// 			},
-// 			PeerCountFunc: func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
-// 				panic("mock out the PeerCount method")
-// 			},
-// 			PeerEventsFunc: func(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (Sentry_PeerEventsClient, error) {
-// 				panic("mock out the PeerEvents method")
-// 			},
-// 			PeerMinBlockFunc: func(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-// 				panic("mock out the PeerMinBlock method")
-// 			},
-// 			PeerUselessFunc: func(ctx context.Context, in *PeerUselessRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-// 				panic("mock out the PeerUseless method")
-// 			},
-// 			PeersFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error) {
-// 				panic("mock out the Peers method")
-// 			},
-// 			PenalizePeerFunc: func(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-// 				panic("mock out the PenalizePeer method")
-// 			},
-// 			SendMessageByIdFunc: func(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-// 				panic("mock out the SendMessageById method")
-// 			},
-// 			SendMessageByMinBlockFunc: func(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-// 				panic("mock out the SendMessageByMinBlock method")
-// 			},
-// 			SendMessageToAllFunc: func(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error) {
-// 				panic("mock out the SendMessageToAll method")
-// 			},
-// 			SendMessageToRandomPeersFunc: func(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error) {
-// 				panic("mock out the SendMessageToRandomPeers method")
-// 			},
-// 			SetStatusFunc: func(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
-// 				panic("mock out the SetStatus method")
-// 			},
-// 		}
+//		// make and configure a mocked SentryClient
+//		mockedSentryClient := &SentryClientMock{
+//			HandShakeFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error) {
+//				panic("mock out the HandShake method")
+//			},
+//			MessagesFunc: func(ctx context.Context, in *MessagesRequest, opts ...grpc.CallOption) (Sentry_MessagesClient, error) {
+//				panic("mock out the Messages method")
+//			},
+//			NodeInfoFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*types.NodeInfoReply, error) {
+//				panic("mock out the NodeInfo method")
+//			},
+//			PeerByIdFunc: func(ctx context.Context, in *PeerByIdRequest, opts ...grpc.CallOption) (*PeerByIdReply, error) {
+//				panic("mock out the PeerById method")
+//			},
+//			PeerCountFunc: func(ctx context.Context, in *PeerCountRequest, opts ...grpc.CallOption) (*PeerCountReply, error) {
+//				panic("mock out the PeerCount method")
+//			},
+//			PeerEventsFunc: func(ctx context.Context, in *PeerEventsRequest, opts ...grpc.CallOption) (Sentry_PeerEventsClient, error) {
+//				panic("mock out the PeerEvents method")
+//			},
+//			PeerMinBlockFunc: func(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+//				panic("mock out the PeerMinBlock method")
+//			},
+//			PeerUselessFunc: func(ctx context.Context, in *PeerUselessRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+//				panic("mock out the PeerUseless method")
+//			},
+//			PeersFunc: func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*PeersReply, error) {
+//				panic("mock out the Peers method")
+//			},
+//			PenalizePeerFunc: func(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+//				panic("mock out the PenalizePeer method")
+//			},
+//			SendMessageByIdFunc: func(ctx context.Context, in *SendMessageByIdRequest, opts ...grpc.CallOption) (*SentPeers, error) {
+//				panic("mock out the SendMessageById method")
+//			},
+//			SendMessageByMinBlockFunc: func(ctx context.Context, in *SendMessageByMinBlockRequest, opts ...grpc.CallOption) (*SentPeers, error) {
+//				panic("mock out the SendMessageByMinBlock method")
+//			},
+//			SendMessageToAllFunc: func(ctx context.Context, in *OutboundMessageData, opts ...grpc.CallOption) (*SentPeers, error) {
+//				panic("mock out the SendMessageToAll method")
+//			},
+//			SendMessageToRandomPeersFunc: func(ctx context.Context, in *SendMessageToRandomPeersRequest, opts ...grpc.CallOption) (*SentPeers, error) {
+//				panic("mock out the SendMessageToRandomPeers method")
+//			},
+//			SetStatusFunc: func(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error) {
+//				panic("mock out the SetStatus method")
+//			},
+//		}
 //
-// 		// use mockedSentryClient in code that requires SentryClient
-// 		// and then make assertions.
+//		// use mockedSentryClient in code that requires SentryClient
+//		// and then make assertions.
 //
-// 	}
+//	}
 type SentryClientMock struct {
 	// HandShakeFunc mocks the HandShake method.
 	HandShakeFunc func(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
@@ -1150,7 +1166,8 @@ func (mock *SentryClientMock) HandShake(ctx context.Context, in *emptypb.Empty, 
 
 // HandShakeCalls gets all the calls that were made to HandShake.
 // Check the length with:
-//     len(mockedSentryClient.HandShakeCalls())
+//
+//	len(mockedSentryClient.HandShakeCalls())
 func (mock *SentryClientMock) HandShakeCalls() []struct {
 	Ctx  context.Context
 	In   *emptypb.Empty
@@ -1193,7 +1210,8 @@ func (mock *SentryClientMock) Messages(ctx context.Context, in *MessagesRequest,
 
 // MessagesCalls gets all the calls that were made to Messages.
 // Check the length with:
-//     len(mockedSentryClient.MessagesCalls())
+//
+//	len(mockedSentryClient.MessagesCalls())
 func (mock *SentryClientMock) MessagesCalls() []struct {
 	Ctx  context.Context
 	In   *MessagesRequest
@@ -1236,7 +1254,8 @@ func (mock *SentryClientMock) NodeInfo(ctx context.Context, in *emptypb.Empty, o
 
 // NodeInfoCalls gets all the calls that were made to NodeInfo.
 // Check the length with:
-//     len(mockedSentryClient.NodeInfoCalls())
+//
+//	len(mockedSentryClient.NodeInfoCalls())
 func (mock *SentryClientMock) NodeInfoCalls() []struct {
 	Ctx  context.Context
 	In   *emptypb.Empty
@@ -1279,7 +1298,8 @@ func (mock *SentryClientMock) PeerById(ctx context.Context, in *PeerByIdRequest,
 
 // PeerByIdCalls gets all the calls that were made to PeerById.
 // Check the length with:
-//     len(mockedSentryClient.PeerByIdCalls())
+//
+//	len(mockedSentryClient.PeerByIdCalls())
 func (mock *SentryClientMock) PeerByIdCalls() []struct {
 	Ctx  context.Context
 	In   *PeerByIdRequest
@@ -1322,7 +1342,8 @@ func (mock *SentryClientMock) PeerCount(ctx context.Context, in *PeerCountReques
 
 // PeerCountCalls gets all the calls that were made to PeerCount.
 // Check the length with:
-//     len(mockedSentryClient.PeerCountCalls())
+//
+//	len(mockedSentryClient.PeerCountCalls())
 func (mock *SentryClientMock) PeerCountCalls() []struct {
 	Ctx  context.Context
 	In   *PeerCountRequest
@@ -1365,7 +1386,8 @@ func (mock *SentryClientMock) PeerEvents(ctx context.Context, in *PeerEventsRequ
 
 // PeerEventsCalls gets all the calls that were made to PeerEvents.
 // Check the length with:
-//     len(mockedSentryClient.PeerEventsCalls())
+//
+//	len(mockedSentryClient.PeerEventsCalls())
 func (mock *SentryClientMock) PeerEventsCalls() []struct {
 	Ctx  context.Context
 	In   *PeerEventsRequest
@@ -1408,7 +1430,8 @@ func (mock *SentryClientMock) PeerMinBlock(ctx context.Context, in *PeerMinBlock
 
 // PeerMinBlockCalls gets all the calls that were made to PeerMinBlock.
 // Check the length with:
-//     len(mockedSentryClient.PeerMinBlockCalls())
+//
+//	len(mockedSentryClient.PeerMinBlockCalls())
 func (mock *SentryClientMock) PeerMinBlockCalls() []struct {
 	Ctx  context.Context
 	In   *PeerMinBlockRequest
@@ -1451,7 +1474,8 @@ func (mock *SentryClientMock) PeerUseless(ctx context.Context, in *PeerUselessRe
 
 // PeerUselessCalls gets all the calls that were made to PeerUseless.
 // Check the length with:
-//     len(mockedSentryClient.PeerUselessCalls())
+//
+//	len(mockedSentryClient.PeerUselessCalls())
 func (mock *SentryClientMock) PeerUselessCalls() []struct {
 	Ctx  context.Context
 	In   *PeerUselessRequest
@@ -1494,7 +1518,8 @@ func (mock *SentryClientMock) Peers(ctx context.Context, in *emptypb.Empty, opts
 
 // PeersCalls gets all the calls that were made to Peers.
 // Check the length with:
-//     len(mockedSentryClient.PeersCalls())
+//
+//	len(mockedSentryClient.PeersCalls())
 func (mock *SentryClientMock) PeersCalls() []struct {
 	Ctx  context.Context
 	In   *emptypb.Empty
@@ -1537,7 +1562,8 @@ func (mock *SentryClientMock) PenalizePeer(ctx context.Context, in *PenalizePeer
 
 // PenalizePeerCalls gets all the calls that were made to PenalizePeer.
 // Check the length with:
-//     len(mockedSentryClient.PenalizePeerCalls())
+//
+//	len(mockedSentryClient.PenalizePeerCalls())
 func (mock *SentryClientMock) PenalizePeerCalls() []struct {
 	Ctx  context.Context
 	In   *PenalizePeerRequest
@@ -1580,7 +1606,8 @@ func (mock *SentryClientMock) SendMessageById(ctx context.Context, in *SendMessa
 
 // SendMessageByIdCalls gets all the calls that were made to SendMessageById.
 // Check the length with:
-//     len(mockedSentryClient.SendMessageByIdCalls())
+//
+//	len(mockedSentryClient.SendMessageByIdCalls())
 func (mock *SentryClientMock) SendMessageByIdCalls() []struct {
 	Ctx  context.Context
 	In   *SendMessageByIdRequest
@@ -1623,7 +1650,8 @@ func (mock *SentryClientMock) SendMessageByMinBlock(ctx context.Context, in *Sen
 
 // SendMessageByMinBlockCalls gets all the calls that were made to SendMessageByMinBlock.
 // Check the length with:
-//     len(mockedSentryClient.SendMessageByMinBlockCalls())
+//
+//	len(mockedSentryClient.SendMessageByMinBlockCalls())
 func (mock *SentryClientMock) SendMessageByMinBlockCalls() []struct {
 	Ctx  context.Context
 	In   *SendMessageByMinBlockRequest
@@ -1666,7 +1694,8 @@ func (mock *SentryClientMock) SendMessageToAll(ctx context.Context, in *Outbound
 
 // SendMessageToAllCalls gets all the calls that were made to SendMessageToAll.
 // Check the length with:
-//     len(mockedSentryClient.SendMessageToAllCalls())
+//
+//	len(mockedSentryClient.SendMessageToAllCalls())
 func (mock *SentryClientMock) SendMessageToAllCalls() []struct {
 	Ctx  context.Context
 	In   *OutboundMessageData
@@ -1709,7 +1738,8 @@ func (mock *SentryClientMock) SendMessageToRandomPeers(ctx context.Context, in *
 
 // SendMessageToRandomPeersCalls gets all the calls that were made to SendMessageToRandomPeers.
 // Check the length with:
-//     len(mockedSentryClient.SendMessageToRandomPeersCalls())
+//
+//	len(mockedSentryClient.SendMessageToRandomPeersCalls())
 func (mock *SentryClientMock) SendMessageToRandomPeersCalls() []struct {
 	Ctx  context.Context
 	In   *SendMessageToRandomPeersRequest
@@ -1752,7 +1782,8 @@ func (mock *SentryClientMock) SetStatus(ctx context.Context, in *StatusData, opt
 
 // SetStatusCalls gets all the calls that were made to SetStatus.
 // Check the length with:
-//     len(mockedSentryClient.SetStatusCalls())
+//
+//	len(mockedSentryClient.SetStatusCalls())
 func (mock *SentryClientMock) SetStatusCalls() []struct {
 	Ctx  context.Context
 	In   *StatusData
