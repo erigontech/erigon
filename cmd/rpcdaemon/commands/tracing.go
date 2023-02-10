@@ -133,7 +133,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
-
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}

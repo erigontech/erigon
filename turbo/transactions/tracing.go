@@ -186,8 +186,8 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
-	var result *core.ExecutionResult
 
+	var result *core.ExecutionResult
 	if *config.BorTx {
 		callmsg := prepareCallMessage(message)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
