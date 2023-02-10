@@ -50,6 +50,12 @@ var expectedEffectiveBalancesState []byte
 //go:embed test_data/effective_balances_test_state.ssz_snappy
 var startingEffectiveBalancesState []byte
 
+//go:embed test_data/historical_roots_expected_test.ssz_snappy
+var expectedHistoricalRootsState []byte
+
+//go:embed test_data/historical_roots_state_test.ssz_snappy
+var startingHistoricalRootsState []byte
+
 /*func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s *transition.StateTransistor) error {
 		return s.ProcessRewardsAndPenalties()
@@ -65,5 +71,11 @@ func TestProcessRegistryUpdates(t *testing.T) {
 func TestProcessEffectiveBalances(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingEffectiveBalancesState, expectedEffectiveBalancesState, func(s *transition.StateTransistor) error {
 		return s.ProcessEffectiveBalanceUpdates()
+	})
+}
+
+func TestProcessHistoricalRoots(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingHistoricalRootsState, expectedHistoricalRootsState, func(s *transition.StateTransistor) error {
+		return s.ProcessHistoricalRootsUpdate()
 	})
 }

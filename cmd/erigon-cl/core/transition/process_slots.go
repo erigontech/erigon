@@ -7,6 +7,9 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
@@ -99,4 +102,27 @@ func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock)
 		return false, err
 	}
 	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
+}
+
+func (s *StateTransistor) ProcessHistoricalRootsUpdate() error {
+	nextEpoch := s.state.Epoch() + 1
+	if nextEpoch%(s.beaconConfig.SlotsPerHistoricalRoot/s.beaconConfig.SlotsPerEpoch) == 0 {
+		var (
+			blockRoots = s.state.BlockRoots()
+			stateRoots = s.state.StateRoots()
+		)
+
+		// Compute historical root batch.
+		blockRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(blockRoots[:]), state_encoding.BlockRootsLength)
+		if err != nil {
+			return err
+		}
+		stateRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(stateRoots[:]), state_encoding.StateRootsLength)
+		if err != nil {
+			return err
+		}
+
+		s.state.AddHistoricalRoot(utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:]))
+	}
+	return nil
 }
