@@ -5,7 +5,7 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +30,7 @@ func TestGetBlockByNumberWithLatestTag(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
 	b, err := api.GetBlockByNumber(context.Background(), rpc.LatestBlockNumber, false)
-	expected := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	expected := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 	if err != nil {
 		t.Errorf("error getting block number with latest tag: %s", err)
 	}
@@ -47,7 +47,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -55,7 +55,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
-	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (libcommon.Hash{}) {
+	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice head hash")
 	}
@@ -66,7 +66,7 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
-	expectedHash := libcommon.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
 	assert.Equal(t, expectedHash, block["hash"])
 }
 
@@ -123,7 +123,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -131,7 +131,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
-	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (libcommon.Hash{}) {
+	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice finalized hash")
 	}
@@ -142,7 +142,7 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
-	expectedHash := libcommon.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
 	assert.Equal(t, expectedHash, block["hash"])
 }
 
@@ -168,7 +168,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not begin read write transaction: %s", err)
 	}
-	latestBlockHash := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
 	latestBlock, err := rawdb.ReadBlockByHash(tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
@@ -176,7 +176,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	}
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
-	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (libcommon.Hash{}) {
+	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
 		tx.Rollback()
 		t.Error("didn't find forkchoice safe block hash")
 	}
@@ -187,7 +187,7 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	if err != nil {
 		t.Errorf("error retrieving block by number: %s", err)
 	}
-	expectedHash := libcommon.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
+	expectedHash := common.HexToHash("0x71b89b6ca7b65debfd2fbb01e4f07de7bba343e6617559fa81df19b605f84662")
 	assert.Equal(t, expectedHash, block["hash"])
 }
 
@@ -199,7 +199,43 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
-	blockHash := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed reading block by hash: %s", err)
+	}
+	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed getting body with transactions: %s", err)
+	}
+	tx.Rollback()
+
+	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
+
+	txAmount, err := api.GetBlockTransactionCountByHash(ctx, blockHash)
+	if err != nil {
+		t.Errorf("failed getting the transaction count, err=%s", err)
+	}
+
+	assert.Equal(t, expectedAmount, *txAmount)
+}
+
+func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {
@@ -234,7 +270,43 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	ctx := context.Background()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
-	blockHash := libcommon.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+	blockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
+
+	tx, err := m.DB.BeginRw(ctx)
+	if err != nil {
+		t.Errorf("could not begin read write transaction: %s", err)
+	}
+	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed reading block by hash: %s", err)
+	}
+	bodyWithTx, err := rawdb.ReadBodyWithTransactions(tx, blockHash, header.Number.Uint64())
+	if err != nil {
+		tx.Rollback()
+		t.Errorf("failed getting body with transactions: %s", err)
+	}
+	tx.Rollback()
+
+	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
+
+	txAmount, err := api.GetBlockTransactionCountByNumber(ctx, rpc.BlockNumber(header.Number.Uint64()))
+	if err != nil {
+		t.Errorf("failed getting the transaction count, err=%s", err)
+	}
+
+	assert.Equal(t, expectedAmount, *txAmount)
+}
+
+func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestSentry(t)
+	agg := m.HistoryV3Components()
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	ctx := context.Background()
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+
+	blockHash := common.HexToHash("0x5883164d4100b95e1d8e931b8b9574586a1dea7507941e6ad3c1e3a2591485fd")
 
 	tx, err := m.DB.BeginRw(ctx)
 	if err != nil {

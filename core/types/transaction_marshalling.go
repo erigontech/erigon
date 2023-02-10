@@ -7,6 +7,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	. "github.com/protolambda/ztyp/view"
 	"github.com/valyala/fastjson"
 
@@ -31,8 +32,8 @@ type txJSON struct {
 	To       *libcommon.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID    *hexutil.Big `json:"chainId,omitempty"`
-	AccessList *AccessList  `json:"accessList,omitempty"`
+	ChainID    *hexutil.Big       `json:"chainId,omitempty"`
+	AccessList *types2.AccessList `json:"accessList,omitempty"`
 
 	// Blob transaction fields:
 	MaxFeePerDataGas    *hexutil.Big     `json:"maxFeePerDataGas,omitempty"`
@@ -421,7 +422,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.AccessList != nil {
 		tx.Message.AccessList = AccessListView(*dec.AccessList)
 	} else {
-		tx.Message.AccessList = AccessListView([]AccessTuple{})
+		tx.Message.AccessList = AccessListView([]types2.AccessTuple{})
 	}
 	if dec.ChainID == nil {
 		return nil, errors.New("missing required field 'chainId' in transaction")

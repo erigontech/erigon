@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 )
 
@@ -55,7 +56,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(5): BlockRoots
 	if b.isLeafDirty(BlockRootsLeafIndex) {
-		blockRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.blockRoots[:]), state_encoding.BlockRootsLength)
+		blockRootsRoot, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(b.blockRoots[:]), state_encoding.BlockRootsLength)
 		if err != nil {
 			return err
 		}
@@ -64,7 +65,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(6): StateRoots
 	if b.isLeafDirty(StateRootsLeafIndex) {
-		stateRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.stateRoots[:]), state_encoding.StateRootsLength)
+		stateRootsRoot, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(b.stateRoots[:]), state_encoding.StateRootsLength)
 		if err != nil {
 			return err
 		}
@@ -73,7 +74,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(7): HistoricalRoots
 	if b.isLeafDirty(HistoricalRootsLeafIndex) {
-		historicalRootsRoot, err := merkle_tree.ArraysRootWithLimit(preparateRootsForHashing(b.historicalRoots), state_encoding.HistoricalRootsLength)
+		historicalRootsRoot, err := merkle_tree.ArraysRootWithLimit(utils.PreparateRootsForHashing(b.historicalRoots), state_encoding.HistoricalRootsLength)
 		if err != nil {
 			return err
 		}
@@ -123,7 +124,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(13): RandaoMixes
 	if b.isLeafDirty(RandaoMixesLeafIndex) {
-		randaoRootsRoot, err := merkle_tree.ArraysRoot(preparateRootsForHashing(b.randaoMixes[:]), state_encoding.RandaoMixesLength)
+		randaoRootsRoot, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(b.randaoMixes[:]), state_encoding.RandaoMixesLength)
 		if err != nil {
 			return err
 		}

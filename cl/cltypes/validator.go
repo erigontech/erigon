@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
@@ -64,9 +63,23 @@ func (d *DepositData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
 
+func (d *DepositData) MessageHash() ([32]byte, error) {
+	var (
+		leaves = make([][32]byte, 4)
+		err    error
+	)
+	leaves[0], err = merkle_tree.PublicKeyRoot(d.PubKey)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	leaves[1] = d.WithdrawalCredentials
+	leaves[2] = merkle_tree.Uint64Root(d.Amount)
+	return merkle_tree.ArraysRoot(leaves, 4)
+}
+
 type Deposit struct {
 	// Merkle proof is used for deposits
-	Proof [][]byte // 33 X 32 size.
+	Proof []libcommon.Hash // 33 X 32 size.
 	Data  *DepositData
 }
 
@@ -74,16 +87,16 @@ func (d *Deposit) EncodeSSZ(dst []byte) []byte {
 
 	buf := dst
 	for _, proofSeg := range d.Proof {
-		buf = append(buf, proofSeg...)
+		buf = append(buf, proofSeg[:]...)
 	}
 	buf = d.Data.EncodeSSZ(buf)
 	return buf
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte) error {
-	d.Proof = make([][]byte, DepositProofLength)
+	d.Proof = make([]libcommon.Hash, DepositProofLength)
 	for i := range d.Proof {
-		d.Proof[i] = common.CopyBytes(buf[i*32 : i*32+32])
+		copy(d.Proof[i][:], buf[i*32:i*32+32])
 	}
 
 	if d.Data == nil {
@@ -103,7 +116,7 @@ func (d *Deposit) EncodingSizeSSZ() int {
 func (d *Deposit) HashSSZ() ([32]byte, error) {
 	proofLeaves := make([][32]byte, DepositProofLength)
 	for i, segProof := range d.Proof {
-		proofLeaves[i] = libcommon.BytesToHash(segProof)
+		copy(proofLeaves[i][:], segProof[:])
 	}
 
 	proofRoot, err := merkle_tree.ArraysRoot(proofLeaves, 64)

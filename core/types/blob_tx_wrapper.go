@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/protolambda/go-kzg/eth"
 	"github.com/protolambda/ztyp/codec"
 
@@ -382,9 +383,9 @@ func (txw *BlobTxWrapper) Hash() libcommon.Hash { return txw.Tx.Hash() }
 func (txw *BlobTxWrapper) SigningHash(chainID *big.Int) libcommon.Hash {
 	return txw.Tx.SigningHash(chainID)
 }
-func (txw *BlobTxWrapper) GetData() []byte           { return txw.Tx.GetData() }
-func (txw *BlobTxWrapper) GetAccessList() AccessList { return txw.Tx.GetAccessList() }
-func (txw *BlobTxWrapper) Protected() bool           { return txw.Tx.Protected() }
+func (txw *BlobTxWrapper) GetData() []byte                  { return txw.Tx.GetData() }
+func (txw *BlobTxWrapper) GetAccessList() types2.AccessList { return txw.Tx.GetAccessList() }
+func (txw *BlobTxWrapper) Protected() bool                  { return txw.Tx.Protected() }
 func (txw *BlobTxWrapper) RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int) {
 	return txw.Tx.RawSignatureValues()
 }

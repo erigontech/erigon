@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	librlp "github.com/ledgerwatch/erigon-lib/rlp"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -56,8 +57,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
-
-const ASSERT = false
 
 var (
 	action     = flag.String("action", "", "action to execute")
@@ -1345,6 +1344,33 @@ func dumpState(chaindata string) error {
 	return nil
 }
 
+type NewPooledTransactionHashesPacket68 struct {
+	Types  []byte
+	Sizes  []uint32
+	Hashes []libcommon.Hash
+}
+
+func rlptest() error {
+	var p = NewPooledTransactionHashesPacket68{
+		Types:  []byte{44, 200},
+		Sizes:  []uint32{56, 57680},
+		Hashes: []libcommon.Hash{{}, {}},
+	}
+	b, err := rlp.EncodeToBytes(&p)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%x\n", b)
+	var hashes []byte
+	for _, h := range p.Hashes {
+		hashes = append(hashes, h[:]...)
+	}
+	b = make([]byte, librlp.AnnouncementsLen(p.Types, p.Sizes, hashes))
+	l := librlp.EncodeAnnouncements(p.Types, p.Sizes, hashes, b)
+	fmt.Printf("%x\n%d %d\n", b, len(b), l)
+	return nil
+}
+
 func main() {
 	debug.RaiseFdLimit()
 	flag.Parse()
@@ -1476,6 +1502,8 @@ func main() {
 		err = readSeg(*chaindata)
 	case "dumpState":
 		err = dumpState(*chaindata)
+	case "rlptest":
+		err = rlptest()
 	}
 
 	if err != nil {

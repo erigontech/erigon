@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"math"
 	"math/big"
+	"sort"
 	"strconv"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -44,7 +46,86 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	return api.bor.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+}
+
+type BlockSigners struct {
+	Signers []difficultiesKV
+	Diff    int
+	Author  libcommon.Address
+}
+
+type difficultiesKV struct {
+	Signer     libcommon.Address
+	Difficulty uint64
+}
+
+func rankMapDifficulties(values map[libcommon.Address]uint64) []difficultiesKV {
+	ss := make([]difficultiesKV, 0, len(values))
+	for k, v := range values {
+		ss = append(ss, difficultiesKV{k, v})
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Difficulty > ss[j].Difficulty
+	})
+
+	return ss
+}
+
+// GetSnapshotProposerSequence retrieves the in-turn signers of all sprints in a span
+func (api *API) GetSnapshotProposerSequence(number *rpc.BlockNumber) (BlockSigners, error) {
+	snapNumber := *number - 1
+
+	var difficulties = make(map[libcommon.Address]uint64)
+
+	snap, err := api.GetSnapshot(&snapNumber)
+
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	proposer := snap.ValidatorSet.GetProposer().Address
+	proposerIndex, _ := snap.ValidatorSet.GetByAddress(proposer)
+
+	signers := snap.signers()
+	for i := 0; i < len(signers); i++ {
+		tempIndex := i
+		if tempIndex < proposerIndex {
+			tempIndex = tempIndex + len(signers)
+		}
+
+		difficulties[signers[i]] = uint64(len(signers) - (tempIndex - proposerIndex))
+	}
+
+	rankedDifficulties := rankMapDifficulties(difficulties)
+
+	author, err := api.GetAuthor(number)
+	if err != nil {
+		return BlockSigners{}, err
+	}
+
+	diff := int(difficulties[*author])
+	blockSigners := &BlockSigners{
+		Signers: rankedDifficulties,
+		Diff:    diff,
+		Author:  *author,
+	}
+
+	return *blockSigners, nil
+}
+
+// GetSnapshotProposer retrieves the in-turn signer at a given block.
+func (api *API) GetSnapshotProposer(number *rpc.BlockNumber) (libcommon.Address, error) {
+	*number -= 1
+	snap, err := api.GetSnapshot(number)
+
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+
+	return snap.ValidatorSet.GetProposer().Address, nil
 }
 
 // GetAuthor retrieves the author a block.
@@ -60,7 +141,9 @@ func (api *API) GetAuthor(number *rpc.BlockNumber) (*libcommon.Address, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	author, err := api.bor.Author(header)
+
 	return &author, err
 }
 
@@ -70,6 +153,7 @@ func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	return api.bor.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
 }
 
@@ -86,10 +170,13 @@ func (api *API) GetSigners(number *rpc.BlockNumber) ([]libcommon.Address, error)
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	snap, err := api.bor.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+
 	if err != nil {
 		return nil, err
 	}
+
 	return snap.signers(), nil
 }
 
@@ -99,10 +186,13 @@ func (api *API) GetSignersAtHash(hash libcommon.Hash) ([]libcommon.Address, erro
 	if header == nil {
 		return nil, errUnknownBlock
 	}
+
 	snap, err := api.bor.snapshot(api.chain, header.Number.Uint64(), header.Hash(), nil)
+
 	if err != nil {
 		return nil, err
 	}
+
 	return snap.signers(), nil
 }
 
@@ -112,15 +202,17 @@ func (api *API) GetCurrentProposer() (libcommon.Address, error) {
 	if err != nil {
 		return libcommon.Address{}, err
 	}
+
 	return snap.ValidatorSet.GetProposer().Address, nil
 }
 
 // GetCurrentValidators gets the current validators
-func (api *API) GetCurrentValidators() ([]*Validator, error) {
+func (api *API) GetCurrentValidators() ([]*valset.Validator, error) {
 	snap, err := api.GetSnapshot(nil)
 	if err != nil {
-		return make([]*Validator, 0), err
+		return make([]*valset.Validator, 0), err
 	}
+
 	return snap.ValidatorSet.Validators, nil
 }
 
@@ -129,26 +221,36 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	if err := api.initializeRootHashCache(); err != nil {
 		return "", err
 	}
+
 	key := getRootHashKey(start, end)
+
 	if root, known := api.rootHashCache.Get(key); known {
 		return root.(string), nil
 	}
+
 	length := end - start + 1
+
 	if length > MaxCheckpointLength {
 		return "", &MaxCheckpointLengthExceededError{start, end}
 	}
+
 	currentHeaderNumber := api.chain.CurrentHeader().Number.Uint64()
+
 	if start > end || end > currentHeaderNumber {
-		return "", &InvalidStartEndBlockError{start, end, currentHeaderNumber}
+		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
+
 	blockHeaders := make([]*types.Header, end-start+1)
 	wg := new(sync.WaitGroup)
 	concurrent := make(chan bool, 20)
+
 	for i := start; i <= end; i++ {
 		wg.Add(1)
 		concurrent <- true
+
 		go func(number uint64) {
 			blockHeaders[number-start] = api.chain.GetHeaderByNumber(number)
+
 			<-concurrent
 			wg.Done()
 		}(i)
@@ -157,6 +259,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	close(concurrent)
 
 	headers := make([][32]byte, NextPowerOfTwo(length))
+
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
@@ -167,6 +270,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 		))
 
 		var arr [32]byte
+
 		copy(arr[:], header)
 		headers[i] = arr
 	}
@@ -175,8 +279,10 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
 		return "", err
 	}
+
 	root := hex.EncodeToString(tree.Root().Hash)
 	api.rootHashCache.Add(key, root)
+
 	return root, nil
 }
 
@@ -185,6 +291,7 @@ func (api *API) initializeRootHashCache() error {
 	if api.rootHashCache == nil {
 		api.rootHashCache, err = lru.NewARC(10)
 	}
+
 	return err
 }
 

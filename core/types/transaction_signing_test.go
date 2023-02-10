@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -140,7 +141,7 @@ func TestEIP155SigningVitalik(t *testing.T) {
 func TestChainId(t *testing.T) {
 	key, _ := defaultTestKey()
 	addr := libcommon.HexToAddress("0x0000000000000000000000000000000000000001")
-	accesses := AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+	accesses := types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 
 	var signedBlobTx Transaction = &SignedBlobTx{
 		Message: BlobTxMessage{
@@ -188,7 +189,7 @@ func TestSigning_SignedBlobDataTx(t *testing.T) {
 	t.Parallel()
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)
-	accesses := AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
+	accesses := types2.AccessList{{Address: addr, StorageKeys: []libcommon.Hash{{0}}}}
 
 	chainId := uint256.NewInt(18)
 	var signedBlobTx Transaction = &SignedBlobTx{

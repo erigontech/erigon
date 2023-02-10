@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -801,7 +802,7 @@ func (m callMsg) DataGas() uint64                { return params.DataGasPerBlob 
 func (m callMsg) MaxFeePerDataGas() *uint256.Int { return m.CallMsg.MaxFeePerDataGas }
 func (m callMsg) Value() *uint256.Int            { return m.CallMsg.Value }
 func (m callMsg) Data() []byte                   { return m.CallMsg.Data }
-func (m callMsg) AccessList() types.AccessList   { return m.CallMsg.AccessList }
+func (m callMsg) AccessList() types2.AccessList  { return m.CallMsg.AccessList }
 func (m callMsg) IsFree() bool                   { return false }
 func (m callMsg) DataHashes() []libcommon.Hash   { return m.CallMsg.DataHashes }
 

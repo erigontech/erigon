@@ -110,7 +110,7 @@ func ExecV3(ctx context.Context,
 	parallel bool, rs *state.StateV3, logPrefix string,
 	logger log.Logger,
 	maxBlockNum uint64,
-) (err error) {
+) error {
 	batchSize, chainDb := cfg.batchSize, cfg.db
 	blockReader := cfg.blockReader
 	agg, engine := cfg.agg, cfg.engine
@@ -119,6 +119,7 @@ func ExecV3(ctx context.Context,
 
 	useExternalTx := applyTx != nil
 	if !useExternalTx && !parallel {
+		var err error
 		applyTx, err = chainDb.BeginRw(ctx)
 		if err != nil {
 			return err
@@ -279,7 +280,6 @@ func ExecV3(ctx context.Context,
 			}
 
 			defer applyLoopWg.Wait()
-
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
@@ -433,8 +433,10 @@ func ExecV3(ctx context.Context,
 
 		rwLoopErrCh = make(chan error, 1)
 
-		rwLoopWg.Add(1)
 		defer rwLoopWg.Wait()
+		rwLoopCtx, rwLoopCancel := context.WithCancel(ctx)
+		defer rwLoopCancel()
+		rwLoopWg.Add(1)
 		go func() {
 			defer close(rwLoopErrCh)
 			defer rwLoopWg.Done()
@@ -443,7 +445,7 @@ func ExecV3(ctx context.Context,
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
 
-			if err := rwLoop(ctx); err != nil {
+			if err := rwLoop(rwLoopCtx); err != nil {
 				rwLoopErrCh <- err
 			}
 		}()
@@ -484,6 +486,7 @@ func ExecV3(ctx context.Context,
 	//isBor := cfg.chainConfig.Bor != nil
 
 	var blockNum uint64
+	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		inputBlockNum.Store(blockNum)
@@ -800,11 +803,10 @@ func reconstituteStep(last bool,
 	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
-	var err error
 	var startOk, endOk bool
 	startTxNum, endTxNum := as.TxNumRange()
 	var startBlockNum, endBlockNum uint64 // First block which is not covered by the history snapshot files
-	if err := chainDb.View(ctx, func(tx kv.Tx) error {
+	if err := chainDb.View(ctx, func(tx kv.Tx) (err error) {
 		startOk, startBlockNum, err = rawdbv3.TxNums.FindBlockNum(tx, startTxNum)
 		if err != nil {
 			return err
@@ -834,9 +836,9 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
+	log.Info(fmt.Sprintf("[%s] Reconstitution", s.LogPrefix()), "startTxNum", startTxNum, "endTxNum", endTxNum, "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
 
-	var maxTxNum uint64 = startTxNum
+	var maxTxNum = startTxNum
 
 	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
@@ -846,19 +848,25 @@ func reconstituteStep(last bool,
 	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	}
 	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
@@ -881,6 +889,7 @@ func reconstituteStep(last bool,
 		}
 	}()
 	for i := 0; i < workerCount; i++ {
+		var err error
 		if roTxs[i], err = db.BeginRo(ctx); err != nil {
 			return err
 		}
@@ -910,7 +919,7 @@ func reconstituteStep(last bool,
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})
-	var bn uint64
+	//var bn uint64
 	go func() {
 		for {
 			select {
@@ -935,23 +944,22 @@ func reconstituteStep(last bool,
 				prevTime = currentTime
 				prevCount = count
 				prevRollbackCount = rollbackCount
-				syncMetrics[stages.Execution].Set(bn)
 				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", bn,
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", syncMetrics[stages.Execution].Get(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
 					t := time.Now()
-					if err = func() error {
+					if err := func() error {
 						lock.Lock()
 						defer lock.Unlock()
 						for i := 0; i < workerCount; i++ {
 							roTxs[i].Rollback()
 						}
 						if err := db.Update(ctx, func(tx kv.RwTx) error {
-							if err = rs.Flush(tx); err != nil {
+							if err := rs.Flush(tx); err != nil {
 								return err
 							}
 							return nil
@@ -959,6 +967,7 @@ func reconstituteStep(last bool,
 							return err
 						}
 						for i := 0; i < workerCount; i++ {
+							var err error
 							if roTxs[i], err = db.BeginRo(ctx); err != nil {
 								return err
 							}
@@ -978,6 +987,7 @@ func reconstituteStep(last bool,
 	var b, parentBlock *types.Block
 	var txKey [8]byte
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
+		var err error
 		if err = chainDb.View(ctx, func(tx kv.Tx) error {
 			h, err = blockReader.Header(ctx, tx, hash, number)
 			if err != nil {
@@ -990,7 +1000,9 @@ func reconstituteStep(last bool,
 		}
 		return h
 	}
-	for bn = startBlockNum; bn <= endBlockNum; bn++ {
+
+	var err error // avoid declare global mutable variable
+	for bn := startBlockNum; bn <= endBlockNum; bn++ {
 		t = time.Now()
 		if b == nil {
 			if bn >= 0 {
@@ -1066,6 +1078,7 @@ func reconstituteStep(last bool,
 		}
 
 		core.BlockExecutionTimer.UpdateDuration(t)
+		syncMetrics[stages.Execution].Set(bn)
 	}
 	close(workCh)
 	wg.Wait()
@@ -1273,16 +1286,27 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 		return err
 	}
 
+	// Incremental reconstitution, step by step (snapshot range by snapshot range)
+	aggSteps, err := agg.MakeSteps()
+	if err != nil {
+		return err
+	}
+	if len(aggSteps) == 0 {
+		return nil
+	}
+	lastStep := aggSteps[len(aggSteps)-1]
+
 	var ok bool
 	var blockNum uint64 // First block which is not covered by the history snapshot files
 	var txNum uint64
 	if err := chainDb.View(ctx, func(tx kv.Tx) error {
-		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+		_, toTxNum := lastStep.TxNumRange()
+		ok, blockNum, err = rawdbv3.TxNums.FindBlockNum(tx, toTxNum)
 		if err != nil {
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", agg.EndTxNumMinimax())
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", toTxNum)
 		}
 		if blockNum == 0 {
 			return fmt.Errorf("not enough transactions in the history data")
@@ -1315,12 +1339,6 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	defer db.Close()
 	defer os.RemoveAll(reconDbPath)
 
-	// Incremental reconstitution, step by step (snapshot range by snapshot range)
-
-	aggSteps, err := agg.MakeSteps()
-	if err != nil {
-		return err
-	}
 	for step, as := range aggSteps {
 		log.Info("Step of incremental reconstitution", "step", step+1, "out of", len(aggSteps), "workers", workerCount)
 		if err := reconstituteStep(step+1 == len(aggSteps), workerCount, ctx, db,
@@ -1341,13 +1359,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
 	fillWorker.FillAccounts(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillStorage(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillCode(codeCollector, plainContractCollector)
-	log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	// Load all collections into the main collector
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {

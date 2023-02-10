@@ -1563,7 +1563,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if terminalTotalDifficulty.Cmp(common.Big0) == 0 {
+	if terminalTotalDifficulty.Cmp(libcommon.Big0) == 0 {
 		return true, nil
 	}
 	header := ReadHeaderByNumber(db, blockNum)
@@ -1571,7 +1571,7 @@ func Transitioned(db kv.Getter, blockNum uint64, terminalTotalDifficulty *big.In
 		return false, nil
 	}
 
-	if header.Difficulty.Cmp(common.Big0) == 0 {
+	if header.Difficulty.Cmp(libcommon.Big0) == 0 {
 		return true, nil
 	}
 
@@ -1593,7 +1593,7 @@ func IsPosBlock(db kv.Getter, blockHash libcommon.Hash) (trans bool, err error) 
 		return false, nil
 	}
 
-	return header.Difficulty.Cmp(common.Big0) == 0, nil
+	return header.Difficulty.Cmp(libcommon.Big0) == 0, nil
 }
 
 var SnapshotsKey = []byte("snapshots")

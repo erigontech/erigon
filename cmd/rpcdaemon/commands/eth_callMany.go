@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -26,12 +26,12 @@ import (
 
 type BlockOverrides struct {
 	BlockNumber *hexutil.Uint64
-	Coinbase    *libcommon.Address
+	Coinbase    *common.Address
 	Timestamp   *hexutil.Uint64
 	GasLimit    *hexutil.Uint
 	Difficulty  *hexutil.Uint
 	BaseFee     *uint256.Int
-	BlockHash   *map[uint64]libcommon.Hash
+	BlockHash   *map[uint64]common.Hash
 }
 
 type Bundle struct {
@@ -44,7 +44,7 @@ type StateContext struct {
 	TransactionIndex *int
 }
 
-func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]libcommon.Hash) {
+func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOverrides, overrideBlockHash map[uint64]common.Hash) {
 	if blockOverride.BlockNumber != nil {
 		blockCtx.BlockNumber = uint64(*blockOverride.BlockNumber)
 	}
@@ -72,16 +72,16 @@ func blockHeaderOverride(blockCtx *evmtypes.BlockContext, blockOverride BlockOve
 
 func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, stateOverride *ethapi.StateOverrides, timeoutMilliSecondsPtr *int64) ([][]map[string]interface{}, error) {
 	var (
-		hash               libcommon.Hash
+		hash               common.Hash
 		replayTransactions types.Transactions
 		evm                *vm.EVM
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
-		overrideBlockHash  map[uint64]libcommon.Hash
+		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
 
-	overrideBlockHash = make(map[uint64]libcommon.Hash)
+	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
-	getHash := func(i uint64) libcommon.Hash {
+	getHash := func(i uint64) common.Hash {
 		if hash, ok := overrideBlockHash[i]; ok {
 			return hash
 		}

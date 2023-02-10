@@ -9,36 +9,36 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
 // ExecutionPayload represents an execution payload (aka block)
 type ExecutionPayload struct {
-	ParentHash    libcommon.Hash      `json:"parentHash"    gencodec:"required"`
-	FeeRecipient  libcommon.Address   `json:"feeRecipient"  gencodec:"required"`
-	StateRoot     libcommon.Hash      `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot  libcommon.Hash      `json:"receiptsRoot"  gencodec:"required"`
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
 	LogsBloom     hexutil.Bytes       `json:"logsBloom"     gencodec:"required"`
-	PrevRandao    libcommon.Hash      `json:"prevRandao"    gencodec:"required"`
+	PrevRandao    common.Hash         `json:"prevRandao"    gencodec:"required"`
 	BlockNumber   hexutil.Uint64      `json:"blockNumber"   gencodec:"required"`
 	GasLimit      hexutil.Uint64      `json:"gasLimit"      gencodec:"required"`
 	GasUsed       hexutil.Uint64      `json:"gasUsed"       gencodec:"required"`
 	Timestamp     hexutil.Uint64      `json:"timestamp"     gencodec:"required"`
 	ExtraData     hexutil.Bytes       `json:"extraData"     gencodec:"required"`
 	BaseFeePerGas *hexutil.Big        `json:"baseFeePerGas" gencodec:"required"`
-	BlockHash     libcommon.Hash      `json:"blockHash"     gencodec:"required"`
+	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
 	ExcessDataGas *hexutil.Big        `json:"excessDataGas"`
@@ -58,35 +58,35 @@ type GetPayloadV3Response struct {
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type ForkChoiceState struct {
-	HeadHash           libcommon.Hash `json:"headBlockHash"             gencodec:"required"`
-	SafeBlockHash      libcommon.Hash `json:"safeBlockHash"             gencodec:"required"`
-	FinalizedBlockHash libcommon.Hash `json:"finalizedBlockHash"        gencodec:"required"`
+	HeadHash           common.Hash `json:"headBlockHash"             gencodec:"required"`
+	SafeBlockHash      common.Hash `json:"safeBlockHash"             gencodec:"required"`
+	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"        gencodec:"required"`
 }
 
 // PayloadAttributes represent the attributes required to start assembling a payload
 type PayloadAttributes struct {
 	Timestamp             hexutil.Uint64      `json:"timestamp"             gencodec:"required"`
-	PrevRandao            libcommon.Hash      `json:"prevRandao"            gencodec:"required"`
-	SuggestedFeeRecipient libcommon.Address   `json:"suggestedFeeRecipient" gencodec:"required"`
+	PrevRandao            common.Hash         `json:"prevRandao"            gencodec:"required"`
+	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
 }
 
 // TransitionConfiguration represents the correct configurations of the CL and the EL
 type TransitionConfiguration struct {
-	TerminalTotalDifficulty *hexutil.Big   `json:"terminalTotalDifficulty" gencodec:"required"`
-	TerminalBlockHash       libcommon.Hash `json:"terminalBlockHash"       gencodec:"required"`
-	TerminalBlockNumber     *hexutil.Big   `json:"terminalBlockNumber"     gencodec:"required"`
+	TerminalTotalDifficulty *hexutil.Big `json:"terminalTotalDifficulty" gencodec:"required"`
+	TerminalBlockHash       common.Hash  `json:"terminalBlockHash"       gencodec:"required"`
+	TerminalBlockNumber     *hexutil.Big `json:"terminalBlockNumber"     gencodec:"required"`
 }
 
 // BlobsBundleV1 holds the blobs of an execution payload, to be retrieved separately
 type BlobsBundleV1 struct {
-	BlockHash libcommon.Hash        `json:"blockHash"     gencodec:"required"`
+	BlockHash common.Hash           `json:"blockHash"     gencodec:"required"`
 	KZGs      []types.KZGCommitment `json:"kzgs"      gencodec:"required"`
 	Blobs     []types.Blob          `json:"blobs"      gencodec:"required"`
 }
 
 type ExecutionPayloadBodyV1 struct {
-	Transactions [][]byte            `json:"transactions" gencodec:"required"`
+	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
@@ -101,7 +101,7 @@ type EngineAPI interface {
 	GetPayloadV3(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV3Response, error)
 	GetBlobsBundleV1(ctx context.Context, payloadID hexutil.Bytes) (*BlobsBundleV1, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
-	GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error)
+	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
 	GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error)
 }
 
@@ -124,8 +124,8 @@ func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *remote.EnginePaylo
 		return json, nil
 	}
 
-	latestValidHash := libcommon.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
-	if latestValidHash == (libcommon.Hash{}) || x.Status == remote.EngineStatus_VALID {
+	latestValidHash := common.Hash(gointerfaces.ConvertH256ToHash(x.LatestValidHash))
+	if latestValidHash == (common.Hash{}) || x.Status == remote.EngineStatus_VALID {
 		json["latestValidHash"] = latestValidHash
 		return json, nil
 	}
@@ -146,7 +146,7 @@ func convertPayloadStatus(ctx context.Context, db kv.RoDB, x *remote.EnginePaylo
 	if isValidHashPos {
 		json["latestValidHash"] = latestValidHash
 	} else {
-		json["latestValidHash"] = libcommon.Hash{}
+		json["latestValidHash"] = common.Hash{}
 	}
 	return json, nil
 }
@@ -461,12 +461,16 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 
 	return &TransitionConfiguration{
 		TerminalTotalDifficulty: (*hexutil.Big)(terminalTotalDifficulty),
-		TerminalBlockHash:       libcommon.Hash{},
+		TerminalBlockHash:       common.Hash{},
 		TerminalBlockNumber:     (*hexutil.Big)(common.Big0),
 	}, nil
 }
 
-func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*ExecutionPayloadBodyV1, error) {
+func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error) {
+	if len(hashes) > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
 	h := make([]*types2.H256, len(hashes))
 	for i, hash := range hashes {
 		h[i] = gointerfaces.ConvertHashToH256(hash)
@@ -481,6 +485,13 @@ func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libc
 }
 
 func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
+	if start == 0 || count == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
+	}
+	if count > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
 	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
 	if err != nil {
 		return nil, err
@@ -537,8 +548,11 @@ func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response
 			result[idx] = nil
 		} else {
 			pl := &ExecutionPayloadBodyV1{
-				Transactions: body.Transactions,
+				Transactions: make([]hexutil.Bytes, len(body.Transactions)),
 				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			}
+			for i := range body.Transactions {
+				pl.Transactions[i] = body.Transactions[i]
 			}
 			result[idx] = pl
 		}

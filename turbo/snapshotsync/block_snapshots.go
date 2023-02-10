@@ -1329,7 +1329,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Txs", segmentFile, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Txs", segmentFile, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return 0, fmt.Errorf("NewCompressor: %w, %s", err, segmentFile)
 	}
@@ -1504,7 +1504,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
@@ -1566,7 +1566,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
@@ -1716,11 +1716,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if err != nil {
 		return err
 	}
-	idxLogLvl := log.LvlDebug
-	if d.Count() > 1_000_000 {
-		idxLogLvl = log.LvlInfo
-	}
-	txnHashIdx.LogLvl(idxLogLvl)
+	txnHashIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 	parseCtx := types2.NewTxParseContext(chainID)
@@ -1901,7 +1897,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(lvl)
+	rs.LogLvl(log.LvlDebug)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
@@ -2090,7 +2086,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}

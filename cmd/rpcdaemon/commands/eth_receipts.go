@@ -10,11 +10,12 @@ import (
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 
@@ -36,7 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []libcommon.Address) (types.Receipts, error) {
+func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
 	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
 		return cached, nil
 	}
@@ -55,7 +56,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 
 	receipts := make(types.Receipts, len(block.Transactions()))
 
-	getHeader := func(hash libcommon.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
@@ -148,7 +149,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
-	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
@@ -234,7 +235,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]libcommon.Hash, from, to uint64) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
 		var bitmapForORing *roaring.Bitmap
@@ -262,7 +263,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]libcommon.Hash, from, to uint64) (*roar
 	}
 	return result, nil
 }
-func getAddrsBitmap(tx kv.Tx, addrs []libcommon.Address, from, to uint64) (*roaring.Bitmap, error) {
+func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -385,7 +386,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 
-	addrMap := make(map[libcommon.Address]struct{}, len(crit.Addresses))
+	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
 	}
@@ -394,9 +395,9 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return nil, err
 	}
-	exec := newIntraBlockExec(tx, chainConfig, api.engine(), api._blockReader)
+	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 
-	var blockHash libcommon.Hash
+	var blockHash common.Hash
 	var header *types.Header
 
 	iter := MapTxNum2BlockNum(tx, txNumbers)
@@ -467,8 +468,10 @@ type intraBlockExec struct {
 	chainConfig *chain.Config
 	evm         *vm.EVM
 
+	tracer GenericTracer
+
 	// calculated by .changeBlock()
-	blockHash libcommon.Hash
+	blockHash common.Hash
 	blockNum  uint64
 	header    *types.Header
 	blockCtx  *evmtypes.BlockContext
@@ -477,18 +480,24 @@ type intraBlockExec struct {
 	vmConfig  *vm.Config
 }
 
-func newIntraBlockExec(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader, br services.FullBlockReader) *intraBlockExec {
+func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.EngineReader, br services.FullBlockReader, tracer GenericTracer) *intraBlockExec {
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(tx)
-	return &intraBlockExec{
+
+	ie := &intraBlockExec{
 		engine:      engine,
 		chainConfig: chainConfig,
 		br:          br,
 		stateReader: stateReader,
+		tracer:      tracer,
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		vmConfig:    &vm.Config{},
 		ibs:         state.New(stateReader),
 	}
+	if tracer != nil {
+		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
+	}
+	return ie
 }
 
 func (e *intraBlockExec) changeBlock(header *types.Header) {
@@ -517,6 +526,11 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
 	}
+	if e.vmConfig.Tracer != nil {
+		if e.tracer.Found() {
+			e.tracer.SetTransaction(txn)
+		}
+	}
 	return e.ibs.GetLogs(txHash), res, nil
 }
 
@@ -531,49 +545,40 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (iter.U64, error) {
-	var result iter.U64
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (res iter.U64, err error) {
 	for _, sub := range topics {
-		var bitmapForORing iter.U64 = iter.Array[uint64]([]uint64{})
 
+		var topicsUnion iter.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), from, to, true, -1)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, -1)
 			if err != nil {
 				return nil, err
 			}
-			bitmapForORing = iter.Union[uint64](bitmapForORing, it)
+			topicsUnion = iter.Union[uint64](topicsUnion, it)
 		}
 
-		if result == nil {
-			result = bitmapForORing
+		if res == nil {
+			res = topicsUnion
 			continue
 		}
-		result = iter.Intersect[uint64](result, bitmapForORing)
+		res = iter.Intersect[uint64](res, topicsUnion)
 	}
-	return result, nil
+	return res, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (iter.U64, error) {
-	if len(addrs) == 0 {
-		return nil, nil
-	}
-	var rx iter.U64
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
 	for _, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], from, to, true, -1)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, -1)
 		if err != nil {
 			return nil, err
 		}
-		if rx == nil {
-			rx = it
-		} else {
-			rx = iter.Union[uint64](rx, it)
-		}
+		res = iter.Union[uint64](res, it)
 	}
-	return rx, nil
+	return res, nil
 }
 
 /*
-func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uint64) (*roaring64.Bitmap, error) {
+func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64) (*roaring64.Bitmap, error) {
 	var result *roaring64.Bitmap
 	for _, sub := range topics {
 		bitmapForORing := bitmapdb.NewBitmap64()
@@ -603,7 +608,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]libcommon.Hash, from, to uin
 	return result, nil
 }
 
-func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint64) (*roaring64.Bitmap, error) {
+func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (*roaring64.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
@@ -628,7 +633,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []libcommon.Address, from, to uint
 */
 
 // GetTransactionReceipt implements eth_getTransactionReceipt. Returns the receipt of a transaction given the transaction's hash.
-func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon.Hash) (map[string]interface{}, error) {
+func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Hash) (map[string]interface{}, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -696,9 +701,6 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
-	if len(receipts) <= int(txnIndex) {
-		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
-	}
 
 	if txn == nil {
 		borReceipt, err := rawdb.ReadBorReceipt(tx, block.Hash(), blockNum, receipts)
@@ -709,6 +711,10 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash libcommon
 			return nil, nil
 		}
 		return marshalReceipt(borReceipt, borTx, cc, block.HeaderNoCopy(), txnHash, false), nil
+	}
+
+	if len(receipts) <= int(txnIndex) {
+		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
 	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
@@ -764,7 +770,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, number rpc.BlockNumber
 	return result, nil
 }
 
-func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash libcommon.Hash, signed bool) map[string]interface{} {
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash common.Hash, signed bool) map[string]interface{} {
 	var chainId *big.Int
 	switch t := txn.(type) {
 	case *types.LegacyTx:
@@ -777,7 +783,7 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		chainId = t.ChainID.ToBig()
 	}
 
-	var from libcommon.Address
+	var from common.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
 		from, _ = txn.Sender(*signer)
@@ -811,13 +817,13 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		fields["logs"] = [][]*types.Log{}
 	}
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
-	if receipt.ContractAddress != (libcommon.Address{}) {
+	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
 	return fields
 }
 
-func includes(addresses []libcommon.Address, a libcommon.Address) bool {
+func includes(addresses []common.Address, a common.Address) bool {
 	for _, addr := range addresses {
 		if addr == a {
 			return true
@@ -827,7 +833,7 @@ func includes(addresses []libcommon.Address, a libcommon.Address) bool {
 }
 
 // filterLogs creates a slice of logs matching the given criteria.
-func filterLogsOld(logs []*types.Log, addresses []libcommon.Address, topics [][]libcommon.Hash) []*types.Log {
+func filterLogsOld(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
 	result := make(types.Logs, 0, len(logs))
 Logs:
 	for _, log := range logs {

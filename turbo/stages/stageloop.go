@@ -149,7 +149,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {
 		// -- Process new blocks + commit(no_sync)
-		tx, err = db.BeginRwAsync(ctx)
+		tx, err = db.BeginRwNosync(ctx)
 		if err != nil {
 			return headBlockHash, err
 		}

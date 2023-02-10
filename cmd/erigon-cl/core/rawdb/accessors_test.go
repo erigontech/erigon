@@ -40,7 +40,7 @@ func TestBeaconBlock(t *testing.T) {
 	}
 
 	require.NoError(t, rawdb.WriteBeaconBlock(tx, signedBeaconBlock))
-	newBlock, err := rawdb.ReadBeaconBlock(tx, signedBeaconBlock.Block.Slot)
+	newBlock, _, _, err := rawdb.ReadBeaconBlock(tx, signedBeaconBlock.Block.Slot)
 	require.NoError(t, err)
 	newBlock.Block.Body.ExecutionPayload = emptyBlock
 	newRoot, err := newBlock.HashSSZ()

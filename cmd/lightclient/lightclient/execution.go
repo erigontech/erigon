@@ -53,7 +53,7 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 }
 
 func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error {
-	if l.execution == nil {
+	if l.execution == nil && l.executionClient == nil {
 		return nil
 	}
 	// If we recently imported the beacon block, skip.
@@ -71,19 +71,45 @@ func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error
 
 	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
 
-	_, err = l.execution.EngineNewPayload(l.ctx, payload)
-	if err != nil {
-		return err
+	if l.execution != nil {
+		_, err = l.execution.EngineNewPayload(l.ctx, payload)
+		if err != nil {
+			return err
+		}
+	}
+
+	if l.executionClient != nil {
+		_, err = l.executionClient.EngineNewPayload(l.ctx, payload)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Wait a bit
 	time.Sleep(500 * time.Millisecond)
-	_, err = l.execution.EngineForkChoiceUpdated(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
-		ForkchoiceState: &remote.EngineForkChoiceState{
-			HeadBlockHash:      payloadHash,
-			SafeBlockHash:      payloadHash,
-			FinalizedBlockHash: gointerfaces.ConvertHashToH256(l.finalizedEth1Hash),
-		},
-	})
+	if l.execution != nil {
+		_, err = l.execution.EngineForkChoiceUpdated(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
+			ForkchoiceState: &remote.EngineForkChoiceState{
+				HeadBlockHash:      payloadHash,
+				SafeBlockHash:      payloadHash,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(l.finalizedEth1Hash),
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if l.executionClient != nil {
+		_, err = l.executionClient.EngineForkChoiceUpdated(l.ctx, &remote.EngineForkChoiceUpdatedRequest{
+			ForkchoiceState: &remote.EngineForkChoiceState{
+				HeadBlockHash:      payloadHash,
+				SafeBlockHash:      payloadHash,
+				FinalizedBlockHash: gointerfaces.ConvertHashToH256(l.finalizedEth1Hash),
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return err
 }

@@ -472,7 +472,7 @@ Finish:
 	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := cfg.agg.ReopenFiles(); err != nil {
+	if err := cfg.agg.ReopenFolder(); err != nil {
 		return err
 	}
 
@@ -556,7 +556,7 @@ func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsy
 		}
 	}
 
-	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo)
+	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
 
 	return nil
 }

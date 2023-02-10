@@ -36,8 +36,7 @@ type BlockGetter interface {
 }
 
 // ComputeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex uint64, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
-	header := block.HeaderNoCopy()
+func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *types.Block, cfg *chain.Config, headerReader services.HeaderReader, dbtx kv.Tx, txIndex int, historyV3 bool) (core.Message, evmtypes.BlockContext, evmtypes.TxContext, *state.IntraBlockState, state.StateReader, error) {
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, block.NumberU64(), txIndex, historyV3, cfg.ChainName)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
@@ -53,6 +52,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		h, _ := headerReader.HeaderByNumber(ctx, dbtx, n)
 		return h
 	}
+	header := block.HeaderNoCopy()
 	parentHeader, err := headerReader.HeaderByHash(ctx, dbtx, header.ParentHash)
 	if err != nil {
 		// TODO(eip-4844): Do we need to propagate this error?
@@ -69,7 +69,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if historyV3 {
 		rules := cfg.Rules(BlockContext.BlockNumber, BlockContext.Time)
 		txn := block.Transactions()[txIndex]
-		statedb.Prepare(txn.Hash(), block.Hash(), int(txIndex))
+		statedb.Prepare(txn.Hash(), block.Hash(), txIndex)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -105,7 +105,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		}
 
 		TxContext := core.NewEVMTxContext(msg)
-		if idx == int(txIndex) {
+		if idx == txIndex {
 			return msg, BlockContext, TxContext, statedb, reader, nil
 		}
 		vmenv.Reset(TxContext, statedb)
@@ -156,9 +156,13 @@ func TraceTx(
 			}
 		}
 		// Construct the JavaScript tracer to execute with
+		cfg := json.RawMessage("{}")
+		if config != nil && config.TracerConfig != nil {
+			cfg = *config.TracerConfig
+		}
 		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
 			TxHash: txCtx.TxHash,
-		}, json.RawMessage("{}")); err != nil {
+		}, cfg); err != nil {
 			stream.WriteNil()
 			return err
 		}
@@ -195,6 +199,8 @@ func TraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+		} else {
+			stream.WriteNil()
 		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}

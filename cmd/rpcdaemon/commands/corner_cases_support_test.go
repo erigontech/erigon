@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/require"
 
@@ -31,7 +31,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require.Nil(a)
 	require.Nil(err)
 
-	b, err := api.GetTransactionByBlockHashAndIndex(ctx, libcommon.Hash{}, 1)
+	b, err := api.GetTransactionByBlockHashAndIndex(ctx, common.Hash{}, 1)
 	require.Nil(b)
 	require.Nil(err)
 
@@ -39,11 +39,11 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require.Nil(c)
 	require.Nil(err)
 
-	d, err := api.GetTransactionReceipt(ctx, libcommon.Hash{})
+	d, err := api.GetTransactionReceipt(ctx, common.Hash{})
 	require.Nil(d)
 	require.Nil(err)
 
-	e, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(libcommon.Hash{}, true), false)
+	e, err := api.GetBlockByHash(ctx, rpc.BlockNumberOrHashWithHash(common.Hash{}, true), false)
 	require.Nil(e)
 	require.Nil(err)
 
@@ -51,7 +51,7 @@ func TestNotFoundMustReturnNil(t *testing.T) {
 	require.Nil(f)
 	require.Nil(err)
 
-	g, err := api.GetUncleByBlockHashAndIndex(ctx, libcommon.Hash{}, 1)
+	g, err := api.GetUncleByBlockHashAndIndex(ctx, common.Hash{}, 1)
 	require.Nil(g)
 	require.Nil(err)
 

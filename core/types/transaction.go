@@ -29,6 +29,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -51,7 +52,6 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
-	StarknetType
 	BlobTxType = 5
 )
 
@@ -76,13 +76,13 @@ type Transaction interface {
 	FakeSign(address libcommon.Address) (Transaction, error)
 	Hash() libcommon.Hash
 	SigningHash(chainID *big.Int) libcommon.Hash
-	EncodingSize() int
 	GetData() []byte
-	GetAccessList() AccessList
+	GetAccessList() types2.AccessList
 	Protected() bool
 	RawSignatureValues() (*uint256.Int, *uint256.Int, *uint256.Int)
-	MarshalBinary(w io.Writer) error
+	EncodingSize() int
 	EncodeRLP(w io.Writer) error
+	MarshalBinary(w io.Writer) error
 	// Sender returns the address derived from the signature (V, R, S) using secp256k1
 	// elliptic curve and an error if it failed deriving or upon an incorrect
 	// signature.
@@ -94,7 +94,6 @@ type Transaction interface {
 	GetSender() (libcommon.Address, bool)
 	SetSender(libcommon.Address)
 	IsContractDeploy() bool
-	IsStarkNet() bool
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwiwes returns itself.
 }
 
@@ -199,13 +198,6 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	case DynamicFeeTxType:
 		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
 		t := &DynamicFeeTransaction{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
-		}
-		return t, nil
-	case StarknetType:
-		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &StarknetTransaction{}
 		if err := t.DecodeRLP(s); err != nil {
 			return nil, err
 		}
@@ -523,13 +515,13 @@ type Message struct {
 	tip              uint256.Int
 	maxFeePerDataGas uint256.Int
 	data             []byte
-	accessList       AccessList
+	accessList       types2.AccessList
 	checkNonce       bool
 	isFree           bool
 	dataHashes       []libcommon.Hash
 }
 
-func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, maxFeePerDataGas *uint256.Int, data []byte, accessList AccessList, checkNonce bool, isFree bool) Message {
+func NewMessage(from libcommon.Address, to *libcommon.Address, nonce uint64, amount *uint256.Int, gasLimit uint64, gasPrice *uint256.Int, feeCap, tip *uint256.Int, maxFeePerDataGas *uint256.Int, data []byte, accessList types2.AccessList, checkNonce bool, isFree bool) Message {
 	m := Message{
 		from:       from,
 		to:         to,
@@ -567,10 +559,10 @@ func (m Message) DataGas() uint64         { return params.DataGasPerBlob * uint6
 func (m Message) MaxFeePerDataGas() *uint256.Int {
 	return &m.maxFeePerDataGas
 }
-func (m Message) Nonce() uint64          { return m.nonce }
-func (m Message) Data() []byte           { return m.data }
-func (m Message) AccessList() AccessList { return m.accessList }
-func (m Message) CheckNonce() bool       { return m.checkNonce }
+func (m Message) Nonce() uint64                 { return m.nonce }
+func (m Message) Data() []byte                  { return m.data }
+func (m Message) AccessList() types2.AccessList { return m.accessList }
+func (m Message) CheckNonce() bool              { return m.checkNonce }
 func (m *Message) SetCheckNonce(checkNonce bool) {
 	m.checkNonce = checkNonce
 }
