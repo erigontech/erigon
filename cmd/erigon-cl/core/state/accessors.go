@@ -417,7 +417,7 @@ func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64)
 }
 
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
-func (b *BeaconState) inactivityLeaking() bool {
+func (b *BeaconState) InactivityLeaking() bool {
 	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
 }
 
@@ -460,7 +460,7 @@ func (b *BeaconState) processFlagIndexDeltas(flagIdx int, balanceDeltaMap map[ui
 			return
 		}
 		if isUnslashedParticipatingIndicies[index] {
-			if b.inactivityLeaking() {
+			if b.InactivityLeaking() {
 				continue
 			}
 			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements

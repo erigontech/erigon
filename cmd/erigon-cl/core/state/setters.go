@@ -207,6 +207,15 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 	b.inactivityScores = append(b.inactivityScores, score)
 }
 
+func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	if index >= len(b.inactivityScores) {
+		return InvalidValidatorIndex
+	}
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
+	b.inactivityScores[index] = score
+	return nil
+}
+
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)

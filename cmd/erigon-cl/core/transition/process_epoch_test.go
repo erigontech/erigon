@@ -152,3 +152,15 @@ func TestSlashingsReset(t *testing.T) {
 		return nil
 	})
 }
+
+//go:embed test_data/inactivity_scores_expected_test.ssz_snappy
+var expectedInactivityScoresState []byte
+
+//go:embed test_data/inactivity_scores_state_test.ssz_snappy
+var startingInactivityScoresState []byte
+
+func TestInactivityScores(t *testing.T) {
+	runEpochTransitionConsensusTest(t, startingInactivityScoresState, expectedInactivityScoresState, func(s *transition.StateTransistor) error {
+		return s.ProcessInactivityScores()
+	})
+}
