@@ -149,7 +149,7 @@ func runCmd(ctx *cli.Context) error {
 	db := memdb.New()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		gen.MustCommit(db)
+		gen.MustCommit(db, "")
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

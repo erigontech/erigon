@@ -26,9 +26,10 @@ func TestInserter1(t *testing.T) {
 			address: {Balance: funds},
 		},
 	}
+	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t)
 	defer db.Close()
-	_, genesis, err := core.CommitGenesisBlock(db, gspec)
+	_, genesis, err := core.CommitGenesisBlock(db, gspec, tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}

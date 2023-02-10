@@ -57,6 +57,7 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon
 func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
+	tmpDir := t.TempDir()
 	var (
 		ctx           = context.Background()
 		configNoFork  = &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
@@ -73,8 +74,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
 
-		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork)
-		genesisProFork = gspecProFork.MustCommit(dbProFork)
+		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork, tmpDir)
+		genesisProFork = gspecProFork.MustCommit(dbProFork, tmpDir)
 	)
 
 	var s1, s2 *GrpcServer

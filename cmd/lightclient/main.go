@@ -61,7 +61,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	var db kv.RwDB
 	if cfg.Chaindata == "" {
 		log.Info("chaindata is in-memory")
-		db = memdb.New()
+		db = memdb.New("" /* tmpDir */)
 	} else {
 		db, err = mdbx.Open(cfg.Chaindata, log.Root(), false)
 		if err != nil {

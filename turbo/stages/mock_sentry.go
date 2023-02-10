@@ -234,7 +234,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	if t != nil {
 		db = memdb.NewTestDB(t)
 	} else {
-		db = memdb.New()
+		db = memdb.New(tmpdir)
 	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
@@ -313,7 +313,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolDB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB(tmpdir)
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
