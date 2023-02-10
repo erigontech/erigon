@@ -72,7 +72,13 @@ type StateTransition struct {
 	sharedBuyGas        *uint256.Int
 	sharedBuyGasBalance *uint256.Int
 
-	isBor bool
+	isBor    bool
+	isParlia bool
+
+	// If true, fee burning and tipping won't happen during transition. Instead, their values will be included in the
+	// ExecutionResult, which caller can use the values to update the balance of burner and coinbase account.
+	// This is useful during parallel state transition, where the common account read/write should be minimized.
+	noFeeBurnAndTip bool
 }
 
 // Message represents a message sent to a contract.
@@ -100,9 +106,13 @@ type Message interface {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas    uint64 // Total used gas but include the refunded gas
-	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas              uint64 // Total used gas but include the refunded gas
+	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData           []byte // Returned data from evm(function result or data supplied with revert opcode)
+	SenderInitBalance    *uint256.Int
+	FeeBurnt             *uint256.Int
+	BurntContractAddress libcommon.Address
+	FeeTipped            *uint256.Int
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -183,6 +193,13 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 // for trace_call to replicate OE/Pariry behaviour
 func ApplyMessage(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
 	return NewStateTransition(evm, msg, gp).TransitionDb(refunds, gasBailout)
+}
+
+func ApplyMessageNoFeeBurnOrTip(evm vm.VMInterface, msg Message, gp *GasPool, refunds bool, gasBailout bool) (*ExecutionResult, error) {
+	st := NewStateTransition(evm, msg, gp)
+	st.noFeeBurnAndTip = true
+
+	return st.TransitionDb(refunds, gasBailout)
 }
 
 // to returns the recipient of the message.
@@ -343,9 +360,10 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 
 	var input1 *uint256.Int
 	var input2 *uint256.Int
-	if st.isBor {
-		input1 = st.state.GetBalance(st.msg.From()).Clone()
-		input2 = st.state.GetBalance(coinbase).Clone()
+	input1 = st.state.GetBalance(st.msg.From()).Clone()
+
+	if st.isBor && !st.noFeeBurnAndTip {
+		input2 = st.state.GetBalance(st.evm.Context().Coinbase).Clone()
 	}
 
 	// First check this message satisfies all consensus rules before
@@ -438,13 +456,23 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount)
-	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
-		burntContractAddress := *st.evm.ChainConfig().Eip1559FeeCollector
-		burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-		st.state.AddBalance(burntContractAddress, burnAmount)
+
+	if !st.isBor || !st.noFeeBurnAndTip {
+		st.state.AddBalance(coinbase, amount)
 	}
-	if st.isBor {
+
+	var burnAmount *uint256.Int
+	var burntContractAddress libcommon.Address
+
+	if !msg.IsFree() && rules.IsLondon && rules.IsEip1559FeeCollector {
+		burntContractAddress = *st.evm.ChainConfig().Eip1559FeeCollector
+		burnAmount = new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
+
+		if !st.noFeeBurnAndTip {
+			st.state.AddBalance(burntContractAddress, burnAmount)
+		}
+	}
+	if st.isBor && !st.noFeeBurnAndTip {
 		// Deprecating transfer log and will be removed in future fork. PLEASE DO NOT USE this transfer log going forward. Parameters won't get updated as expected going forward with EIP1559
 		// add transfer log
 		output1 := input1.Clone()
@@ -464,9 +492,13 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 
 	return &ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		ReturnData: ret,
+		UsedGas:              st.gasUsed(),
+		Err:                  vmerr,
+		ReturnData:           ret,
+		SenderInitBalance:    input1.Clone(),
+		FeeBurnt:             burnAmount,
+		BurntContractAddress: burntContractAddress,
+		FeeTipped:            amount,
 	}, nil
 }
 
