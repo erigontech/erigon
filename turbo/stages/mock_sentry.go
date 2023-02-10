@@ -680,7 +680,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 	//if err := ms.agg.BuildFiles(ms.Ctx, ms.DB); err != nil {
 	//	return err
 	//}
-	//if err := ms.DB.UpdateAsync(ms.Ctx, func(tx kv.RwTx) error {
+	//if err := ms.DB.UpdateNosync(ms.Ctx, func(tx kv.RwTx) error {
 	//	ms.agg.SetTx(tx)
 	//	if err := ms.agg.Prune(ms.Ctx, math.MaxUint64); err != nil {
 	//		return err
