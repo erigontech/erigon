@@ -2,6 +2,7 @@ package transition_test
 
 import (
 	_ "embed"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -19,8 +20,15 @@ func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpec
 	expectedState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
 	// Make up state transistor
+	fmt.Println(testState.Balances())
 	s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 	require.NoError(t, f(s))
+	fmt.Println(testState.Balances())
+	fmt.Println()
+	fmt.Println()
+	fmt.Println()
+	fmt.Println()
+	fmt.Println(expectedState.Balances())
 	haveRoot, err := testState.HashSSZ()
 	require.NoError(t, err)
 	expectedRoot, err := expectedState.HashSSZ()
@@ -29,14 +37,11 @@ func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpec
 	require.Equal(t, expectedRoot, haveRoot)
 }
 
-/* Broken tests lol.
-
 //go:embed test_data/rewards_penalty_test_expected.ssz_snappy
 var expectedRewardsPenaltyState []byte
 
 //go:embed test_data/rewards_penalty_test_state.ssz_snappy
 var startingRewardsPenaltyState []byte
-*/
 
 //go:embed test_data/registry_updates_test_expected.ssz_snappy
 var expectedRegistryUpdatesState []byte
@@ -62,11 +67,11 @@ var expectedParticipationFlagState []byte
 //go:embed test_data/participation_flag_updates_state_test.ssz_snappy
 var startingParticipationFlagState []byte
 
-/*func TestProcessRewardsAndPenalties(t *testing.T) {
+func TestProcessRewardsAndPenalties(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRewardsPenaltyState, expectedRewardsPenaltyState, func(s *transition.StateTransistor) error {
 		return s.ProcessRewardsAndPenalties()
 	})
-}*/
+}
 
 func TestProcessRegistryUpdates(t *testing.T) {
 	runEpochTransitionConsensusTest(t, startingRegistryUpdatesState, expectedRegistryUpdatesState, func(s *transition.StateTransistor) error {

@@ -445,27 +445,28 @@ func (b *BeaconState) processFlagIndexDeltas(flagIdx int, balanceDeltaMap map[ui
 		return
 	}
 	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	isUnslashedParticipatingIndicies := make(map[uint64]bool)
 	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
+		isUnslashedParticipatingIndicies[index] = true
 	}
 	// Compute relative increments.
 	unslashedParticipatingIncrements := unslashedParticipatingTotalBalance / b.beaconConfig.EffectiveBalanceIncrement
-	activeIncrements := b.GetTotalActiveBalance() / b.beaconConfig.EffectiveBalanceIncrement
 	totalActiveBalance := b.GetTotalActiveBalance()
+	activeIncrements := totalActiveBalance / b.beaconConfig.EffectiveBalanceIncrement
 	// Now process deltas and whats nots.
 	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
+		baseReward, err = b.BaseReward(totalActiveBalance, index)
+		if err != nil {
+			return
+		}
+		if isUnslashedParticipatingIndicies[index] {
 			if b.inactivityLeaking() {
 				continue
 			}
 			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
 			balanceDeltaMap[index] += int64(rewardNumerator / (activeIncrements * b.beaconConfig.WeightDenominator))
 		} else if flagIdx != int(b.beaconConfig.TimelyHeadFlagIndex) {
-			baseReward, err = b.BaseReward(totalActiveBalance, index)
-			if err != nil {
-				return
-			}
+
 			balanceDeltaMap[index] -= int64(baseReward * weight / b.beaconConfig.WeightDenominator)
 		}
 	}
@@ -485,9 +486,9 @@ func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64, 
 		return
 	}
 	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	isUnslashedParticipatingIndicies := make(map[uint64]bool)
 	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
+		isUnslashedParticipatingIndicies[index] = true
 	}
 	// retrieve penalty quotient based on fork
 	var penaltyQuotient uint64
@@ -500,7 +501,7 @@ func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64, 
 		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientBellatrix
 	}
 	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
+		if isUnslashedParticipatingIndicies[index] {
 			continue
 		}
 		// Process inactivity penalties.
