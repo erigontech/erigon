@@ -62,7 +62,6 @@ builds:
     ldflags: -s -w
 
 
-
 snapshot:
   name_template: "{{ .Tag }}.next"
 
