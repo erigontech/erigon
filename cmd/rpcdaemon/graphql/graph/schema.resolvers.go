@@ -163,7 +163,9 @@ func (r *queryResolver) Syncing(ctx context.Context) (*model.SyncState, error) {
 
 // ChainID is the resolver for the chainID field.
 func (r *queryResolver) ChainID(ctx context.Context) (string, error) {
-	panic(fmt.Errorf("not implemented: ChainID - chainID"))
+	chainID, err := r.GraphQLAPI.GetChainID(ctx)
+
+	return "0x" + strconv.FormatUint(chainID.Uint64(), 16), err
 }
 
 // Mutation returns MutationResolver implementation.

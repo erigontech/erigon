@@ -16,6 +16,12 @@ func TestGraphQLQueryBlock(t *testing.T) {
 		code int
 		comp string
 	}{
+		{ // Get chainID
+			body: `{"query": "{chainID}","variables": null}`,
+			want: `{"data":{"chainID":"0x[0-9A-F]+"}}`,
+			code: 200,
+			comp: "regexp",
+		},
 		{ // Should return latest block
 			body: `{"query": "{block{number}}","variables": null}`,
 			want: `{"data":{"block":{"number":\d{8,}}}}`,

@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -16,6 +17,7 @@ import (
 
 type GraphQLAPI interface {
 	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]interface{}, error)
+	GetChainID(ctx context.Context) (*big.Int, error)
 }
 
 type GraphQLAPIImpl struct {
@@ -28,6 +30,21 @@ func NewGraphQLAPI(base *BaseAPI, db kv.RoDB) *GraphQLAPIImpl {
 		BaseAPI: base,
 		db:      db,
 	}
+}
+
+func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*big.Int, error) {
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	response, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	return response.ChainID, nil
 }
 
 func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]interface{}, error) {
@@ -65,22 +82,9 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
 	}
 
-	/*
-		getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
-		if err != nil {
-			return nil, err
-		}
-		feesRes, err := api.delegateBlockFees(ctx, tx, b, senders, chainConfig)
-		if err != nil {
-			return nil, err
-		}
-	*/
-
 	response := map[string]interface{}{}
 	response["block"] = getBlockRes
 	response["receipts"] = result
-	//	response["issuance"] = getIssuanceRes
-	//	response["totalFees"] = hexutil.Uint64(feesRes)
 
 	return response, nil
 }
@@ -119,53 +123,5 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 		}
 	}
 
-	// Explicitly drop unwanted fields
-	// response["logsBloom"] = nil
 	return response, err
 }
-
-/*
-func (api *GraphQLAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
-	if chainConfig.Ethash == nil {
-		// Clique for example has no issuance
-		return internalIssuance{}, nil
-	}
-
-	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
-	issuance := minerReward
-	for _, r := range uncleRewards {
-		p := r // avoids warning?
-		issuance.Add(&issuance, &p)
-	}
-
-	var ret internalIssuance
-	ret.BlockReward = hexutil.EncodeBig(minerReward.ToBig())
-	ret.Issuance = hexutil.EncodeBig(issuance.ToBig())
-	issuance.Sub(&issuance, &minerReward)
-	ret.UncleReward = hexutil.EncodeBig(issuance.ToBig())
-	return ret, nil
-}
-
-func (api *GraphQLAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, block *types.Block, senders []common.Address, chainConfig *chain.Config) (uint64, error) {
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
-	if err != nil {
-		return 0, fmt.Errorf("getReceipts error: %v", err)
-	}
-
-	fees := uint64(0)
-	for _, receipt := range receipts {
-		txn := block.Transactions()[receipt.TransactionIndex]
-		effectiveGasPrice := uint64(0)
-		if !chainConfig.IsLondon(block.NumberU64()) {
-			effectiveGasPrice = txn.GetPrice().Uint64()
-		} else {
-			baseFee, _ := uint256.FromBig(block.BaseFee())
-			gasPrice := new(big.Int).Add(block.BaseFee(), txn.GetEffectiveGasTip(baseFee).ToBig())
-			effectiveGasPrice = gasPrice.Uint64()
-		}
-		fees += effectiveGasPrice * receipt.GasUsed
-	}
-
-	return fees, nil
-}
-*/
