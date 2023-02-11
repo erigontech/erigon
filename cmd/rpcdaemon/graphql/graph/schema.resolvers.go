@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -19,18 +20,37 @@ func (r *mutationResolver) SendRawTransaction(ctx context.Context, data string) 
 }
 
 // Block is the resolver for the block field.
-func (r *queryResolver) Block(ctx context.Context, number *int64, hash *string) (*model.Block, error) {
+func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
 	var blockNumber rpc.BlockNumber
 
-	// If number is not specified (nil), we should deliver "latest" block
-	if number == nil {
-		blockNumber = rpc.LatestExecutedBlockNumber
-	} else {
-		if *number < 0 {
-			var err error
-			return nil, err
+	if number != nil {
+		// Block number is not null, test for a positive long integer
+		bNum, err := strconv.ParseUint(*number, 10, 64)
+		if err == nil {
+			// Positive integer, go ahead
+			blockNumber = rpc.BlockNumber(bNum)
+		} else {
+			bNum, err := hexutil.DecodeUint64(*number)
+			if err == nil {
+				// Hexadecimal, 0x prefixed
+				blockNumber = rpc.BlockNumber(bNum)
+			} else {
+				var err error
+				return nil, err
+			}
 		}
-		blockNumber = rpc.BlockNumber(*number)
+	} else {
+		if hash != nil {
+			blockHash, _ := hexutil.DecodeBig(*hash)
+			fmt.Println("TODO/GraphQL/Implement me, get Block by hash=", blockHash)
+			hash = nil
+		}
+	}
+
+	if number == nil && hash == nil {
+		// If neither number or hash is specified (nil), we should deliver "latest" block
+		// blockNumber = rpc.LatestExecutedBlockNumber
+		blockNumber = rpc.LatestBlockNumber
 	}
 
 	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber)
@@ -45,21 +65,21 @@ func (r *queryResolver) Block(ctx context.Context, number *int64, hash *string) 
 	block := &model.Block{}
 	block.Difficulty = *convertDataToStringP(blk, "difficulty")
 	block.ExtraData = *convertDataToStringP(blk, "extraData")
-	block.GasLimit = int64(*convertDataToInt64P(blk, "gasLimit"))
-	block.GasUsed = convertDataToInt64P(blk, "gasUsed")
+	block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
+	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
 	block.Hash = *convertDataToStringP(blk, "hash")
 	block.Miner = &model.Account{}
 	block.Miner.Address = *convertDataToStringP(blk, "miner")
 	block.MixHash = *convertDataToStringP(blk, "mixHash")
 	block.Nonce = *convertDataToStringP(blk, "nonce")
-	block.Number, _ = strconv.ParseInt(*convertDataToStringP(blk, "number"), 10, 64)
+	block.Number = *convertDataToUint64P(blk, "number")
 	block.Ommers = []*model.Block{}
 	block.Parent = &model.Block{}
 	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
 	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = int64(*convertDataToIntP(blk, "timestamp"))
-	block.TransactionCount = convertDataToIntP(blk, "transactionCount")
+	block.Timestamp = *convertDataToUint64P(blk, "timestamp")
+	block.TransactionCount = convertDataToIntP(blk, "transactionCount") // *int
 	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
 
@@ -68,13 +88,13 @@ func (r *queryResolver) Block(ctx context.Context, number *int64, hash *string) 
 	rcp := absRcp.([]map[string]interface{})
 	for _, transReceipt := range rcp {
 		trans := &model.Transaction{}
-		trans.CumulativeGasUsed = convertDataToInt64P(transReceipt, "cumulativeGasUsed")
-		trans.EffectiveGasPrice = convertDataToInt64P(transReceipt, "effectiveGasPrice")
-		trans.GasUsed = convertDataToInt64P(transReceipt, "gasUsed")
+		trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
+		trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
+		trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
 		trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-		trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
-		trans.Status = convertDataToInt64P(transReceipt, "status")
-		trans.Type = convertDataToIntP(transReceipt, "type")
+		trans.Index = convertDataToIntP(transReceipt, "transactionIndex") // *int
+		trans.Status = convertDataToUint64P(transReceipt, "status")
+		trans.Type = convertDataToIntP(transReceipt, "type") // *int
 		// convertDataToStringP(transReceipt, "logsBloom")
 
 		trans.From = &model.Account{}
@@ -90,7 +110,7 @@ func (r *queryResolver) Block(ctx context.Context, number *int64, hash *string) 
 }
 
 // Blocks is the resolver for the blocks field.
-func (r *queryResolver) Blocks(ctx context.Context, from *int64, to *int64) ([]*model.Block, error) {
+func (r *queryResolver) Blocks(ctx context.Context, from *uint64, to *uint64) ([]*model.Block, error) {
 	panic(fmt.Errorf("not implemented: Blocks - blocks"))
 }
 

@@ -10,13 +10,13 @@ type AccessTuple struct {
 type Account struct {
 	Address          string `json:"address"`
 	Balance          string `json:"balance"`
-	TransactionCount int64  `json:"transactionCount"`
+	TransactionCount uint64 `json:"transactionCount"`
 	Code             string `json:"code"`
 	Storage          string `json:"storage"`
 }
 
 type Block struct {
-	Number            int64          `json:"number"`
+	Number            uint64         `json:"number"`
 	Hash              string         `json:"hash"`
 	Parent            *Block         `json:"parent"`
 	Nonce             string         `json:"nonce"`
@@ -26,11 +26,11 @@ type Block struct {
 	ReceiptsRoot      string         `json:"receiptsRoot"`
 	Miner             *Account       `json:"miner"`
 	ExtraData         string         `json:"extraData"`
-	GasLimit          int64          `json:"gasLimit"`
-	GasUsed           *int64         `json:"gasUsed"`
+	GasLimit          uint64         `json:"gasLimit"`
+	GasUsed           uint64         `json:"gasUsed"`
 	BaseFeePerGas     *string        `json:"baseFeePerGas"`
 	NextBaseFeePerGas *string        `json:"nextBaseFeePerGas"`
-	Timestamp         int64          `json:"timestamp"`
+	Timestamp         uint64         `json:"timestamp"`
 	LogsBloom         string         `json:"logsBloom"`
 	MixHash           string         `json:"mixHash"`
 	Difficulty        string         `json:"difficulty"`
@@ -44,7 +44,7 @@ type Block struct {
 	Logs              []*Log         `json:"logs"`
 	Account           *Account       `json:"account"`
 	Call              *CallResult    `json:"call"`
-	EstimateGas       int64          `json:"estimateGas"`
+	EstimateGas       uint64         `json:"estimateGas"`
 	RawHeader         string         `json:"rawHeader"`
 	Raw               string         `json:"raw"`
 }
@@ -57,7 +57,7 @@ type BlockFilterCriteria struct {
 type CallData struct {
 	From                 *string `json:"from"`
 	To                   *string `json:"to"`
-	Gas                  *int64  `json:"gas"`
+	Gas                  *uint64 `json:"gas"`
 	GasPrice             *string `json:"gasPrice"`
 	MaxFeePerGas         *string `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *string `json:"maxPriorityFeePerGas"`
@@ -67,13 +67,13 @@ type CallData struct {
 
 type CallResult struct {
 	Data    string `json:"data"`
-	GasUsed int64  `json:"gasUsed"`
-	Status  int64  `json:"status"`
+	GasUsed uint64 `json:"gasUsed"`
+	Status  uint64 `json:"status"`
 }
 
 type FilterCriteria struct {
-	FromBlock *int64     `json:"fromBlock"`
-	ToBlock   *int64     `json:"toBlock"`
+	FromBlock *uint64    `json:"fromBlock"`
+	ToBlock   *uint64    `json:"toBlock"`
 	Addresses []string   `json:"addresses"`
 	Topics    [][]string `json:"topics"`
 }
@@ -91,18 +91,18 @@ type Pending struct {
 	Transactions     []*Transaction `json:"transactions"`
 	Account          *Account       `json:"account"`
 	Call             *CallResult    `json:"call"`
-	EstimateGas      int64          `json:"estimateGas"`
+	EstimateGas      uint64         `json:"estimateGas"`
 }
 
 type SyncState struct {
-	StartingBlock int64 `json:"startingBlock"`
-	CurrentBlock  int64 `json:"currentBlock"`
-	HighestBlock  int64 `json:"highestBlock"`
+	StartingBlock uint64 `json:"startingBlock"`
+	CurrentBlock  uint64 `json:"currentBlock"`
+	HighestBlock  uint64 `json:"highestBlock"`
 }
 
 type Transaction struct {
 	Hash                 string         `json:"hash"`
-	Nonce                int64          `json:"nonce"`
+	Nonce                uint64         `json:"nonce"`
 	Index                *int           `json:"index"`
 	From                 *Account       `json:"from"`
 	To                   *Account       `json:"to"`
@@ -111,13 +111,13 @@ type Transaction struct {
 	MaxFeePerGas         *string        `json:"maxFeePerGas"`
 	MaxPriorityFeePerGas *string        `json:"maxPriorityFeePerGas"`
 	EffectiveTip         *string        `json:"effectiveTip"`
-	Gas                  int64          `json:"gas"`
+	Gas                  uint64         `json:"gas"`
 	InputData            string         `json:"inputData"`
 	Block                *Block         `json:"block"`
-	Status               *int64         `json:"status"`
-	GasUsed              *int64         `json:"gasUsed"`
-	CumulativeGasUsed    *int64         `json:"cumulativeGasUsed"`
-	EffectiveGasPrice    *int64         `json:"effectiveGasPrice"`
+	Status               *uint64        `json:"status"`
+	GasUsed              *uint64        `json:"gasUsed"`
+	CumulativeGasUsed    *uint64        `json:"cumulativeGasUsed"`
+	EffectiveGasPrice    *string        `json:"effectiveGasPrice"`
 	CreatedContract      *Account       `json:"createdContract"`
 	Logs                 []*Log         `json:"logs"`
 	R                    string         `json:"r"`

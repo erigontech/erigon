@@ -60,17 +60,17 @@ func TestGraphQLQueryBlock(t *testing.T) {
 		},
 		{
 			body: `{"query": "{block(number:\"0xbad\"){number,gasUsed,gasLimit}}","variables": null}`,
-			want: `{"errors":[{"message":"strconv.ParseInt: parsing \"0xbad\": invalid syntax","path":["block","number"]}],"data":{"block":null}}`,
+			want: `{"data":{"block":{"number":2989,"gasUsed":0,"gasLimit":5000}}}`,
 			code: 200,
 		},
 		{ // hex strings are currently not supported. If that's added to the spec, this test will need to change
 			body: `{"query": "{block(number:\"0x0\"){number,gasUsed,gasLimit}}","variables": null}`,
-			want: `{"errors":[{"message":"strconv.ParseInt: parsing \"0x0\": invalid syntax","path":["block","number"]}],"data":{"block":null}}`,
+			want: `{"data":{"block":{"number":0,"gasUsed":0,"gasLimit":5000}}}`,
 			code: 200,
 		},
 		{
 			body: `{"query": "{block(number:\"a\"){number,gasUsed,gasLimit}}","variables": null}`,
-			want: `{"errors":[{"message":"strconv.ParseInt: parsing \"a\": invalid syntax","path":["block","number"]}],"data":{"block":null}}`,
+			want: `{"data":{"block":null}}`,
 			code: 200,
 		},
 		{

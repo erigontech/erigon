@@ -11,9 +11,7 @@
     scalar BigInt
     # Long is a 64 bit unsigned integer.
     scalar Long
-    # Either a string or an unsigned int
-    scalar BlockNum
-    
+
     schema {
         query: Query
         mutation: Mutation
@@ -315,7 +313,7 @@
     type Query {
         # Block fetches an Ethereum block by number or by hash. If neither is
         # supplied, the most recent known block is returned.
-        block(number: BlockNum, hash: Bytes32): Block
+        block(number: Long, hash: Bytes32): Block
         # Blocks returns all the blocks between two numbers, inclusive. If
         # to is not supplied, it defaults to the most recent known block.
         blocks(from: Long, to: Long): [Block!]!

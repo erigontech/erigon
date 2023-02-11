@@ -50,12 +50,6 @@ autobind:
 # modelgen, the others will be allowed when binding to fields. Configure them to
 # your liking
 models:
-  ID:
-    model:
-      - github.com/99designs/gqlgen/graphql.ID
-      - github.com/99designs/gqlgen/graphql.Int
-      - github.com/99designs/gqlgen/graphql.Int64
-      - github.com/99designs/gqlgen/graphql.Int32
   Int:
     model:
       - github.com/99designs/gqlgen/graphql.Int
@@ -63,13 +57,23 @@ models:
       - github.com/99designs/gqlgen/graphql.Int32
   Long:
     model:
-      - github.com/99designs/gqlgen/graphql.Int64
-  ULong:
-    model:
       - github.com/99designs/gqlgen/graphql.Uint64
   BigInt:
     model:
       - github.com/99designs/gqlgen/graphql.String
+  Address:
+    model:
+      - github.com/99designs/gqlgen/graphql.String
+  Bytes:
+    model:
+      - github.com/99designs/gqlgen/graphql.String
+  Bytes32:
+    model:
+      - github.com/99designs/gqlgen/graphql.String
+  BlockNum:
+    model:
+      - github.com/99designs/gqlgen/graphql.String
+      - github.com/99designs/gqlgen/graphql.Uint64
 #  Block:
 #    fields:
 #      logs:
