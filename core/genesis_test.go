@@ -162,8 +162,7 @@ func TestAllocConstructor(t *testing.T) {
 	}
 	db := memdb.NewTestDB(t)
 	defer db.Close()
-	tmpDir := t.TempDir()
-	_, _, err := core.CommitGenesisBlock(db, genSpec, tmpDir)
+	_, _, err := core.CommitGenesisBlock(db, genSpec, "")
 	require.NoError(err)
 
 	tx, err := db.BeginRo(context.Background())
