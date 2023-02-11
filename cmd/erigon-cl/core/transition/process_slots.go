@@ -1,8 +1,8 @@
 package transition
 
 import (
-	"errors"
 	"fmt"
+	"time"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
@@ -77,13 +79,15 @@ func (s *StateTransistor) processSlots(slot uint64) error {
 		}
 		// TODO(Someone): Add epoch transition.
 		if (stateSlot+1)%s.beaconConfig.SlotsPerEpoch == 0 {
-			return errors.New("cannot transition epoch: not implemented")
+			start := time.Now()
+			if err := s.ProcessEpoch(); err != nil {
+				return err
+			}
+			log.Info("Processed new epoch successfully", "epoch", s.state.Epoch(), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
-		if err := s.state.SetSlot(stateSlot); err != nil {
-			return err
-		}
+		s.state.SetSlot(stateSlot)
 	}
 	return nil
 }

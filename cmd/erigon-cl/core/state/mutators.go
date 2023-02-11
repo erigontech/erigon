@@ -2,6 +2,8 @@ package state
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 func (b *BeaconState) IncreaseBalance(index, delta uint64) error {
@@ -29,12 +31,8 @@ func (b *BeaconState) ComputeActivationExitEpoch(epoch uint64) uint64 {
 }
 
 func (b *BeaconState) GetValidatorChurnLimit() uint64 {
-	inds := b.GetActiveValidatorsIndices(b.Epoch())
-	churnLimit := uint64(len(inds)) / b.beaconConfig.ChurnLimitQuotient
-	if churnLimit > b.beaconConfig.MinPerEpochChurnLimit {
-		return churnLimit
-	}
-	return b.beaconConfig.MinPerEpochChurnLimit
+	activeIndsCount := uint64(len(b.GetActiveValidatorsIndices(b.Epoch())))
+	return utils.Max64(activeIndsCount/b.beaconConfig.ChurnLimitQuotient, b.beaconConfig.MinPerEpochChurnLimit)
 }
 
 func (b *BeaconState) InitiateValidatorExit(index uint64) error {
