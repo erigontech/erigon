@@ -3,14 +3,10 @@ package commands
 import (
 	"context"
 	"fmt"
-	"math/big"
 
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -41,7 +37,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	}
 	defer tx.Rollback()
 
-	block, _, err := api.getBlockWithSenders(ctx, blockNumber, tx)
+	block, senders, err := api.getBlockWithSenders(ctx, blockNumber, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +55,7 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, block.Body().SendersFromTxs())
+	receipts, err := api.getReceipts(ctx, tx, chainConfig, block, senders)
 	if err != nil {
 		return nil, fmt.Errorf("getReceipts error: %w", err)
 	}
@@ -70,14 +66,14 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	}
 
 	/*
-	getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
-	if err != nil {
-		return nil, err
-	}
-	feesRes, err := api.delegateBlockFees(ctx, tx, b, senders, chainConfig)
-	if err != nil {
-		return nil, err
-	}
+		getIssuanceRes, err := api.delegateIssuance(tx, b, chainConfig)
+		if err != nil {
+			return nil, err
+		}
+		feesRes, err := api.delegateBlockFees(ctx, tx, b, senders, chainConfig)
+		if err != nil {
+			return nil, err
+		}
 	*/
 
 	response := map[string]interface{}{}
@@ -124,10 +120,11 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	}
 
 	// Explicitly drop unwanted fields
-	response["logsBloom"] = nil
+	// response["logsBloom"] = nil
 	return response, err
 }
 
+/*
 func (api *GraphQLAPIImpl) delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (internalIssuance, error) {
 	if chainConfig.Ethash == nil {
 		// Clique for example has no issuance
@@ -171,3 +168,4 @@ func (api *GraphQLAPIImpl) delegateBlockFees(ctx context.Context, tx kv.Tx, bloc
 
 	return fees, nil
 }
+*/

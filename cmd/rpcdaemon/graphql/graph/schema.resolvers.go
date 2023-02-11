@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -69,7 +70,7 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
 	block.Hash = *convertDataToStringP(blk, "hash")
 	block.Miner = &model.Account{}
-	block.Miner.Address = *convertDataToStringP(blk, "miner")
+	block.Miner.Address = strings.ToLower(*convertDataToStringP(blk, "miner"))
 	block.MixHash = *convertDataToStringP(blk, "mixHash")
 	block.Nonce = *convertDataToStringP(blk, "nonce")
 	block.Number = *convertDataToUint64P(blk, "number")
@@ -78,12 +79,20 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
 	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
 	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = *convertDataToUint64P(blk, "timestamp")
-	block.TransactionCount = convertDataToIntP(blk, "transactionCount") // *int
+	block.Timestamp = *convertDataToUint64P(blk, "timestamp") // int in the schema but Geth displays in HEX !!!
+	block.TransactionCount = convertDataToIntP(blk, "transactionCount")
 	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
 	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
-
 	block.Transactions = []*model.Transaction{}
+
+	block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
+	block.OmmerHash = "" // OmmerHash:     gointerfaces.ConvertHashToH256(header.UncleHash),
+
+	/*
+		Missing Block fields to fill :
+		- ommerHash
+	*/
+
 	absRcp := res["receipts"]
 	rcp := absRcp.([]map[string]interface{})
 	for _, transReceipt := range rcp {
@@ -92,18 +101,26 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
 		trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
 		trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-		trans.Index = convertDataToIntP(transReceipt, "transactionIndex") // *int
+		trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
 		trans.Status = convertDataToUint64P(transReceipt, "status")
-		trans.Type = convertDataToIntP(transReceipt, "type") // *int
-		// convertDataToStringP(transReceipt, "logsBloom")
+		trans.Type = convertDataToIntP(transReceipt, "type")
+		trans.Logs = make([]*model.Log, 0)
 
 		trans.From = &model.Account{}
-		trans.From.Address = *convertDataToStringP(transReceipt, "from")
+		trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
 
 		trans.To = &model.Account{}
-		trans.To.Address = *convertDataToStringP(transReceipt, "to")
+		trans.To.Address = strings.ToLower(*convertDataToStringP(transReceipt, "to"))
 
 		block.Transactions = append(block.Transactions, trans)
+
+		/*
+			Missing Transaction fields to fill :
+			- gasPrice
+			- inputData (even if geth often display "0x")
+			- nonce (we get 0, geth displays "0xZZZZZZZ" hex data)
+			- value
+		*/
 	}
 
 	return block, ctx.Err()
