@@ -193,7 +193,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -325,6 +325,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+			cfg.TmpDir = stack.Config().Dirs.Tmp
 
 			// pick port from allowed list
 			var picked bool

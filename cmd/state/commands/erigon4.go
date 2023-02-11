@@ -144,7 +144,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	interrupt := false
 	if startTxNum == 0 {
-		genBlock, genesisIbs, err := genesis.ToBlock()
+		genBlock, genesisIbs, err := genesis.ToBlock("")
 		if err != nil {
 			return err
 		}

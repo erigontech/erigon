@@ -61,8 +61,9 @@ func (s *Sentinel) createLocalNode(
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
 	udpPort, tcpPort int,
+	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
@@ -125,7 +126,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort))
+	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
 	if err != nil {
 		return nil, err
 	}

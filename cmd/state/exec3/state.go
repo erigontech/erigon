@@ -134,7 +134,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock()
+		_, ibs, err = rw.genesis.ToBlock("")
 		if err != nil {
 			panic(err)
 		}

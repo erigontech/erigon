@@ -46,6 +46,7 @@ func TestSetupGenesis(t *testing.T) {
 			},
 		}
 		oldcustomg = customg
+		tmpdir     = t.TempDir()
 	)
 	oldcustomg.Config = &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(2)}
 	tests := []struct {
@@ -58,7 +59,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "genesis without ChainConfig",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				return core.CommitGenesisBlock(db, new(core.Genesis))
+				return core.CommitGenesisBlock(db, new(core.Genesis), tmpdir)
 			},
 			wantErr:    core.ErrGenesisNoConfig,
 			wantConfig: params.AllProtocolChanges,
@@ -66,7 +67,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "no block in DB, genesis == nil",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				return core.CommitGenesisBlock(db, nil)
+				return core.CommitGenesisBlock(db, nil, tmpdir)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -74,7 +75,7 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "mainnet block in DB, genesis == nil",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				return core.CommitGenesisBlock(db, nil)
+				return core.CommitGenesisBlock(db, nil, tmpdir)
 			},
 			wantHash:   params.MainnetGenesisHash,
 			wantConfig: params.MainnetChainConfig,
@@ -82,8 +83,8 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == nil",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				customg.MustCommit(db)
-				return core.CommitGenesisBlock(db, nil)
+				customg.MustCommit(db, tmpdir)
+				return core.CommitGenesisBlock(db, nil, tmpdir)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -91,8 +92,8 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				customg.MustCommit(db)
-				return core.CommitGenesisBlock(db, core.DefaultSepoliaGenesisBlock())
+				customg.MustCommit(db, tmpdir)
+				return core.CommitGenesisBlock(db, core.DefaultSepoliaGenesisBlock(), tmpdir)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
 			wantHash:   params.SepoliaGenesisHash,
@@ -101,8 +102,8 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "compatible config in DB",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
-				oldcustomg.MustCommit(db)
-				return core.CommitGenesisBlock(db, &customg)
+				oldcustomg.MustCommit(db, tmpdir)
+				return core.CommitGenesisBlock(db, &customg, tmpdir)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
@@ -123,7 +124,7 @@ func TestSetupGenesis(t *testing.T) {
 					return nil, nil, err
 				}
 				// This should return a compatibility error.
-				return core.CommitGenesisBlock(m.DB, &customg)
+				return core.CommitGenesisBlock(m.DB, &customg, tmpdir)
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
