@@ -63,8 +63,8 @@ type BeaconState struct {
 	activeValidatorsCache   *lru.Cache
 	committeeCache          *lru.Cache
 	shuffledSetsCache       *lru.Cache
-	totalActiveBalanceCache uint64
-	proposerIndex           uint64
+	totalActiveBalanceCache *uint64
+	proposerIndex           *uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -107,10 +107,11 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 
 func (b *BeaconState) _refreshActiveBalances() {
 	epoch := b.Epoch()
-	b.totalActiveBalanceCache = 0
+	b.totalActiveBalanceCache = new(uint64)
+	*b.totalActiveBalanceCache = 0
 	for _, validator := range b.validators {
 		if validator.Active(epoch) {
-			b.totalActiveBalanceCache += validator.EffectiveBalance
+			*b.totalActiveBalanceCache += validator.EffectiveBalance
 		}
 	}
 }
@@ -122,7 +123,7 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	// Input for the seed hash.
 	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
+	binary.LittleEndian.PutUint64(slotByteArray, b.slot)
 
 	// Add slot to the end of the input.
 	inputWithSlot := append(input[:], slotByteArray...)
@@ -136,8 +137,8 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	// Write the seed to an array.
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
-
-	b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
+	b.proposerIndex = new(uint64)
+	*b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
 	return
 }
 

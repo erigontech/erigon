@@ -1,6 +1,8 @@
 package transition
 
-import "sort"
+import (
+	"sort"
+)
 
 const preAllocatedSizeActivationQueue = 8192
 
@@ -13,7 +15,7 @@ func (s *StateTransistor) computeActivationExitEpoch(epoch uint64) uint64 {
 func (s *StateTransistor) ProcessRegistryUpdates() error {
 	currentEpoch := s.state.Epoch()
 	// start also initializing the activation queue.
-	activationQueue := make([]uint64, 0, preAllocatedSizeActivationQueue)
+	activationQueue := make([]uint64, 0)
 	validators := s.state.Validators()
 	// Process activation eligibility and ejections.
 	for validatorIndex, validator := range validators {
@@ -36,13 +38,17 @@ func (s *StateTransistor) ProcessRegistryUpdates() error {
 	// order the queue accordingly.
 	sort.Slice(activationQueue, func(i, j int) bool {
 		//  Order by the sequence of activation_eligibility_epoch setting and then index.
-		if validators[i].ActivationEligibilityEpoch != validators[j].ActivationEligibilityEpoch {
-			return validators[i].ActivationEligibilityEpoch < validators[j].ActivationEligibilityEpoch
+		if validators[activationQueue[i]].ActivationEligibilityEpoch != validators[activationQueue[j]].ActivationEligibilityEpoch {
+			return validators[activationQueue[i]].ActivationEligibilityEpoch < validators[activationQueue[j]].ActivationEligibilityEpoch
 		}
 		return activationQueue[i] < activationQueue[j]
 	})
+	activationQueueLength := s.state.GetValidatorChurnLimit()
+	if len(activationQueue) > int(activationQueueLength) {
+		activationQueue = activationQueue[:activationQueueLength]
+	}
 	// Only process up to epoch limit.
-	for _, validatorIndex := range activationQueue[:s.state.GetValidatorChurnLimit()] {
+	for _, validatorIndex := range activationQueue {
 		validator, err := s.state.ValidatorAt(int(validatorIndex))
 		if err != nil {
 			return err

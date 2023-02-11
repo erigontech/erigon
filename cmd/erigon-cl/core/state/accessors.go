@@ -95,10 +95,13 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *BeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
+	}
+	if *b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
 		return b.beaconConfig.EffectiveBalanceIncrement
 	}
-	return b.totalActiveBalanceCache
+	return *b.totalActiveBalanceCache
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -241,7 +244,12 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	return b.proposerIndex, nil
+	if b.proposerIndex == nil {
+		if err := b._updateProposerIndex(); err != nil {
+			return 0, err
+		}
+	}
+	return *b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
