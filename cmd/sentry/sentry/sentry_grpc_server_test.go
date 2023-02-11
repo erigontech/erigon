@@ -57,7 +57,6 @@ func testSentryServer(db kv.Getter, genesis *core.Genesis, genesisHash libcommon
 func TestForkIDSplit66(t *testing.T) { testForkIDSplit(t, eth.ETH66) }
 
 func testForkIDSplit(t *testing.T, protocol uint) {
-	tmpDir := t.TempDir()
 	var (
 		ctx           = context.Background()
 		configNoFork  = &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
@@ -74,8 +73,8 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
 
-		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork, tmpDir)
-		genesisProFork = gspecProFork.MustCommit(dbProFork, tmpDir)
+		genesisNoFork  = gspecNoFork.MustCommit(dbNoFork, "")
+		genesisProFork = gspecProFork.MustCommit(dbProFork, "")
 	)
 
 	var s1, s2 *GrpcServer
@@ -160,11 +159,10 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 		}
 	}()
 
-	tmpDir := t.TempDir()
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 	dbNoFork := memdb.NewTestDB(t)
 	gspecNoFork := &core.Genesis{Config: configNoFork}
-	genesisNoFork := gspecNoFork.MustCommit(dbNoFork, tmpDir)
+	genesisNoFork := gspecNoFork.MustCommit(dbNoFork, "")
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{

@@ -91,8 +91,7 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	tmpDir := t.TempDir()
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, tmpDir).Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, "").Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -150,9 +149,8 @@ func BenchmarkHashing(b *testing.B) {
 		bodyRlp  []byte
 		blockRlp []byte
 	)
-	tmpDir := b.TempDir()
 	{
-		block := getBlock(200, 2, 50, tmpDir)
+		block := getBlock(200, 2, 50, "")
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}

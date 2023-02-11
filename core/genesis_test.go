@@ -23,7 +23,6 @@ import (
 )
 
 func TestDefaultGenesisBlockHashes(t *testing.T) {
-	tmpDir := t.TempDir()
 	db := memdb.NewTestDB(t)
 	check := func(network string) {
 		genesis := core.DefaultGenesisBlockByChainName(network)
@@ -32,7 +31,7 @@ func TestDefaultGenesisBlockHashes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer tx.Rollback()
-		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, tmpDir)
+		_, block, err := core.WriteGenesisBlock(tx, genesis, nil, "")
 		require.NoError(t, err)
 		expect := params.GenesisHashByChainName(network)
 		require.NotNil(t, expect, network)
@@ -46,14 +45,13 @@ func TestDefaultGenesisBlockHashes(t *testing.T) {
 func TestDefaultGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
-	tmpDir := t.TempDir()
 
-	block, _, _ := core.DefaultGenesisBlock().ToBlock(tmpDir)
+	block, _, _ := core.DefaultGenesisBlock().ToBlock("")
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.DefaultSokolGenesisBlock().ToBlock(tmpDir)
+	block, _, err = core.DefaultSokolGenesisBlock().ToBlock("")
 	require.NoError(err)
 	if block.Root() != params.SokolGenesisStateRoot {
 		t.Errorf("wrong Sokol genesis state root, got %v, want %v", block.Root(), params.SokolGenesisStateRoot)
@@ -62,7 +60,7 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Sokol genesis hash, got %v, want %v", block.Hash(), params.SokolGenesisHash)
 	}
 
-	block, _, err = core.DefaultGnosisGenesisBlock().ToBlock(tmpDir)
+	block, _, err = core.DefaultGnosisGenesisBlock().ToBlock("")
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -71,7 +69,7 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.DefaultChiadoGenesisBlock().ToBlock(tmpDir)
+	block, _, err = core.DefaultChiadoGenesisBlock().ToBlock("")
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)
@@ -82,16 +80,15 @@ func TestDefaultGenesisBlockRoots(t *testing.T) {
 }
 
 func TestCommitGenesisIdempotency(t *testing.T) {
-	tmpDir := t.TempDir()
 	_, tx := memdb.NewTestTx(t)
 	genesis := core.DefaultGenesisBlockByChainName(networkname.MainnetChainName)
-	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, tmpDir)
+	_, _, err := core.WriteGenesisBlock(tx, genesis, nil, "")
 	require.NoError(t, err)
 	seq, err := tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), seq)
 
-	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, tmpDir)
+	_, _, err = core.WriteGenesisBlock(tx, genesis, nil, "")
 	require.NoError(t, err)
 	seq, err = tx.ReadSequence(kv.EthTx)
 	require.NoError(t, err)
@@ -99,11 +96,10 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 }
 
 func TestSokolHeaderRLP(t *testing.T) {
-	tmpDir := t.TempDir()
 	require := require.New(t)
 	{ //sokol
 		expect := common.FromHex("f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000")
-		block, _, err := core.DefaultSokolGenesisBlock().ToBlock(tmpDir)
+		block, _, err := core.DefaultSokolGenesisBlock().ToBlock("")
 		require.NoError(err)
 		b, err := rlp.EncodeToBytes(block.Header())
 		require.NoError(err)

@@ -203,8 +203,7 @@ func TestEmptyBlock(t *testing.T) {
 
 	require := require.New(t)
 	genesis := core.DefaultGnosisGenesisBlock()
-	tmpDir := t.TempDir()
-	genesisBlock, _, err := genesis.ToBlock(tmpDir)
+	genesisBlock, _, err := genesis.ToBlock("")
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
