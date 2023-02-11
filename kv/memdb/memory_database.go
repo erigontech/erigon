@@ -25,23 +25,25 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func New() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem("").MustOpen()
+func New(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).MustOpen()
 }
 
-func NewPoolDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.TxPoolDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
+func NewPoolDB(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).Label(kv.TxPoolDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TxpoolTablesCfg }).MustOpen()
 }
-func NewDownloaderDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.DownloaderDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).MustOpen()
+func NewDownloaderDB(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).Label(kv.DownloaderDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).MustOpen()
 }
-func NewSentryDB() kv.RwDB {
-	return mdbx.NewMDBX(log.New()).InMem("").Label(kv.SentryDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
+func NewSentryDB(tmpDir string) kv.RwDB {
+	return mdbx.NewMDBX(log.New()).InMem(tmpDir).Label(kv.SentryDB).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.SentryTablesCfg }).MustOpen()
 }
 
 func NewTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	db := New()
+	tmpDir := tb.TempDir()
+	tb.Helper()
+	db := New(tmpDir)
 	tb.Cleanup(db.Close)
 	return db
 }
@@ -68,28 +70,32 @@ func BeginRo(tb testing.TB, db kv.RoDB) kv.Tx {
 
 func NewTestPoolDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	db := NewPoolDB()
+	tmpDir := tb.TempDir()
+	db := NewPoolDB(tmpDir)
 	tb.Cleanup(db.Close)
 	return db
 }
 
 func NewTestDownloaderDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	db := NewDownloaderDB()
+	tmpDir := tb.TempDir()
+	db := NewDownloaderDB(tmpDir)
 	tb.Cleanup(db.Close)
 	return db
 }
 
 func NewTestSentrylDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	db := NewPoolDB()
+	tmpDir := tb.TempDir()
+	db := NewPoolDB(tmpDir)
 	tb.Cleanup(db.Close)
 	return db
 }
 
 func NewTestTx(tb testing.TB) (kv.RwDB, kv.RwTx) {
 	tb.Helper()
-	db := New()
+	tmpDir := tb.TempDir()
+	db := New(tmpDir)
 	tb.Cleanup(db.Close)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
