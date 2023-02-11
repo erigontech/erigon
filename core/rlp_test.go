@@ -34,8 +34,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func getBlock(transactions int, uncles int, dataSize int) *types.Block {
-	db := memdb.New()
+func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+	db := memdb.New(tmpDir)
 	defer db.Close()
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
@@ -49,7 +49,7 @@ func getBlock(transactions int, uncles int, dataSize int) *types.Block {
 			Config: params.TestChainConfig,
 			Alloc:  GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = gspec.MustCommit(db)
+		genesis = gspec.MustCommit(db, tmpDir)
 	)
 
 	// We need to generate as many blocks +1 as uncles
@@ -91,7 +91,8 @@ func TestRlpIterator(t *testing.T) {
 
 func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize).Body())
+	tmpDir := t.TempDir()
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(txs, uncles, datasize, tmpDir).Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -149,8 +150,9 @@ func BenchmarkHashing(b *testing.B) {
 		bodyRlp  []byte
 		blockRlp []byte
 	)
+	tmpDir := b.TempDir()
 	{
-		block := getBlock(200, 2, 50)
+		block := getBlock(200, 2, 50, tmpDir)
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}

@@ -160,10 +160,11 @@ func TestSentryServerImpl_SetStatusInitPanic(t *testing.T) {
 		}
 	}()
 
+	tmpDir := t.TempDir()
 	configNoFork := &chain.Config{HomesteadBlock: big.NewInt(1), ChainID: big.NewInt(1)}
 	dbNoFork := memdb.NewTestDB(t)
 	gspecNoFork := &core.Genesis{Config: configNoFork}
-	genesisNoFork := gspecNoFork.MustCommit(dbNoFork)
+	genesisNoFork := gspecNoFork.MustCommit(dbNoFork, tmpDir)
 	ss := &GrpcServer{p2p: &p2p.Config{}}
 
 	_, err := ss.SetStatus(context.Background(), &proto_sentry.StatusData{
