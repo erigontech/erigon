@@ -1,6 +1,8 @@
 package transition
 
-import "github.com/ledgerwatch/erigon/cl/clparams"
+import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
+)
 
 // Implementation defined in ETH 2.0 specs: https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#get_flag_index_deltas.
 // Although giulio made it efficient hopefully. results will be written in the input map.
@@ -28,8 +30,9 @@ func (s *StateTransistor) processFlagIndexDeltas(flagIdx int, eligibleValidators
 
 	// Compute relative increments.
 	unslashedParticipatingIncrements := unslashedParticipatingTotalBalance / s.beaconConfig.EffectiveBalanceIncrement
-	totalActiveBalance := s.state.GetTotalActiveBalance()
-	activeIncrements := totalActiveBalance / s.beaconConfig.EffectiveBalanceIncrement
+	activeIncrements := s.state.GetTotalActiveBalance() / s.beaconConfig.EffectiveBalanceIncrement
+	// denominators
+	rewardDenominator := activeIncrements * s.beaconConfig.WeightDenominator
 	// Now process deltas and whats nots.
 	for _, index := range eligibleValidators {
 		baseReward, err = s.state.BaseReward(index)
@@ -41,9 +44,13 @@ func (s *StateTransistor) processFlagIndexDeltas(flagIdx int, eligibleValidators
 				continue
 			}
 			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
-			s.state.IncreaseBalance(index, rewardNumerator/(activeIncrements*s.beaconConfig.WeightDenominator))
+			if err := s.state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
+				return err
+			}
 		} else if flagIdx != int(s.beaconConfig.TimelyHeadFlagIndex) {
-			s.state.DecreaseBalance(index, baseReward*weight/s.beaconConfig.WeightDenominator)
+			if err := s.state.DecreaseBalance(index, baseReward*weight/s.beaconConfig.WeightDenominator); err != nil {
+				return err
+			}
 		}
 	}
 	return
@@ -62,14 +69,11 @@ func (s *StateTransistor) processInactivityDeltas(eligibleValidators []uint64) (
 	case clparams.BellatrixVersion:
 		penaltyQuotient = s.beaconConfig.InactivityPenaltyQuotientBellatrix
 	}
+	penaltyDenominator := s.beaconConfig.InactivityScoreBias * penaltyQuotient
+	validators := s.state.Validators()
 	for _, index := range eligibleValidators {
-
-		if s.state.IsUnslashedParticipatingIndex(previousEpoch, index, int(s.beaconConfig.TimelyHeadFlagIndex)) {
+		if s.state.IsUnslashedParticipatingIndex(previousEpoch, index, int(s.beaconConfig.TimelyTargetFlagIndex)) {
 			continue
-		}
-		validator, err := s.state.ValidatorAt(int(index))
-		if err != nil {
-			return err
 		}
 		inactivityScore, err := s.state.ValidatorInactivityScore(int(index))
 		if err != nil {
@@ -77,8 +81,8 @@ func (s *StateTransistor) processInactivityDeltas(eligibleValidators []uint64) (
 		}
 
 		// Process inactivity penalties.
-		penaltyNumerator := validator.EffectiveBalance * inactivityScore
-		s.state.DecreaseBalance(index, penaltyNumerator/(s.beaconConfig.InactivityScoreBias*penaltyQuotient))
+		penaltyNumerator := validators[index].EffectiveBalance * inactivityScore
+		s.state.DecreaseBalance(index, penaltyNumerator/penaltyDenominator)
 	}
 	return
 }

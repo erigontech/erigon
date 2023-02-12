@@ -16,7 +16,7 @@ func (s *StateTransistor) ProcessInactivityScores() error {
 		if err != nil {
 			return err
 		}
-		if s.state.IsUnslashedParticipatingIndex(previousEpoch, validatorIndex, int(s.beaconConfig.TimelyHeadFlagIndex)) {
+		if s.state.IsUnslashedParticipatingIndex(previousEpoch, validatorIndex, int(s.beaconConfig.TimelyTargetFlagIndex)) {
 			score -= utils.Min64(1, score)
 		} else {
 			score += s.beaconConfig.InactivityScoreBias
