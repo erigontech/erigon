@@ -31,15 +31,14 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 		return err
 	}
 
-	if !s.noValidate {
-		expectedStateRoot, err := s.state.HashSSZ()
-		if err != nil {
-			return fmt.Errorf("unable to generate state root: %v", err)
-		}
-		if expectedStateRoot != currentBlock.StateRoot {
-			return fmt.Errorf("expected state root differs from received state root")
-		}
+	expectedStateRoot, err := s.state.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("unable to generate state root: %v", err)
 	}
+	if expectedStateRoot != currentBlock.StateRoot {
+		return fmt.Errorf("expected state root differs from received state root")
+	}
+
 	return nil
 }
 

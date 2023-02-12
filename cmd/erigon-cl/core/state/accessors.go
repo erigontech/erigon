@@ -262,7 +262,7 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
-func (b *BeaconState) baseRewardPerIncrement() uint64 {
+func (b *BeaconState) BaseRewardPerIncrement() uint64 {
 	if b.totalActiveBalanceCache == nil {
 		b._refreshActiveBalances()
 	}
@@ -274,7 +274,7 @@ func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
 	if index >= uint64(len(b.validators)) {
 		return 0, InvalidValidatorIndex
 	}
-	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.baseRewardPerIncrement(), nil
+	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
@@ -284,7 +284,7 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 		return 0, 0, err
 	}
 	totalActiveIncrements := activeBalance / b.beaconConfig.EffectiveBalanceIncrement
-	baseRewardPerInc := b.baseRewardPerIncrement()
+	baseRewardPerInc := b.BaseRewardPerIncrement()
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
 	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / b.beaconConfig.SlotsPerEpoch
 	participantReward = maxParticipantRewards / b.beaconConfig.SyncCommitteeSize
