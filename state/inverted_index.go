@@ -260,10 +260,6 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, sem *semaphore.
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			if err := sem.Acquire(ctx, 1); err != nil {
-				return err
-			}
-			defer sem.Release(1)
 			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 			fName := fmt.Sprintf("%s.%d-%d.efi", ii.filenameBase, fromStep, toStep)
 			idxPath := filepath.Join(ii.dir, fName)

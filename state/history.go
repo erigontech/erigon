@@ -304,11 +304,6 @@ func (h *History) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighte
 	for _, item := range missedFiles {
 		item := item
 		g.Go(func() error {
-			if err := sem.Acquire(ctx, 1); err != nil {
-				return err
-			}
-			defer sem.Release(1)
-
 			search := &filesItem{startTxNum: item.startTxNum, endTxNum: item.endTxNum}
 			iiItem, ok := h.InvertedIndex.files.Get(search)
 			if !ok {
