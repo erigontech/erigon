@@ -1306,6 +1306,9 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		}
 	}
 	for ; k != nil; k, _, err = c.Prev() {
+		if err != nil {
+			return err
+		}
 		n := binary.BigEndian.Uint64(k)
 		if n < blockFrom { // [from, to)
 			break
