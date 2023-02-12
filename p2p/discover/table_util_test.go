@@ -42,8 +42,8 @@ func init() {
 	nullNode = enode.SignNull(&r, enode.ID{})
 }
 
-func newTestTable(t transport) (*Table, *enode.DB) {
-	db, err := enode.OpenDB("")
+func newTestTable(t transport, tmpDir string) (*Table, *enode.DB) {
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}

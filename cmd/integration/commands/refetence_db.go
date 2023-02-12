@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
@@ -493,7 +495,10 @@ func kv2kv(ctx context.Context, src, dst kv.RwDB) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k))
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info("Progress", "bucket", name, "progress", fmt.Sprintf("%.1fm/%.1fm", float64(i)/1_000_000, float64(total)/1_000_000), "key", hex.EncodeToString(k),
+					"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			default:
 			}
 		}

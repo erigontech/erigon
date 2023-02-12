@@ -20,7 +20,7 @@ func main() {
 	maxReceiveSize := 500 * datasize.MB
 
 	s := grpc.NewServer(grpc.MaxRecvMsgSize(int(maxReceiveSize)))
-	execution.RegisterExecutionServer(s, NewEth1Execution(memdb.New()))
+	execution.RegisterExecutionServer(s, NewEth1Execution(memdb.New("" /* tmpDir */)))
 	log.Info("Serving mock Execution layer.")
 	if err := s.Serve(lis); err != nil {
 		log.Error("failed to serve", "err", err)

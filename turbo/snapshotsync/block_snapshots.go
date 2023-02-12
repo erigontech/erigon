@@ -33,12 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -49,6 +43,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 )
 
 type DownloadRequest struct {
@@ -884,7 +882,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainID uint256.Int, tm
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, sem *semaphore.Weighted) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
@@ -897,6 +895,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	startIndexingTime := time.Now()
 
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
 	for _, t := range snaptype.AllSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
@@ -906,12 +905,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			if hasIdxFile(&segment) {
 				continue
 			}
-			if err := sem.Acquire(gCtx, 1); err != nil {
-				return err
-			}
 			sn := segment
 			g.Go(func() error {
-				defer sem.Release(1)
 				p := &background.Progress{}
 				ps.Add(p)
 				defer ps.Delete(p)
@@ -921,8 +916,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	}
 	finish := make(chan struct{})
 	go func() {
+		defer close(finish)
 		g.Wait()
-		close(finish)
 	}()
 
 	for {

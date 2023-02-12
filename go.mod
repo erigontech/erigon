@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20230212022538-841b3bca134f
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230209051056-e695bb0d2ace
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230211023518-6233ff68c4ca
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.0.0 // indirect
@@ -12,7 +12,7 @@ require (
 )
 
 require (
-	github.com/Giulio2002/bls v0.0.0-20221130111651-ff2d397f3b99
+	github.com/Giulio2002/bls v0.0.0-20230210152409-898d831f215e
 	github.com/RoaringBitmap/roaring v1.2.2
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.23.1

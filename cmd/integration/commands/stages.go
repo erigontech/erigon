@@ -721,7 +721,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		return reset2.ResetExec(ctx, db, chain)
+		return reset2.ResetExec(ctx, db, chain, "")
 	}
 
 	if txtrace {
@@ -1233,7 +1233,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	events := shards.NewEvents()
 
 	genesis := core.DefaultGenesisBlockByChainName(chain)
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis)
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
 	}

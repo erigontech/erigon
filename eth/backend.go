@@ -224,7 +224,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -573,12 +573,13 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			GenesisConfig: genesisCfg,
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
+			TmpDir:        tmpdir,
 		}, chainKv, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, nil, handshake.LightClientRule)
 		if err != nil {
 			return nil, err
 		}
 
-		lc, err := lightclient.NewLightClient(ctx, memdb.New(), genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
+		lc, err := lightclient.NewLightClient(ctx, memdb.New(tmpdir), genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
 		if err != nil {
 			return nil, err
 		}

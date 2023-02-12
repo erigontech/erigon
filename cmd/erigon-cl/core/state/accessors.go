@@ -95,10 +95,13 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *BeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
+	}
+	if *b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
 		return b.beaconConfig.EffectiveBalanceIncrement
 	}
-	return b.totalActiveBalanceCache
+	return *b.totalActiveBalanceCache
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -241,7 +244,12 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	return b.proposerIndex, nil
+	if b.proposerIndex == nil {
+		if err := b._updateProposerIndex(); err != nil {
+			return 0, err
+		}
+	}
+	return *b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
@@ -417,7 +425,7 @@ func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64)
 }
 
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
-func (b *BeaconState) inactivityLeaking() bool {
+func (b *BeaconState) InactivityLeaking() bool {
 	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
 }
 
@@ -445,27 +453,28 @@ func (b *BeaconState) processFlagIndexDeltas(flagIdx int, balanceDeltaMap map[ui
 		return
 	}
 	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	isUnslashedParticipatingIndicies := make(map[uint64]bool)
 	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
+		isUnslashedParticipatingIndicies[index] = true
 	}
 	// Compute relative increments.
 	unslashedParticipatingIncrements := unslashedParticipatingTotalBalance / b.beaconConfig.EffectiveBalanceIncrement
-	activeIncrements := b.GetTotalActiveBalance() / b.beaconConfig.EffectiveBalanceIncrement
 	totalActiveBalance := b.GetTotalActiveBalance()
+	activeIncrements := totalActiveBalance / b.beaconConfig.EffectiveBalanceIncrement
 	// Now process deltas and whats nots.
 	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
-			if b.inactivityLeaking() {
+		baseReward, err = b.BaseReward(totalActiveBalance, index)
+		if err != nil {
+			return
+		}
+		if isUnslashedParticipatingIndicies[index] {
+			if b.InactivityLeaking() {
 				continue
 			}
 			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
 			balanceDeltaMap[index] += int64(rewardNumerator / (activeIncrements * b.beaconConfig.WeightDenominator))
 		} else if flagIdx != int(b.beaconConfig.TimelyHeadFlagIndex) {
-			baseReward, err = b.BaseReward(totalActiveBalance, index)
-			if err != nil {
-				return
-			}
+
 			balanceDeltaMap[index] -= int64(baseReward * weight / b.beaconConfig.WeightDenominator)
 		}
 	}
@@ -485,9 +494,9 @@ func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64, 
 		return
 	}
 	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
+	isUnslashedParticipatingIndicies := make(map[uint64]bool)
 	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
+		isUnslashedParticipatingIndicies[index] = true
 	}
 	// retrieve penalty quotient based on fork
 	var penaltyQuotient uint64
@@ -500,7 +509,7 @@ func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64, 
 		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientBellatrix
 	}
 	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
+		if isUnslashedParticipatingIndicies[index] {
 			continue
 		}
 		// Process inactivity penalties.

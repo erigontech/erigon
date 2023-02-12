@@ -210,14 +210,14 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
-	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
 
 	allSnapshots := snapshotsync.NewRoSnapshots(cfg, dirs.Snap)
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	allSnapshots.LogStat()
-	if err := snapshotsync.BuildMissedIndices("Indexing", ctx, dirs, *chainID, sem); err != nil {
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := snapshotsync.BuildMissedIndices("Indexing", ctx, dirs, *chainID, indexWorkers); err != nil {
 		return err
 	}
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB)
@@ -228,6 +228,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
 	err = agg.BuildMissedIndices(ctx, sem)
 	if err != nil {
 		return err
