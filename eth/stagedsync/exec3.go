@@ -225,7 +225,10 @@ func ExecV3(ctx context.Context,
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case txTask := <-resultCh:
+			case txTask, ok := <-resultCh:
+				if !ok {
+					return nil
+				}
 				if txTask.BlockNum > lastBlockNum {
 					if lastBlockNum > 0 {
 						core.BlockExecutionTimer.UpdateDuration(t)
