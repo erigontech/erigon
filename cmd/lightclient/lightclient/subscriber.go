@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -56,9 +58,15 @@ func (c *ChainTipSubscriber) StartLoop() {
 	for {
 		data, err := stream.Recv()
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				log.Debug("[Lightclient] could not read gossip :/", "reason", err)
+			if errors.Is(err, context.Canceled) {
+				continue
 			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue
+			}
+
+			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
 			continue
 		}
 		if err := c.handleGossipData(data); err != nil {
