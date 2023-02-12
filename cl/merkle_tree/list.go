@@ -93,10 +93,11 @@ func ArraysRootWithLimit(input [][32]byte, limit uint64) ([32]byte, error) {
 
 // ArraysRoot calculates the root hash of an array of hashes by first making a copy of the input array, then calculating the Merkle root of the copy using the MerkleRootFromLeaves function.
 func ArraysRoot(input [][32]byte, length uint64) ([32]byte, error) {
-	leaves := make([][32]byte, length)
-	copy(leaves, input)
+	for uint64(len(input)) != length {
+		input = append(input, [32]byte{})
+	}
 
-	res, err := MerkleRootFromLeaves(leaves)
+	res, err := MerkleRootFromLeaves(input)
 	if err != nil {
 		return [32]byte{}, err
 	}
