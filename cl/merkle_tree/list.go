@@ -56,10 +56,8 @@ func MerkleizeVector(elements [][32]byte, length uint64) ([32]byte, error) {
 			resultCh := make(chan *gohashtreeWorkerIO)
 			outputBranches := make([][][32]byte, numThreads)
 			for i := 0; i < numThreads; i++ {
-				workerElements := make([][32]byte, branchSize)
-				copy(workerElements, elements[i*branchSize:])
 				go gohashtreeWorker(&gohashtreeWorkerIO{
-					elements: workerElements,
+					elements: elements[i*branchSize : (i*branchSize)+branchSize],
 					index:    i,
 				}, resultCh)
 			}
