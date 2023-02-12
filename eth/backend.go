@@ -1010,7 +1010,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err = agg.ReopenFolder(); err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		return nil, nil, nil, err
 	}
 	agg.OnFreeze(func(frozenFileNames []string) {

@@ -1189,7 +1189,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.ReopenFolder()
+		err = _aggSingleton.OpenFolder()
 		if err != nil {
 			panic(err)
 		}

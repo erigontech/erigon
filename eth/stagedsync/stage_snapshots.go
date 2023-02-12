@@ -22,9 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/parlia"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -34,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type SnapshotsCfg struct {
@@ -166,8 +164,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
-		sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
-		if err := cfg.agg.BuildMissedIndices(ctx, sem); err != nil {
+		indexWorkers := estimate.IndexSnapshot.Workers()
+		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
 		}
 		if cfg.dbEventNotifier != nil {
@@ -472,7 +470,7 @@ Finish:
 	if err := cfg.snapshots.ReopenFolder(); err != nil {
 		return err
 	}
-	if err := cfg.agg.ReopenFolder(); err != nil {
+	if err := cfg.agg.OpenFolder(); err != nil {
 		return err
 	}
 
