@@ -228,8 +228,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
-	err = agg.BuildMissedIndices(ctx, sem)
+	err = agg.BuildMissedIndices(ctx, indexWorkers)
 	if err != nil {
 		return err
 	}
