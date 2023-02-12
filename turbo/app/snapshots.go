@@ -24,19 +24,17 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -408,8 +406,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	log.Info("Work on state history snapshots")
-	sem := semaphore.NewWeighted(int64(estimate.IndexSnapshot.Workers()))
-	if err = agg.BuildMissedIndices(ctx, sem); err != nil {
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 		return err
 	}
 
