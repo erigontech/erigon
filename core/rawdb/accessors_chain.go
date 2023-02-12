@@ -1302,7 +1302,7 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		n := binary.BigEndian.Uint64(k)
 		if n > 1 {
 			log.Info("TruncateBlocks", "block", n)
-			defer log.Info("TruncateBlocks", "done")
+			defer log.Info("TruncateBlocks done")
 		}
 	}
 	for ; k != nil; k, _, err = c.Prev() {
