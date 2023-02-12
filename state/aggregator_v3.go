@@ -215,31 +215,33 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 }
 
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) error {
-	g, ctx := errgroup.WithContext(ctx)
-	if a.accounts != nil {
-		g.Go(func() error { return a.accounts.BuildMissedIndices(ctx, sem) })
-	}
-	if a.storage != nil {
-		g.Go(func() error { return a.storage.BuildMissedIndices(ctx, sem) })
-	}
-	if a.code != nil {
-		g.Go(func() error { return a.code.BuildMissedIndices(ctx, sem) })
-	}
-	if a.logAddrs != nil {
-		g.Go(func() error { return a.logAddrs.BuildMissedIndices(ctx, sem) })
-	}
-	if a.logTopics != nil {
-		g.Go(func() error { return a.logTopics.BuildMissedIndices(ctx, sem) })
-	}
-	if a.tracesFrom != nil {
-		g.Go(func() error { return a.tracesFrom.BuildMissedIndices(ctx, sem) })
-	}
-	if a.tracesTo != nil {
-		g.Go(func() error { return a.tracesTo.BuildMissedIndices(ctx, sem) })
-	}
+	{
+		g, ctx := errgroup.WithContext(ctx)
+		if a.accounts != nil {
+			g.Go(func() error { return a.accounts.BuildMissedIndices(ctx, sem) })
+		}
+		if a.storage != nil {
+			g.Go(func() error { return a.storage.BuildMissedIndices(ctx, sem) })
+		}
+		if a.code != nil {
+			g.Go(func() error { return a.code.BuildMissedIndices(ctx, sem) })
+		}
+		if a.logAddrs != nil {
+			g.Go(func() error { return a.logAddrs.BuildMissedIndices(ctx, sem) })
+		}
+		if a.logTopics != nil {
+			g.Go(func() error { return a.logTopics.BuildMissedIndices(ctx, sem) })
+		}
+		if a.tracesFrom != nil {
+			g.Go(func() error { return a.tracesFrom.BuildMissedIndices(ctx, sem) })
+		}
+		if a.tracesTo != nil {
+			g.Go(func() error { return a.tracesTo.BuildMissedIndices(ctx, sem) })
+		}
 
-	if err := g.Wait(); err != nil {
-		return err
+		if err := g.Wait(); err != nil {
+			return err
+		}
 	}
 	return a.BuildOptionalMissedIndices(ctx, 4)
 }
