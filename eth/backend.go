@@ -297,7 +297,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			Accumulator: shards.NewAccumulator(),
 		},
 	}
-	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
+	blockReader, allSnapshots, agg, err := backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, backend.notifications.Events)
 	if err != nil {
 		return nil, err
 	}
@@ -969,7 +969,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
+func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, notifications *shards.Events) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	if !snConfig.Enabled {
 		blockReader := snapshotsync.NewBlockReader()
 		return blockReader, nil, nil, nil
@@ -1013,6 +1013,15 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err = agg.ReopenFolder(); err != nil {
 		return nil, nil, nil, err
 	}
+	agg.OnFreeze(func(frozenFileNames []string) {
+		notifications.OnNewSnapshot()
+		req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
+		for _, fName := range frozenFileNames {
+			req.Items = append(req.Items, &proto_downloader.DownloadItem{
+				Path: filepath.Join("history", fName),
+			})
+		}
+	})
 
 	return blockReader, allSnapshots, agg, nil
 }
