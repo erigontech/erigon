@@ -34,8 +34,8 @@ builds:
     goos: [ linux ]
     goarch: [ amd64 ]
     env:
-      - CC=gcc
-      - CXX=g++
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
     tags: [ nosqlite, noboltdb ]
     ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
