@@ -365,11 +365,11 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 				go func() { // don't block events processing by network communication
 					reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
 					if err != nil {
-						log.Warn("[Snapshots] reopen", "err", err)
+						log.Warn("[snapshots] reopen", "err", err)
 						return
 					}
 					if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
+						log.Error("[snapshots] reopen", "err", err)
 					} else {
 						allSnapshots.LogStat()
 					}
@@ -377,7 +377,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 					_ = reply.HistoryFiles
 
 					if err = agg.ReopenFolder(); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
+						log.Error("[snapshots] reopen", "err", err)
 					} else {
 						db.View(context.Background(), func(tx kv.Tx) error {
 							agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {

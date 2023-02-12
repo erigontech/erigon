@@ -523,13 +523,20 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 
 	sn := cfg.blockRetire.Snapshots()
 	if sn != nil && sn.Cfg().Enabled && sn.Cfg().Produce {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx); err != nil {
+		br := cfg.blockRetire
+		if err := br.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
 
-		if err := retireBlocksInSingleBackgroundThread(s, cfg.blockRetire, cfg.agg, ctx, tx); err != nil {
-			return fmt.Errorf("retireBlocksInSingleBackgroundThread: %w", err)
+		//TODO: initialSync maybe save files progress here
+		if cfg.agg.NeedSaveFilesListInDB() || br.NeedSaveFilesListInDB() {
+			if err := rawdb.WriteSnapshots(tx, br.Snapshots().Files(), cfg.agg.Files()); err != nil {
+				return err
+			}
 		}
+
+		br.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
+		cfg.agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx {
@@ -537,26 +544,6 @@ func SnapshotsPrune(s *PruneState, cfg SnapshotsCfg, ctx context.Context, tx kv.
 			return err
 		}
 	}
-
-	return nil
-}
-
-// retiring blocks in a single thread in the brackground
-func retireBlocksInSingleBackgroundThread(s *PruneState, blockRetire *snapshotsync.BlockRetire, agg *state.AggregatorV3, ctx context.Context, tx kv.RwTx) (err error) {
-	// if something already happens in background - noop
-	if blockRetire.Working() {
-		return nil
-	}
-	ok, err := blockRetire.BackgroundResult.GetAndReset()
-	if err != nil {
-		log.Warn(fmt.Sprintf("[%s]", s.LogPrefix()), "err", err)
-	} else if ok {
-		if err := rawdb.WriteSnapshots(tx, blockRetire.Snapshots().Files(), agg.Files()); err != nil {
-			return err
-		}
-	}
-
-	blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlDebug)
 
 	return nil
 }

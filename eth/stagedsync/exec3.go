@@ -695,9 +695,7 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				return err
-			}
+			agg.BuildFilesInBackground()
 		}
 	}
 
@@ -720,9 +718,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx && applyTx != nil {
