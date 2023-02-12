@@ -11,8 +11,11 @@ import (
 func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestation) error {
 	var err error
 	attestingIndiciesSet := make([][]uint64, len(attestations))
+
+	baseRewardPerIncrement := s.state.BaseRewardPerIncrement()
+
 	for i, attestation := range attestations {
-		if attestingIndiciesSet[i], err = s.processAttestation(attestation); err != nil {
+		if attestingIndiciesSet[i], err = s.processAttestation(attestation, baseRewardPerIncrement); err != nil {
 			return err
 		}
 	}
@@ -27,7 +30,7 @@ func (s *StateTransistor) ProcessAttestations(attestations []*cltypes.Attestatio
 }
 
 // ProcessAttestation takes an attestation and process it.
-func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) ([]uint64, error) {
+func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation, baseRewardPerIncrement uint64) ([]uint64, error) {
 	data := attestation.Data
 	currentEpoch := s.state.Epoch()
 	previousEpoch := s.state.PreviousEpoch()
@@ -58,12 +61,10 @@ func (s *StateTransistor) processAttestation(attestation *cltypes.Attestation) (
 	} else {
 		epochParticipation = s.state.PreviousEpochParticipation()
 	}
+	validators := s.state.Validators()
 
 	for _, attesterIndex := range attestingIndicies {
-		baseReward, err := s.state.BaseReward(attesterIndex)
-		if err != nil {
-			return nil, err
-		}
+		baseReward := (validators[attesterIndex].EffectiveBalance / s.beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
 		for flagIndex, weight := range s.beaconConfig.ParticipationWeights() {
 			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
 				continue

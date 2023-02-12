@@ -10,15 +10,15 @@ import (
 
 // merkleizeTrieLeaves returns intermediate roots of given leaves.
 func merkleizeTrieLeaves(leaves [][32]byte) ([32]byte, error) {
+	layer := make([][32]byte, len(leaves)/2)
 	for len(leaves) > 1 {
 		if !utils.IsPowerOf2(uint64(len(leaves))) {
 			return [32]byte{}, fmt.Errorf("hash layer is a non power of 2: %d", len(leaves))
 		}
-		layer := make([][32]byte, len(leaves)/2)
 		if err := gohashtree.Hash(layer, leaves); err != nil {
 			return [32]byte{}, err
 		}
-		leaves = layer
+		leaves = layer[:len(leaves)/2]
 	}
 	return leaves[0], nil
 }
