@@ -18,6 +18,7 @@ package length
 
 // Lengths of hashes and addresses in bytes.
 const (
+	PeerID = 64
 	// Hash is the expected length of the hash (in bytes)
 	Hash = 32
 	// Addr is the expected length of the address (in bytes)
