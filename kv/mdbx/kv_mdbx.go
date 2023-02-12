@@ -614,7 +614,7 @@ func (tx *MdbxTx) ListBuckets() ([]string, error) {
 }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
-	// can't use db.evn.View method - because it calls commit for read transactions - it conflicts with write transactions.
+	// can't use db.env.View method - because it calls commit for read transactions - it conflicts with write transactions.
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
