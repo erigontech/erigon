@@ -335,7 +335,10 @@ func ExecV3(ctx context.Context,
 							var drained bool
 							for !drained {
 								select {
-								case txTask := <-resultCh:
+								case txTask, ok := <-resultCh:
+									if !ok {
+										return nil
+									}
 									resultsSize.Add(txTask.ResultsSize)
 									heap.Push(rws, txTask)
 								default:
@@ -358,7 +361,10 @@ func ExecV3(ctx context.Context,
 						var drained bool
 						for !drained {
 							select {
-							case txTask := <-resultCh:
+							case txTask, ok := <-resultCh:
+								if !ok {
+									return nil
+								}
 								rs.AddWork(txTask)
 							default:
 								drained = true
@@ -704,7 +710,7 @@ Loop:
 
 	if parallel {
 		stopWorkers()
-		if err, ok := <-rwLoopErrCh; ok && err != nil {
+		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
 		rwLoopWg.Wait()
