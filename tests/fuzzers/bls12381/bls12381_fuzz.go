@@ -25,6 +25,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	gnark "github.com/consensys/gnark-crypto/ecc/bls12-381"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fp"
 	"github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
@@ -189,7 +190,7 @@ func FuzzCrossG1MultiExp(data []byte) int {
 		}
 		gethScalars = append(gethScalars, bls12381.NewFr().FromBytes(s.Bytes()))
 		var gnarkScalar = &fr.Element{}
-		gnarkScalar = gnarkScalar.SetBigInt(s).FromMont()
+		gnarkScalar = gnarkScalar.SetBigInt(s)
 		gnarkScalars = append(gnarkScalars, *gnarkScalar)
 
 		gethPoints = append(gethPoints, new(bls12381.PointG1).Set(kp1))
@@ -208,7 +209,7 @@ func FuzzCrossG1MultiExp(data []byte) int {
 
 	// gnark multi exp
 	cp := new(gnark.G1Affine)
-	cp.MultiExp(gnarkPoints, gnarkScalars)
+	cp.MultiExp(gnarkPoints, gnarkScalars, ecc.MultiExpConfig{})
 
 	// compare result
 	if !(bytes.Equal(cp.Marshal(), g1.ToBytes(&kp))) {
