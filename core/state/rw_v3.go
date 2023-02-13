@@ -40,7 +40,7 @@ type StateV3 struct {
 	changes      map[string]*btree2.Map[string, []byte]
 	sizeEstimate uint64
 	txsDone      *atomic2.Uint64
-	finished     bool
+	finished     atomic2.Bool
 }
 
 func NewStateV3() *StateV3 {
@@ -137,11 +137,11 @@ func (rs *StateV3) QueueLen() int {
 
 func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	for !rs.finished && rs.queue.Len() == 0 {
+	rs.queueLock.Unlock()
+	for !rs.finished.Load() {
 		rs.receiveWork.Wait()
 	}
-	if rs.finished {
+	if rs.finished.Load() {
 		return nil, false
 	}
 	if rs.queue.Len() > 0 {
@@ -226,9 +226,9 @@ func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
 }
 
 func (rs *StateV3) Finish() {
+	rs.finished.Store(true)
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
-	rs.finished = true
 	rs.receiveWork.Broadcast()
 }
 
