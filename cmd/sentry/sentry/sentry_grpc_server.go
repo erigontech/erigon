@@ -563,11 +563,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 	for _, p := range protocols {
 		protocol := p
+		var disc enode.Iterator
+		if dialCandidates != nil {
+			disc = dialCandidates()
+		}
 		ss.Protocols = append(ss.Protocols, p2p.Protocol{
 			Name:           eth.ProtocolName,
 			Version:        protocol,
 			Length:         17,
-			DialCandidates: dialCandidates(),
+			DialCandidates: disc,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.Pubkey()
 				printablePeerID := hex.EncodeToString(peerID[:])[:20]
@@ -623,7 +627,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 // Sentry creates and runs standalone sentry
 func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
 	dir.MustExist(dirs.DataDir)
-	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
+
+	discovery := func() enode.Iterator {
+		d, err := setupDiscovery(discoveryDNS)
+		if err != nil {
+			panic(err)
+		}
+		return d
+	}
+	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
