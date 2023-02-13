@@ -1,7 +1,6 @@
 package engineapi
 
 import (
-	"context"
 	"sync"
 
 	"github.com/emirpasic/gods/maps/treemap"
@@ -56,23 +55,13 @@ type RequestList struct {
 	interrupt Interrupt
 	waiting   atomic.Uint32
 	syncCond  *sync.Cond
-
-	// waiterMtx is used to place locks around `waiters` so the slice can be read/modified safely
-	// and also serves as a lock around the `waiting` field so that this can't be modified whilst it
-	// is being read.  waiters is modified as part of updating waiter so we need to ensure these
-	// two things lock at the same time
-	waiterMtx sync.Mutex
-
-	waiters []chan struct{}
 }
 
 func NewRequestList() *RequestList {
 	rl := &RequestList{
-		requests:  treemap.NewWithIntComparator(),
-		syncCond:  sync.NewCond(&sync.Mutex{}),
-		waiterMtx: sync.Mutex{},
-		waiters:   make([]chan struct{}, 0),
-		waiting:   atomic.Uint32{},
+		requests: treemap.NewWithIntComparator(),
+		syncCond: sync.NewCond(&sync.Mutex{}),
+		waiting:  atomic.Uint32{},
 	}
 	return rl
 }
@@ -130,14 +119,8 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 	rl.syncCond.L.Lock()
 	defer rl.syncCond.L.Unlock()
 
-	rl.waiterMtx.Lock()
-	rl.updateWaiting(1)
-	rl.waiterMtx.Unlock()
-	defer func() {
-		rl.waiterMtx.Lock()
-		rl.updateWaiting(0)
-		rl.waiterMtx.Unlock()
-	}()
+	rl.waiting.Store(1)
+	defer rl.waiting.Store(0)
 
 	for {
 		interrupt = rl.interrupt
@@ -158,36 +141,6 @@ func (rl *RequestList) WaitForRequest(onlyNew bool, noWait bool) (interrupt Inte
 
 func (rl *RequestList) IsWaiting() bool {
 	return rl.waiting.Load() != 0
-}
-
-// update waiting should always be called from a locked context using rl.waiterMtx as it
-// updates rl.waiters in certain scenarios
-func (rl *RequestList) updateWaiting(val uint32) {
-	rl.waiting.Store(val)
-
-	if val == 1 {
-		for i, c := range rl.waiters {
-			close(c)
-			rl.waiters[i] = nil
-		}
-		rl.waiters = rl.waiters[:0]
-	}
-}
-
-func (rl *RequestList) WaitForWaiting(ctx context.Context) (chan struct{}, bool) {
-	rl.waiterMtx.Lock()
-	defer rl.waiterMtx.Unlock()
-
-	isWaiting := rl.waiting.Load()
-
-	if isWaiting == 1 {
-		// we are already waiting so just return
-		return nil, true
-	} else {
-		c := make(chan struct{}, 1)
-		rl.waiters = append(rl.waiters, c)
-		return c, false
-	}
 }
 
 func (rl *RequestList) Interrupt(kind Interrupt) {

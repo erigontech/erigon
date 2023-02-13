@@ -269,13 +269,15 @@ func convertPayloadStatus(payloadStatus *engineapi.PayloadStatus) *remote.Engine
 }
 
 func (s *EthBackendServer) stageLoopIsBusy() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	wait, ok := s.hd.BeaconRequestList.WaitForWaiting(ctx)
-	if !ok {
-		select {
-		case <-wait:
-		case <-ctx.Done():
+	for i := 0; i < 100; i++ {
+		if !s.hd.BeaconRequestList.IsWaiting() {
+			// This might happen, for example, in the following scenario:
+			// 1) CL sends NewPayload and immediately after that ForkChoiceUpdated.
+			// 2) We happily process NewPayload and stage loop is at the end.
+			// 3) We start processing ForkChoiceUpdated,
+			// but the stage loop hasn't moved yet from the end to the beginning of HeadersPOS
+			// and thus requestList.WaitForRequest() is not called yet.
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 
