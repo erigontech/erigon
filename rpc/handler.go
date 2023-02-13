@@ -438,7 +438,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream *jsoniter
 	}
 	args, err := parsePositionalArguments(msg.Params, callb.argTypes)
 	if err != nil {
-		return msg.errorResponse(&invalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()})
 	}
 	start := time.Now()
 	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
@@ -464,7 +464,7 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	// Subscription method name is first argument.
 	name, err := parseSubscriptionName(msg.Params)
 	if err != nil {
-		return msg.errorResponse(&invalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()})
 	}
 	namespace := msg.namespace()
 	callb := h.reg.subscription(namespace, name)
@@ -476,7 +476,7 @@ func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream *jso
 	argTypes := append([]reflect.Type{stringType}, callb.argTypes...)
 	args, err := parsePositionalArguments(msg.Params, argTypes)
 	if err != nil {
-		return msg.errorResponse(&invalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()})
 	}
 	args = args[1:]
 

@@ -112,3 +112,63 @@ func (ec *ExecutionClient) IsCanonical(hash libcommon.Hash) (bool, error) {
 	}
 	return resp.Canonical, nil
 }
+
+func (ec *ExecutionClient) ReadHeader(number uint64, blockHash libcommon.Hash) (*types.Header, error) {
+	resp, err := ec.client.GetHeader(ec.ctx, &execution.GetSegmentRequest{
+		BlockNumber: &number,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return eth1.HeaderRpcToHeader(resp.Header)
+}
+
+func (ec *ExecutionClient) ReadExecutionPayload(number uint64, blockHash libcommon.Hash) (*cltypes.Eth1Block, error) {
+	header, err := ec.ReadHeader(number, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	body, err := ec.ReadBody(number, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	return &cltypes.Eth1Block{
+		Header: header,
+		Body:   body,
+	}, nil
+}
+
+func (ec *ExecutionClient) ReadBody(number uint64, blockHash libcommon.Hash) (*types.RawBody, error) {
+	resp, err := ec.client.GetBody(ec.ctx, &execution.GetSegmentRequest{
+		BlockNumber: &number,
+		BlockHash:   gointerfaces.ConvertHashToH256(blockHash),
+	})
+	if err != nil {
+		return nil, err
+	}
+	uncles := make([]*types.Header, 0, len(resp.Body.Uncles))
+	for _, uncle := range resp.Body.Uncles {
+		h, err := eth1.HeaderRpcToHeader(uncle)
+		if err != nil {
+			return nil, err
+		}
+		uncles = append(uncles, h)
+	}
+	// Withdrawals processing
+	withdrawals := make([]*types.Withdrawal, 0, len(resp.Body.Withdrawals))
+	for _, withdrawal := range resp.Body.Withdrawals {
+		withdrawals = append(withdrawals, &types.Withdrawal{
+			Index:     withdrawal.Index,
+			Validator: withdrawal.ValidatorIndex,
+			Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
+			Amount:    withdrawal.Amount,
+		})
+	}
+	return &types.RawBody{
+		Transactions: resp.Body.Transactions,
+		Uncles:       uncles,
+		Withdrawals:  withdrawals,
+	}, nil
+}

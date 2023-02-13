@@ -191,12 +191,13 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
-	var rwsLock sync.RWMutex
-	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
+
+	var rwsLock sync.RWMutex
+	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
@@ -225,7 +226,10 @@ func ExecV3(ctx context.Context,
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case txTask := <-resultCh:
+			case txTask, ok := <-resultCh:
+				if !ok {
+					return nil
+				}
 				if txTask.BlockNum > lastBlockNum {
 					if lastBlockNum > 0 {
 						core.BlockExecutionTimer.UpdateDuration(t)
@@ -280,7 +284,6 @@ func ExecV3(ctx context.Context,
 			}
 
 			defer applyLoopWg.Wait()
-
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
@@ -333,7 +336,10 @@ func ExecV3(ctx context.Context,
 							var drained bool
 							for !drained {
 								select {
-								case txTask := <-resultCh:
+								case txTask, ok := <-resultCh:
+									if !ok {
+										return nil
+									}
 									resultsSize.Add(txTask.ResultsSize)
 									heap.Push(rws, txTask)
 								default:
@@ -356,7 +362,10 @@ func ExecV3(ctx context.Context,
 						var drained bool
 						for !drained {
 							select {
-							case txTask := <-resultCh:
+							case txTask, ok := <-resultCh:
+								if !ok {
+									return nil
+								}
 								rs.AddWork(txTask)
 							default:
 								drained = true
@@ -434,8 +443,10 @@ func ExecV3(ctx context.Context,
 
 		rwLoopErrCh = make(chan error, 1)
 
-		rwLoopWg.Add(1)
 		defer rwLoopWg.Wait()
+		rwLoopCtx, rwLoopCancel := context.WithCancel(ctx)
+		defer rwLoopCancel()
+		rwLoopWg.Add(1)
 		go func() {
 			defer close(rwLoopErrCh)
 			defer rwLoopWg.Done()
@@ -444,7 +455,7 @@ func ExecV3(ctx context.Context,
 			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
 
-			if err := rwLoop(ctx); err != nil {
+			if err := rwLoop(rwLoopCtx); err != nil {
 				rwLoopErrCh <- err
 			}
 		}()
@@ -694,18 +705,16 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				return err
-			}
+			agg.BuildFilesInBackground()
 		}
 	}
 
 	if parallel {
 		stopWorkers()
-		rwLoopWg.Wait()
-		if err, ok := <-rwLoopErrCh; ok && err != nil {
+		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
+		rwLoopWg.Wait()
 	} else {
 		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
 			return err
@@ -719,9 +728,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx && applyTx != nil {
@@ -824,9 +831,9 @@ func reconstituteStep(last bool,
 		endBlockNum = blockNum
 	}
 
-	log.Info(fmt.Sprintf("[%s] ", s.LogPrefix()) + fmt.Sprintf("startTxNum = %d, endTxNum = %d, startBlockNum = %d, endBlockNum = %d\n", startTxNum, endTxNum, startBlockNum, endBlockNum))
+	log.Info(fmt.Sprintf("[%s] Reconstitution", s.LogPrefix()), "startTxNum", startTxNum, "endTxNum", endTxNum, "startBlockNum", startBlockNum, "endBlockNum", endBlockNum)
 
-	var maxTxNum uint64 = startTxNum
+	var maxTxNum = startTxNum
 
 	workCh := make(chan *exec22.TxTask, workerCount*4)
 	rs := state.NewReconState(workCh)
@@ -836,19 +843,25 @@ func reconstituteStep(last bool,
 	if err := scanWorker.BitmapAccounts(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan accounts history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapStorage(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan storage history", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	t = time.Now()
 	if err := scanWorker.BitmapCode(); err != nil {
 		return err
 	}
-	log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Scan code history", s.LogPrefix()), "took", time.Since(t))
+	}
 	bitmap := scanWorker.Bitmap()
 
 	var wg sync.WaitGroup
@@ -1327,13 +1340,19 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
 	fillWorker.FillAccounts(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillStorage(plainStateCollector)
-	log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
+	}
 	t = time.Now()
 	fillWorker.FillCode(codeCollector, plainContractCollector)
-	log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	if time.Since(t) > 5*time.Second {
+		log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
+	}
 
 	// Load all collections into the main collector
 	if err = chainDb.Update(ctx, func(tx kv.RwTx) error {

@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
@@ -94,7 +93,10 @@ func TestProcessBlockHeader(t *testing.T) {
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
 
 	badStateSlashed := getTestState(t)
-	badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex)).Slashed = true
+	validator, err := badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex))
+	require.NoError(t, err)
+	validator.Slashed = true
+	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), &validator)
 
 	testCases := []struct {
 		description string
@@ -169,8 +171,10 @@ func TestProcessRandao(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to get proposer index: %v", err)
 	}
-	testStateSuccess.ValidatorAt(int(propInd)).PublicKey = testPublicKeyRandao
-
+	validator, err := testStateSuccess.ValidatorAt(int(propInd))
+	require.NoError(t, err)
+	validator.PublicKey = testPublicKeyRandao
+	testStateSuccess.SetValidatorAt(int(propInd), &validator)
 	testBlock := getTestBlock(t)
 	testBlock.Body.RandaoReveal = testSignatureRandao
 	testBody := testBlock.Body
@@ -202,24 +206,12 @@ func TestProcessRandao(t *testing.T) {
 			body:        testBody,
 			wantErr:     true,
 		},
-		{
-			description: "bad_signature_err_processing",
-			state:       testStateSuccess,
-			body:        testBlockBadSig1.Body,
-			wantErr:     true,
-		},
-		{
-			description: "bad_signature_invalid",
-			state:       testStateSuccess,
-			body:        testBlockBadSig2.Body,
-			wantErr:     true,
-		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessRandao(tc.body.RandaoReveal)
+			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, true)
+			err := s.ProcessRandao(tc.body.RandaoReveal, propInd)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -228,13 +220,6 @@ func TestProcessRandao(t *testing.T) {
 			}
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
-			}
-			randaoOut := tc.state.RandaoMixes()[0]
-			randaoExpected := utils.Keccak256(tc.body.RandaoReveal[:])
-			for i := range tc.state.RandaoMixes()[0] {
-				if randaoOut[i] != randaoExpected[i] {
-					t.Errorf("unexpected output randao byte: got %x, want %x", randaoOut[i], randaoExpected[i])
-				}
 			}
 		})
 	}

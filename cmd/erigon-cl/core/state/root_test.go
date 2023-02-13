@@ -6,8 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-// Prev: 151849172
-// Curr: 5463452
+// Curr: 4358340
 func BenchmarkStateRootNonCached(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		base := state.GetEmptyBeaconState()

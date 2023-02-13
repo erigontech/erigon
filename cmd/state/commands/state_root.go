@@ -89,7 +89,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	_, genesisIbs, err4 := genesis.ToBlock()
+	_, genesisIbs, err4 := genesis.ToBlock("")
 	if err4 != nil {
 		return err4
 	}

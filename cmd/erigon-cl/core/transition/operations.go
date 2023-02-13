@@ -1,6 +1,7 @@
 package transition
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -29,15 +30,6 @@ func IsSlashableAttestationData(d1, d2 *cltypes.AttestationData) (bool, error) {
 	return (hash1 != hash2 && d1.Target.Epoch == d2.Target.Epoch) || (d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch), nil
 }
 
-func IsSortedSet(vals []uint64) bool {
-	for i := 0; i < len(vals)-1; i++ {
-		if vals[i] >= vals[i+1] {
-			return false
-		}
-	}
-	return true
-}
-
 func GetSetIntersection(v1, v2 []uint64) []uint64 {
 	intersection := []uint64{}
 	present := map[uint64]bool{}
@@ -54,15 +46,18 @@ func GetSetIntersection(v1, v2 []uint64) []uint64 {
 	return intersection
 }
 
-func IsValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
+func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !IsSortedSet(inds) {
-		return false, fmt.Errorf("invalid attesting indices")
+	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
 	for _, v := range inds {
-		val := state.ValidatorAt(int(v))
+		val, err := state.ValidatorAt(int(v))
+		if err != nil {
+			return false, err
+		}
 		pks = append(pks, val.PublicKey[:])
 	}
 
@@ -110,8 +105,11 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer := s.state.ValidatorAt(int(h1.ProposerIndex))
-	if !IsSlashableValidator(proposer, s.state.Epoch()) {
+	proposer, err := s.state.ValidatorAt(int(h1.ProposerIndex))
+	if err != nil {
+		return err
+	}
+	if !IsSlashableValidator(&proposer, s.state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
@@ -150,7 +148,7 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := IsValidIndexedAttestation(s.state, att1)
+	valid, err := isValidIndexedAttestation(s.state, att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -158,7 +156,7 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = IsValidIndexedAttestation(s.state, att2)
+	valid, err = isValidIndexedAttestation(s.state, att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
@@ -169,7 +167,11 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	slashedAny := false
 	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
 	for _, ind := range indices {
-		if IsSlashableValidator(s.state.ValidatorAt(int(ind)), s.state.GetEpochAtSlot(s.state.Slot())) {
+		currentValidator, err := s.state.ValidatorAt(int(ind))
+		if err != nil {
+			return err
+		}
+		if IsSlashableValidator(&currentValidator, s.state.GetEpochAtSlot(s.state.Slot())) {
 			err := s.state.SlashValidator(ind, 0)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
@@ -229,16 +231,59 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		}
 		if valid {
 			// Append validator
-			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit))
-			s.state.AddBalance(amount)
+			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit), amount)
 			// Altair only
 			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddInactivityScore(0)
 		}
-	} else {
-		// Increase the balance if exists already
-		s.state.IncreaseBalance(int(validatorIndex), amount)
+		return nil
 	}
-	return nil
+	// Increase the balance if exists already
+	return s.state.IncreaseBalance(validatorIndex, amount)
+
+}
+
+// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
+func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
+	// Sanity checks so that we know it is good.
+	voluntaryExit := signedVoluntaryExit.VolunaryExit
+	currentEpoch := s.state.Epoch()
+	validator, err := s.state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
+	if err != nil {
+		return err
+	}
+	if !validator.Active(currentEpoch) {
+		return errors.New("ProcessVoluntaryExit: validator is not active")
+	}
+	if validator.ExitEpoch != s.beaconConfig.FarFutureEpoch {
+		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
+	}
+	if currentEpoch < voluntaryExit.Epoch {
+		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
+	}
+	if currentEpoch < validator.ActivationEpoch+s.beaconConfig.ShardCommitteePeriod {
+		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
+	}
+
+	// We can skip it in some instances if we want to optimistically sync up.
+	if !s.noValidate {
+		domain, err := s.state.GetDomain(s.beaconConfig.DomainVoluntaryExit, voluntaryExit.Epoch)
+		if err != nil {
+			return err
+		}
+		signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
+		if err != nil {
+			return err
+		}
+		valid, err := bls.Verify(signedVoluntaryExit.Signature[:], signingRoot[:], validator.PublicKey[:])
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return errors.New("ProcessVoluntaryExit: BLS verification failed")
+		}
+	}
+	// Do the exit (same process in slashing).
+	return s.state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }

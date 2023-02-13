@@ -99,7 +99,11 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 func (rw *Worker) Run() {
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
-		rw.resultCh <- txTask // Needs to have outside of the lock
+		select {
+		case rw.resultCh <- txTask: // Needs to have outside of the lock
+		case <-rw.ctx.Done():
+			return
+		}
 	}
 }
 
@@ -130,7 +134,7 @@ func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock()
+		_, ibs, err = rw.genesis.ToBlock("")
 		if err != nil {
 			panic(err)
 		}
@@ -310,6 +314,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func()) {
+	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	queueSize := workerCount * 2
 	reconWorkers = make([]*Worker, workerCount)
@@ -318,12 +323,19 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+	var clearDone bool
 	clear = func() {
+		if clearDone {
+			return
+		}
+		clearDone = true
+		cancel()
 		wg.Wait()
 		for _, w := range reconWorkers {
 			w.ResetTx(nil)
 		}
 		applyWorker.ResetTx(nil)
+		close(resultCh)
 	}
 	if background {
 		wg.Add(workerCount)

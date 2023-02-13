@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,13 +21,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 )
@@ -81,90 +83,99 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		_ = logging2.GetLoggerCmd("txpool", cmd)
-		ctx := cmd.Context()
+
+		if err := doTxpool(cmd.Context()); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func doTxpool(ctx context.Context) error {
+	creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
+	if err != nil {
+		return fmt.Errorf("could not connect to remoteKv: %w", err)
+	}
+	coreConn, err := grpcutil.Connect(creds, privateApiAddr)
+	if err != nil {
+		return fmt.Errorf("could not connect to remoteKv: %w", err)
+	}
+
+	kvClient := remote.NewKVClient(coreConn)
+	coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
+	if err != nil {
+		return fmt.Errorf("could not connect to remoteKv: %w", err)
+	}
+
+	log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
+
+	sentryClients := make([]direct.SentryClient, len(sentryAddr))
+	for i := range sentryAddr {
 		creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
 		if err != nil {
-			return fmt.Errorf("could not connect to remoteKv: %w", err)
+			return fmt.Errorf("could not connect to sentry: %w", err)
 		}
-		coreConn, err := grpcutil.Connect(creds, privateApiAddr)
+		sentryConn, err := grpcutil.Connect(creds, sentryAddr[i])
 		if err != nil {
-			return fmt.Errorf("could not connect to remoteKv: %w", err)
+			return fmt.Errorf("could not connect to sentry: %w", err)
 		}
 
-		kvClient := remote.NewKVClient(coreConn)
-		coreDB, err := remotedb.NewRemote(gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion), log.New(), kvClient).Open()
-		if err != nil {
-			return fmt.Errorf("could not connect to remoteKv: %w", err)
+		sentryClients[i] = direct.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
+	}
+
+	cfg := txpool.DefaultConfig
+	dirs := datadir.New(datadirCli)
+
+	cfg.DBDir = dirs.TxPool
+	cfg.CommitEvery = 30 * time.Second
+	cfg.PendingSubPoolLimit = pendingPoolLimit
+	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
+	cfg.QueuedSubPoolLimit = queuedPoolLimit
+	cfg.MinFeeCap = priceLimit
+	cfg.AccountSlots = accountSlots
+	cfg.PriceBump = priceBump
+
+	cacheConfig := kvcache.DefaultCoherentConfig
+	cacheConfig.MetricsLabel = "txpool"
+
+	cfg.TracedSenders = make([]string, len(traceSenders))
+	for i, senderHex := range traceSenders {
+		sender := common.HexToAddress(senderHex)
+		cfg.TracedSenders[i] = string(sender[:])
+	}
+
+	newTxs := make(chan types.Announcements, 1024)
+	defer close(newTxs)
+	txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
+		kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
+	if err != nil {
+		return err
+	}
+	fetch.ConnectCore()
+	fetch.ConnectSentries()
+
+	/*
+		var ethashApi *ethash.API
+		sif casted, ok := backend.engine.(*ethash.Ethash); ok {
+			ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
 		}
+	*/
+	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil)
 
-		log.Info("TxPool started", "db", filepath.Join(datadirCli, "txpool"))
+	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil)
+	if err != nil {
+		return err
+	}
 
-		sentryClients := make([]direct.SentryClient, len(sentryAddr))
-		for i := range sentryAddr {
-			creds, err := grpcutil.TLS(TLSCACert, TLSCertfile, TLSKeyFile)
-			if err != nil {
-				return fmt.Errorf("could not connect to sentry: %w", err)
-			}
-			sentryConn, err := grpcutil.Connect(creds, sentryAddr[i])
-			if err != nil {
-				return fmt.Errorf("could not connect to sentry: %w", err)
-			}
+	notifyMiner := func() {}
+	txpool.MainLoop(ctx, txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
-			sentryClients[i] = direct.NewSentryClientRemote(proto_sentry.NewSentryClient(sentryConn))
-		}
-
-		cfg := txpool.DefaultConfig
-		dirs := datadir.New(datadirCli)
-
-		cfg.DBDir = dirs.TxPool
-		cfg.CommitEvery = 30 * time.Second
-		cfg.PendingSubPoolLimit = pendingPoolLimit
-		cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
-		cfg.QueuedSubPoolLimit = queuedPoolLimit
-		cfg.MinFeeCap = priceLimit
-		cfg.AccountSlots = accountSlots
-		cfg.PriceBump = priceBump
-
-		cacheConfig := kvcache.DefaultCoherentConfig
-		cacheConfig.MetricsLabel = "txpool"
-
-		cfg.TracedSenders = make([]string, len(traceSenders))
-		for i, senderHex := range traceSenders {
-			sender := common.HexToAddress(senderHex)
-			cfg.TracedSenders[i] = string(sender[:])
-		}
-
-		newTxs := make(chan types.Announcements, 1024)
-		defer close(newTxs)
-		txPoolDB, txPool, fetch, send, txpoolGrpcServer, err := txpooluitl.AllComponents(ctx, cfg,
-			kvcache.New(cacheConfig), newTxs, coreDB, sentryClients, kvClient)
-		if err != nil {
-			return err
-		}
-		fetch.ConnectCore()
-		fetch.ConnectSentries()
-
-		/*
-			var ethashApi *ethash.API
-			sif casted, ok := backend.engine.(*ethash.Ethash); ok {
-				ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-			}
-		*/
-		miningGrpcServer := privateapi.NewMiningServer(cmd.Context(), &rpcdaemontest.IsMiningMock{}, nil)
-
-		grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil)
-		if err != nil {
-			return err
-		}
-
-		notifyMiner := func() {}
-		txpool.MainLoop(cmd.Context(), txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
-
-		grpcServer.GracefulStop()
-		return nil
-	},
+	grpcServer.GracefulStop()
+	return nil
 }
 
 func main() {
