@@ -90,7 +90,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  state.FinalizedCheckpoint().Root,
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-		HeadSlot:       state.FinalizedCheckpoint().Epoch * 32,
+		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       state.FinalizedCheckpoint().Root,
 	}, handshake.LightClientRule)
 	if err != nil {
