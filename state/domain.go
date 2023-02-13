@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"io/fs"
 	"math"
 	"os"
 	"path/filepath"
@@ -32,18 +31,17 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+	atomic2 "go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 )
 
 var (
@@ -157,17 +155,44 @@ func NewDomain(
 	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals, []string{"kv"}); err != nil {
 		return nil, err
 	}
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	_ = d.scanStateFiles(files)
 
-	if err = d.openFiles(); err != nil {
-		return nil, err
-	}
-	d.defaultDc = d.MakeContext()
 	return d, nil
+}
+func (d *Domain) StartWrites() {
+	d.defaultDc = d.MakeContext()
+	d.History.StartWrites()
+}
+func (d *Domain) FinishWrites() {
+	d.defaultDc.Close()
+	d.History.FinishWrites()
+}
+
+// OpenList - main method to open list of files.
+// It's ok if some files was open earlier.
+// If some file already open: noop.
+// If some file already open but not in provided list: close and remove from `files` field.
+func (d *Domain) OpenList(fNames []string) error {
+	if err := d.History.OpenList(fNames); err != nil {
+		return err
+	}
+	return d.openList(fNames)
+}
+
+func (d *Domain) openList(fNames []string) error {
+	d.closeWhatNotInList(fNames)
+	_ = d.scanStateFiles(fNames)
+	if err := d.openFiles(); err != nil {
+		return fmt.Errorf("History.OpenList: %s, %w", d.filenameBase, err)
+	}
+	return nil
+}
+
+func (d *Domain) OpenFolder() error {
+	files, err := d.fileNamesOnDisk()
+	if err != nil {
+		return err
+	}
+	return d.OpenList(files)
 }
 
 func (d *Domain) GetAndResetStats() DomainStats {
@@ -178,14 +203,10 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	return r
 }
 
-func (d *Domain) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
+func (d *Domain) scanStateFiles(fileNames []string) (uselessFiles []string) {
 	re := regexp.MustCompile("^" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
-	for _, f := range files {
-		if !f.Type().IsRegular() {
-			continue
-		}
-		name := f.Name()
+	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
 			if len(subs) != 0 {
@@ -209,6 +230,10 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 
 		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
 		var newFile = &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: endStep-startStep == StepsInBiggestFile}
+		if _, has := d.files.Get(newFile); has {
+			continue
+		}
+
 		{
 			var subSets []*filesItem
 			var superSet *filesItem
@@ -239,19 +264,17 @@ func (d *Domain) scanStateFiles(files []fs.DirEntry) (uselessFiles []string) {
 		}
 		d.files.Set(newFile)
 	}
-	d.reCalcRoFiles()
 	return uselessFiles
 }
 
-func (d *Domain) openFiles() error {
-	var err error
+func (d *Domain) openFiles() (err error) {
 	var totalKeys uint64
 
 	invalidFileItems := make([]*filesItem, 0)
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor != nil {
-				item.decompressor.Close()
+				continue
 			}
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
 			datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, fromStep, toStep))
@@ -263,15 +286,16 @@ func (d *Domain) openFiles() error {
 				return false
 			}
 
-			if item.index == nil {
-				idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
-				if dir.FileExist(idxPath) {
-					if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
-						log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
-						return false
-					}
-					totalKeys += item.index.KeyCount()
+			if item.index != nil {
+				continue
+			}
+			idxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, fromStep, toStep))
+			if dir.FileExist(idxPath) {
+				if item.index, err = recsplit.OpenIndex(idxPath); err != nil {
+					log.Debug("InvertedIndex.openFiles: %w, %s", err, idxPath)
+					return false
 				}
+				totalKeys += item.index.KeyCount()
 			}
 		}
 		return true
@@ -282,29 +306,40 @@ func (d *Domain) openFiles() error {
 	for _, item := range invalidFileItems {
 		d.files.Delete(item)
 	}
+
+	d.reCalcRoFiles()
 	return nil
 }
 
-func (d *Domain) closeFiles() {
+func (d *Domain) closeWhatNotInList(fNames []string) {
+	var toDelete []*filesItem
 	d.files.Walk(func(items []*filesItem) bool {
+	Loop1:
 		for _, item := range items {
-			if item.decompressor != nil {
-				if err := item.decompressor.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.index.FileName())
+			for _, protectName := range fNames {
+				if item.decompressor != nil && item.decompressor.FileName() == protectName {
+					continue Loop1
 				}
-				item.decompressor = nil
 			}
-			if item.index != nil {
-				if err := item.index.Close(); err != nil {
-					log.Trace("close", "err", err, "file", item.index.FileName())
-				}
-				item.index = nil
-			}
+			toDelete = append(toDelete, item)
 		}
 		return true
 	})
-	d.files.Clear()
-	d.reCalcRoFiles()
+	for _, item := range toDelete {
+		if item.decompressor != nil {
+			if err := item.decompressor.Close(); err != nil {
+				log.Trace("close", "err", err, "file", item.index.FileName())
+			}
+			item.decompressor = nil
+		}
+		if item.index != nil {
+			if err := item.index.Close(); err != nil {
+				log.Trace("close", "err", err, "file", item.index.FileName())
+			}
+			item.index = nil
+		}
+		d.files.Delete(item)
+	}
 }
 
 func (d *Domain) reCalcRoFiles() {
@@ -349,9 +384,9 @@ func (d *Domain) reCalcRoFiles() {
 }
 
 func (d *Domain) Close() {
-	// Closing state files only after background aggregation goroutine is finished
 	d.History.Close()
-	d.closeFiles()
+	d.closeWhatNotInList([]string{})
+	d.reCalcRoFiles()
 }
 
 func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
@@ -918,7 +953,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
-	if valuesIdx, err = buildIndex(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false); err != nil {
+	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false); err != nil {
 		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
 	}
 	closeComp = false
@@ -946,18 +981,23 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, sem *semaphore.Weighted) (err error) {
-	if err := d.History.BuildMissedIndices(ctx, sem); err != nil {
-		return err
-	}
+func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group) (err error) {
+	d.History.BuildMissedIndices(ctx, g)
 	for _, item := range d.missedIdxFiles() {
 		//TODO: build .kvi
 		_ = item
 	}
-	return d.openFiles()
+	return nil
 }
 
-func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) (*recsplit.Index, error) {
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) (*recsplit.Index, error) {
+	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values); err != nil {
+		return nil, err
+	}
+	return recsplit.OpenIndex(idxPath)
+}
+
+func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -968,7 +1008,7 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 		TmpDir:     tmpdir,
 		IndexFile:  idxPath,
 	}); err != nil {
-		return nil, fmt.Errorf("create recsplit: %w", err)
+		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
 	rs.LogLvl(log.LvlTrace)
@@ -980,18 +1020,18 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 	for {
 		if err := ctx.Err(); err != nil {
 			log.Warn("recsplit index building cancelled", "err", err)
-			return nil, err
+			return err
 		}
 		g.Reset(0)
 		for g.HasNext() {
 			word, valPos = g.Next(word[:0])
 			if values {
 				if err = rs.AddKey(word, valPos); err != nil {
-					return nil, fmt.Errorf("add idx key [%x]: %w", word, err)
+					return fmt.Errorf("add idx key [%x]: %w", word, err)
 				}
 			} else {
 				if err = rs.AddKey(word, keyPos); err != nil {
-					return nil, fmt.Errorf("add idx key [%x]: %w", word, err)
+					return fmt.Errorf("add idx key [%x]: %w", word, err)
 				}
 			}
 			// Skip value
@@ -1002,17 +1042,13 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
 				rs.ResetNextSalt()
 			} else {
-				return nil, fmt.Errorf("build idx: %w", err)
+				return fmt.Errorf("build idx: %w", err)
 			}
 		} else {
 			break
 		}
 	}
-	var idx *recsplit.Index
-	if idx, err = recsplit.OpenIndex(idxPath); err != nil {
-		return nil, fmt.Errorf("open idx: %w", err)
-	}
-	return idx, nil
+	return nil
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {

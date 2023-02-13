@@ -23,7 +23,6 @@ import (
 	"math"
 	"os"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -67,7 +66,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites("")
+	ii.StartWrites()
 	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
@@ -145,7 +144,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		}
 	}()
 	ii.SetTx(tx)
-	ii.StartWrites("")
+	ii.StartWrites()
 	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
@@ -216,7 +215,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64) (string, k
 	require.NoError(err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites("")
+	ii.StartWrites()
 	defer ii.FinishWrites()
 
 	var flusher flusher
@@ -501,39 +500,20 @@ func TestScanStaticFiles(t *testing.T) {
 	ii := &InvertedIndex{filenameBase: "test", aggregationStep: 1,
 		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
-	ffs := fstest.MapFS{
-		"test.0-1.ef": {},
-		"test.1-2.ef": {},
-		"test.0-4.ef": {},
-		"test.2-3.ef": {},
-		"test.3-4.ef": {},
-		"test.4-5.ef": {},
+	files := []string{
+		"test.0-1.ef",
+		"test.1-2.ef",
+		"test.0-4.ef",
+		"test.2-3.ef",
+		"test.3-4.ef",
+		"test.4-5.ef",
 	}
-	files, err := ffs.ReadDir(".")
-	require.NoError(t, err)
-	ii.scanStateFiles(files, nil)
-	var found []string
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	require.Equal(t, 6, len(found))
+	ii.scanStateFiles(files)
+	require.Equal(t, 6, ii.files.Len())
 
+	//integrity extension case
 	ii.files.Clear()
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			fmt.Printf("%s\n", fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	ii.scanStateFiles(files, []string{"v"})
-	ii.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			fmt.Printf("%s\n", fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
+	ii.integrityFileExtensions = []string{"v"}
+	ii.scanStateFiles(files)
 	require.Equal(t, 0, ii.files.Len())
 }

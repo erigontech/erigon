@@ -21,7 +21,6 @@ import (
 	"container/heap"
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -62,32 +61,40 @@ func NewLocalityIndex(
 	}
 	return li, nil
 }
-func (li *LocalityIndex) reOpenFolder() error {
+func (li *LocalityIndex) closeWhatNotInList(fNames []string) {
+	if li == nil || li.file == nil || li.file.decompressor == nil {
+		return
+	}
+
+	for _, protectName := range fNames {
+		if li.file.decompressor.FileName() == protectName {
+			continue
+		}
+		li.closeFiles()
+		break
+	}
+}
+
+func (li *LocalityIndex) OpenList(fNames []string) error {
 	if li == nil {
 		return nil
 	}
-
-	li.closeFiles()
-	files, err := os.ReadDir(li.dir)
-	if err != nil {
-		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
-	}
-	_ = li.scanStateFiles(files)
-	if err = li.openFiles(); err != nil {
-		return fmt.Errorf("LocalityIndex: %s, %w", li.filenameBase, err)
+	li.closeWhatNotInList(fNames)
+	_ = li.scanStateFiles(fNames)
+	if err := li.openFiles(); err != nil {
+		return fmt.Errorf("NewHistory.openFiles: %s, %w", li.filenameBase, err)
 	}
 	return nil
 }
 
-func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []*filesItem) {
+func (li *LocalityIndex) scanStateFiles(fNames []string) (uselessFiles []*filesItem) {
+	if li == nil {
+		return nil
+	}
+
 	re := regexp.MustCompile("^" + li.filenameBase + ".([0-9]+)-([0-9]+).li$")
 	var err error
-	for _, f := range files {
-		if !f.Type().IsRegular() {
-			continue
-		}
-
-		name := f.Name()
+	for _, name := range fNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 3 {
 			if len(subs) != 0 {
@@ -130,20 +137,30 @@ func (li *LocalityIndex) scanStateFiles(files []fs.DirEntry) (uselessFiles []*fi
 }
 
 func (li *LocalityIndex) openFiles() (err error) {
-	if li.file == nil {
+	if li == nil || li.file == nil {
 		return nil
 	}
+
 	fromStep, toStep := li.file.startTxNum/li.aggregationStep, li.file.endTxNum/li.aggregationStep
-	idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep))
-	li.file.index, err = recsplit.OpenIndex(idxPath)
-	if err != nil {
-		return fmt.Errorf("LocalityIndex.openFiles: %w, %s", err, idxPath)
+	if li.bm == nil {
+		dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
+		if dir.FileExist(dataPath) {
+			li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInBiggestFile))
+			if err != nil {
+				return err
+			}
+		}
 	}
-	dataPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.l", li.filenameBase, fromStep, toStep))
-	li.bm, err = bitmapdb.OpenFixedSizeBitmaps(dataPath, int((toStep-fromStep)/StepsInBiggestFile))
-	if err != nil {
-		return err
+	if li.file.index == nil {
+		idxPath := filepath.Join(li.dir, fmt.Sprintf("%s.%d-%d.li", li.filenameBase, fromStep, toStep))
+		if dir.FileExist(idxPath) {
+			li.file.index, err = recsplit.OpenIndex(idxPath)
+			if err != nil {
+				return fmt.Errorf("LocalityIndex.openFiles: %w, %s", err, idxPath)
+			}
+		}
 	}
+
 	return nil
 }
 
@@ -161,12 +178,36 @@ func (li *LocalityIndex) closeFiles() {
 	}
 }
 
-func (li *LocalityIndex) closeFilesAndRemove(i ctxLocalityItem) {
+func (li *LocalityIndex) MakeContext(out *ctxLocalityItem) {
+	if li == nil || li.file == nil {
+		return
+	}
+	out.file = li.file
+	out.reader = li.NewIdxReader()
+	out.bm = li.bm
+	if out.file != nil {
+		out.file.refcount.Inc()
+	}
+}
+func (li *LocalityIndex) CloseContext(out *ctxLocalityItem) {
+	if li == nil || li.file == nil {
+		return
+	}
+	if out.file != nil {
+		refCnt := out.file.refcount.Dec()
+		if refCnt == 0 && out.file.canDelete.Load() {
+			li.closeFilesAndRemove(out)
+		}
+	}
+}
+
+func (li *LocalityIndex) closeFilesAndRemove(i *ctxLocalityItem) {
 	if li == nil {
 		return
 	}
 	if i.file != nil {
 		i.file.closeFilesAndRemove()
+		i.file = nil
 	}
 	if i.bm != nil {
 		if err := i.bm.Close(); err != nil {
@@ -175,6 +216,7 @@ func (li *LocalityIndex) closeFilesAndRemove(i ctxLocalityItem) {
 		if err := os.Remove(i.bm.FilePath()); err != nil {
 			log.Trace("os.Remove", "err", err, "file", i.bm.FileName())
 		}
+		i.bm = nil
 	}
 }
 
@@ -227,9 +269,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ii *InvertedIndex, toSt
 	defer logEvery.Stop()
 
 	fromStep := uint64(0)
-
+	ic := ii.MakeContext()
+	defer ic.Close()
 	count := 0
-	it := ii.MakeContext().iterateKeysLocality(toStep * li.aggregationStep)
+	it := ic.iterateKeysLocality(toStep * li.aggregationStep)
 	for it.HasNext() {
 		_, _ = it.Next()
 		count++
@@ -268,7 +311,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ii *InvertedIndex, toSt
 		}
 		defer dense.Close()
 
-		it = ii.MakeContext().iterateKeysLocality(toStep * li.aggregationStep)
+		it = ic.iterateKeysLocality(toStep * li.aggregationStep)
 		for it.HasNext() {
 			k, inFiles := it.Next()
 			if err := dense.AddArray(i, inFiles); err != nil {
@@ -283,7 +326,7 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, ii *InvertedIndex, toSt
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-logEvery.C:
-				log.Debug("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
+				log.Info("[LocalityIndex] build", "name", li.filenameBase, "progress", fmt.Sprintf("%.2f%%", 50+it.Progress()/2))
 			default:
 			}
 		}
@@ -447,18 +490,20 @@ func (li *LocalityIndex) CleanupDir() {
 	if li == nil || li.dir == "" {
 		return
 	}
-	files, err := os.ReadDir(li.dir)
-	if err != nil {
-		log.Warn("[clean] can't read dir", "err", err, "dir", li.dir)
-		return
-	}
-	uselessFiles := li.scanStateFiles(files)
-	for _, f := range uselessFiles {
-		fName := fmt.Sprintf("%s.%d-%d.l", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
-		err = os.Remove(filepath.Join(li.dir, fName))
-		log.Debug("[clean] remove", "file", fName, "err", err)
-		fIdxName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
-		err = os.Remove(filepath.Join(li.dir, fIdxName))
-		log.Debug("[clean] remove", "file", fName, "err", err)
-	}
+	/*
+		files, err := os.ReadDir(li.dir)
+		if err != nil {
+			log.Warn("[clean] can't read dir", "err", err, "dir", li.dir)
+			return
+		}
+		uselessFiles := li.scanStateFiles(files)
+		for _, f := range uselessFiles {
+			fName := fmt.Sprintf("%s.%d-%d.l", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
+			err = os.Remove(filepath.Join(li.dir, fName))
+			log.Debug("[clean] remove", "file", fName, "err", err)
+			fIdxName := fmt.Sprintf("%s.%d-%d.li", li.filenameBase, f.startTxNum/li.aggregationStep, f.endTxNum/li.aggregationStep)
+			err = os.Remove(filepath.Join(li.dir, fIdxName))
+			log.Debug("[clean] remove", "file", fName, "err", err)
+		}
+	*/
 }

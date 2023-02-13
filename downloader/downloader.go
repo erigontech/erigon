@@ -292,10 +292,10 @@ func (d *Downloader) Stats() AggStats {
 func (d *Downloader) Close() {
 	d.torrentClient.Close()
 	if err := d.folder.Close(); err != nil {
-		log.Warn("[Snapshots] folder.close", "err", err)
+		log.Warn("[snapshots] folder.close", "err", err)
 	}
 	if err := d.pieceCompletionDB.Close(); err != nil {
-		log.Warn("[Snapshots] pieceCompletionDB.close", "err", err)
+		log.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
 	d.db.Close()
 }
@@ -406,7 +406,7 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 			stats := d.Stats()
 
 			if stats.MetadataReady < stats.FilesTotal {
-				log.Info(fmt.Sprintf("[Snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
+				log.Info(fmt.Sprintf("[snapshots] Waiting for torrents metadata: %d/%d", stats.MetadataReady, stats.FilesTotal))
 				continue
 			}
 
@@ -417,26 +417,26 @@ func MainLoop(ctx context.Context, d *Downloader, silent bool) {
 					_ = d.db.Update(ctx, func(tx kv.RwTx) error { return nil })
 				}
 
-				log.Info("[Snapshots] Seeding",
+				log.Info("[snapshots] Seeding",
 					"up", common2.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
-					"connections", stats.ConnectionsTotal,
+					"conns", stats.ConnectionsTotal,
 					"files", stats.FilesTotal)
 				continue
 			}
 
-			log.Info("[Snapshots] Downloading",
+			log.Info("[snapshots] Downloading",
 				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common2.ByteCount(stats.BytesCompleted), common2.ByteCount(stats.BytesTotal)),
 				"download", common2.ByteCount(stats.DownloadRate)+"/s",
 				"upload", common2.ByteCount(stats.UploadRate)+"/s",
 				"peers", stats.PeersUnique,
-				"connections", stats.ConnectionsTotal,
+				"conns", stats.ConnectionsTotal,
 				"files", stats.FilesTotal)
 
 			if stats.PeersUnique == 0 {
 				ips := d.Torrent().BadPeerIPs()
 				if len(ips) > 0 {
-					log.Info("[Snapshots] Stats", "banned", ips)
+					log.Info("[snapshots] Stats", "banned", ips)
 				}
 			}
 		}

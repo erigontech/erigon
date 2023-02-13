@@ -79,7 +79,7 @@ lintci-deps-clean: golangci-lint-clean
 
 # download and build golangci-lint (https://golangci-lint.run)
 $(GOBINREL)/golangci-lint: | $(GOBINREL)
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.50.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b "$(GOBIN)" v1.51.1
 
 golangci-lint-clean:
 	rm -f "$(GOBIN)/golangci-lint"

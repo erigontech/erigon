@@ -24,7 +24,6 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -74,7 +73,7 @@ func TestCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -133,7 +132,7 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -174,7 +173,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -247,7 +246,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	txs := uint64(1000)
@@ -354,7 +353,7 @@ func TestIterationMultistep(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -498,17 +497,19 @@ func TestMergeFiles(t *testing.T) {
 
 func TestScanFiles(t *testing.T) {
 	path, db, d, txs := filledDomain(t)
-
+	_ = path
 	collateAndMerge(t, db, nil, d, txs)
 	// Recreate domain and re-scan the files
 	txNum := d.txNum
-	d.Close()
-
-	var err error
-	d, err = NewDomain(path, path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
-	require.NoError(t, err)
-	require.NoError(t, d.reOpenFolder())
-	defer d.Close()
+	d.closeWhatNotInList([]string{})
+	d.OpenFolder()
+	//d.Close()
+	//
+	//var err error
+	//d, err = NewDomain(path, path, d.aggregationStep, d.filenameBase, d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.settingsTable, d.indexTable, d.prefixLen, d.compressVals)
+	//require.NoError(t, err)
+	//require.NoError(t, d.OpenFolder())
+	//defer d.Close()
 	d.SetTxNum(txNum)
 	// Check the history
 	checkHistory(t, db, d, txs)
@@ -521,7 +522,7 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	// Put on even txNum, delete on odd txNum
@@ -563,7 +564,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	// keys are encodings of numbers 1..31
@@ -664,7 +665,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites("")
+	d.StartWrites()
 	defer d.FinishWrites()
 
 	// keys are encodings of numbers 1..31
@@ -751,16 +752,14 @@ func TestScanStaticFilesD(t *testing.T) {
 	ii := &Domain{History: &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1}},
 		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
-	ffs := fstest.MapFS{
-		"test.0-1.kv": {},
-		"test.1-2.kv": {},
-		"test.0-4.kv": {},
-		"test.2-3.kv": {},
-		"test.3-4.kv": {},
-		"test.4-5.kv": {},
+	files := []string{
+		"test.0-1.kv",
+		"test.1-2.kv",
+		"test.0-4.kv",
+		"test.2-3.kv",
+		"test.3-4.kv",
+		"test.4-5.kv",
 	}
-	files, err := ffs.ReadDir(".")
-	require.NoError(t, err)
 	ii.scanStateFiles(files)
 	var found []string
 	ii.files.Walk(func(items []*filesItem) bool {

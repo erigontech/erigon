@@ -116,29 +116,58 @@ func NewAggregator(
 
 func (a *Aggregator) ReopenFolder() error {
 	var err error
-	if err = a.accounts.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.accounts.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.storage.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.storage.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.code.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.code.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.commitment.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.commitment.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.logAddrs.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.logAddrs.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.logTopics.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.logTopics.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.tracesFrom.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.tracesFrom.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
 	}
-	if err = a.tracesTo.reOpenFolder(); err != nil {
-		return fmt.Errorf("ReopenFolder: %w", err)
+	if err = a.tracesTo.OpenFolder(); err != nil {
+		return fmt.Errorf("OpenFolder: %w", err)
+	}
+	return nil
+}
+
+func (a *Aggregator) ReopenList(fNames []string) error {
+	var err error
+	if err = a.accounts.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.storage.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.code.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.commitment.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.logAddrs.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.logTopics.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.tracesFrom.OpenList(fNames); err != nil {
+		return err
+	}
+	if err = a.tracesTo.OpenList(fNames); err != nil {
+		return err
 	}
 	return nil
 }
@@ -684,10 +713,10 @@ func (a *Aggregator) cleanAfterFreeze(in MergedFiles) {
 	a.storage.cleanAfterFreeze(in.storageHist)
 	a.code.cleanAfterFreeze(in.codeHist)
 	a.commitment.cleanAfterFreeze(in.commitment)
-	a.logAddrs.cleanAfterFreeze(in.logAddrs)
-	a.logTopics.cleanAfterFreeze(in.logTopics)
-	a.tracesFrom.cleanAfterFreeze(in.tracesFrom)
-	a.tracesTo.cleanAfterFreeze(in.tracesTo)
+	a.logAddrs.cleanFrozenParts(in.logAddrs)
+	a.logTopics.cleanFrozenParts(in.logTopics)
+	a.tracesFrom.cleanFrozenParts(in.tracesFrom)
+	a.tracesTo.cleanFrozenParts(in.tracesTo)
 }
 func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
 	return ac.accounts.Get(addr, nil, roTx)
@@ -984,14 +1013,14 @@ func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum i
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *Aggregator) StartWrites() *Aggregator {
-	a.accounts.StartWrites(a.tmpdir)
-	a.storage.StartWrites(a.tmpdir)
-	a.code.StartWrites(a.tmpdir)
-	a.commitment.StartWrites(a.tmpdir)
-	a.logAddrs.StartWrites(a.tmpdir)
-	a.logTopics.StartWrites(a.tmpdir)
-	a.tracesFrom.StartWrites(a.tmpdir)
-	a.tracesTo.StartWrites(a.tmpdir)
+	a.accounts.StartWrites()
+	a.storage.StartWrites()
+	a.code.StartWrites()
+	a.commitment.StartWrites()
+	a.logAddrs.StartWrites()
+	a.logTopics.StartWrites()
+	a.tracesFrom.StartWrites()
+	a.tracesTo.StartWrites()
 	return a
 }
 func (a *Aggregator) FinishWrites() {

@@ -23,7 +23,6 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -72,7 +71,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites("")
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	h.SetTxNum(2)
@@ -176,7 +175,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites("")
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	h.SetTxNum(2)
@@ -234,7 +233,7 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites("")
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	txs := uint64(1000)
@@ -397,7 +396,7 @@ func TestHistoryScanFiles(t *testing.T) {
 	collateAndMergeHistory(t, db, h, txs)
 	// Recreate domain and re-scan the files
 	txNum := h.txNum
-	require.NoError(t, h.reOpenFolder())
+	require.NoError(t, h.OpenFolder())
 	//h.Close()
 	//h, err = NewHistory(path, path, h.aggregationStep, h.filenameBase, h.indexKeysTable, h.indexTable, h.historyValsTable, h.settingsTable, h.compressVals, nil)
 	require.NoError(t, err)
@@ -626,28 +625,20 @@ func TestScanStaticFilesH(t *testing.T) {
 	h := &History{InvertedIndex: &InvertedIndex{filenameBase: "test", aggregationStep: 1},
 		files: btree2.NewBTreeG[*filesItem](filesItemLess),
 	}
-	ffs := fstest.MapFS{
-		"test.0-1.v": {},
-		"test.1-2.v": {},
-		"test.0-4.v": {},
-		"test.2-3.v": {},
-		"test.3-4.v": {},
-		"test.4-5.v": {},
+	files := []string{
+		"test.0-1.v",
+		"test.1-2.v",
+		"test.0-4.v",
+		"test.2-3.v",
+		"test.3-4.v",
+		"test.4-5.v",
 	}
-	files, err := ffs.ReadDir(".")
-	require.NoError(t, err)
-	h.scanStateFiles(files, nil)
-	var found []string
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			found = append(found, fmt.Sprintf("%d-%d", item.startTxNum, item.endTxNum))
-		}
-		return true
-	})
-	require.Equal(t, 6, len(found))
+	h.scanStateFiles(files)
+	require.Equal(t, 6, h.files.Len())
 
 	h.files.Clear()
-	h.scanStateFiles(files, []string{"kv"})
+	h.integrityFileExtensions = []string{"kv"}
+	h.scanStateFiles(files)
 	require.Equal(t, 0, h.files.Len())
 
 }

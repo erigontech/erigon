@@ -254,7 +254,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 			case <-ctx.Done():
 				errs <- ctx.Err()
 			case <-logEvery.C:
-				log.Info("[Snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+				log.Info("[snapshots] Creating .torrent files", "Progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			}
 		}(f)
 	}
@@ -432,12 +432,12 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 			j++
 			if !good {
 				failsAmount++
-				log.Error("[Snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
+				log.Error("[snapshots] Verify hash mismatch", "at piece", i, "file", info.Name)
 				return ErrSkip
 			}
 			select {
 			case <-logEvery.C:
-				log.Info("[Snapshots] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
+				log.Info("[snapshots] Verify", "Progress", fmt.Sprintf("%.2f%%", 100*float64(j)/float64(totalPieces)))
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
@@ -453,7 +453,7 @@ func VerifyDtaFiles(ctx context.Context, snapDir string) error {
 	if failsAmount > 0 {
 		return fmt.Errorf("not all files are valid")
 	}
-	log.Info("[Snapshots] Verify done")
+	log.Info("[snapshots] Verify done")
 	return nil
 }
 

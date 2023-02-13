@@ -190,7 +190,7 @@ func TestAggregator_RestartOnDatadir(t *testing.T) {
 }
 
 func TestAggregator_RestartOnFiles(t *testing.T) {
-	aggStep := uint64(1000)
+	aggStep := uint64(100)
 
 	path, db, agg := testDbAndAggregator(t, 0, aggStep)
 	defer db.Close()
@@ -224,7 +224,7 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	agg.SetCommitFn(commit)
 
 	txs := aggStep * 5
-	t.Logf("step=%d tx_count=%d", aggStep, txs)
+	t.Logf("step=%d tx_count=%d\n", aggStep, txs)
 
 	rnd := rand.New(rand.NewSource(0))
 	keys := make([][]byte, txs)

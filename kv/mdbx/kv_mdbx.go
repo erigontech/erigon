@@ -432,10 +432,9 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
-	if db.closed.Load() {
+	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	db.closed.Store(true)
 	db.wg.Wait()
 	db.env.Close()
 	db.env = nil
