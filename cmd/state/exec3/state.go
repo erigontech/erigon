@@ -325,9 +325,10 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	var clearDone bool
 	clear = func() {
-		if !clearDone {
-			clearDone = true
+		if clearDone {
+			return
 		}
+		clearDone = true
 		cancel()
 		wg.Wait()
 		for _, w := range reconWorkers {
