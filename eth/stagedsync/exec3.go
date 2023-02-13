@@ -198,7 +198,6 @@ func ExecV3(ctx context.Context,
 
 	var rwsLock sync.RWMutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
-	defer rwsReceiveCond.Broadcast()
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())

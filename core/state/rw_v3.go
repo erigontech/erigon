@@ -227,8 +227,6 @@ func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
 
 func (rs *StateV3) Finish() {
 	rs.finished.Store(true)
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	rs.receiveWork.Broadcast()
 }
 
