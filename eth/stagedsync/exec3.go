@@ -191,12 +191,13 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
-	var rwsLock sync.RWMutex
-	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
+
+	var rwsLock sync.RWMutex
+	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
@@ -225,7 +226,10 @@ func ExecV3(ctx context.Context,
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case txTask := <-resultCh:
+			case txTask, ok := <-resultCh:
+				if !ok {
+					return nil
+				}
 				if txTask.BlockNum > lastBlockNum {
 					if lastBlockNum > 0 {
 						core.BlockExecutionTimer.UpdateDuration(t)
@@ -332,7 +336,10 @@ func ExecV3(ctx context.Context,
 							var drained bool
 							for !drained {
 								select {
-								case txTask := <-resultCh:
+								case txTask, ok := <-resultCh:
+									if !ok {
+										return nil
+									}
 									resultsSize.Add(txTask.ResultsSize)
 									heap.Push(rws, txTask)
 								default:
@@ -355,7 +362,10 @@ func ExecV3(ctx context.Context,
 						var drained bool
 						for !drained {
 							select {
-							case txTask := <-resultCh:
+							case txTask, ok := <-resultCh:
+								if !ok {
+									return nil
+								}
 								rs.AddWork(txTask)
 							default:
 								drained = true
@@ -695,18 +705,16 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				return err
-			}
+			agg.BuildFilesInBackground()
 		}
 	}
 
 	if parallel {
 		stopWorkers()
-		rwLoopWg.Wait()
-		if err, ok := <-rwLoopErrCh; ok && err != nil {
+		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
+		rwLoopWg.Wait()
 	} else {
 		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
 			return err
@@ -720,9 +728,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx && applyTx != nil {

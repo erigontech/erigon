@@ -249,7 +249,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			panic(err)
 		}
-		if err := agg.ReopenFolder(); err != nil {
+		if err := agg.OpenFolder(); err != nil {
 			panic(err)
 		}
 	}

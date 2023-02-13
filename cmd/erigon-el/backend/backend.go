@@ -898,9 +898,24 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err = agg.ReopenFolder(); err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		return nil, nil, nil, err
 	}
+	agg.OnFreeze(func(frozenFileNames []string) {
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if s.downloaderClient != nil {
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Download(ctx, req); err != nil {
+				log.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
 
 	return blockReader, allSnapshots, agg, nil
 }

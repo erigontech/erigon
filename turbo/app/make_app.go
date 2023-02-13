@@ -21,7 +21,7 @@ import (
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
 func MakeApp(action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
-	app := cli2.NewApp(params.GitCommit, "", "erigon experimental cli")
+	app := cli2.NewApp(params.GitCommit, "erigon experimental cli")
 	app.Action = action
 	app.Flags = append(cliFlags, debug.Flags...) // debug flags are required
 	app.Before = func(ctx *cli.Context) error {
@@ -96,7 +96,7 @@ func NewNodeConfig(ctx *cli.Context) *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit, "")
+		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}
