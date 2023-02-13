@@ -14,37 +14,27 @@ import (
 func convertDataToStringP(abstractMap map[string]interface{}, field string) *string {
 	var result string
 
-	switch abstractMap[field].(type) {
+	switch v := abstractMap[field].(type) {
 	case int64:
-		result = strconv.FormatInt(abstractMap[field].(int64), 10)
-		break
+		result = strconv.FormatInt(v, 10)
 	case *hexutil.Big:
-		result = abstractMap[field].(*hexutil.Big).String()
-		break
+		result = v.String()
 	case hexutil.Bytes:
-		result = abstractMap[field].(hexutil.Bytes).String()
-		break
+		result = v.String()
 	case hexutil.Uint:
-		result = abstractMap[field].(hexutil.Uint).String()
-		break
+		result = v.String()
 	case hexutil.Uint64:
-		result = abstractMap[field].(hexutil.Uint64).String()
-		break
+		result = v.String()
 	case *libcommon.Address:
-		result = abstractMap[field].(*libcommon.Address).String()
-		break
+		result = v.String()
 	case libcommon.Address:
-		result = abstractMap[field].(libcommon.Address).String()
-		break
+		result = v.String()
 	case libcommon.Hash:
-		result = abstractMap[field].(libcommon.Hash).String()
-		break
+		result = v.String()
 	case types.Bloom:
-		result = hex.EncodeToString(abstractMap[field].(types.Bloom).Bytes())
-		break
+		result = hex.EncodeToString(v.Bytes())
 	case types.BlockNonce:
-		result = "0x" + strconv.FormatInt(int64(abstractMap[field].(types.BlockNonce).Uint64()), 16)
-		break
+		result = "0x" + strconv.FormatInt(int64(v.Uint64()), 16)
 	default:
 		fmt.Println("string", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
 		result = "unhandled"
@@ -55,27 +45,23 @@ func convertDataToStringP(abstractMap map[string]interface{}, field string) *str
 func convertDataToIntP(abstractMap map[string]interface{}, field string) *int {
 	var result int
 
-	switch abstractMap[field].(type) {
+	switch v := abstractMap[field].(type) {
 	case hexutil.Uint64:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint64).String())
+		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {
 			result = 0
 		} else {
 			result = int(resultUint)
 		}
-		break
 	case hexutil.Uint:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint).String())
+		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {
 			result = 0
 		} else {
 			result = int(resultUint)
 		}
-		break
 	case int:
-		result = abstractMap[field].(int)
-		break
-
+		result = v
 	default:
 		fmt.Println("int", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
 		result = 0
@@ -87,27 +73,25 @@ func convertDataToIntP(abstractMap map[string]interface{}, field string) *int {
 func convertDataToUint64P(abstractMap map[string]interface{}, field string) *uint64 {
 	var result uint64
 
-	switch abstractMap[field].(type) {
+	switch v := abstractMap[field].(type) {
 	case hexutil.Uint64:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint64).String())
+		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {
 			result = 0
 		} else {
 			result = resultUint
 		}
 	case hexutil.Uint:
-		resultUint, err := hexutil.DecodeUint64(abstractMap[field].(hexutil.Uint).String())
+		resultUint, err := hexutil.DecodeUint64(v.String())
 		if err != nil {
 			result = 0
 		} else {
 			result = resultUint
 		}
 	case *hexutil.Big:
-		result = abstractMap[field].(*hexutil.Big).ToInt().Uint64()
+		result = v.ToInt().Uint64()
 	case int:
 		result = abstractMap[field].(uint64)
-		break
-
 	default:
 		fmt.Println("uint64", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
 		result = 0
