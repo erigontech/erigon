@@ -1134,12 +1134,11 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
-	if br.working.Load() {
+	ok := br.working.CompareAndSwap(false, true)
+	if !ok {
 		// go-routine is still working
 		return
 	}
-
-	br.working.Store(true)
 	go func() {
 		defer br.working.Store(false)
 
