@@ -19,7 +19,7 @@ func runEpochTransitionConsensusTest(t *testing.T, sszSnappyTest, sszSnappyExpec
 	expectedState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(clparams.BellatrixVersion)))
 	// Make up state transistor
-	s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
+	s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, true)
 	require.NoError(t, f(s))
 	haveRoot, err := testState.HashSSZ()
 	require.NoError(t, err)

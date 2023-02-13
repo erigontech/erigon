@@ -66,7 +66,7 @@ func (s *StateTransistor) ProcessSyncAggregate(sync *cltypes.SyncAggregate) erro
 	if !s.noValidate {
 		previousSlot := s.state.PreviousSlot()
 
-		domain, err := fork.Domain(s.state.Fork(), previousSlot/s.beaconConfig.SlotsPerEpoch, s.beaconConfig.DomainSyncCommittee, s.state.GenesisValidatorsRoot())
+		domain, err := fork.Domain(s.state.Fork(), s.state.GetEpochAtSlot(previousSlot), s.beaconConfig.DomainSyncCommittee, s.state.GenesisValidatorsRoot())
 		if err != nil {
 			return nil
 		}

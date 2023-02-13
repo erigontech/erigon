@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -17,6 +18,7 @@ import (
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
 	s.processSlots(currentBlock.Slot)
+	// Write the block root to the cache
 	if !s.noValidate {
 		valid, err := s.verifyBlockSignature(block)
 		if err != nil {
@@ -30,7 +32,6 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 	if err := s.processBlock(block); err != nil {
 		return err
 	}
-
 	if !s.noValidate {
 		expectedStateRoot, err := s.state.HashSSZ()
 		if err != nil {
@@ -40,15 +41,26 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 			return fmt.Errorf("expected state root differs from received state root")
 		}
 	}
+	// Write the block root to the cache
+	s.stateRootsCache.Add(block.Block.Slot, block.Block.StateRoot)
+
 	return nil
 }
 
 // transitionSlot is called each time there is a new slot to process
 func (s *StateTransistor) transitionSlot() error {
 	slot := s.state.Slot()
-	previousStateRoot, err := s.state.HashSSZ()
-	if err != nil {
-		return err
+	var (
+		previousStateRoot libcommon.Hash
+		err               error
+	)
+	if previousStateRootI, ok := s.stateRootsCache.Get(slot); ok {
+		previousStateRoot = previousStateRootI.(libcommon.Hash)
+	} else {
+		previousStateRoot, err = s.state.HashSSZ()
+		if err != nil {
+			return err
+		}
 	}
 	s.state.SetStateRootAt(int(slot%s.beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
 

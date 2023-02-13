@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -60,11 +61,12 @@ type BeaconState struct {
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache   *lru.Cache
-	committeeCache          *lru.Cache
-	shuffledSetsCache       *lru.Cache
-	totalActiveBalanceCache *uint64
-	proposerIndex           *uint64
+	activeValidatorsCache       *lru.Cache
+	committeeCache              *lru.Cache
+	shuffledSetsCache           *lru.Cache
+	totalActiveBalanceCache     *uint64
+	totalActiveBalanceRootCache uint64
+	proposerIndex               *uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -114,6 +116,7 @@ func (b *BeaconState) _refreshActiveBalances() {
 			*b.totalActiveBalanceCache += validator.EffectiveBalance
 		}
 	}
+	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
 
 func (b *BeaconState) _updateProposerIndex() (err error) {

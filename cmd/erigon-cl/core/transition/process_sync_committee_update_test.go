@@ -34,7 +34,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	state.SetNextSyncCommittee(nextCommittee)
 	prevNextSyncCommittee := state.NextSyncCommittee()
 	state.SetSlot(8160)
-	transistor := transition.New(state, &clparams.MainnetBeaconConfig, nil, true)
+	transistor := transition.New(state, &clparams.MainnetBeaconConfig, nil, false)
 	require.NoError(t, transistor.ProcessSyncCommitteeUpdate())
 	require.Equal(t, state.CurrentSyncCommittee(), prevNextSyncCommittee)
 	require.NotEqual(t, state.NextSyncCommittee(), prevNextSyncCommittee)
