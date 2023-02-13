@@ -137,8 +137,8 @@ func (rs *StateV3) QueueLen() int {
 
 func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
-	rs.queueLock.Unlock()
-	for !rs.finished.Load() {
+	defer rs.queueLock.Unlock()
+	for !rs.finished.Load() && rs.queue.Len() == 0 {
 		rs.receiveWork.Wait()
 	}
 	if rs.finished.Load() {
