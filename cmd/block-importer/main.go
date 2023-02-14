@@ -21,6 +21,8 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 func main() {
@@ -29,8 +31,13 @@ func main() {
 
 	// Create genesis block
 	genesis := core.Genesis{}
+	initState := make(core.GenesisAlloc)
+	initState[common.HexToAddress("0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b")] = core.GenesisAccount{
+		Balance: max_balance(),
+	}
+	genesis.Alloc = initState
 	chainConfig := chain.Config{
-		ChainID: big.NewInt(5),
+		ChainID: big.NewInt(355113),
 	}
 	genesis.Config = &chainConfig
 	core.MustCommitGenesisBlock(db, &genesis)
@@ -45,6 +52,8 @@ func main() {
 		if err = block.DecodeRLP(rlp.NewStream(file, 0)); err != nil {
 			panic(err)
 		}
+
+		spew.Dump(block)
 
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
@@ -90,6 +99,18 @@ func main() {
 			}
 		}
 	}
+}
+
+func max_balance() *big.Int {
+	var bytes [32]uint8
+	for i, _ := range bytes {
+		bytes[i] = 255
+	}
+
+	val := &big.Int{}
+	val.SetBytes(bytes[:])
+
+	return val
 }
 
 func newLogger() log.Logger {
