@@ -248,13 +248,10 @@ func (l *LightClient) importBlockIfPossible() {
 		return
 	}
 
-	finalizedEth2Root, err := l.store.finalizedHeader.HashSSZ()
-	if err != nil {
-		return
-	}
-	if finalizedEth2Root == currentRoot {
+	if (curr.Slot+1)%l.beaconConfig.SlotsPerEpoch == 0 {
 		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
 	}
+
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
 		l.lastEth2ParentRoot = curr.ParentRoot
 		return
