@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/holiman/uint256"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -80,7 +81,7 @@ func (rs *StateV3) get(table string, key []byte) []byte {
 	if !ok {
 		return nil
 	}
-	if i, ok := t.Get(string(key)); ok {
+	if i, ok := t.Get(*(*string)(unsafe.Pointer(&key))); ok {
 		return i
 	}
 	return nil
@@ -562,8 +563,9 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 			continue
 		}
 		for i, key := range list.Keys {
-			if val, ok := t.Get(string(key)); ok {
-				//fmt.Printf("key [%x] => [%x] vs [%x]\n", key, val, rereadVal)
+			key := key
+			keyS := *(*string)(unsafe.Pointer(&key))
+			if val, ok := t.Get(keyS); ok {
 				if table == CodeSizeTable {
 					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 						return false
