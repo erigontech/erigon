@@ -62,5 +62,8 @@ func (b *BlockBuilder) Block() *types.Block {
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()
 
+	if b.block == nil {
+		return nil
+	}
 	return b.block.Block
 }
