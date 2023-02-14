@@ -563,7 +563,9 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 			continue
 		}
 		for i, key := range list.Keys {
-			if val, ok := t.Get(*(*string)(unsafe.Pointer(&key))); ok {
+			key := key
+			keyS := *(*string)(unsafe.Pointer(&key))
+			if val, ok := t.Get(keyS); ok {
 				if table == CodeSizeTable {
 					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 						return false
