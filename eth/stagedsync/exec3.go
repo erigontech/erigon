@@ -610,17 +610,7 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						currentQueueSize := rs.AddWork(txTask)
-						if currentQueueSize > queueSize {
-							time.Sleep(10 * time.Microsecond)
-						} else {
-							rwsLock.RLock()
-							needWait := rws.Len() > queueSize
-							rwsLock.RUnlock()
-							if needWait {
-								time.Sleep(10 * time.Microsecond)
-							}
-						}
+						rs.AddWork(txTask)
 					}
 				} else {
 					rs.AddWork(txTask)
