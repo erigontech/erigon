@@ -56,7 +56,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//prev = sealHash
 
 	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- block
+		cfg.miningState.MiningResultPOSCh <- &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
 		return nil
 	}
 	// Tests may set pre-calculated nonce
