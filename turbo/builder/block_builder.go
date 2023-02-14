@@ -17,7 +17,7 @@ type BlockBuilderFunc func(param *core.BlockBuilderParameters, interrupt *int32)
 type BlockBuilder struct {
 	interrupt int32
 	syncCond  *sync.Cond
-	block     *types.BlockWithReceipts
+	result    *types.BlockWithReceipts
 	err       error
 }
 
@@ -28,17 +28,17 @@ func NewBlockBuilder(build BlockBuilderFunc, param *core.BlockBuilderParameters)
 	go func() {
 		log.Info("Building block...")
 		t := time.Now()
-		block, err := build(param, &builder.interrupt)
+		result, err := build(param, &builder.interrupt)
 		if err != nil {
 			log.Warn("Failed to build a block", "err", err)
 		} else {
-			b := block.Block
-			log.Info("Built block", "hash", b.Hash(), "height", b.NumberU64(), "txs", len(b.Transactions()), "gas used %", 100*float64(b.GasUsed())/float64(b.GasLimit()), "time", time.Since(t))
+			block := result.Block
+			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
 		}
 
 		builder.syncCond.L.Lock()
 		defer builder.syncCond.L.Unlock()
-		builder.block = block
+		builder.result = result
 		builder.err = err
 		builder.syncCond.Broadcast()
 	}()
@@ -51,19 +51,19 @@ func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
 
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()
-	for b.block == nil && b.err == nil {
+	for b.result == nil && b.err == nil {
 		b.syncCond.Wait()
 	}
 
-	return b.block, b.err
+	return b.result, b.err
 }
 
 func (b *BlockBuilder) Block() *types.Block {
 	b.syncCond.L.Lock()
 	defer b.syncCond.L.Unlock()
 
-	if b.block == nil {
+	if b.result == nil {
 		return nil
 	}
-	return b.block.Block
+	return b.result.Block
 }
