@@ -598,7 +598,6 @@ Loop:
 			}
 
 			if parallel {
-				log.Warn("send", "t", txTask.TxNum)
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
 						currentQueueSize := rs.AddWork(txTask)
