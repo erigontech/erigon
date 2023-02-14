@@ -1782,3 +1782,8 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uin
 	}
 	return
 }
+
+type BlockWithReceipts struct {
+	Block    *Block
+	Receipts Receipts
+}
