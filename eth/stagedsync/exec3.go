@@ -189,13 +189,12 @@ func ExecV3(ctx context.Context,
 	var resultsSize = atomic2.NewInt64(0)
 	var lock sync.RWMutex
 
-	rws := &exec22.TxTaskQueue{}
-	heap.Init(rws)
-
 	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
 	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 
+	rws := &exec22.TxTaskQueue{}
+	heap.Init(rws)
 	var rwsLock sync.RWMutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
@@ -226,32 +225,43 @@ func ExecV3(ctx context.Context,
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case txTask, ok := <-resultCh:
-				if !ok {
-					return nil
-				}
-				if txTask.BlockNum > lastBlockNum {
-					if lastBlockNum > 0 {
-						core.BlockExecutionTimer.UpdateDuration(t)
+			default:
+			}
+		Drain:
+			for {
+				select {
+				case txTask, ok := <-resultCh:
+					if !ok {
+						return nil
 					}
-					lastBlockNum = txTask.BlockNum
-					t = time.Now()
-				}
-				if err := func() error {
+					if txTask.BlockNum > lastBlockNum {
+						if lastBlockNum > 0 {
+							core.BlockExecutionTimer.UpdateDuration(t)
+						}
+						lastBlockNum = txTask.BlockNum
+						t = time.Now()
+					}
 					rwsLock.Lock()
-					defer rwsLock.Unlock()
 					resultsSize.Add(txTask.ResultsSize)
 					heap.Push(rws, txTask)
-					if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
-						return err
-					}
-					return nil
-				}(); err != nil {
+					rwsLock.Unlock()
+				default:
+					break Drain
+				}
+			}
+
+			if err := func() error {
+				rwsLock.Lock()
+				defer rwsLock.Unlock()
+				if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
 					return err
 				}
-
-				syncMetrics[stages.Execution].Set(outputBlockNum.Load())
+				return nil
+			}(); err != nil {
+				return err
 			}
+
+			syncMetrics[stages.Execution].Set(outputBlockNum.Load())
 		}
 		return nil
 	}
