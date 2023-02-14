@@ -275,11 +275,12 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 	if !ok {
 		select {
 		case <-wait:
+			return false
 		case <-ctx.Done():
+			return true
 		}
 	}
-
-	return !s.hd.BeaconRequestList.IsWaiting()
+	return false
 }
 
 func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
