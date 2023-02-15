@@ -98,9 +98,6 @@ func (b *BeaconState) GetTotalActiveBalance() uint64 {
 	if b.totalActiveBalanceCache == nil {
 		b._refreshActiveBalances()
 	}
-	if *b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
-		return b.beaconConfig.EffectiveBalanceIncrement
-	}
 	return *b.totalActiveBalanceCache
 }
 
@@ -208,7 +205,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
-		return 0, fmt.Errorf("must have >0 indices")
+		return 0, nil
 	}
 	maxRandomByte := uint64(1<<8 - 1)
 	i := uint64(0)
@@ -263,9 +260,6 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseRewardPerIncrement() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
 	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
