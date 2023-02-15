@@ -266,7 +266,7 @@ func (b *BeaconState) BaseRewardPerIncrement() uint64 {
 	if b.totalActiveBalanceCache == nil {
 		b._refreshActiveBalances()
 	}
-	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache
+	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.GetTotalActiveBalance()
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
