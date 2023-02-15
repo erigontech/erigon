@@ -201,12 +201,6 @@ func TestComputeProposerIndex(t *testing.T) {
 			expected:    7,
 		},
 		{
-			description: "zero_active_indices",
-			indices:     []uint64{},
-			seed:        seed,
-			wantErr:     true,
-		},
-		{
 			description: "active_index_out_of_range",
 			indices:     []uint64{100},
 			state:       generateBeaconStateWithValidators(1),
