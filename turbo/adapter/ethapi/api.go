@@ -280,7 +280,6 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
-		result["withdrawals"] = []string{}
 	}
 
 	return result
@@ -335,8 +334,13 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	}
 	fields["uncles"] = uncleHashes
 
-	if block.Withdrawals() != nil {
-		fields["withdrawals"] = block.Withdrawals()
+	if block.HeaderNoCopy().WithdrawalsHash != nil {
+		if block.Withdrawals() == nil {
+			fields["withdrawals"] = block.Withdrawals()
+		} else {
+			// always show withdrawals as an array
+			fields["withdrawals"] = []string{}
+		}
 	}
 
 	return fields, nil
