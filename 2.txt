@@ -1,5 +1,0 @@
-WRITE_MAP=true  ./build/bin/integration stage_trie --datadir=/mnt/erigon/ --chain="$CHAIN" --reset
-WRITE_MAP=true  ./build/bin/integration stage_hash_state --datadir=/mnt/erigon/ --chain="$CHAIN" --reset
-WRITE_MAP=true  ./build/bin/integration stage_exec --datadir=/mnt/erigon/ --chain="$CHAIN" --block=15363272
-WRITE_MAP=true  ./build/bin/integration stage_hash_state --datadir=/mnt/erigon/ --chain="$CHAIN"
-WRITE_MAP=true  ./build/bin/integration stage_trie --datadir=/mnt/erigon/ --chain="$CHAIN"
