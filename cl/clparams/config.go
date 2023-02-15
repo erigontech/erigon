@@ -105,6 +105,7 @@ type NetworkConfig struct {
 
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
 	BootNodes               []string
+	StaticPeers             []string
 }
 
 type GenesisConfig struct {
