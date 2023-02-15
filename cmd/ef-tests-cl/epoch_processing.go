@@ -24,6 +24,10 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 			return err
 		}
 		sszSnappyExpected, err := os.ReadFile("post.ssz_snappy")
+		isErrExpected := os.IsNotExist(err)
+		if isErrExpected {
+			err = nil
+		}
 		if err != nil {
 			return err
 		}
@@ -32,14 +36,25 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 		if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappyTest, int(testVersion)); err != nil {
 			return err
 		}
-		expectedState := state.New(&clparams.MainnetBeaconConfig)
-		if err := utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(testVersion)); err != nil {
-			return err
+		var expectedState *state.BeaconState
+		if !isErrExpected {
+			expectedState = state.New(&clparams.MainnetBeaconConfig)
+			if err := utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(testVersion)); err != nil {
+				return err
+			}
 		}
+
 		// Make up state transistor
 		s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, true)
 		if err := f(s); err != nil {
+			if isErrExpected {
+				return nil
+			}
 			return err
+		}
+
+		if isErrExpected && err == nil {
+			return fmt.Errorf("expected an error got none")
 		}
 		haveRoot, err := testState.HashSSZ()
 		if err != nil {
