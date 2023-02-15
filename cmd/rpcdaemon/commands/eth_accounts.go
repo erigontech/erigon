@@ -5,24 +5,28 @@ import (
 	"fmt"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // GetBalance implements eth_getBalance. Returns the balance of an account for a given address.
-func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+func (api *APIImpl) GetBalance(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Big, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getBalance cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +44,7 @@ func (api *APIImpl) GetBalance(ctx context.Context, address common.Address, bloc
 }
 
 // GetTransactionCount implements eth_getTransactionCount. Returns the number of transactions sent from an address (the nonce).
-func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
+func (api *APIImpl) GetTransactionCount(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (*hexutil.Uint64, error) {
 	if blockNrOrHash.BlockNumber != nil && *blockNrOrHash.BlockNumber == rpc.PendingBlockNumber {
 		reply, err := api.txPool.Nonce(ctx, &txpool_proto.NonceRequest{
 			Address: gointerfaces.ConvertAddressToH160(address),
@@ -58,7 +62,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 		return nil, fmt.Errorf("getTransactionCount cannot open tx: %w", err1)
 	}
 	defer tx.Rollback()
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +75,7 @@ func (api *APIImpl) GetTransactionCount(ctx context.Context, address common.Addr
 }
 
 // GetCode implements eth_getCode. Returns the byte code at a given address (if it's a smart contract).
-func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+func (api *APIImpl) GetCode(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return nil, fmt.Errorf("getCode cannot open tx: %w", err1)
@@ -81,7 +85,7 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 	if err != nil {
 		return nil, fmt.Errorf("read chain config: %v", err)
 	}
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, chainConfig.ChainName)
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -98,41 +102,41 @@ func (api *APIImpl) GetCode(ctx context.Context, address common.Address, blockNr
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
-func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
+func (api *APIImpl) GetStorageAt(ctx context.Context, address libcommon.Address, index string, blockNrOrHash rpc.BlockNumberOrHash) (string, error) {
 	var empty []byte
 
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err1
+		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err1
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 	acc, err := reader.ReadAccountData(address)
 	if acc == nil || err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+		return hexutility.Encode(common.LeftPadBytes(empty, 32)), err
 	}
 
-	location := common.HexToHash(index)
+	location := libcommon.HexToHash(index)
 	res, err := reader.ReadAccountStorage(address, acc.Incarnation, &location)
 	if err != nil {
 		res = empty
 	}
-	return hexutil.Encode(common.LeftPadBytes(res, 32)), err
+	return hexutility.Encode(common.LeftPadBytes(res, 32)), err
 }
 
 // Exist returns whether an account for a given address exists in the database.
-func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
+func (api *APIImpl) Exist(ctx context.Context, address libcommon.Address, blockNrOrHash rpc.BlockNumberOrHash) (bool, error) {
 	tx, err1 := api.db.BeginRo(ctx)
 	if err1 != nil {
 		return false, err1
 	}
 	defer tx.Rollback()
 
-	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), api._agg, "")
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return false, err
 	}

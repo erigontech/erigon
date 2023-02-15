@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"testing"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -20,12 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func addTestAccount(tx kv.Putter, hash common.Hash, balance uint64, incarnation uint64) error {
+func addTestAccount(tx kv.Putter, hash libcommon.Hash, balance uint64, incarnation uint64) error {
 	acc := accounts.NewAccount()
 	acc.Balance.SetUint64(balance)
 	acc.Incarnation = incarnation
 	if incarnation != 0 {
-		acc.CodeHash = common.HexToHash("0x5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd")
+		acc.CodeHash = libcommon.HexToHash("0x5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd")
 	}
 	encoded := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(encoded)
@@ -36,20 +38,20 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	db, tx := memdb.NewTestTx(t)
 	ctx := context.Background()
 
-	hash1 := common.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
+	hash1 := libcommon.HexToHash("0xB000000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash1, 3*params.Ether, 0))
 
-	hash2 := common.HexToHash("0xB040000000000000000000000000000000000000000000000000000000000000")
+	hash2 := libcommon.HexToHash("0xB040000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash2, 1*params.Ether, 0))
 
 	incarnation := uint64(1)
-	hash3 := common.HexToHash("0xB041000000000000000000000000000000000000000000000000000000000000")
+	hash3 := libcommon.HexToHash("0xB041000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash3, 2*params.Ether, incarnation))
 
-	loc1 := common.HexToHash("0x1200000000000000000000000000000000000000000000000000000000000000")
-	loc2 := common.HexToHash("0x1400000000000000000000000000000000000000000000000000000000000000")
-	loc3 := common.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00000")
-	loc4 := common.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00001")
+	loc1 := libcommon.HexToHash("0x1200000000000000000000000000000000000000000000000000000000000000")
+	loc2 := libcommon.HexToHash("0x1400000000000000000000000000000000000000000000000000000000000000")
+	loc3 := libcommon.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00000")
+	loc4 := libcommon.HexToHash("0x3000000000000000000000000000000000000000000000000000000000E00001")
 
 	val1 := common.FromHex("0x42")
 	val2 := common.FromHex("0x01")
@@ -61,13 +63,13 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc3), val3))
 	assert.Nil(t, tx.Put(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hash3, incarnation, loc4), val4))
 
-	hash4a := common.HexToHash("0xB1A0000000000000000000000000000000000000000000000000000000000000")
+	hash4a := libcommon.HexToHash("0xB1A0000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash4a, 4*params.Ether, 0))
 
-	hash5 := common.HexToHash("0xB310000000000000000000000000000000000000000000000000000000000000")
+	hash5 := libcommon.HexToHash("0xB310000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash5, 8*params.Ether, 0))
 
-	hash6 := common.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
+	hash6 := libcommon.HexToHash("0xB340000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, addTestAccount(tx, hash6, 1*params.Ether, 0))
 
 	// ----------------------------------------------------------------
@@ -77,7 +79,7 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -135,19 +137,19 @@ func TestAccountAndStorageTrie(t *testing.T) {
 	// Incremental trie
 	// ----------------------------------------------------------------
 
-	newAddress := common.HexToAddress("0x4f61f2d5ebd991b85aa1677db97307caf5215c91")
+	newAddress := libcommon.HexToAddress("0x4f61f2d5ebd991b85aa1677db97307caf5215c91")
 	hash4b, err := common.HashData(newAddress[:])
 	assert.Nil(t, err)
 	assert.Equal(t, hash4a[0], hash4b[0])
 
 	assert.Nil(t, addTestAccount(tx, hash4b, 5*params.Ether, 0))
 
-	err = tx.Put(kv.AccountChangeSet, common2.EncodeTs(1), newAddress[:])
+	err = tx.Put(kv.AccountChangeSet, hexutility.EncodeTs(1), newAddress[:])
 	assert.Nil(t, err)
 
 	var s StageState
 	s.BlockNumber = 0
-	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	accountTrieB := make(map[string][]byte)
@@ -179,26 +181,26 @@ func TestAccountTrieAroundExtensionNode(t *testing.T) {
 	encoded := make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(encoded)
 
-	hash1 := common.HexToHash("0x30af561000000000000000000000000000000000000000000000000000000000")
+	hash1 := libcommon.HexToHash("0x30af561000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash1[:], encoded))
 
-	hash2 := common.HexToHash("0x30af569000000000000000000000000000000000000000000000000000000000")
+	hash2 := libcommon.HexToHash("0x30af569000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash2[:], encoded))
 
-	hash3 := common.HexToHash("0x30af650000000000000000000000000000000000000000000000000000000000")
+	hash3 := libcommon.HexToHash("0x30af650000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash3[:], encoded))
 
-	hash4 := common.HexToHash("0x30af6f0000000000000000000000000000000000000000000000000000000000")
+	hash4 := libcommon.HexToHash("0x30af6f0000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash4[:], encoded))
 
-	hash5 := common.HexToHash("0x30af8f0000000000000000000000000000000000000000000000000000000000")
+	hash5 := libcommon.HexToHash("0x30af8f0000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash5[:], encoded))
 
-	hash6 := common.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
+	hash6 := libcommon.HexToHash("0x3100000000000000000000000000000000000000000000000000000000000000")
 	assert.Nil(t, tx.Put(kv.HashedAccounts, hash6[:], encoded))
 
 	blockReader := snapshotsync.NewBlockReader()
-	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), common.Hash{} /* expectedRootHash */, ctx)
+	_, err := RegenerateIntermediateHashes("IH", tx, StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil), libcommon.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	accountTrie := make(map[string][]byte)
@@ -229,21 +231,21 @@ func TestStorageDeletion(t *testing.T) {
 	db, tx := memdb.NewTestTx(t)
 	ctx := context.Background()
 
-	address := common.HexToAddress("0x1000000000000000000000000000000000000000")
+	address := libcommon.HexToAddress("0x1000000000000000000000000000000000000000")
 	hashedAddress, err := common.HashData(address[:])
 	assert.Nil(t, err)
 	incarnation := uint64(1)
 	assert.Nil(t, addTestAccount(tx, hashedAddress, params.Ether, incarnation))
 
-	plainLocation1 := common.HexToHash("0x1000000000000000000000000000000000000000000000000000000000000000")
+	plainLocation1 := libcommon.HexToHash("0x1000000000000000000000000000000000000000000000000000000000000000")
 	hashedLocation1, err := common.HashData(plainLocation1[:])
 	assert.Nil(t, err)
 
-	plainLocation2 := common.HexToHash("0x1A00000000000000000000000000000000000000000000000000000000000000")
+	plainLocation2 := libcommon.HexToHash("0x1A00000000000000000000000000000000000000000000000000000000000000")
 	hashedLocation2, err := common.HashData(plainLocation2[:])
 	assert.Nil(t, err)
 
-	plainLocation3 := common.HexToHash("0x1E00000000000000000000000000000000000000000000000000000000000000")
+	plainLocation3 := libcommon.HexToHash("0x1E00000000000000000000000000000000000000000000000000000000000000")
 	hashedLocation3, err := common.HashData(plainLocation3[:])
 	assert.Nil(t, err)
 
@@ -262,7 +264,7 @@ func TestStorageDeletion(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err = RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
+	_, err = RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
 	assert.Nil(t, err)
 
 	// ----------------------------------------------------------------
@@ -286,18 +288,18 @@ func TestStorageDeletion(t *testing.T) {
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation2)))
 	assert.Nil(t, tx.Delete(kv.HashedStorage, dbutils.GenerateCompositeStorageKey(hashedAddress, incarnation, hashedLocation3)))
 
-	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
+	err = tx.Put(kv.StorageChangeSet, append(hexutility.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation1[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
+	err = tx.Put(kv.StorageChangeSet, append(hexutility.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation2[:])
 	assert.Nil(t, err)
 
-	err = tx.Put(kv.StorageChangeSet, append(common2.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
+	err = tx.Put(kv.StorageChangeSet, append(hexutility.EncodeTs(1), dbutils.PlainGenerateStoragePrefix(address[:], incarnation)...), plainLocation3[:])
 	assert.Nil(t, err)
 
 	var s StageState
 	s.BlockNumber = 0
-	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	_, err = incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	assert.Nil(t, err)
 
 	storageTrieB := make(map[string][]byte)
@@ -381,23 +383,23 @@ func TestHiveTrieRoot(t *testing.T) {
 	historyV3 := false
 	blockReader := snapshotsync.NewBlockReader()
 	cfg := StageTrieCfg(db, false, true, false, t.TempDir(), blockReader, nil, historyV3, nil)
-	_, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
+	_, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
 	require.Nil(t, err)
 
 	// Now add a new account
-	newAddress := common.HexToAddress("0xf76fefb6608ca3d826945a9571d1f8e53bb6f366")
+	newAddress := libcommon.HexToAddress("0xf76fefb6608ca3d826945a9571d1f8e53bb6f366")
 	newHash, err := common.HashData(newAddress[:])
 	require.Nil(t, err)
 
 	require.Nil(t, tx.Put(kv.HashedAccounts, newHash[:], common.FromHex("02081bc16d674ec80000")))
-	require.Nil(t, tx.Put(kv.AccountChangeSet, common2.EncodeTs(1), newAddress[:]))
+	require.Nil(t, tx.Put(kv.AccountChangeSet, hexutility.EncodeTs(1), newAddress[:]))
 
 	var s StageState
 	s.BlockNumber = 0
-	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, common.Hash{} /* expectedRootHash */, nil /* quit */)
+	incrementalRoot, err := incrementIntermediateHashes("IH", &s, tx, 1 /* to */, cfg, libcommon.Hash{} /* expectedRootHash */, nil /* quit */)
 	require.Nil(t, err)
 
-	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, common.Hash{} /* expectedRootHash */, ctx)
+	regeneratedRoot, err := RegenerateIntermediateHashes("IH", tx, cfg, libcommon.Hash{} /* expectedRootHash */, ctx)
 	require.Nil(t, err)
 
 	assert.Equal(t, regeneratedRoot, incrementalRoot)

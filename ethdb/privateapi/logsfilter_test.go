@@ -4,24 +4,24 @@ import (
 	"context"
 	"testing"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
 var (
-	address1   = common.HexToHash("0xdac17f958d2ee523a2206206994597c13d831ec7")
-	topic1     = common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	address1   = libcommon.HexToHash("0xdac17f958d2ee523a2206206994597c13d831ec7")
+	topic1     = libcommon.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	address160 *types2.H160
 	topic1H256 *types2.H256
 )
 
 func init() {
-	var a common.Address
+	var a libcommon.Address
 	a.SetBytes(address1.Bytes())
 	address160 = gointerfaces.ConvertAddressToH160(a)
 	topic1H256 = gointerfaces.ConvertHashToH256(topic1)

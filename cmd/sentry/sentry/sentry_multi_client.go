@@ -13,6 +13,8 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -28,13 +30,11 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -244,27 +244,27 @@ func pumpStreamLoop[TMessage interface{}](
 // MultiClient - does handle request/response/subscriptions to multiple sentries
 // each sentry may support same or different p2p protocol
 type MultiClient struct {
-	lock          sync.RWMutex
-	Hd            *headerdownload.HeaderDownload
-	Bd            *bodydownload.BodyDownload
-	IsMock        bool
-	forkValidator *engineapi.ForkValidator
-	nodeName      string
-	sentries      []direct.SentryClient
-	headHeight    uint64
-	headTime      uint64
-	headHash      common.Hash
-	headTd        *uint256.Int
-	ChainConfig   *params.ChainConfig
-	heightForks   []uint64
-	timeForks     []uint64
-	genesisHash   common.Hash
-	networkId     uint64
-	db            kv.RwDB
-	Engine        consensus.Engine
-	blockReader   services.HeaderAndCanonicalReader
-	logPeerInfo   bool
-	passivePeers  bool
+	lock                              sync.RWMutex
+	Hd                                *headerdownload.HeaderDownload
+	Bd                                *bodydownload.BodyDownload
+	IsMock                            bool
+	forkValidator                     *engineapi.ForkValidator
+	nodeName                          string
+	sentries                          []direct.SentryClient
+	headHeight                        uint64
+	headTime                          uint64
+	headHash                          libcommon.Hash
+	headTd                            *uint256.Int
+	ChainConfig                       *chain.Config
+	heightForks                       []uint64
+	timeForks                         []uint64
+	genesisHash                       libcommon.Hash
+	networkId                         uint64
+	db                                kv.RwDB
+	Engine                            consensus.Engine
+	blockReader                       services.HeaderAndCanonicalReader
+	logPeerInfo                       bool
+	sendHeaderRequestsToMultiplePeers bool
 
 	historyV3 bool
 }
@@ -272,8 +272,8 @@ type MultiClient struct {
 func NewMultiClient(
 	db kv.RwDB,
 	nodeName string,
-	chainConfig *params.ChainConfig,
-	genesisHash common.Hash,
+	chainConfig *chain.Config,
+	genesisHash libcommon.Hash,
 	engine consensus.Engine,
 	networkID uint64,
 	sentries []direct.SentryClient,
@@ -297,20 +297,20 @@ func NewMultiClient(
 	if err := hd.RecoverFromDb(db); err != nil {
 		return nil, fmt.Errorf("recovery from DB failed: %w", err)
 	}
-	bd := bodydownload.NewBodyDownload(syncCfg.BlockDownloaderWindow /* outstandingLimit */, engine)
+	bd := bodydownload.NewBodyDownload(engine, int(syncCfg.BodyCacheLimit))
 
 	cs := &MultiClient{
-		nodeName:      nodeName,
-		Hd:            hd,
-		Bd:            bd,
-		sentries:      sentries,
-		db:            db,
-		Engine:        engine,
-		blockReader:   blockReader,
-		logPeerInfo:   logPeerInfo,
-		forkValidator: forkValidator,
-		historyV3:     historyV3,
-		passivePeers:  chainConfig.TerminalTotalDifficultyPassed,
+		nodeName:                          nodeName,
+		Hd:                                hd,
+		Bd:                                bd,
+		sentries:                          sentries,
+		db:                                db,
+		Engine:                            engine,
+		blockReader:                       blockReader,
+		logPeerInfo:                       logPeerInfo,
+		forkValidator:                     forkValidator,
+		historyV3:                         historyV3,
+		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
 	}
 	cs.ChainConfig = chainConfig
 	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
@@ -327,7 +327,7 @@ func NewMultiClient(
 func (cs *MultiClient) Sentries() []direct.SentryClient { return cs.sentries }
 
 func (cs *MultiClient) newBlockHashes66(ctx context.Context, req *proto_sentry.InboundMessage, sentry direct.SentryClient) error {
-	if !cs.Hd.RequestChaining() && !cs.Hd.FetchingNew() {
+	if cs.Hd.InitialCycle() && !cs.Hd.FetchingNew() {
 		return nil
 	}
 	//log.Info(fmt.Sprintf("NewBlockHashes from [%s]", ConvertH256ToPeerID(req.PeerId)))
@@ -399,7 +399,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
-		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID)))
+		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
 		// No point processing empty response
 		return nil
 	}
@@ -408,6 +408,7 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		return fmt.Errorf("decode 2 BlockHeadersPacket66: %w", err)
 	}
 	// Extract headers from the block
+	//var blockNums []int
 	var highestBlock uint64
 	csHeaders := make([]headerdownload.ChainSegmentHeader, 0, len(pkt))
 	for _, header := range pkt {
@@ -426,7 +427,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			Hash:      types.RawRlpHash(hRaw),
 			Number:    number,
 		})
+		//blockNums = append(blockNums, int(number))
 	}
+	//sort.Ints(blockNums)
+	//log.Debug("Delivered headers", "peer",  fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8], "blockNums", fmt.Sprintf("%d", blockNums))
 	if cs.Hd.POSSync() {
 		sort.Sort(headerdownload.HeadersReverseSort(csHeaders)) // Sorting by reverse order of block heights
 		tx, err := cs.db.BeginRo(ctx)
@@ -449,11 +453,10 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 			currentTime := time.Now()
 			req, penalties := cs.Hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				if _, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
-					cs.Hd.UpdateStats(req, false /* skeleton */)
+				if peer, sentToPeer := cs.SendHeaderRequest(ctx, req); sentToPeer {
+					cs.Hd.UpdateStats(req, false /* skeleton */, peer)
+					cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 				}
-				// Regardless of whether request was actually sent to a peer, we update retry time to be 5 seconds in the future
-				cs.Hd.UpdateRetryTime(req, currentTime, 5*time.Second /* timeout */)
 			}
 			if len(penalties) > 0 {
 				cs.Penalize(ctx, penalties)
@@ -535,7 +538,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 	} else {
 		return fmt.Errorf("singleHeaderAsSegment failed: %w", err)
 	}
-	cs.Bd.AddToPrefetch(request.Block)
+	cs.Bd.AddToPrefetch(request.Block.Header(), request.Block.RawBody())
 	outreq := proto_sentry.PeerMinBlockRequest{
 		PeerId:   inreq.PeerId,
 		MinBlock: request.Block.NumberU64(),
@@ -553,7 +556,7 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
-	if len(txs) == 0 && len(uncles) == 0 {
+	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
 		outreq := proto_sentry.PeerUselessRequest{
 			PeerId: inreq.PeerId,
 		}
@@ -752,7 +755,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	peerIDStr := hex.EncodeToString(peerID[:])
 
 	if !cs.logPeerInfo {
-		log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr)
+		log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr)
 		return nil
 	}
 
@@ -771,7 +774,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		}
 	}
 
-	log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr,
+	log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr,
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }
@@ -789,7 +792,6 @@ func (cs *MultiClient) makeStatusData() *proto_sentry.StatusData {
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
 		},
-		PassivePeers: cs.passivePeers,
 	}
 }
 

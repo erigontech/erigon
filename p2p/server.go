@@ -169,6 +169,8 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
+
+	TmpDir string
 }
 
 // Server manages all peer connections.
@@ -533,7 +535,7 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.Config.NodeDatabase)
+	db, err := enode.OpenDB(srv.Config.NodeDatabase, srv.Config.TmpDir)
 	if err != nil {
 		return err
 	}

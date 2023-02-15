@@ -18,12 +18,11 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -33,12 +32,10 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
-	"github.com/libp2p/go-libp2p-core/network"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pubsub_pb "github.com/libp2p/go-libp2p-pubsub/pb"
 	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/p2p/protocol/identify"
-	"github.com/pkg/errors"
+	"github.com/libp2p/go-libp2p/core/network"
 )
 
 type Sentinel struct {
@@ -48,7 +45,7 @@ type Sentinel struct {
 	host       host.Host
 	cfg        *SentinelConfig
 	peers      *peers.Peers
-	metadataV2 *cltypes.MetadataV2
+	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
 	db kv.RoDB
@@ -56,16 +53,18 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
+	gossipTopics   []GossipTopic
 }
 
 func (s *Sentinel) createLocalNode(
 	privKey *ecdsa.PrivateKey,
 	ipAddr net.IP,
 	udpPort, tcpPort int,
+	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
-		return nil, errors.Wrap(err, "could not open node's peer database")
+		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
 	localNode := enode.NewLocalNode(db, privKey)
 
@@ -126,16 +125,16 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort))
+	localNode, err := s.createLocalNode(discCfg.PrivateKey, ip, port, int(s.cfg.TCPPort), s.cfg.TmpDir)
 	if err != nil {
 		return nil, err
 	}
 
 	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.MetadataV2{
+	s.metadataV2 = &cltypes.Metadata{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
-		Syncnets:  0,
+		Syncnets:  new(uint64),
 	}
 
 	// Start stream handlers
@@ -209,7 +208,6 @@ func New(
 
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
 
-	host.RemoveStreamHandler(identify.IDDelta)
 	s.host = host
 	s.peers = peers.New(s.host)
 
@@ -221,7 +219,11 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) RecvGossip() <-chan *communication.GossipContext {
+func (s *Sentinel) ChainConfigs() (clparams.BeaconChainConfig, clparams.GenesisConfig) {
+	return *s.cfg.BeaconConfig, *s.cfg.GenesisConfig
+}
+
+func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
 	return s.subManager.Recv()
 }
 
@@ -242,10 +244,10 @@ func (s *Sentinel) Start() error {
 	s.host.Network().Notify(&network.NotifyBundle{
 		ConnectedF: s.onConnection,
 	})
+	s.subManager = NewGossipManager(s.ctx)
 	if !s.cfg.NoDiscovery {
 		go s.listenForPeers()
 	}
-	s.subManager = NewGossipManager(s.ctx)
 	return nil
 }
 
@@ -258,13 +260,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	// Check how many peers are subscribed to beacon block
-	var sub *GossipSubscription
-	for topic, currSub := range s.subManager.subscriptions {
-		if strings.Contains(topic, string(BeaconBlockTopic)) {
-			sub = currSub
-		}
-	}
+	sub := s.subManager.GetMatchingSubscription(string(LightClientFinalityUpdateTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())

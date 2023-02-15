@@ -21,6 +21,7 @@ var (
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
+	HeimdallgRPCAddress            string
 	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
@@ -117,7 +118,7 @@ func withBatchSize(cmd *cobra.Command) {
 
 func withIntegrityChecks(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&integritySlow, "integrity.slow", false, "enable slow data-integrity checks")
-	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", true, "enable fast data-integrity checks")
+	cmd.Flags().BoolVar(&integrityFast, "integrity.fast", false, "enable fast data-integrity checks")
 }
 
 func withMigration(cmd *cobra.Command) {

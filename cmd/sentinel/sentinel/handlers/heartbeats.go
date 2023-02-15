@@ -14,6 +14,7 @@
 package handlers
 
 import (
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -35,7 +36,7 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) {
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) {
-	ssz_snappy.EncodeAndWrite(s, &cltypes.MetadataV1{
+	ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
 	}, SuccessfulResponsePrefix)
@@ -48,7 +49,7 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) {
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) {
 	status := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status, clparams.Phase0Version); err != nil {
 		s.Close()
 		return
 	}

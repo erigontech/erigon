@@ -28,8 +28,11 @@ import (
 	"path/filepath"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -45,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/tests"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -96,7 +98,7 @@ func Main(ctx *cli.Context) error {
 		err     error
 		baseDir = ""
 	)
-	var getTracer func(txIndex int, txHash common.Hash) (vm.EVMLogger, error)
+	var getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error)
 
 	// If user specified a basedir, make sure it exists
 	if ctx.IsSet(OutputBasedir.Name) {
@@ -123,7 +125,7 @@ func Main(ctx *cli.Context) error {
 				prevFile.Close()
 			}
 		}()
-		getTracer = func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error) {
 			if prevFile != nil {
 				prevFile.Close()
 			}
@@ -135,7 +137,7 @@ func Main(ctx *cli.Context) error {
 			return logger.NewJSONLogger(logConfig, traceFile), nil
 		}
 	} else {
-		getTracer = func(txIndex int, txHash common.Hash) (tracer vm.EVMLogger, err error) {
+		getTracer = func(txIndex int, txHash libcommon.Hash) (tracer vm.EVMLogger, err error) {
 			return nil, nil
 		}
 	}
@@ -192,7 +194,7 @@ func Main(ctx *cli.Context) error {
 		StatelessExec: true,
 	}
 	// Construct the chainconfig
-	var chainConfig *params.ChainConfig
+	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := tests.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
 		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
 	} else { //nolint:golint
@@ -268,10 +270,10 @@ func Main(ctx *cli.Context) error {
 	block := types.NewBlock(header, txs, ommerHeaders, nil /* receipts */, prestate.Env.Withdrawals)
 
 	var hashError error
-	getHash := func(num uint64) common.Hash {
+	getHash := func(num uint64) libcommon.Hash {
 		if prestate.Env.BlockHashes == nil {
 			hashError = fmt.Errorf("getHash(%d) invoked, no blockhashes provided", num)
-			return common.Hash{}
+			return libcommon.Hash{}
 		}
 		h, ok := prestate.Env.BlockHashes[math.HexOrDecimal64(num)]
 		if !ok {
@@ -279,7 +281,7 @@ func Main(ctx *cli.Context) error {
 		}
 		return h
 	}
-	db := memdb.New()
+	db := memdb.New("" /* tmpDir */)
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
@@ -310,8 +312,13 @@ func Main(ctx *cli.Context) error {
 	// Dump the execution result
 	body, _ := rlp.EncodeToBytes(txs)
 	collector := make(Alloc)
-	dumper := state.NewDumper(tx, prestate.Env.Number)
-	dumper.DumpToCollector(collector, false, false, common.Address{}, 0)
+
+	historyV3, err := kvcfg.HistoryV3.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	dumper := state.NewDumper(tx, prestate.Env.Number, historyV3)
+	dumper.DumpToCollector(collector, false, false, libcommon.Address{}, 0)
 	return dispatchOutput(ctx, baseDir, result, collector, body)
 }
 
@@ -325,7 +332,7 @@ type txWithKey struct {
 func (t *txWithKey) UnmarshalJSON(input []byte) error {
 	// Read the secretKey, if present
 	type sKey struct {
-		Key *common.Hash `json:"secretKey"`
+		Key *libcommon.Hash `json:"secretKey"`
 	}
 	var key sKey
 	if err := json.Unmarshal(input, &key); err != nil {
@@ -384,7 +391,7 @@ func getTransaction(txJson commands.RPCTransaction) (types.Transaction, error) {
 
 	switch txJson.Type {
 	case types.LegacyTxType, types.AccessListTxType:
-		var toAddr = common.Address{}
+		var toAddr = libcommon.Address{}
 		if txJson.To != nil {
 			toAddr = *txJson.To
 		}
@@ -480,17 +487,17 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
-type Alloc map[common.Address]core.GenesisAccount
+type Alloc map[libcommon.Address]core.GenesisAccount
 
-func (g Alloc) OnRoot(common.Hash) {}
+func (g Alloc) OnRoot(libcommon.Hash) {}
 
-func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
+func (g Alloc) OnAccount(addr libcommon.Address, dumpAccount state.DumpAccount) {
 	balance, _ := new(big.Int).SetString(dumpAccount.Balance, 10)
-	var storage map[common.Hash]common.Hash
+	var storage map[libcommon.Hash]libcommon.Hash
 	if dumpAccount.Storage != nil {
-		storage = make(map[common.Hash]common.Hash)
+		storage = make(map[libcommon.Hash]libcommon.Hash)
 		for k, v := range dumpAccount.Storage {
-			storage[common.HexToHash(k)] = common.HexToHash(v)
+			storage[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 		}
 	}
 	genesisAccount := core.GenesisAccount{
@@ -575,7 +582,7 @@ func NewHeader(env stEnv) *types.Header {
 	return &header
 }
 
-func CalculateStateRoot(tx kv.RwTx) (*common.Hash, error) {
+func CalculateStateRoot(tx kv.RwTx) (*libcommon.Hash, error) {
 	// Generate hashed state
 	c, err := tx.RwCursor(kv.PlainState)
 	if err != nil {

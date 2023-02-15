@@ -6,7 +6,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func generateOperands() []WitnessOperator {
@@ -16,7 +16,7 @@ func generateOperands() []WitnessOperator {
 		&OperatorCode{[]byte("code-operand-1")},
 		&OperatorExtension{[]byte{5, 5, 4, 6, 6, 6}},
 		&OperatorLeafValue{[]byte{5, 5, 4, 3, 2, 1}, []byte("leaf-value-value-1")},
-		&OperatorHash{common.HexToHash("0xabcabcabcabc")},
+		&OperatorHash{libcommon.HexToHash("0xabcabcabcabc")},
 		&OperatorLeafAccount{
 			[]byte{2, 2, 4, 5, 6},
 			999,

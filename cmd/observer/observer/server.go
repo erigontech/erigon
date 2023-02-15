@@ -8,6 +8,8 @@ import (
 	"net"
 	"path/filepath"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/core/forkid"
@@ -19,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Server struct {
@@ -86,7 +87,7 @@ func NewServer(flags CommandFlags) (*Server, error) {
 }
 
 func makeLocalNode(nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(nodeDBPath)
+	db, err := enode.OpenDB(nodeDBPath, "")
 	if err != nil {
 		return nil, err
 	}

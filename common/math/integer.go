@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"math/bits"
 	"strconv"
 )
 
@@ -80,24 +79,6 @@ func MustParseUint64(s string) uint64 {
 		panic("invalid unsigned 64 bit integer: " + s)
 	}
 	return v
-}
-
-// SafeSub returns x-y and checks for overflow.
-func SafeSub(x, y uint64) (uint64, bool) {
-	diff, borrowOut := bits.Sub64(x, y, 0)
-	return diff, borrowOut != 0
-}
-
-// SafeAdd returns x+y and checks for overflow.
-func SafeAdd(x, y uint64) (uint64, bool) {
-	sum, carryOut := bits.Add64(x, y, 0)
-	return sum, carryOut != 0
-}
-
-// SafeMul returns x*y and checks for overflow.
-func SafeMul(x, y uint64) (uint64, bool) {
-	hi, lo := bits.Mul64(x, y)
-	return lo, hi != 0
 }
 
 // AbsoluteDifference is a utility method that given 2 int64, it returns the absolute value of their difference in uint64 format.

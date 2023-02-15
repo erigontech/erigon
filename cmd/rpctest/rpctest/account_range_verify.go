@@ -11,11 +11,13 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, gethDataDir string, blockFrom uint64, notRegenerateGethData bool) {
@@ -76,7 +78,7 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 				spew.Dump(ar)
 				return fmt.Errorf("response error %v", ar.Error)
 			}
-			var addr common.Address
+			var addr libcommon.Address
 			var acc state.DumpAccount
 			for addr, acc = range ar.Result.Accounts {
 				i++

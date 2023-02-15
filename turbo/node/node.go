@@ -114,6 +114,10 @@ func New(
 	if err != nil {
 		return nil, err
 	}
+	err = ethereum.Init(node, ethConfig)
+	if err != nil {
+		return nil, err
+	}
 	return &ErigonNode{stack: node, backend: ethereum}, nil
 }
 
@@ -121,7 +125,7 @@ func NewNodeConfig() *nodecfg.Config {
 	nodeConfig := nodecfg.DefaultConfig
 	// see simiar changes in `cmd/geth/config.go#defaultNodeConfig`
 	if commit := params.GitCommit; commit != "" {
-		nodeConfig.Version = params.VersionWithCommit(commit, "")
+		nodeConfig.Version = params.VersionWithCommit(commit)
 	} else {
 		nodeConfig.Version = params.Version
 	}

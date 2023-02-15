@@ -8,18 +8,20 @@ import (
 	"sync"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Eth1Execution struct {
@@ -83,10 +85,9 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 				Index:     withdrawal.Index,
 				Validator: withdrawal.ValidatorIndex,
 				Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
-				Amount:    *gointerfaces.ConvertH256ToUint256Int(withdrawal.Amount),
+				Amount:    withdrawal.Amount,
 			})
 		}
-
 		if _, _, err := rawdb.WriteRawBodyIfNotExists(tx, gointerfaces.ConvertH256ToHash(body.BlockHash),
 			body.BlockNumber, &types.RawBody{
 				Transactions: body.Transactions,
@@ -100,7 +101,7 @@ func (e *Eth1Execution) InsertBodies(ctx context.Context, req *execution.InsertB
 }
 
 type canonicalEntry struct {
-	hash   common.Hash
+	hash   libcommon.Hash
 	number uint64
 }
 
@@ -161,7 +162,7 @@ func (e *Eth1Execution) UpdateForkChoice(ctx context.Context, hash *types2.H256)
 		}
 	}
 	if currentParentNumber != fcuHeader.Number.Uint64()-1 {
-		e.executionPipeline.UnwindTo(currentParentNumber, common.Hash{})
+		e.executionPipeline.UnwindTo(currentParentNumber, libcommon.Hash{})
 	}
 	// Run the unwind
 	if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
@@ -343,13 +344,14 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 		h.BaseFee = gointerfaces.ConvertH256ToUint256Int(header.BaseFeePerGas).ToBig()
 	}
 	if header.WithdrawalHash != nil {
-		h.WithdrawalsHash = new(common.Hash)
+		h.WithdrawalsHash = new(libcommon.Hash)
 		*h.WithdrawalsHash = gointerfaces.ConvertH256ToHash(header.WithdrawalHash)
 	}
 	blockHash := gointerfaces.ConvertH256ToHash(header.BlockHash)
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
+	h.BlockHashCL = blockHash
 	return h, nil
 }
 

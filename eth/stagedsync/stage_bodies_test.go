@@ -6,13 +6,14 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/stretchr/testify/require"
 )
 
 func TestBodiesUnwind(t *testing.T) {
@@ -29,9 +30,9 @@ func TestBodiesUnwind(t *testing.T) {
 
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	for i := uint64(1); i <= 10; i++ {
-		_, _, err = rawdb.WriteRawBody(tx, common.Hash{byte(i)}, i, b)
+		_, _, err = rawdb.WriteRawBody(tx, libcommon.Hash{byte(i)}, i, b)
 		require.NoError(err)
-		err = rawdb.WriteCanonicalHash(tx, common.Hash{byte(i)}, i)
+		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{byte(i)}, i)
 		require.NoError(err)
 	}
 	{
@@ -49,9 +50,9 @@ func TestBodiesUnwind(t *testing.T) {
 		require.NoError(err)
 		require.Equal(10*(3+2), int(n))
 
-		_, _, err = rawdb.WriteRawBody(tx, common.Hash{11}, 11, b)
+		_, _, err = rawdb.WriteRawBody(tx, libcommon.Hash{11}, 11, b)
 		require.NoError(err)
-		err = rawdb.WriteCanonicalHash(tx, common.Hash{11}, 11)
+		err = rawdb.WriteCanonicalHash(tx, libcommon.Hash{11}, 11)
 		require.NoError(err)
 
 		n, err = tx.ReadSequence(kv.EthTx)

@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -9,7 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -22,7 +25,7 @@ import (
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -30,24 +33,29 @@ var cmdResetState = &cobra.Command{
 		defer sn.Close()
 		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
-			return err
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
-		err := reset2.ResetState(db, ctx, chain)
+		err := reset2.ResetState(db, ctx, chain, "")
 		if err != nil {
-			log.Error(err.Error())
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		sn, _ = allSnapshots(ctx, db)
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn) }); err != nil {
-			return err
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
@@ -58,7 +66,7 @@ func init() {
 	rootCmd.AddCommand(cmdResetState)
 }
 
-func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
+func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -87,11 +95,13 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	if err != nil {
 		return err
 	}
-	lastK, lastV, err := rawdb.Last(tx, kv.MaxTxNum)
+	lastK, lastV, err := rawdbv3.Last(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV))
+
+	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
+	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
@@ -104,19 +114,19 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots) error {
 	fmt.Fprintf(w, "sequence: EthTx=%d, NonCanonicalTx=%d\n\n", s1, s2)
 
 	{
-		firstNonGenesisHeader, err := rawdb.SecondKey(tx, kv.Headers)
+		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		lastHeaders, err := rawdb.LastKey(tx, kv.Headers)
+		lastHeaders, err := rawdbv3.LastKey(tx, kv.Headers)
 		if err != nil {
 			return err
 		}
-		firstNonGenesisBody, err := rawdb.SecondKey(tx, kv.BlockBody)
+		firstNonGenesisBody, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 		if err != nil {
 			return err
 		}
-		lastBody, err := rawdb.LastKey(tx, kv.BlockBody)
+		lastBody, err := rawdbv3.LastKey(tx, kv.BlockBody)
 		if err != nil {
 			return err
 		}

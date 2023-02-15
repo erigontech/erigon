@@ -7,15 +7,16 @@ import (
 	"testing"
 	"time"
 
-	common2 "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/stretchr/testify/require"
 )
 
 func TestTxsBeginEnd(t *testing.T) {
@@ -31,7 +32,7 @@ func TestTxsBeginEnd(t *testing.T) {
 	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
 	err = db.Update(context.Background(), func(tx kv.RwTx) error {
 		for i := uint64(0); i < 10; i++ {
-			hash := common.Hash{byte(i)}
+			hash := libcommon.Hash{byte(i)}
 			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
@@ -44,7 +45,7 @@ func TestTxsBeginEnd(t *testing.T) {
 		err = rawdb.TruncateCanonicalHash(tx, 7, false)
 		for i := uint64(7); i < 10; i++ {
 			require.NoError(err)
-			hash := common.Hash{0xa, byte(i)}
+			hash := libcommon.Hash{0xa, byte(i)}
 			err = writeRawBodyDeprecated(tx, hash, i, b)
 			require.NoError(err)
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
@@ -72,7 +73,7 @@ func TestTxsBeginEnd(t *testing.T) {
 
 	err = db.View(context.Background(), func(tx kv.Tx) error {
 		for i := uint64(7); i < 10; i++ {
-			hash := common.Hash{byte(i)}
+			hash := libcommon.Hash{byte(i)}
 			k := make([]byte, 8+32)
 			binary.BigEndian.PutUint64(k, 7)
 			copy(k[8:], hash[:])
@@ -92,7 +93,7 @@ func TestTxsBeginEnd(t *testing.T) {
 		require.NoError(err)
 		require.Zero(v)
 
-		has, err := tx.Has(kv.EthTx, common2.EncodeTs(0))
+		has, err := tx.Has(kv.EthTx, hexutility.EncodeTs(0))
 		require.NoError(err)
 		require.False(has)
 

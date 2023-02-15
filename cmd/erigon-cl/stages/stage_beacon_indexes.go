@@ -5,14 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type StageBeaconIndexesCfg struct {
@@ -64,7 +65,7 @@ func SpawnStageBeaconIndexes(cfg StageBeaconIndexesCfg, s *stagedsync.StageState
 		}
 		slotBytes := utils.Uint32ToBytes4(uint32(slot))
 
-		if eth1Hash != (common.Hash{}) {
+		if eth1Hash != (libcommon.Hash{}) {
 			// Collect root indexes => slot
 			if err := rootToSlotCollector.Collect(eth1Hash[:], slotBytes[:]); err != nil {
 				return err

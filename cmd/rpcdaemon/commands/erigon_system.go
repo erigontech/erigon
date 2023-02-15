@@ -3,7 +3,8 @@ package commands
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -46,6 +47,8 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 	var rpcBlockNum rpc.BlockNumber
 	if rpcBlockNumPtr == nil {
 		rpcBlockNum = rpc.LatestExecutedBlockNumber
+	} else {
+		rpcBlockNum = *rpcBlockNumPtr
 	}
 
 	var blockNum uint64

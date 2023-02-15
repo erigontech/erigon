@@ -10,8 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/libp2p/go-libp2p-core/peer"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"go.uber.org/zap/buffer"
 )
 
@@ -83,9 +83,8 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	}
 	responseStatus := &cltypes.Status{}
 
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(response), responseStatus); err != nil {
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(response), responseStatus, clparams.Phase0Version); err != nil {
 		return false
 	}
-
 	return h.rule(responseStatus, status, h.genesisConfig, h.beaconConfig)
 }

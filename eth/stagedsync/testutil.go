@@ -6,11 +6,13 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -87,7 +89,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 		updateIncarnation := difficulty != staticCodeStaticIncarnations && blockNumber%10 == 0
 
 		for i, oldAcc := range testAccounts {
-			addr := common.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
+			addr := libcommon.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
 
 			newAcc := oldAcc.SelfCopy()
 			newAcc.Balance.SetUint64(blockNumber)
@@ -118,7 +120,7 @@ func generateBlocks2(t *testing.T, from uint64, numberOfBlocks uint64, blockWrit
 			if newAcc.Incarnation > 0 {
 				var oldValue, newValue uint256.Int
 				newValue.SetOne()
-				var location common.Hash
+				var location libcommon.Hash
 				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
 				if blockNumber >= from {
 					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {
@@ -158,7 +160,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 		blockWriter := stateWriterGen(blockNumber)
 
 		for i, oldAcc := range testAccounts {
-			addr := common.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
+			addr := libcommon.HexToAddress(fmt.Sprintf("0x1234567890%d", i))
 
 			newAcc := oldAcc.SelfCopy()
 			newAcc.Balance.SetUint64(blockNumber)
@@ -189,7 +191,7 @@ func generateBlocks(t *testing.T, from uint64, numberOfBlocks uint64, stateWrite
 			if newAcc.Incarnation > 0 {
 				var oldValue, newValue uint256.Int
 				newValue.SetOne()
-				var location common.Hash
+				var location libcommon.Hash
 				location.SetBytes(big.NewInt(int64(blockNumber)).Bytes())
 				if blockNumber >= from {
 					if err := blockWriter.WriteAccountStorage(addr, newAcc.Incarnation, &location, &oldValue, &newValue); err != nil {

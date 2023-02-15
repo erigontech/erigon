@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
@@ -21,7 +24,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/debugprint"
 	"github.com/ledgerwatch/erigon/core"
@@ -51,7 +53,7 @@ Examples:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -64,23 +66,26 @@ Examples:
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
-				log.Error(err.Error())
-				return nil
+				if !errors.Is(err, context.Canceled) {
+					log.Error(err.Error())
+				}
+				return
 			}
 		}
-		return nil
 	},
 }
 
 var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -89,17 +94,17 @@ var loopIhCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopIh(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -107,11 +112,11 @@ var loopExecCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopExec(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
@@ -318,7 +323,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 			panic(err)
 		}
 
-		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common.Address{}) {
+		if miner.MiningConfig.Enabled && nextBlock != nil && nextBlock.Coinbase() != (common2.Address{}) {
 			miner.MiningConfig.Etherbase = nextBlock.Coinbase()
 			miner.MiningConfig.ExtraData = nextBlock.Extra()
 			miningStages.MockExecFunc(stages.MiningCreateBlock, func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
@@ -363,7 +368,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 
 		to := execAtBlock - unwind
-		stateStages.UnwindTo(to, common.Hash{})
+		stateStages.UnwindTo(to, common2.Hash{})
 
 		if err := tx.Commit(); err != nil {
 			return err
@@ -408,7 +413,7 @@ func checkChanges(expectedAccountChanges map[uint64]*historyv2.ChangeSet, tx kv.
 	return nil
 }
 
-func checkMinedBlock(b1, b2 *types.Block, chainConfig *params.ChainConfig) {
+func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 	if b1.Root() != b2.Root() ||
 		(chainConfig.IsByzantium(b1.NumberU64()) && b1.ReceiptHash() != b2.ReceiptHash()) ||
 		b1.TxHash() != b2.TxHash() ||
@@ -563,7 +568,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2.ChangeSet, expectedStorageChanges *historyv2.ChangeSet) error {
 	i := 0
 	sort.Sort(expectedAccountChanges)
-	err := historyv2.ForPrefix(db, kv.AccountChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
+	err := historyv2.ForPrefix(db, kv.AccountChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedAccountChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -589,7 +594,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2
 
 	i = 0
 	sort.Sort(expectedStorageChanges)
-	err = historyv2.ForPrefix(db, kv.StorageChangeSet, common2.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
+	err = historyv2.ForPrefix(db, kv.StorageChangeSet, hexutility.EncodeTs(blockNum), func(blockN uint64, k, v []byte) error {
 		c := expectedStorageChanges.Changes[i]
 		i++
 		if bytes.Equal(c.Key, k) && bytes.Equal(c.Value, v) {
@@ -615,7 +620,7 @@ func checkChangeSet(db kv.Tx, blockNum uint64, expectedAccountChanges *historyv2
 
 func checkHistory(tx kv.Tx, changeSetBucket string, blockNum uint64) error {
 	indexBucket := historyv2.Mapper[changeSetBucket].IndexBucket
-	blockNumBytes := common2.EncodeTs(blockNum)
+	blockNumBytes := hexutility.EncodeTs(blockNum)
 	if err := historyv2.ForEach(tx, changeSetBucket, blockNumBytes, func(blockN uint64, address, v []byte) error {
 		k := dbutils.CompositeKeyWithoutIncarnation(address)
 		from := blockN

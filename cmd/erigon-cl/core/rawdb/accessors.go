@@ -2,18 +2,13 @@ package rawdb
 
 import (
 	"encoding/binary"
-	"fmt"
-	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/consensus/serenity"
-	rawdb2 "github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
-	ssz "github.com/prysmaticlabs/fastssz"
 )
 
 func EncodeNumber(n uint64) []byte {
@@ -38,24 +33,24 @@ func ReadBeaconState(tx kv.Getter, slot uint64) (*state.BeaconState, error) {
 	if err != nil {
 		return nil, err
 	}
-	bellatrixState := &cltypes.BeaconStateBellatrix{}
+	state := &state.BeaconState{}
 
 	if len(data) == 0 {
 		return nil, nil
 	}
 
-	if err := utils.DecodeSSZSnappy(bellatrixState, data); err != nil {
+	if err := utils.DecodeSSZSnappy(state, data); err != nil {
 		return nil, err
 	}
 
-	return state.FromBellatrixState(bellatrixState), nil
+	return state, nil
 }
 
 func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error {
 	key := make([]byte, 4)
 	binary.BigEndian.PutUint32(key, uint32(update.SignatureSlot/8192))
 
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -63,7 +58,7 @@ func WriteLightClientUpdate(tx kv.RwTx, update *cltypes.LightClientUpdate) error
 }
 
 func WriteLightClientFinalityUpdate(tx kv.RwTx, update *cltypes.LightClientFinalityUpdate) error {
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -71,7 +66,7 @@ func WriteLightClientFinalityUpdate(tx kv.RwTx, update *cltypes.LightClientFinal
 }
 
 func WriteLightClientOptimisticUpdate(tx kv.RwTx, update *cltypes.LightClientOptimisticUpdate) error {
-	encoded, err := update.MarshalSSZ()
+	encoded, err := update.EncodeSSZ(nil)
 	if err != nil {
 		return err
 	}
@@ -87,7 +82,7 @@ func ReadLightClientUpdate(tx kv.RwTx, period uint32) (*cltypes.LightClientUpdat
 		return nil, err
 	}
 	update := &cltypes.LightClientUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
@@ -102,7 +97,7 @@ func ReadLightClientFinalityUpdate(tx kv.Tx) (*cltypes.LightClientFinalityUpdate
 		return nil, nil
 	}
 	update := &cltypes.LightClientFinalityUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
@@ -117,18 +112,10 @@ func ReadLightClientOptimisticUpdate(tx kv.Tx) (*cltypes.LightClientOptimisticUp
 		return nil, nil
 	}
 	update := &cltypes.LightClientOptimisticUpdate{}
-	if err = update.UnmarshalSSZ(encoded); err != nil {
+	if err = update.DecodeSSZ(encoded); err != nil {
 		return nil, err
 	}
 	return update, nil
-}
-
-func EncodeSSZ(prefix []byte, object ssz.Marshaler) ([]byte, error) {
-	enc, err := object.MarshalSSZ()
-	if err != nil {
-		return nil, err
-	}
-	return append(prefix, enc...), nil
 }
 
 // Bytes2FromLength convert length to 2 bytes repressentation
@@ -180,127 +167,33 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 	return tx.Put(kv.BeaconBlocks, key, value)
 }
 
-func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	signedBlock, _, _, _, err := ReadBeaconBlockForStorage(tx, slot)
+func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, uint64, libcommon.Hash, error) {
+	signedBlock, eth1Number, eth1Hash, _, err := ReadBeaconBlockForStorage(tx, slot)
 	if err != nil {
-		return nil, err
+		return nil, 0, libcommon.Hash{}, err
 	}
 	if signedBlock == nil {
-		return nil, nil
+		return nil, 0, libcommon.Hash{}, err
 	}
 
 	attestations, err := ReadAttestations(tx, slot)
 	if err != nil {
-		return nil, err
+		return nil, 0, libcommon.Hash{}, err
 	}
 	signedBlock.Block.Body.Attestations = attestations
-	return signedBlock, err
-	/*
-		// Process payload
-		header := rawdb2.ReadHeader(tx, hash, blockNumber)
-		if header == nil {
-			beaconBlock.Body = beaconBody
-			signedBeaconBlock.Block = beaconBlock
-			return signedBeaconBlock, nil // Header is empty so avoid writing EL data.
-		}
-		// Pack basic
-		payload := &cltypes.ExecutionPayload{
-			ParentHash:   header.ParentHash,
-			FeeRecipient: header.Coinbase,
-			StateRoot:    header.Root,
-			ReceiptsRoot: header.ReceiptHash,
-			LogsBloom:    header.Bloom[:],
-			PrevRandao:   header.MixDigest,
-			BlockNumber:  header.Number.Uint64(),
-			GasLimit:     header.GasLimit,
-			GasUsed:      header.GasUsed,
-			Timestamp:    header.Time,
-			ExtraData:    header.Extra,
-			BlockHash:    hash,
-		}
-		// TODO: pack back the baseFee
-		if header.BaseFee != nil {
-			baseFeeBytes := header.BaseFee.Bytes()
-			payload.BaseFeePerGas = make([]byte, 32)
-			for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-				baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-			}
-			copy(payload.BaseFeePerGas, baseFeeBytes)
-		}
-
-		body, err := rawdb2.ReadStorageBody(tx, hash, blockNumber)
-		if err != nil {
-			return nil, err
-		}
-		if err := tx.ForAmount(kv.EthTx, common2.EncodeTs(body.BaseTxId+1), body.TxAmount-2, func(k, v []byte) error {
-			payload.Transactions = append(payload.Transactions, v)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-		//
-		// Pack types
-		beaconBody.ExecutionPayload = payload
-		beaconBlock.Body = beaconBody
-		signedBeaconBlock.Block = beaconBlock
-		return signedBeaconBlock, nil*/
+	return signedBlock, eth1Number, eth1Hash, err
 }
 
-func ReadBeaconBlockForStorage(tx kv.Getter, slot uint64) (block *cltypes.SignedBeaconBlock, eth1Number uint64, eth1Hash common.Hash, eth2Hash common.Hash, err error) {
+func ReadBeaconBlockForStorage(tx kv.Getter, slot uint64) (block *cltypes.SignedBeaconBlock, eth1Number uint64, eth1Hash libcommon.Hash, eth2Hash libcommon.Hash, err error) {
 	encodedBeaconBlock, err := tx.GetOne(kv.BeaconBlocks, EncodeNumber(slot))
 	if err != nil {
-		return nil, 0, common.Hash{}, common.Hash{}, err
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, err
 	}
 	if len(encodedBeaconBlock) == 0 {
-		return nil, 0, common.Hash{}, common.Hash{}, nil
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, nil
 	}
 	if len(encodedBeaconBlock) == 0 {
-		return nil, 0, common.Hash{}, common.Hash{}, nil
+		return nil, 0, libcommon.Hash{}, libcommon.Hash{}, nil
 	}
 	return cltypes.DecodeBeaconBlockForStorage(encodedBeaconBlock)
-}
-
-// WriteExecutionPayload Writes Execution Payload in EL format.. [Will be removed soonish]
-func WriteExecutionPayload(tx kv.RwTx, payload *cltypes.ExecutionPayload) error {
-	header := &types.Header{
-		ParentHash:  common.BytesToHash(payload.ParentHash[:]),
-		UncleHash:   types.EmptyUncleHash,
-		Coinbase:    common.BytesToAddress(payload.FeeRecipient[:]),
-		Root:        common.BytesToHash(payload.StateRoot[:]),
-		TxHash:      types.DeriveSha(types.BinaryTransactions(payload.Transactions)),
-		ReceiptHash: common.BytesToHash(payload.ReceiptsRoot[:]),
-		Bloom:       types.BytesToBloom(payload.LogsBloom),
-		Difficulty:  serenity.SerenityDifficulty,
-		Number:      big.NewInt(int64(payload.BlockNumber)),
-		GasLimit:    payload.GasLimit,
-		GasUsed:     payload.GasUsed,
-		Time:        payload.Timestamp,
-		Extra:       payload.ExtraData,
-		MixDigest:   common.BytesToHash(payload.PrevRandao[:]),
-		Nonce:       serenity.SerenityNonce,
-	}
-
-	if len(payload.BaseFeePerGas) > 0 {
-		baseFeeBytes := common.CopyBytes(payload.BaseFeePerGas)
-		for len(baseFeeBytes) > 0 && baseFeeBytes[len(baseFeeBytes)-1] == 0 {
-			baseFeeBytes = baseFeeBytes[:len(baseFeeBytes)-1]
-		}
-		for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-			baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-		}
-		header.BaseFee = new(big.Int).SetBytes(baseFeeBytes)
-	}
-	hash := header.Hash()
-	// Sanity check to see if we decoded the header correctly
-	if payload.BlockHash != hash {
-		return fmt.Errorf("mismatching header hashes %x != %x", payload.BlockHash, hash)
-	}
-
-	// Write header and body in ETH1 storage
-	rawdb2.WriteHeader(tx, header)
-	_, _, err := rawdb2.WriteRawBodyIfNotExists(tx, hash, header.Number.Uint64(), &types.RawBody{
-		Transactions: payload.Transactions,
-	})
-
-	return err
 }

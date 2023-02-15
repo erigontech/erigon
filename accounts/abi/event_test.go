@@ -25,10 +25,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/crypto"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/crypto"
 )
 
 var jsonEventTransfer = []byte(`{
@@ -83,14 +85,14 @@ var mixedCaseData1 = "0000000000000000000000000000000000000000000000000000000000
 func TestEventId(t *testing.T) {
 	var table = []struct {
 		definition   string
-		expectations map[string]common.Hash
+		expectations map[string]libcommon.Hash
 	}{
 		{
 			definition: `[
 			{ "type" : "event", "name" : "Balance", "inputs": [{ "name" : "in", "type": "uint256" }] },
 			{ "type" : "event", "name" : "Check", "inputs": [{ "name" : "t", "type": "address" }, { "name": "b", "type": "uint256" }] }
 			]`,
-			expectations: map[string]common.Hash{
+			expectations: map[string]libcommon.Hash{
 				"Balance": crypto.Keccak256Hash([]byte("Balance(uint256)")),
 				"Check":   crypto.Keccak256Hash([]byte("Check(address,uint256)")),
 			},
@@ -189,7 +191,7 @@ func TestEventTupleUnpack(t *testing.T) {
 	}
 
 	type EventPledge struct {
-		Who      common.Address
+		Who      libcommon.Address
 		Wad      *big.Int
 		Currency [3]byte
 	}
@@ -210,7 +212,7 @@ func TestEventTupleUnpack(t *testing.T) {
 	bigintExpected := big.NewInt(1000000)
 	bigintExpected2 := big.NewInt(2218516807680)
 	bigintExpected3 := big.NewInt(1000001)
-	addr := common.HexToAddress("0x00Ce0d46d924CC8437c806721496599FC3FFA268")
+	addr := libcommon.HexToAddress("0x00Ce0d46d924CC8437c806721496599FC3FFA268")
 	var testCases = []struct {
 		data     string
 		dest     interface{}
@@ -272,7 +274,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can unpack Pledge event into structure",
 	}, {
 		pledgeData1,
-		&[]interface{}{&common.Address{}, &bigint, &[3]byte{}},
+		&[]interface{}{&libcommon.Address{}, &bigint, &[3]byte{}},
 		&[]interface{}{
 			&addr,
 			&bigintExpected2,
@@ -282,7 +284,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can unpack Pledge event into slice",
 	}, {
 		pledgeData1,
-		&[3]interface{}{&common.Address{}, &bigint, &[3]byte{}},
+		&[3]interface{}{&libcommon.Address{}, &bigint, &[3]byte{}},
 		&[3]interface{}{
 			&addr,
 			&bigintExpected2,
@@ -306,7 +308,7 @@ func TestEventTupleUnpack(t *testing.T) {
 		"Can not unpack Pledge event into struct with wrong filed types",
 	}, {
 		pledgeData1,
-		&[]interface{}{common.Address{}, new(big.Int)},
+		&[]interface{}{libcommon.Address{}, new(big.Int)},
 		&[]interface{}{},
 		jsonEventPledge,
 		"abi: insufficient number of arguments for unpack, want 3, got 2",

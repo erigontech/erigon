@@ -5,21 +5,25 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	commonold "github.com/ledgerwatch/erigon/common"
-	ecom "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -38,11 +42,9 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -63,7 +65,7 @@ type WithSnapshots interface {
 }
 
 type headerDownloader interface {
-	ReportBadHeaderPoS(badHeader, lastValidAncestor ecom.Hash)
+	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
 type ExecuteBlockCfg struct {
@@ -71,7 +73,7 @@ type ExecuteBlockCfg struct {
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
 	changeSetHook ChangeSetHook
-	chainConfig   *params.ChainConfig
+	chainConfig   *chain.Config
 	engine        consensus.Engine
 	vmConfig      *vm.Config
 	badBlockHalt  bool
@@ -92,7 +94,7 @@ func StageExecuteBlocksCfg(
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
 	changeSetHook ChangeSetHook,
-	chainConfig *params.ChainConfig,
+	chainConfig *chain.Config,
 	engine consensus.Engine,
 	vmConfig *vm.Config,
 	accumulator *shards.Accumulator,
@@ -147,12 +149,12 @@ func executeBlock(
 	}
 
 	// where the magic happens
-	getHeader := func(hash commonold.Hash, number uint64) *types.Header {
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
 		return h
 	}
 
-	getTracer := func(txIndex int, txHash ecom.Hash) (vm.EVMLogger, error) {
+	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
 		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
@@ -257,6 +259,9 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 			if err := ReconstituteState(ctx, s, cfg.dirs, reconWorkers, cfg.batchSize, cfg.db, cfg.blockReader, log.New(), cfg.agg, cfg.engine, cfg.chainConfig, cfg.genesis); err != nil {
 				return err
 			}
+			if dbg.StopAfterReconst() {
+				os.Exit(1)
+			}
 		}
 	}
 
@@ -291,16 +296,16 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 	if err != nil {
 		return 0, false, err
 	}
-	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumMinimax())
+	reconToBlock := cmp.Min(sendersProgress, agg.EndTxNumFrozenAndIndexed())
 	if tx == nil {
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
-			ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
+			ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
 			return err
 		}); err != nil {
 			return
 		}
 	} else {
-		ok, n, err = rawdb.TxNums.FindBlockNum(tx, reconToBlock)
+		ok, n, err = rawdbv3.TxNums.FindBlockNum(tx, reconToBlock)
 	}
 	return
 }
@@ -309,7 +314,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	cfg.agg.SetLogPrefix(s.LogPrefix())
 	rs := state.NewStateV3()
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	txNum, err := rawdb.TxNums.Min(tx, u.UnwindPoint+1)
+	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
@@ -614,7 +619,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 
 				// Fetch the code hash
 				recoverCodeHashPlain(&acc, tx, k)
-				var address commonold.Address
+				var address common.Address
 				copy(address[:], k)
 
 				// cleanup contract code bucket
@@ -642,7 +647,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 				}
 			} else {
 				if accumulator != nil {
-					var address commonold.Address
+					var address common.Address
 					copy(address[:], k)
 					accumulator.DeleteAccount(address)
 				}
@@ -653,9 +658,9 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 			return nil
 		}
 		if accumulator != nil {
-			var address commonold.Address
+			var address common.Address
 			var incarnation uint64
-			var location commonold.Hash
+			var location common.Hash
 			copy(address[:], k[:length.Addr])
 			incarnation = binary.BigEndian.Uint64(k[length.Addr:])
 			copy(location[:], k[length.Addr+length.Incarnation:])
@@ -692,7 +697,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 	}
 
 	// Truncate CallTraceSet
-	keyStart := common.EncodeTs(u.UnwindPoint + 1)
+	keyStart := hexutility.EncodeTs(u.UnwindPoint + 1)
 	c, err := tx.RwCursorDupSort(kv.CallTraceSet)
 	if err != nil {
 		return err
@@ -712,7 +717,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, tx kv.RwTx, ctx context
 }
 
 func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
-	var address commonold.Address
+	var address common.Address
 	copy(address[:], key)
 	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 		if codeHash, err2 := db.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(address[:], acc.Incarnation)); err2 == nil {
@@ -738,11 +743,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if initialCycle {
-			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		} else {
-			if err = cfg.agg.PruneWithTiemout(ctx, 500*time.Millisecond); err != nil { // prune part of retired data, before commit
+			if err = cfg.agg.PruneWithTiemout(ctx, 1*time.Second); err != nil { // prune part of retired data, before commit
 				return err
 			}
 		}
