@@ -98,9 +98,6 @@ func (b *BeaconState) GetTotalActiveBalance() uint64 {
 	if b.totalActiveBalanceCache == nil {
 		b._refreshActiveBalances()
 	}
-	if *b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
-		return b.beaconConfig.EffectiveBalanceIncrement
-	}
 	return *b.totalActiveBalanceCache
 }
 
@@ -263,10 +260,7 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseRewardPerIncrement() uint64 {
-	if b.totalActiveBalanceCache == nil {
-		b._refreshActiveBalances()
-	}
-	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.GetTotalActiveBalance()
+	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
