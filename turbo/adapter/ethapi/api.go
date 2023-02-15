@@ -280,6 +280,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
+		result["withdrawals"] = []string{}
 	}
 
 	return result
