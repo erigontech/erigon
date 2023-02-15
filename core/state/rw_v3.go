@@ -35,7 +35,7 @@ type StateV3 struct {
 	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common2.Address]uint64
-	triggerLock  sync.RWMutex
+	triggerLock  sync.Mutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
 	changes      map[string]*btree2.Map[string, []byte]
