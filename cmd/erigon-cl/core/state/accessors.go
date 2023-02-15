@@ -208,7 +208,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
-		return 0, fmt.Errorf("must have >0 indices")
+		return 0, nil
 	}
 	maxRandomByte := uint64(1<<8 - 1)
 	i := uint64(0)
