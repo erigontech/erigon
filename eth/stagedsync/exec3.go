@@ -228,27 +228,43 @@ func ExecV3(ctx context.Context,
 				return ctx.Err()
 			default:
 			}
-		Drain:
-			for {
-				select {
-				case txTask, ok := <-resultCh:
-					if !ok {
-						return nil
-					}
-					if txTask.BlockNum > lastBlockNum {
-						if lastBlockNum > 0 {
-							core.BlockExecutionTimer.UpdateDuration(t)
-						}
-						lastBlockNum = txTask.BlockNum
-						t = time.Now()
-					}
-					rwsLock.Lock()
-					resultsSize.Add(txTask.ResultsSize)
-					heap.Push(rws, txTask)
-					rwsLock.Unlock()
-				default:
-					break Drain
+
+			select {
+			case txTask, ok := <-resultCh:
+				if !ok {
+					return nil
 				}
+				if txTask.BlockNum > lastBlockNum {
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = txTask.BlockNum
+					t = time.Now()
+				}
+				rwsLock.Lock()
+				resultsSize.Add(txTask.ResultsSize)
+				heap.Push(rws, txTask)
+			Drain:
+				for {
+					select {
+					case txTask, ok := <-resultCh:
+						if !ok {
+							return nil
+						}
+						if txTask.BlockNum > lastBlockNum {
+							if lastBlockNum > 0 {
+								core.BlockExecutionTimer.UpdateDuration(t)
+							}
+							lastBlockNum = txTask.BlockNum
+							t = time.Now()
+						}
+						resultsSize.Add(txTask.ResultsSize)
+						heap.Push(rws, txTask)
+					default:
+						break Drain
+					}
+				}
+				rwsLock.Unlock()
 			}
 
 			if err := func() error {
