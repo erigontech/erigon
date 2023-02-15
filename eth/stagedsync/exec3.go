@@ -249,7 +249,7 @@ func ExecV3(ctx context.Context,
 					select {
 					case txTask, ok := <-resultCh:
 						if !ok {
-							return nil
+							break Drain
 						}
 						if txTask.BlockNum > lastBlockNum {
 							if lastBlockNum > 0 {
