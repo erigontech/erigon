@@ -196,7 +196,7 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
-	var rwsLock sync.RWMutex
+	var rwsLock sync.Mutex
 	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	commitThreshold := batchSize.Bytes()
@@ -305,9 +305,9 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
-					rwsLock.RLock()
+					rwsLock.Lock()
 					rwsLen := rws.Len()
-					rwsLock.RUnlock()
+					rwsLock.Unlock()
 
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
@@ -542,11 +542,6 @@ Loop:
 
 			func() {
 				needWait := rs.QueueLen() > queueSize
-				if !needWait {
-					rwsLock.RLock()
-					needWait = rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
-					rwsLock.RUnlock()
-				}
 				if !needWait {
 					return
 				}

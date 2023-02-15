@@ -62,5 +62,5 @@ type HttpCfg struct {
 	LogDirPath      string
 
 	BatchLimit      int // Maximum number of requests in a batch
-	ReturnDataLimit int // Maximum number of bytes retutned from calls (like eth_call)
+	ReturnDataLimit int // Maximum number of bytes returned from calls (like eth_call)
 }

@@ -403,6 +403,10 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 }
 
 func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+	if dbg.DiscardHistory() {
+		return nil
+	}
+
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
 			return err
