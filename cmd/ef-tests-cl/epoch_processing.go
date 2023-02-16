@@ -72,7 +72,7 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 }
 
 var effectiveBalancesUpdateTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessRewardsAndPenalties()
+	return s.ProcessEffectiveBalanceUpdates()
 })
 
 var eth1DataResetTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
