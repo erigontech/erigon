@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -47,10 +48,8 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	currentEpoch := b.Epoch()
 	exitQueueEpoch := b.ComputeActivationExitEpoch(currentEpoch)
 	for _, v := range b.validators {
-		if v.ExitEpoch != b.beaconConfig.FarFutureEpoch {
-			if v.ExitEpoch > exitQueueEpoch {
-				exitQueueEpoch = v.ExitEpoch
-			}
+		if v.ExitEpoch != b.beaconConfig.FarFutureEpoch && v.ExitEpoch > exitQueueEpoch {
+			exitQueueEpoch = v.ExitEpoch
 		}
 	}
 
@@ -65,7 +64,11 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	}
 
 	validator.ExitEpoch = exitQueueEpoch
-	validator.WithdrawableEpoch = exitQueueEpoch + b.beaconConfig.MinValidatorWithdrawabilityDelay
+	var overflow bool
+	if validator.WithdrawableEpoch, overflow = math.SafeAdd(validator.ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
+		return fmt.Errorf("withdrawable epoch is too big")
+	}
+
 	return b.SetValidatorAt(int(index), &validator)
 }
 
