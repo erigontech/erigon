@@ -45,7 +45,7 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 		}
 
 		// Make up state transistor
-		s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, true)
+		s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 		if err := f(s); err != nil {
 			if isErrExpected {
 				return nil
