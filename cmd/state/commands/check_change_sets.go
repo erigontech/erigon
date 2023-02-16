@@ -32,6 +32,7 @@ import (
 var (
 	historyfile string
 	nocheck     bool
+	transactionsV3 bool
 )
 
 func init() {
@@ -40,6 +41,7 @@ func init() {
 	withSnapshotBlocks(checkChangeSetsCmd)
 	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as <datadir>/erion/chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
+	checkChangeSetsCmd.Flags().BoolVar(&transactionsV3, "experimental.transactions.v3", false, "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }
 
@@ -48,7 +50,7 @@ var checkChangeSetsCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New()
-		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, false)
+		return CheckChangeSets(genesis, logger, block, chaindata, historyfile, nocheck, transactionsV3)
 	},
 }
 
