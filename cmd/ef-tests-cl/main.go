@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	testDir = flag.String("test-dir", "tests", "directory of consensus tests")
-	//testNameFlag = flag.String("test-name", "", "name of test to run")
+	testDir      = flag.String("test-dir", "tests", "directory of consensus tests")
+	testNameFlag = flag.String("case", "", "name of test to run")
 )
 
 var supportedVersions = []string{"altair", "bellatrix"}
@@ -55,12 +55,14 @@ func iterateOverTests(dir, p string, depth int) {
 		}
 
 		if !testType.IsDir() {
-			if ok, err := executeTest(p); err != nil {
-				log.Warn("Test Failed", "err", err, "test", p)
-				failed++
-			} else {
-				if ok {
-					passed++
+			if *testNameFlag == "" || *testNameFlag == p {
+				if ok, err := executeTest(p); err != nil {
+					log.Warn("Test Failed", "err", err, "test", p)
+					failed++
+				} else {
+					if ok {
+						passed++
+					}
 				}
 			}
 			return
