@@ -35,6 +35,8 @@ const (
 	MainnetNetwork NetworkType = 1
 	GoerliNetwork  NetworkType = 5
 	SepoliaNetwork NetworkType = 11155111
+	GnosisNetwork  NetworkType = 100
+	ChiadoNetwork  NetworkType = 10200
 )
 
 const (
@@ -80,6 +82,27 @@ var (
 		"enr:-KG4QE5OIg5ThTjkzrlVF32WT_-XT14WeJtIz2zoTqLLjQhYAmJlnk4ItSoH41_2x0RX0wTFIe5GgjRzU2u7Q1fN4vADhGV0aDKQqP7o7pAAAHAyAAAAAAAAAIJpZIJ2NIJpcISlFsStiXNlY3AyNTZrMaEC-Rrd_bBZwhKpXzFCrStKp1q_HmGOewxY3KwM8ofAj_ODdGNwgiMog3VkcIIjKA",
 		// Teku boot node
 		"enr:-Ly4QFoZTWR8ulxGVsWydTNGdwEESueIdj-wB6UmmjUcm-AOPxnQi7wprzwcdo7-1jBW_JxELlUKJdJES8TDsbl1EdNlh2F0dG5ldHOI__78_v2bsV-EZXRoMpA2-lATkAAAcf__________gmlkgnY0gmlwhBLYJjGJc2VjcDI1NmsxoQI0gujXac9rMAb48NtMqtSTyHIeNYlpjkbYpWJw46PmYYhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+	}
+
+	GnosisBootstrapNodes = []string{
+		"enr:-Ly4QMU1y81COwm1VZgxGF4_eZ21ub9-GHF6dXZ29aEJ0oZpcV2Rysw-viaEKfpcpu9ZarILJLxFZjcKOjE0Sybs3MQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANLnx-Jc2VjcDI1NmsxoQKoaYT8I-wf2I_f_ii6EgoSSXj5T3bhiDyW-7ZLsY3T64hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QBf76jLiCA_pDXoZjhyRbuwzFOscFY-MIKkPnmHPQbvaKhIDZutfe38G9ibzgQP0RKrTo3vcWOy4hf_8wOZ-U5MBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhBLGgjaJc2VjcDI1NmsxoQLGeo0Q4lDvxIjHjnkAqEuETTaFIjsNrEcSpdDhcHXWFYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QLjZUWdqUO_RwyDqCAccIK5-MbLRD6A2c7oBuVbBgBnWDkEf0UKJVAaJqi2pO101WVQQLYSnYgz1Q3pRhYdrlFoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhANA8sSJc2VjcDI1NmsxoQK4TC_EK1jSs0VVPUpOjIo1rhJmff2SLBPFOWSXMwdLVYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QKwX2rTFtKWKQHSGQFhquxsxL1jewO8JB1MG-jgHqAZVFWxnb3yMoQqnYSV1bk25-_jiLuhIulxar3RBWXEDm6EBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhAN-qZeJc2VjcDI1NmsxoQI7EPGMpecl0QofLp4Wy_lYNCCChUFEH6kY7k-oBGkPFIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QPoChSQTleJROee1-k-4HOEgKqL9kLksE-tEiVqcY9kwF9V53aBg-MruD7Yx4Aks3LAeJpKXAS4ntMrIdqvQYc8Ch2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhGsWBHiJc2VjcDI1NmsxoQKwGQrwOSBJB_DtQOkFZVAY4YQfMAbUVxFpL5WgrzEddYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QBbaKRSX4SncCOxTTL611Kxlz-zYFrIn-k_63jGIPK_wbvFghVUHJICPCxufgTX5h79jvgfPr-2hEEQEdziGQ5MCh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhAMazo6Jc2VjcDI1NmsxoQKt-kbM9isuWp8djhyEq6-4MLv1Sy7dOXeMOMdPgwu9LohzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QKJ5BzgFyJ6BaTlGY0C8ROzl508U3GA6qxdG5Gn2hxdke6nQO187pYlLvhp82Dez4PQn436Fts1F0WAm-_5l2LACh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhA-YLVKJc2VjcDI1NmsxoQI8_Lvr6p_TkcAu8KorKacfUEnoOon0tdO0qWhriPdBP4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QJMtoiX2bPnVbiQOJCLbtUlqdqZk7kCJQln_W1bp1vOHcxWowE-iMXkKC4_uOb0o73wAW71WYi80Dlsg-7a5wiICh2F0dG5ldHOIAAAAAAAAAACEZXRoMpCCS-QxAgAAZP__________gmlkgnY0gmlwhDbP3KmJc2VjcDI1NmsxoQNvcfKYUqcemLFlpKxl7JcQJwQ3L9unYL44gY2aEiRnI4hzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+	}
+	ChiadoBootstrapNodes = []string{
+		"enr:-L64QOijsdi9aVIawMb5h5PWueaPM9Ai6P17GNPFlHzz7MGJQ8tFMdYrEx8WQitNKLG924g2Q9cCdzg54M0UtKa3QIKCMxaHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5AaWYlzZWNwMjU2azGhA8CjTkD4m1s8FbKCN18LgqlYcE65jrT148vFtwd9U62SiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-L64QKYKGQj5ybkfBxyFU5IEVzP7oJkGHJlie4W8BCGAYEi4P0mmMksaasiYF789mVW_AxYVNVFUjg9CyzmdvpyWQ1KCMlmHYXR0bmV0c4j__________4RldGgykDE2cEMCAABv__________-CaWSCdjSCaXCEi5CtNolzZWNwMjU2azGhAuA7BAwIijy1z81AO9nz_MOukA1ER68rGA67PYQ5pF1qiHN5bmNuZXRzD4N0Y3CCIyiDdWRwgiMo",
+		"enr:-Ly4QJJUnV9BxP_rw2Bv7E9iyw4sYS2b4OQZIf4Mu_cA6FljJvOeSTQiCUpbZhZjR4R0VseBhdTzrLrlHrAuu_OeZqgJh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGnOJc2VjcDI1NmsxoQPT_u3IjDtB2r-nveH5DhUmlM8F2IgLyxhmwmqW4L5k3ohzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		"enr:-MK4QCkOyqOTPX1_-F-5XVFjPclDUc0fj3EeR8FJ5-hZjv6ARuGlFspM0DtioHn1r6YPUXkOg2g3x6EbeeKdsrvVBYmGAYQKrixeh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQGlWJc2VjcDI1NmsxoQKdW3-DgLExBkpLGMRtuM88wW_gZkC7Yeg0stYDTrlynYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA==",
+		"enr:-Ly4QLYLNqrjvSxD3lpAPBUNlxa6cIbe79JqLZLFcZZjWoCjZcw-85agLUErHiygG2weRSCLnd5V460qTbLbwJQsfZkoh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhKq7mu-Jc2VjcDI1NmsxoQP900YAYa9kdvzlSKGjVo-F3XVzATjOYp3BsjLjSophO4hzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 	}
 )
 
@@ -173,6 +196,46 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		ContractDeploymentBlock:         4367322,
 		BootNodes:                       GoerliBootstrapNodes,
 	},
+
+	GnosisNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         19475089,
+		BootNodes:                       GnosisBootstrapNodes,
+	},
+
+	ChiadoNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         155530,
+		BootNodes:                       ChiadoBootstrapNodes,
+	},
 }
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
@@ -187,6 +250,14 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	GoerliNetwork: {
 		GenesisValidatorRoot: libcommon.HexToHash("043db0d9a83813551ee2f33450d23797757d430911a9320530ad8a0eabc43efb"),
 		GenesisTime:          1616508000,
+	},
+	GnosisNetwork: {
+		GenesisValidatorRoot: libcommon.HexToHash("f5dcb5564e829aab27264b9becd5dfaa017085611224cb3036f573368dbb9d47"),
+		GenesisTime:          1638993340,
+	},
+	ChiadoNetwork: {
+		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
+		GenesisTime:          1665396300,
 	},
 }
 
@@ -208,6 +279,13 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	SepoliaNetwork: {
 		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+	},
+	GnosisNetwork: {
+		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
+	},
+	ChiadoNetwork: {
+		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -716,11 +794,65 @@ func goerliConfig() BeaconChainConfig {
 	return cfg
 }
 
+func gnosisConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.MinGenesisTime = 1638968400
+	cfg.MinGenesisActiveValidatorCount = 4096
+	cfg.GenesisDelay = 6000
+	cfg.SecondsPerSlot = 5
+	cfg.Eth1FollowDistance = 1024
+	cfg.ConfigName = "gnosis"
+	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.GenesisForkVersion = 0x00000064
+	cfg.SecondsPerETH1Block = 6
+	cfg.DepositChainID = uint64(GnosisNetwork)
+	cfg.DepositNetworkID = uint64(GnosisNetwork)
+	cfg.AltairForkEpoch = 512
+	cfg.AltairForkVersion = 0x01000064
+	cfg.BellatrixForkEpoch = 385536
+	cfg.BellatrixForkVersion = 0x02000064
+	cfg.TerminalTotalDifficulty = "8626000000000000000000058750000000000000000000"
+	cfg.DepositContractAddress = "0x0B98057eA310F4d31F2a452B414647007d1645d9"
+	cfg.BaseRewardFactor = 25
+	cfg.SlotsPerEpoch = 16
+	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
+func chiadoConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.MinGenesisTime = 1665396000
+	cfg.MinGenesisActiveValidatorCount = 6000
+	cfg.GenesisDelay = 300
+	cfg.SecondsPerSlot = 5
+	cfg.Eth1FollowDistance = 1024
+	cfg.ConfigName = "chiado"
+	cfg.ChurnLimitQuotient = 1 << 12
+	cfg.GenesisForkVersion = 0x0000006f
+	cfg.SecondsPerETH1Block = 6
+	cfg.DepositChainID = uint64(ChiadoNetwork)
+	cfg.DepositNetworkID = uint64(ChiadoNetwork)
+	cfg.AltairForkEpoch = 90
+	cfg.AltairForkVersion = 0x0100006f
+	cfg.BellatrixForkEpoch = 180
+	cfg.BellatrixForkVersion = 0x0200006f
+	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
+	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
+	cfg.BaseRewardFactor = 25
+	cfg.SlotsPerEpoch = 16
+	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	GoerliNetwork:  goerliConfig(),
+	GnosisNetwork:  gnosisConfig(),
+	ChiadoNetwork:  chiadoConfig(),
 }
 
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
@@ -741,6 +873,12 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	case networkname.SepoliaChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(SepoliaNetwork)
 		return genesisCfg, networkCfg, beaconCfg, SepoliaNetwork, nil
+	case networkname.GnosisChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(GnosisNetwork)
+		return genesisCfg, networkCfg, beaconCfg, GnosisNetwork, nil
+	case networkname.ChiadoChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
+		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
 	default:
 		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
@@ -761,6 +899,8 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 1 is Ethereum Mainnet
 // 5 is Goerli Testnet
 // 11155111 is Sepolia Testnet
+// 100 is Gnosis Mainnet
+// 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
-	return id == 1 || id == 5 || id == 11155111
+	return id == 1 || id == 5 || id == 11155111 || id == 100 || id == 10200
 }
