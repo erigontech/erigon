@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
@@ -55,16 +56,18 @@ func iterateOverTests(dir, p string, depth int) {
 		}
 
 		if !testType.IsDir() {
-			if *testNameFlag == "" || *testNameFlag == p {
-				if ok, err := executeTest(p); err != nil {
-					log.Warn("Test Failed", "err", err, "test", p)
-					failed++
-				} else {
-					if ok {
-						passed++
-					}
+			if *testNameFlag != "" && !strings.Contains(p, *testNameFlag) {
+				return
+			}
+			if ok, err := executeTest(p); err != nil {
+				log.Warn("Test Failed", "err", err, "test", p)
+				failed++
+			} else {
+				if ok {
+					passed++
 				}
 			}
+
 			return
 		} else {
 			iterateOverTests(testType.Name(), path.Join(p, testType.Name()), depth+1)
