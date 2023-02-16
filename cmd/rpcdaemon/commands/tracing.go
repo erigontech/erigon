@@ -123,7 +123,6 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		config.BorTx = newBoolPtr(false)
 		if borTx != nil && idx == len(txns)-1 {
 			if *config.BorTraceEnabled {
 				config.BorTx = newBoolPtr(true)

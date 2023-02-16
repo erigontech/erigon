@@ -188,7 +188,7 @@ func TraceTx(
 	}
 
 	var result *core.ExecutionResult
-	if *config.BorTx {
+	if config.BorTx != nil && *config.BorTx {
 		callmsg := prepareCallMessage(message)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
 	} else {
