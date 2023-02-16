@@ -45,7 +45,7 @@ func (s *StateTransistor) processSyncAggregate(sync *cltypes.SyncAggregate) ([][
 		currByte := sync.SyncCommiteeBits[i/8]
 		if (currByte & (1 << bit)) > 0 {
 			votedKeys = append(votedKeys, committeeKeys[i][:])
-			if err := s.state.IncreaseBalance(int(vIdx), participantReward); err != nil {
+			if err := s.state.IncreaseBalance(vIdx, participantReward); err != nil {
 				return nil, err
 			}
 			earnedProposerReward += proposerReward
@@ -55,7 +55,7 @@ func (s *StateTransistor) processSyncAggregate(sync *cltypes.SyncAggregate) ([][
 			}
 		}
 	}
-	return votedKeys, s.state.IncreaseBalance(int(proposerIndex), earnedProposerReward)
+	return votedKeys, s.state.IncreaseBalance(proposerIndex, earnedProposerReward)
 }
 
 func (s *StateTransistor) ProcessSyncAggregate(sync *cltypes.SyncAggregate) error {
@@ -66,7 +66,7 @@ func (s *StateTransistor) ProcessSyncAggregate(sync *cltypes.SyncAggregate) erro
 	if !s.noValidate {
 		previousSlot := s.state.PreviousSlot()
 
-		domain, err := fork.Domain(s.state.Fork(), previousSlot/s.beaconConfig.SlotsPerEpoch, s.beaconConfig.DomainSyncCommittee, s.state.GenesisValidatorsRoot())
+		domain, err := fork.Domain(s.state.Fork(), s.state.GetEpochAtSlot(previousSlot), s.beaconConfig.DomainSyncCommittee, s.state.GenesisValidatorsRoot())
 		if err != nil {
 			return nil
 		}

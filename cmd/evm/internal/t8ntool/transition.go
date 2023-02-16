@@ -282,7 +282,7 @@ func Main(ctx *cli.Context) error {
 		}
 		return h
 	}
-	db := memdb.New()
+	db := memdb.New("" /* tmpDir */)
 
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

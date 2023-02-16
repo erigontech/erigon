@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -109,13 +110,14 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		debug.Exit()
 	},
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		_ = logging2.GetLoggerCmd("downloader", cmd)
 		if err := Downloader(cmd.Context()); err != nil {
-			log.Error("Downloader", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-		return nil
 	},
 }
 
@@ -140,7 +142,7 @@ func Downloader(ctx context.Context) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 
-	version := "erigon: " + params.VersionWithCommit(params.GitCommit, "")
+	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 	cfg, err := downloadercfg2.New(dirs.Snap, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots)
 	if err != nil {
 		return err
@@ -150,7 +152,7 @@ func Downloader(ctx context.Context) error {
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
-	d, err := downloader.New(cfg)
+	d, err := downloader.New(ctx, cfg)
 	if err != nil {
 		return err
 	}

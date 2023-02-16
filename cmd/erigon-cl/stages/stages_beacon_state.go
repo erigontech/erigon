@@ -54,7 +54,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		defer tx.Rollback()
 	}
 	// Initialize the transistor
-	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, true)
+	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, false)
 
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {

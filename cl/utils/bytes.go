@@ -83,6 +83,20 @@ func DecodeSSZSnappy(dst ssz_utils.Unmarshaler, src []byte) error {
 	return nil
 }
 
+func DecodeSSZSnappyWithVersion(dst ssz_utils.Unmarshaler, src []byte, version int) error {
+	dec, err := snappy.Decode(nil, src)
+	if err != nil {
+		return err
+	}
+
+	err = dst.DecodeSSZWithVersion(dec, version)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func CompressZstd(b []byte) []byte {
 	wr, err := zstd.NewWriter(nil)
 	if err != nil {

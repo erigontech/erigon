@@ -21,13 +21,10 @@ func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Ha
 	b.genesisValidatorsRoot = genesisValidatorRoot
 }
 
-func (b *BeaconState) SetSlot(slot uint64) error {
+func (b *BeaconState) SetSlot(slot uint64) {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
-	// If there is a new slot update the active balance cache.
-	b._refreshActiveBalances()
-	// Also re-update proposer index
-	return b._updateProposerIndex()
+	b.proposerIndex = nil
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -67,7 +64,7 @@ func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) er
 	b.validators[index] = validator
 	// change in validator set means cache purging
 	b.activeValidatorsCache.Purge()
-	b._refreshActiveBalances()
+	b.totalActiveBalanceCache = nil
 	return nil
 }
 
@@ -102,12 +99,10 @@ func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64)
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
 	b.balances = append(b.balances, balance)
-	if validator.Active(b.Epoch()) {
-		b.totalActiveBalanceCache += validator.EffectiveBalance
-	}
 	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 	// change in validator set means cache purging
 	b.activeValidatorsCache.Purge()
+	b.totalActiveBalanceCache = nil
 
 }
 
@@ -183,25 +178,45 @@ func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
 	b.nextWithdrawalIndex = index
 }
 
 func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
 	b.nextWithdrawalValidatorIndex = index
 }
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
 
+func (b *BeaconState) AddHistoricalRoot(root libcommon.Hash) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.historicalRoots = append(b.historicalRoots, root)
+}
+
 func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores = append(b.inactivityScores, score)
 }
 
+func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	if index >= len(b.inactivityScores) {
+		return InvalidValidatorIndex
+	}
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
+	b.inactivityScores[index] = score
+	return nil
+}
+
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }

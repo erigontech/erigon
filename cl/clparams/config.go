@@ -105,6 +105,7 @@ type NetworkConfig struct {
 
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
 	BootNodes               []string
+	StaticPeers             []string
 }
 
 type GenesisConfig struct {
@@ -444,6 +445,14 @@ func configForkNames(b *BeaconChainConfig) map[[VersionLength]byte]string {
 	fvn[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = "bellatrix"
 	fvn[utils.Uint32ToBytes4(b.CapellaForkVersion)] = "capella"
 	return fvn
+}
+
+func (b *BeaconChainConfig) ParticipationWeights() []uint64 {
+	return []uint64{
+		b.TimelySourceWeight,
+		b.TimelyTargetWeight,
+		b.TimelyHeadWeight,
+	}
 }
 
 var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{

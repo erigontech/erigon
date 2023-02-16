@@ -62,6 +62,19 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
+	enodes := []*enode.Node{}
+	for _, node := range s.cfg.NetworkConfig.StaticPeers {
+		newNode, err := enode.Parse(enode.ValidSchemes, node)
+		if err == nil {
+			enodes = append(enodes, newNode)
+		} else {
+			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
+		}
+	}
+
+	multiAddresses := convertToMultiAddr(enodes)
+	s.connectWithAllPeers(multiAddresses)
+
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {

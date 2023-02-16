@@ -1294,7 +1294,18 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		blockFrom = 1
 	}
 	sequenceTo := map[string]uint64{}
-	for k, _, err := c.Last(); k != nil; k, _, err = c.Prev() {
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+	if k != nil {
+		n := binary.BigEndian.Uint64(k)
+		if n > 1 {
+			log.Info("TruncateBlocks", "block", n)
+			defer log.Info("TruncateBlocks done")
+		}
+	}
+	for ; k != nil; k, _, err = c.Prev() {
 		if err != nil {
 			return err
 		}
@@ -1318,6 +1329,14 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 				bucket = kv.NonCanonicalTxs
 			}
 			if err := tx.ForEach(bucket, hexutility.EncodeTs(b.BaseTxId), func(k, _ []byte) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-logEvery.C:
+					log.Info("TruncateBlocks", "block", n)
+				default:
+				}
+
 				if err := tx.Delete(bucket, k); err != nil {
 					return err
 				}
