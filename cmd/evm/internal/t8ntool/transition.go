@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -241,6 +242,20 @@ func Main(ctx *cli.Context) error {
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
+	}
+
+	if chainConfig.IsSharding(prestate.Env.Timestamp) {
+		if prestate.Env.ExcessDataGas != nil {
+			// Already set, excess data gas has precedent over parent excess data gas.
+		} else if prestate.Env.ParentExcessDataGas != nil {
+			newBlobs := 0
+			for _, tx := range txs {
+				if tx.Type() == types.BlobTxType {
+					newBlobs += len(tx.GetDataHashes())
+				}
+			}
+			prestate.Env.ExcessDataGas = misc.CalcExcessDataGas(prestate.Env.ParentExcessDataGas, newBlobs)
+		}
 	}
 
 	if env := prestate.Env; env.Difficulty == nil {

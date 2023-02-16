@@ -45,31 +45,35 @@ type ommer struct {
 
 //go:generate gencodec -type stEnv -field-override stEnvMarshaling -out gen_stenv.go
 type stEnv struct {
-	Coinbase         libcommon.Address                      `json:"currentCoinbase"   gencodec:"required"`
-	Difficulty       *big.Int                               `json:"currentDifficulty"`
-	Random           *big.Int                               `json:"currentRandom"`
-	ParentDifficulty *big.Int                               `json:"parentDifficulty"`
-	GasLimit         uint64                                 `json:"currentGasLimit"   gencodec:"required"`
-	Number           uint64                                 `json:"currentNumber"     gencodec:"required"`
-	Timestamp        uint64                                 `json:"currentTimestamp"  gencodec:"required"`
-	ParentTimestamp  uint64                                 `json:"parentTimestamp,omitempty"`
-	BlockHashes      map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
-	Ommers           []ommer                                `json:"ommers,omitempty"`
-	BaseFee          *big.Int                               `json:"currentBaseFee,omitempty"`
-	ParentUncleHash  libcommon.Hash                         `json:"parentUncleHash"`
-	Withdrawals      []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+	Coinbase            libcommon.Address                      `json:"currentCoinbase"   gencodec:"required"`
+	Difficulty          *big.Int                               `json:"currentDifficulty"`
+	Random              *big.Int                               `json:"currentRandom"`
+	ParentDifficulty    *big.Int                               `json:"parentDifficulty"`
+	ParentExcessDataGas *big.Int                               `json:"parentExcessDataGas,omitempty"`
+	GasLimit            uint64                                 `json:"currentGasLimit"   gencodec:"required"`
+	Number              uint64                                 `json:"currentNumber"     gencodec:"required"`
+	Timestamp           uint64                                 `json:"currentTimestamp"  gencodec:"required"`
+	ParentTimestamp     uint64                                 `json:"parentTimestamp,omitempty"`
+	BlockHashes         map[math.HexOrDecimal64]libcommon.Hash `json:"blockHashes,omitempty"`
+	Ommers              []ommer                                `json:"ommers,omitempty"`
+	BaseFee             *big.Int                               `json:"currentBaseFee,omitempty"`
+	ParentUncleHash     libcommon.Hash                         `json:"parentUncleHash"`
+	Withdrawals         []*types.Withdrawal                    `json:"withdrawals,omitempty"`
+	ExcessDataGas       *big.Int                               `json:"currentExcessDataGas,omitempty"`
 }
 
 type stEnvMarshaling struct {
-	Coinbase         common.UnprefixedAddress
-	Difficulty       *math.HexOrDecimal256
-	Random           *math.HexOrDecimal256
-	ParentDifficulty *math.HexOrDecimal256
-	GasLimit         math.HexOrDecimal64
-	Number           math.HexOrDecimal64
-	Timestamp        math.HexOrDecimal64
-	ParentTimestamp  math.HexOrDecimal64
-	BaseFee          *math.HexOrDecimal256
+	Coinbase            common.UnprefixedAddress
+	Difficulty          *math.HexOrDecimal256
+	Random              *math.HexOrDecimal256
+	ParentDifficulty    *math.HexOrDecimal256
+	ParentExcessDataGas *math.HexOrDecimal256
+	GasLimit            math.HexOrDecimal64
+	Number              math.HexOrDecimal64
+	Timestamp           math.HexOrDecimal64
+	ParentTimestamp     math.HexOrDecimal64
+	BaseFee             *math.HexOrDecimal256
+	ExcessDataGas       *math.HexOrDecimal256
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.RwTx, accounts core.GenesisAlloc) (*state.PlainStateReader, *state.PlainStateWriter) {
