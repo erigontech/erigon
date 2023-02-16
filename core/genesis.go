@@ -400,12 +400,6 @@ func (g *Genesis) ToBlock(tmpDir string) (*types.Block, *state.IntraBlockState, 
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
 		statedb = state.New(r)
 
-		var excessDataGas *big.Int
-		ph, _ := rawdb.ReadHeaderByHash(tx, head.ParentHash)
-		if ph != nil {
-			excessDataGas = ph.ExcessDataGas
-		}
-
 		hasConstructorAllocation := false
 		for _, account := range g.Alloc {
 			if len(account.Constructor) > 0 {
@@ -437,7 +431,7 @@ func (g *Genesis) ToBlock(tmpDir string) (*types.Block, *state.IntraBlockState, 
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, g.ExcessDataGas); err != nil {
 					return
 				}
 			}

@@ -293,9 +293,9 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 	return nil
 }
 
-func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
-	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
-}
+// func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+// 	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
+// }
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.ExecutionPayload) (*remote.EnginePayloadStatus, error) {
@@ -550,11 +550,12 @@ func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, req *remo
 		return nil, &UnknownPayloadErr
 	}
 
-	block, err := builder.Stop()
+	blockWithReceipts, err := builder.Stop()
 	if err != nil {
-		log.Error("Failed to build PoS block", "err", err)
+		log.Error("Failed to build PoS blockWithReceipts", "err", err)
 		return nil, err
 	}
+	block := blockWithReceipts.Block
 
 	blobsBundle := &types2.BlobsBundleV1{
 		BlockHash: gointerfaces.ConvertHashToH256(block.Header().Hash()),

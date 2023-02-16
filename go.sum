@@ -808,8 +808,8 @@ github.com/quic-go/quic-go v0.32.0 h1:lY02md31s1JgPiiyfqJijpu/UX/Iun304FI3yUqX7t
 github.com/quic-go/quic-go v0.32.0/go.mod h1:/fCsKANhQIeD5l76c2JFU+07gVE3KaA0FP+0zMWwfwo=
 github.com/quic-go/webtransport-go v0.5.1 h1:1eVb7WDWCRoaeTtFHpFBJ6WDN1bSrPrRoW6tZgSw0Ow=
 github.com/quic-go/webtransport-go v0.5.1/go.mod h1:OhmmgJIzTTqXK5xvtuX0oBpLV2GkLWNDA+UeTGJXErU=
-github.com/racytech/erigon-lib v0.0.0-20230208184247-548b81fe543a h1:Gh3IOhplS6Qi7Df6rlY6q60vtFXpGlhctHpdRaCE2lw=
-github.com/racytech/erigon-lib v0.0.0-20230208184247-548b81fe543a/go.mod h1:dCeBBQFS7Dk0Uj4Bmt3ReIFH5/D5rQbjh5LfN0DNVXI=
+github.com/racytech/erigon-lib v0.0.0-20230216142735-1470123e5b7b h1:TXbhwQPTRsl3i7wXdWx5nJKBXhnHcf6JeBRI/O18gv4=
+github.com/racytech/erigon-lib v0.0.0-20230216142735-1470123e5b7b/go.mod h1:9fmwQak5J/y3EAx+nQycWX4k5CQo8Njk8SIaTTTvzww=
 github.com/raulk/go-watchdog v1.3.0 h1:oUmdlHxdkXRJlwfG0O9omj8ukerm8MEQavSiDTEtBsk=
 github.com/raulk/go-watchdog v1.3.0/go.mod h1:fIvOnLbF0b0ZwkB9YU4mOW9Did//4vPZtDqv66NfsMU=
 github.com/rcrowley/go-metrics v0.0.0-20181016184325-3113b8401b8a/go.mod h1:bCqnVzQkZxMG4s8nGwiZ5l3QUCyqpo9Y+/ZMZ9VjZe4=
