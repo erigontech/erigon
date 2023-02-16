@@ -176,7 +176,7 @@ func (api *APIImpl) NewPendingTransactions(ctx context.Context) (*rpc.Subscripti
 
 	go func() {
 		defer debug.LogPanic()
-		txsCh, id := api.filters.SubscribePendingTxs(256)
+		txsCh, id := api.filters.SubscribePendingTxs(4096)
 		defer api.filters.UnsubscribePendingTxs(id)
 
 		for {
@@ -218,7 +218,7 @@ func (api *APIImpl) NewPendingTransactionsWithBody(ctx context.Context) (*rpc.Su
 
 	go func() {
 		defer debug.LogPanic()
-		txsCh, id := api.filters.SubscribePendingTxs(512)
+		txsCh, id := api.filters.SubscribePendingTxs(4096)
 		defer api.filters.UnsubscribePendingTxs(id)
 
 		for {
