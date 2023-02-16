@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -23,7 +25,7 @@ import (
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -32,22 +34,28 @@ var cmdResetState = &cobra.Command{
 		defer agg.Close()
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
-		err := reset2.ResetState(db, ctx, chain)
+		err := reset2.ResetState(db, ctx, chain, "")
 		if err != nil {
-			log.Error(err.Error())
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 

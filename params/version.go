@@ -80,13 +80,10 @@ func ArchiveVersion(gitCommit string) string {
 	return vsn
 }
 
-func VersionWithCommit(gitCommit, gitDate string) string {
+func VersionWithCommit(gitCommit string) string {
 	vsn := VersionWithMeta
 	if len(gitCommit) >= 8 {
 		vsn += "-" + gitCommit[:8]
-	}
-	if !isRelease() && (gitDate != "") {
-		vsn += "-" + gitDate
 	}
 	return vsn
 }

@@ -1,11 +1,15 @@
 package state
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
+
 	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -57,10 +61,12 @@ type BeaconState struct {
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache   *lru.Cache
-	committeeCache          *lru.Cache
-	shuffledSetsCache       *lru.Cache
-	totalActiveBalanceCache uint64
+	activeValidatorsCache       *lru.Cache
+	committeeCache              *lru.Cache
+	shuffledSetsCache           *lru.Cache
+	totalActiveBalanceCache     *uint64
+	totalActiveBalanceRootCache uint64
+	proposerIndex               *uint64
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -103,15 +109,44 @@ func (b *BeaconState) BlockRoot() ([32]byte, error) {
 
 func (b *BeaconState) _refreshActiveBalances() {
 	epoch := b.Epoch()
-	b.totalActiveBalanceCache = 0
+	b.totalActiveBalanceCache = new(uint64)
+	*b.totalActiveBalanceCache = 0
 	for _, validator := range b.validators {
 		if validator.Active(epoch) {
-			b.totalActiveBalanceCache += validator.EffectiveBalance
+			*b.totalActiveBalanceCache += validator.EffectiveBalance
 		}
 	}
+	*b.totalActiveBalanceCache = utils.Max64(b.beaconConfig.EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
+	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
 
-func (b *BeaconState) initBeaconState() {
+func (b *BeaconState) _updateProposerIndex() (err error) {
+	epoch := b.Epoch()
+
+	hash := sha256.New()
+	// Input for the seed hash.
+	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
+	slotByteArray := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotByteArray, b.slot)
+
+	// Add slot to the end of the input.
+	inputWithSlot := append(input[:], slotByteArray...)
+
+	// Calculate the hash.
+	hash.Write(inputWithSlot)
+	seed := hash.Sum(nil)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed)
+	b.proposerIndex = new(uint64)
+	*b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
+	return
+}
+
+func (b *BeaconState) initBeaconState() error {
 	if b.touchedLeaves == nil {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
 	}
@@ -120,18 +155,18 @@ func (b *BeaconState) initBeaconState() {
 	for i, validator := range b.validators {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
-	// 5 Epochs at a time is reasonable.
 	var err error
-	b.activeValidatorsCache, err = lru.New(5)
-	if err != nil {
-		panic(err)
+	if b.activeValidatorsCache, err = lru.New(5); err != nil {
+		return err
 	}
-	b.shuffledSetsCache, err = lru.New(25)
-	if err != nil {
-		panic(err)
+	if b.shuffledSetsCache, err = lru.New(25); err != nil {
+		return err
 	}
-	b.committeeCache, err = lru.New(256)
-	if err != nil {
-		panic(err)
+	if b.committeeCache, err = lru.New(256); err != nil {
+		return err
 	}
+	if err := b._updateProposerIndex(); err != nil {
+		return err
+	}
+	return nil
 }

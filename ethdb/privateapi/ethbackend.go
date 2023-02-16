@@ -41,7 +41,8 @@ import (
 // 2.2.0 - add NodesInfo function
 // 3.0.0 - adding PoS interfaces
 // 3.1.0 - add Subscribe to logs
-var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 1, Patch: 0}
+// 3.2.0 - add EngineGetBlobsBundleV1
+var EthBackendAPIVersion = &types2.VersionReply{Major: 3, Minor: 2, Patch: 0}
 
 const MaxBuilders = 128
 
@@ -274,11 +275,12 @@ func (s *EthBackendServer) stageLoopIsBusy() bool {
 	if !ok {
 		select {
 		case <-wait:
+			return false
 		case <-ctx.Done():
+			return true
 		}
 	}
-
-	return !s.hd.BeaconRequestList.IsWaiting()
+	return false
 }
 
 func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
@@ -289,6 +291,10 @@ func (s *EthBackendServer) checkWithdrawalsPresence(time uint64, withdrawals []*
 		return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 	}
 	return nil
+}
+
+func (s *EthBackendServer) EngineGetBlobsBundleV1(ctx context.Context, in *remote.EngineGetBlobsBundleRequest) (*types2.BlobsBundleV1, error) {
+	return nil, fmt.Errorf("EngineGetBlobsBundleV1: not implemented yet")
 }
 
 // EngineNewPayload validates and possibly executes payload
@@ -511,11 +517,12 @@ func (s *EthBackendServer) getQuickPayloadStatusIfPossible(blockHash libcommon.H
 }
 
 // The expected value to be received by the feeRecipient in wei
-func blockValue(block *types.Block, baseFee *uint256.Int) *uint256.Int {
+func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int {
 	blockValue := uint256.NewInt(0)
-	for _, tx := range block.Transactions() {
-		gas := new(uint256.Int).SetUint64(tx.GetGas())
-		effectiveTip := tx.GetEffectiveGasTip(baseFee)
+	txs := br.Block.Transactions()
+	for i := range txs {
+		gas := new(uint256.Int).SetUint64(br.Receipts[i].GasUsed)
+		effectiveTip := txs[i].GetEffectiveGasTip(baseFee)
 		txValue := new(uint256.Int).Mul(gas, effectiveTip)
 		blockValue.Add(blockValue, txValue)
 	}
@@ -543,11 +550,12 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		return nil, &UnknownPayloadErr
 	}
 
-	block, err := builder.Stop()
+	blockWithReceipts, err := builder.Stop()
 	if err != nil {
 		log.Error("Failed to build PoS block", "err", err)
 		return nil, err
 	}
+	block := blockWithReceipts.Block
 
 	baseFee := new(uint256.Int)
 	baseFee.SetFromBig(block.Header().BaseFee)
@@ -579,7 +587,7 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
 	}
 
-	blockValue := blockValue(block, baseFee)
+	blockValue := blockValue(blockWithReceipts, baseFee)
 	return &remote.EngineGetPayloadResponse{
 		ExecutionPayload: payload,
 		BlockValue:       gointerfaces.ConvertUint256IntToH256(blockValue),

@@ -240,7 +240,7 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		return nil
 	}
 	// Increase the balance if exists already
-	return s.state.IncreaseBalance(int(validatorIndex), amount)
+	return s.state.IncreaseBalance(validatorIndex, amount)
 
 }
 

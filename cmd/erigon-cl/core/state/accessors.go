@@ -1,7 +1,6 @@
 package state
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -13,6 +12,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	eth2_shuffle "github.com/protolambda/eth2-shuffle"
 )
+
+const PreAllocatedRewardsAndPenalties = 8192
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
@@ -93,11 +94,11 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 }
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
-func (b *BeaconState) GetTotalActiveBalance() (uint64, error) {
-	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
-		return b.beaconConfig.EffectiveBalanceIncrement, nil
+func (b *BeaconState) GetTotalActiveBalance() uint64 {
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
 	}
-	return b.totalActiveBalanceCache, nil
+	return *b.totalActiveBalanceCache
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -182,7 +183,7 @@ func (b *BeaconState) ComputeShuffledIndex(ind, ind_count uint64, seed [32]byte,
 	return ind, nil
 }
 
-func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, preInputs [][32]byte, hashFunc utils.HashFunc) ([]uint64, error) {
+func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, index, count uint64, hashFunc utils.HashFunc) ([]uint64, error) {
 	lenIndicies := uint64(len(indicies))
 	start := (lenIndicies * index) / count
 	end := (lenIndicies * (index + 1)) / count
@@ -204,7 +205,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
-		return 0, fmt.Errorf("must have >0 indices")
+		return 0, nil
 	}
 	maxRandomByte := uint64(1<<8 - 1)
 	i := uint64(0)
@@ -240,28 +241,12 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	epoch := b.Epoch()
-
-	hash := sha256.New()
-	// Input for the seed hash.
-	input := b.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconProposer)
-	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
-
-	// Add slot to the end of the input.
-	inputWithSlot := append(input[:], slotByteArray...)
-
-	// Calculate the hash.
-	hash.Write(inputWithSlot)
-	seed := hash.Sum(nil)
-
-	indices := b.GetActiveValidatorsIndices(epoch)
-
-	// Write the seed to an array.
-	seedArray := [32]byte{}
-	copy(seedArray[:], seed)
-
-	return b.ComputeProposerIndex(indices, seedArray)
+	if b.proposerIndex == nil {
+		if err := b._updateProposerIndex(); err != nil {
+			return 0, err
+		}
+	}
+	return *b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
@@ -274,27 +259,26 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
-func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
-	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / utils.IntegerSquareRoot(totalActiveBalance)
+func (b *BeaconState) BaseRewardPerIncrement() uint64 {
+	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
-func (b *BeaconState) BaseReward(totalActiveBalance, index uint64) (uint64, error) {
-	validator, err := b.ValidatorAt(int(index))
-	if err != nil {
-		return 0, err
+func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
+	if index >= uint64(len(b.validators)) {
+		return 0, InvalidValidatorIndex
 	}
-	return (validator.EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.baseRewardPerIncrement(totalActiveBalance), nil
+	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
 func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, err error) {
-	activeBalance, err := b.GetTotalActiveBalance()
+	activeBalance := b.GetTotalActiveBalance()
 	if err != nil {
 		return 0, 0, err
 	}
 	totalActiveIncrements := activeBalance / b.beaconConfig.EffectiveBalanceIncrement
-	baseRewardPerInc := b.baseRewardPerIncrement(activeBalance)
+	baseRewardPerInc := b.BaseRewardPerIncrement()
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
 	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / b.beaconConfig.SlotsPerEpoch
 	participantReward = maxParticipantRewards / b.beaconConfig.SyncCommitteeSize
@@ -377,14 +361,12 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
 	seed := b.GetSeed(epoch, b.beaconConfig.DomainBeaconAttester)
-	preInputs := b.ComputeShuffledIndexPreInputs(seed)
 	hashFunc := utils.OptimizedKeccak256()
 	committee, err := b.ComputeCommittee(
 		b.GetActiveValidatorsIndices(epoch),
 		seed,
 		(slot%b.beaconConfig.SlotsPerEpoch)*committeesPerSlot+committeeIndex,
 		committeesPerSlot*b.beaconConfig.SlotsPerEpoch,
-		preInputs,
 		hashFunc,
 	)
 	if err != nil {
@@ -423,4 +405,51 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 		}
 	}
 	return attestingIndices, nil
+}
+
+// Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
+func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64) {
+	eligibleValidators = make([]uint64, 0, len(b.validators))
+	previousEpoch := b.PreviousEpoch()
+	// TODO(Giulio2002): Proper caching
+	for i, validator := range b.validators {
+		if validator.Active(previousEpoch) || (validator.Slashed && previousEpoch+1 < validator.WithdrawableEpoch) {
+			eligibleValidators = append(eligibleValidators, uint64(i))
+		}
+	}
+	return
+}
+
+// Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
+func (b *BeaconState) InactivityLeaking() bool {
+	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
+}
+
+func (b *BeaconState) IsUnslashedParticipatingIndex(epoch, index uint64, flagIdx int) bool {
+	return b.validators[index].Active(epoch) &&
+		b.previousEpochParticipation[index].HasFlag(flagIdx) &&
+		!b.validators[index].Slashed
+}
+
+// Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue
+func (b *BeaconState) IsValidatorEligibleForActivationQueue(validator *cltypes.Validator) bool {
+	return validator.ActivationEligibilityEpoch == b.beaconConfig.FarFutureEpoch &&
+		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance
+}
+
+// Implementation of is_eligible_for_activation. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation
+func (b *BeaconState) IsValidatorEligibleForActivation(validator *cltypes.Validator) bool {
+	return validator.ActivationEligibilityEpoch <= b.finalizedCheckpoint.Epoch &&
+		validator.ActivationEpoch == b.beaconConfig.FarFutureEpoch
+}
+
+// Implementation of get_validator_churn_limit. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
+func (b *BeaconState) ValidatorChurnLimit() (limit uint64) {
+	activeValidatorsCount := uint64(len(b.GetActiveValidatorsIndices(b.Epoch())))
+	limit = activeValidatorsCount / b.beaconConfig.ChurnLimitQuotient
+	if limit < b.beaconConfig.MinPerEpochChurnLimit {
+		limit = b.beaconConfig.MinPerEpochChurnLimit
+	}
+	return
+
 }

@@ -41,7 +41,7 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance := state.Balances()[testInd]
-	state.IncreaseBalance(int(testInd), amount)
+	state.IncreaseBalance(testInd, amount)
 	afterBalance := state.Balances()[testInd]
 	require.Equal(t, afterBalance, beforeBalance+amount)
 }
@@ -180,11 +180,6 @@ func TestSlashValidator(t *testing.T) {
 			state:        successState,
 			wantBalances: wantBalances,
 			wantErr:      false,
-		},
-		{
-			description: "fail_no_active_validators",
-			state:       failState,
-			wantErr:     true,
 		},
 	}
 

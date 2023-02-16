@@ -115,6 +115,10 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
+	if err := agg.ReopenFolder(); err != nil {
+		return err
+	}
+
 	defer agg.Close()
 
 	var mode libstate.CommitmentMode
@@ -140,7 +144,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	interrupt := false
 	if startTxNum == 0 {
-		genBlock, genesisIbs, err := genesis.ToBlock()
+		genBlock, genesisIbs, err := genesis.ToBlock("")
 		if err != nil {
 			return err
 		}

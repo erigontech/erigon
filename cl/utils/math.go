@@ -41,3 +41,17 @@ func IntegerSquareRoot(n uint64) uint64 {
 
 	return uint64(math.Sqrt(float64(n)))
 }
+
+func Max64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func Min64(a, b uint64) uint64 {
+	if a < b {
+		return a
+	}
+	return b
+}

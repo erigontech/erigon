@@ -57,9 +57,7 @@ func TestActiveValidatorIndices(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, set, []uint64{1})
 	// Check if balances are retrieved correctly
-	totalBalance, err := testState.GetTotalActiveBalance()
-	require.NoError(t, err)
-	require.Equal(t, totalBalance, uint64(2e9))
+	require.Equal(t, testState.GetTotalActiveBalance(), uint64(2e9))
 }
 
 func TestGetBlockRoot(t *testing.T) {
@@ -203,12 +201,6 @@ func TestComputeProposerIndex(t *testing.T) {
 			expected:    7,
 		},
 		{
-			description: "zero_active_indices",
-			indices:     []uint64{},
-			seed:        seed,
-			wantErr:     true,
-		},
-		{
 			description: "active_index_out_of_range",
 			indices:     []uint64{100},
 			state:       generateBeaconStateWithValidators(1),
@@ -266,13 +258,12 @@ func TestComputeCommittee(t *testing.T) {
 	epoch := state.Epoch()
 	indices := state.GetActiveValidatorsIndices(epoch)
 	seed := state.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
-	preInputs := state.ComputeShuffledIndexPreInputs(seed)
-	committees, err := state.ComputeCommittee(indices, seed, 0, 1, preInputs, utils.Keccak256)
+	committees, err := state.ComputeCommittee(indices, seed, 0, 1, utils.Keccak256)
 	require.NoError(t, err, "Could not compute committee")
 
 	// Test shuffled indices are correct for index 5 committee
 	index := uint64(5)
-	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount, preInputs, utils.Keccak256)
+	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount, utils.Keccak256)
 	require.NoError(t, err, "Could not compute committee")
 	start := (validatorCount * index) / committeeCount
 	end := (validatorCount * (index + 1)) / committeeCount
