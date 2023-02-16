@@ -92,9 +92,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
-	var borTx types.Transaction
-	borTx, _, _, _ = rawdb.ReadBorTransactionForBlock(tx, block)
-
+	borTx, _, _, _ := rawdb.ReadBorTransactionForBlock(tx, block)
 	txns := block.Transactions()
 	if borTx != nil && *config.BorTraceEnabled {
 		txns = append(txns, borTx)
