@@ -27,7 +27,8 @@ import (
 
 func main() {
 	logger := newLogger()
-	db := newDatabase(".", logger, true)
+	db := newDatabase(".", logger, false)
+	defer db.Close()
 
 	// Create genesis block
 	genesis := core.Genesis{}
@@ -97,6 +98,14 @@ func main() {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				panic(err)
 			}
+		}
+
+		if err = batch.Commit(); err != nil {
+			panic(err)
+		}
+
+		if err = tx.Commit(); err != nil {
+			panic(err)
 		}
 	}
 }
