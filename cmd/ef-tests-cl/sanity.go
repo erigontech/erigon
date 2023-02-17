@@ -2,17 +2,23 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
-func finalityTestFunction() error {
+func testSanityFunction() error {
 	testState, err := decodeStateFromFile("pre.ssz_snappy")
 	if err != nil {
 		return err
 	}
+	var expectedError bool
 	expectedState, err := decodeStateFromFile("post.ssz_snappy")
+	if os.IsNotExist(err) {
+		expectedError = true
+		err = nil
+	}
 	if err != nil {
 		return err
 	}
@@ -21,11 +27,18 @@ func finalityTestFunction() error {
 		return err
 	}
 	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
-	startSlot := testState.Slot()
 	for _, block := range blocks {
-		if err := transistor.TransitionState(block); err != nil {
-			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
+		err := transistor.TransitionState(block)
+		if expectedError && err == nil {
+			return fmt.Errorf("expected error")
 		}
+		if err != nil {
+			if expectedError {
+				return nil
+			}
+			return err
+		}
+
 	}
 	expectedRoot, err := expectedState.HashSSZ()
 	if err != nil {
@@ -36,7 +49,7 @@ func finalityTestFunction() error {
 		return err
 	}
 	if haveRoot != expectedRoot {
-		return fmt.Errorf("mismatching state roots")
+		return fmt.Errorf("mismatching state roots.")
 	}
 	return nil
 }
