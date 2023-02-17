@@ -24,6 +24,7 @@ func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Ha
 func (b *BeaconState) SetSlot(slot uint64) {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
+	b.proposerIndex = nil
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -56,8 +57,15 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.historicalRoots[index] = root
 }
 
-func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) {
+func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
+	if index >= len(b.validators) {
+		return InvalidValidatorIndex
+	}
 	b.validators[index] = validator
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
+	b.totalActiveBalanceCache = nil
+	return nil
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
@@ -81,31 +89,37 @@ func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 }
 
 // Should not be called if not for testing
-func (b *BeaconState) SetValidators(validators []*cltypes.Validator) {
+func (b *BeaconState) SetValidators(validators []*cltypes.Validator) error {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = validators
-	b.initBeaconState()
+	return b.initBeaconState()
 }
 
-func (b *BeaconState) AddValidator(validator *cltypes.Validator) {
+func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
+	b.balances = append(b.balances, balance)
 	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
+	// change in validator set means cache purging
+	b.activeValidatorsCache.Purge()
+	b.totalActiveBalanceCache = nil
+
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances = balances
+	b._refreshActiveBalances()
 }
 
-func (b *BeaconState) AddBalance(balance uint64) {
-	b.touchedLeaves[BalancesLeafIndex] = true
-	b.balances = append(b.balances, balance)
-}
+func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
+	if index >= len(b.balances) {
+		return InvalidValidatorIndex
+	}
 
-func (b *BeaconState) SetValidatorBalance(index int, balance uint64) {
 	b.touchedLeaves[BalancesLeafIndex] = true
 	b.balances[index] = balance
+	return nil
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
@@ -164,25 +178,45 @@ func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
 	b.nextWithdrawalIndex = index
 }
 
 func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
+	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
 	b.nextWithdrawalValidatorIndex = index
 }
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
 
+func (b *BeaconState) AddHistoricalRoot(root libcommon.Hash) {
+	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.historicalRoots = append(b.historicalRoots, root)
+}
+
 func (b *BeaconState) AddInactivityScore(score uint64) {
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores = append(b.inactivityScores, score)
 }
 
+func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
+	if index >= len(b.inactivityScores) {
+		return InvalidValidatorIndex
+	}
+	b.touchedLeaves[InactivityScoresLeafIndex] = true
+	b.inactivityScores[index] = score
+	return nil
+}
+
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }

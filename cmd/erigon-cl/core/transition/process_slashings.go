@@ -6,10 +6,7 @@ func (s *StateTransistor) processSlashings(slashingMultiplier uint64) error {
 	// Get the current epoch
 	epoch := s.state.Epoch()
 	// Get the total active balance
-	totalBalance, err := s.state.GetTotalActiveBalance()
-	if err != nil {
-		return err
-	}
+	totalBalance := s.state.GetTotalActiveBalance()
 	// Calculate the total slashing amount
 	// by summing all slashings and multiplying by the provided multiplier
 	slashing := s.state.GetTotalSlashingAmount() * slashingMultiplier
@@ -29,7 +26,9 @@ func (s *StateTransistor) processSlashings(slashingMultiplier uint64) error {
 		// Calculate the penalty by dividing the penalty numerator by the total balance and multiplying by the increment
 		penalty := penaltyNumerator / totalBalance * increment
 		// Decrease the validator's balance by the calculated penalty
-		s.state.DecreaseBalance(uint64(i), penalty)
+		if err := s.state.DecreaseBalance(uint64(i), penalty); err != nil {
+			return err
+		}
 	}
 	return nil
 }

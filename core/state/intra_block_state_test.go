@@ -217,7 +217,7 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := memdb.New()
+	db := memdb.New("")
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

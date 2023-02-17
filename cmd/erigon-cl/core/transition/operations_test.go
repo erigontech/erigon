@@ -325,30 +325,71 @@ func TestProcessDeposit(t *testing.T) {
 		},
 	}
 	testState := state.GetEmptyBeaconState()
-	testState.SetBalances([]uint64{0})
 	testState.AddValidator(&cltypes.Validator{
 		PublicKey:             [48]byte{1},
 		WithdrawalCredentials: [32]byte{1, 2, 3},
-	})
+	}, 0)
 	testState.SetEth1Data(eth1Data)
 	s := New(testState, &clparams.MainnetBeaconConfig, nil, true)
 	require.NoError(t, s.ProcessDeposit(deposit))
-	if testState.Balances()[1] != deposit.Data.Amount {
-		t.Errorf(
-			"Expected state validator balances index 0 to equal %d, received %d",
-			deposit.Data.Amount,
-			testState.Balances()[1],
-		)
+	require.Equal(t, deposit.Data.Amount, testState.Balances()[1])
+}
+
+func TestProcessVoluntaryExits(t *testing.T) {
+	state := state.GetEmptyBeaconState()
+	exit := &cltypes.SignedVoluntaryExit{
+		VolunaryExit: &cltypes.VoluntaryExit{
+			ValidatorIndex: 0,
+			Epoch:          0,
+		},
 	}
-	/*
-		beaconState, err := state_native.InitializeFromProtoAltair(&ethpb.BeaconStateAltair{
-			Validators: registry,
-			Balances:   balances,
-			Eth1Data:   eth1Data,
-			Fork: &ethpb.Fork{
-				PreviousVersion: params.BeaconConfig().GenesisForkVersion,
-				CurrentVersion:  params.BeaconConfig().GenesisForkVersion,
-			},
-		})*/
-	//s := New()
+	state.AddValidator(&cltypes.Validator{
+		ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
+		ActivationEpoch: 0,
+	}, 0)
+	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
+	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
+	newRegistry := state.Validators()
+	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
+}
+
+func TestProcessAttestation(t *testing.T) {
+	beaconState := state.GetEmptyBeaconState()
+	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
+	for i := 0; i < 64; i++ {
+		beaconState.AddValidator(&cltypes.Validator{
+			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
+			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
+			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
+		}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
+		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+	}
+
+	aggBits := []byte{7}
+	r, err := beaconState.GetBlockRootAtSlot(0)
+	require.NoError(t, err)
+	att := &cltypes.Attestation{
+		Data: &cltypes.AttestationData{
+			BeaconBlockHash: r,
+			Source:          &cltypes.Checkpoint{},
+			Target:          &cltypes.Checkpoint{},
+		},
+		AggregationBits: aggBits,
+	}
+	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
+
+	require.NoError(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
+
+	p := beaconState.CurrentEpochParticipation()
+	require.NoError(t, err)
+
+	indices, err := beaconState.GetAttestingIndicies(att.Data, att.AggregationBits)
+	require.NoError(t, err)
+	for _, index := range indices {
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyHeadFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelySourceFlagIndex)))
+		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
+	}
 }

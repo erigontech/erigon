@@ -78,4 +78,14 @@ var (
 		Usage: "checkpoint sync endpoint",
 		Value: "",
 	}
+	ErigonPrivateApiFlag = cli.StringFlag{
+		Name:  "private.api.addr",
+		Usage: "connect to existing erigon instance",
+		Value: "",
+	}
+	SentinelStaticPeersFlag = cli.StringFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
+		Value: "",
+	}
 )

@@ -312,7 +312,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 	}
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New()
+		db = memdb.New("")
 		return db, nil
 	}
 

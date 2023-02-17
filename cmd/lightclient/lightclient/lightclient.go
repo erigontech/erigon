@@ -55,25 +55,29 @@ type LightClient struct {
 	recentHashesCache    *lru.Cache
 	db                   kv.RwDB
 	rpc                  *rpc.BeaconRpcP2P
-	execution            remote.ETHBACKENDServer
-	store                *LightClientStore
+	// Either execution server or client
+	execution       remote.ETHBACKENDServer
+	executionClient remote.ETHBACKENDClient
+	store           *LightClientStore
 }
 
 func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel sentinel.SentinelClient,
+	execution remote.ETHBACKENDServer, executionClient remote.ETHBACKENDClient, sentinel sentinel.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
+	rpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	return &LightClient{
 		ctx:               ctx,
 		beaconConfig:      beaconConfig,
 		genesisConfig:     genesisConfig,
-		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel),
+		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel, rpc),
 		recentHashesCache: recentHashesCache,
-		rpc:               rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig),
+		rpc:               rpc,
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
 		db:                db,
+		executionClient:   executionClient,
 	}, err
 }
 
@@ -245,13 +249,10 @@ func (l *LightClient) importBlockIfPossible() {
 		return
 	}
 
-	finalizedEth2Root, err := l.store.finalizedHeader.HashSSZ()
-	if err != nil {
-		return
-	}
-	if finalizedEth2Root == currentRoot {
+	if (curr.Slot+1)%l.beaconConfig.SlotsPerEpoch == 0 {
 		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
 	}
+
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
 		l.lastEth2ParentRoot = curr.ParentRoot
 		return
