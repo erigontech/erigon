@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/log/v3"
@@ -12,8 +13,8 @@ import (
 )
 
 var (
-	testDir = flag.String("test-dir", "tests", "directory of consensus tests")
-	//testNameFlag = flag.String("test-name", "", "name of test to run")
+	testDir      = flag.String("test-dir", "tests", "directory of consensus tests")
+	testNameFlag = flag.String("case", "", "name of test to run")
 )
 
 var supportedVersions = []string{"altair", "bellatrix"}
@@ -55,6 +56,9 @@ func iterateOverTests(dir, p string, depth int) {
 		}
 
 		if !testType.IsDir() {
+			if *testNameFlag != "" && !strings.Contains(p, *testNameFlag) {
+				return
+			}
 			if ok, err := executeTest(p); err != nil {
 				log.Warn("Test Failed", "err", err, "test", p)
 				failed++
@@ -63,6 +67,7 @@ func iterateOverTests(dir, p string, depth int) {
 					passed++
 				}
 			}
+
 			return
 		} else {
 			iterateOverTests(testType.Name(), path.Join(p, testType.Name()), depth+1)
