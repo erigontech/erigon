@@ -2,7 +2,6 @@ package transition
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -80,7 +79,6 @@ func (s *StateTransistor) ProcessSyncAggregate(sync *cltypes.SyncAggregate) erro
 			return err
 		}
 		msg := utils.Keccak256(blockRoot[:], domain)
-		fmt.Println(votedKeys)
 		isValid, err := bls.VerifyAggregate(sync.SyncCommiteeSignature[:], msg[:], votedKeys)
 		if err != nil {
 			return err
