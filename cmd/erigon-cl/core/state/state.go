@@ -116,6 +116,7 @@ func (b *BeaconState) _refreshActiveBalances() {
 			*b.totalActiveBalanceCache += validator.EffectiveBalance
 		}
 	}
+	*b.totalActiveBalanceCache = utils.Max64(b.beaconConfig.EffectiveBalanceIncrement, *b.totalActiveBalanceCache)
 	b.totalActiveBalanceRootCache = utils.IntegerSquareRoot(*b.totalActiveBalanceCache)
 }
 
