@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const hashStackStride = length2.Hash + 1 // + 1 byte for RLP encoding
@@ -82,7 +81,6 @@ func (hb *HashBuilder) SetProofReturn(accProofResult *accounts.AccProofResult) {
 
 // Set the collectNode flag. It will be cleared after an item is added to the proof stack.
 func (hb *HashBuilder) collectNextNode() error {
-	log.Debug("MMDBG collectNextNode setting flag", "old", hb.collectNode)
 	if hb.accProofResult != nil && hb.accProofResult.AccountProof != nil {
 		hb.collectNode = true
 		return nil

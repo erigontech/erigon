@@ -349,7 +349,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 			return nil, err
 		}
 		a, err := reader.ReadAccountData(address)
-		log.Debug("MMDBG ReadAccountData", "err", err, "a", a)
 		if err != nil {
 			return nil, err
 		}
