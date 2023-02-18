@@ -24,4 +24,4 @@ jobs:
         run: DOCKER_BUILDKIT=1 docker build . --file Dockerfile --tag racytech/erigon:$(date +%s)
 
       - name: Docker Push
-        run: docker push ${{secrets.DOCKER_USER}}/erigon
+        run: docker push ${{secrets.DOCKER_USER}}/erigon:eip_4844
