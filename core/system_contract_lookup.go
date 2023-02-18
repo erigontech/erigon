@@ -73,10 +73,10 @@ func init() {
 				addCodeRecords(systemcontracts.GibbsUpgrade[chainName], blockNum, byChain)
 			}
 		}
-		if chainConfig.BorDevnetBlock != nil {
-			blockNum := chainConfig.BorDevnetBlock.Uint64()
+		if chainConfig.CalcuttaBlock != nil {
+			blockNum := chainConfig.CalcuttaBlock.Uint64()
 			if blockNum != 0 {
-				addCodeRecords(systemcontracts.BorDevnetUpgrade[chainName], blockNum, byChain)
+				addCodeRecords(systemcontracts.CalcuttaUpgrade[chainName], blockNum, byChain)
 			}
 		}
 	}
