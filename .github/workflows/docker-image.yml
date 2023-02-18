@@ -21,7 +21,7 @@ jobs:
           docker login -u $DOCKER_USER -p $DOCKER_PASSWORD
 
       - name: Build the Docker image
-        run: DOCKER_BUILDKIT=1 docker build . --file Dockerfile --tag racytech/erigon:$(date +%s)
+        run: DOCKER_BUILDKIT=1 docker build . --file Dockerfile --tag racytech/erigon:eip_4844
 
       - name: Docker Push
         run: docker push ${{secrets.DOCKER_USER}}/erigon:eip_4844
