@@ -13,7 +13,7 @@ import (
 
 func init() {
 	// Initialise systemContractCodeLookup
-	for _, chainName := range []string{networkname.BSCChainName, networkname.ChapelChainName, networkname.RialtoChainName} {
+	for _, chainName := range []string{networkname.BSCChainName, networkname.ChapelChainName, networkname.RialtoChainName, networkname.BorMainnetChainName, networkname.MumbaiChainName, networkname.BorDevnetChainName} {
 		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
@@ -71,6 +71,12 @@ func init() {
 			blockNum := chainConfig.GibbsBlock.Uint64()
 			if blockNum != 0 {
 				addCodeRecords(systemcontracts.GibbsUpgrade[chainName], blockNum, byChain)
+			}
+		}
+		if chainConfig.BorDevnetBlock != nil {
+			blockNum := chainConfig.BorDevnetBlock.Uint64()
+			if blockNum != 0 {
+				addCodeRecords(systemcontracts.BorDevnetUpgrade[chainName], blockNum, byChain)
 			}
 		}
 	}

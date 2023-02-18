@@ -55,6 +55,7 @@ func copyConfig(original *chain.Config) *chain.Config {
 		ShanghaiTime:                  original.ShanghaiTime,
 		CancunTime:                    original.CancunTime,
 		RamanujanBlock:                original.RamanujanBlock,
+		BorDevnetBlock:                original.BorDevnetBlock,
 		NielsBlock:                    original.NielsBlock,
 		MirrorSyncBlock:               original.MirrorSyncBlock,
 		BrunoBlock:                    original.BrunoBlock,
