@@ -2,15 +2,10 @@ package merkle_tree
 
 import "encoding/binary"
 
-var reusableSlice [][32]byte
-
 // PackUint64IntoChunks packs a list of uint64 values into 32 byte roots.
 func PackUint64IntoChunks(vals []uint64) [][32]byte {
 	numChunks := (len(vals) + 3) / 4
-	if numChunks > cap(reusableSlice) {
-		reusableSlice = make([][32]byte, numChunks)
-	}
-	chunks := reusableSlice[:numChunks]
+	chunks := make([][32]byte, numChunks)
 	for i := 0; i < len(vals); i++ {
 		chunkIndex := i / 4
 		byteIndex := (i % 4) * 8

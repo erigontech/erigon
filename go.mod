@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230213050448-610e0ed123bc
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230217023654-c9efa3d6946e
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230215122237-5e33484e9be4
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -12,7 +12,7 @@ require (
 )
 
 require (
-	github.com/Giulio2002/bls v0.0.0-20230210152409-898d831f215e
+	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.2
 	github.com/VictoriaMetrics/fastcache v1.12.0
 	github.com/VictoriaMetrics/metrics v1.23.1
@@ -84,7 +84,7 @@ require (
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.6.0
 	golang.org/x/exp v0.0.0-20230210204819-062eb4c674ab
-	golang.org/x/net v0.6.0
+	golang.org/x/net v0.7.0
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.5.0
 	golang.org/x/time v0.3.0
