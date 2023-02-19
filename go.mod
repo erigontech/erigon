@@ -53,7 +53,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/klauspost/compress v1.15.15
 	github.com/libp2p/go-libp2p v0.25.1
-	github.com/libp2p/go-libp2p-pubsub v0.8.3
+	github.com/libp2p/go-libp2p-pubsub v0.9.0
 	github.com/maticnetwork/crand v1.0.2
 	github.com/maticnetwork/polyproto v0.0.2
 	github.com/multiformats/go-multiaddr v0.8.0
