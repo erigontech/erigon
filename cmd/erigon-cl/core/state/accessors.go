@@ -95,10 +95,10 @@ func (b *BeaconState) GetTotalBalance(validatorSet []uint64) (uint64, error) {
 
 // GetTotalActiveBalance return the sum of all balances within active validators.
 func (b *BeaconState) GetTotalActiveBalance() uint64 {
-	if b.totalActiveBalanceCache < b.beaconConfig.EffectiveBalanceIncrement {
-		return b.beaconConfig.EffectiveBalanceIncrement
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
 	}
-	return b.totalActiveBalanceCache
+	return *b.totalActiveBalanceCache
 }
 
 // GetTotalSlashingAmount return the sum of all slashings.
@@ -205,7 +205,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 
 func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uint64, error) {
 	if len(indices) == 0 {
-		return 0, fmt.Errorf("must have >0 indices")
+		return 0, nil
 	}
 	maxRandomByte := uint64(1<<8 - 1)
 	i := uint64(0)
@@ -241,7 +241,12 @@ func (b *BeaconState) GetRandaoMixes(epoch uint64) [32]byte {
 }
 
 func (b *BeaconState) GetBeaconProposerIndex() (uint64, error) {
-	return b.proposerIndex, nil
+	if b.proposerIndex == nil {
+		if err := b._updateProposerIndex(); err != nil {
+			return 0, err
+		}
+	}
+	return *b.proposerIndex, nil
 }
 
 func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
@@ -254,17 +259,19 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
-func (b *BeaconState) baseRewardPerIncrement(totalActiveBalance uint64) uint64 {
-	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / utils.IntegerSquareRoot(totalActiveBalance)
+func (b *BeaconState) BaseRewardPerIncrement() uint64 {
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
+	}
+	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache
 }
 
 // BaseReward return base rewards for processing sync committee and duties.
-func (b *BeaconState) BaseReward(totalActiveBalance, index uint64) (uint64, error) {
-	validator, err := b.ValidatorAt(int(index))
-	if err != nil {
-		return 0, err
+func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
+	if index >= uint64(len(b.validators)) {
+		return 0, InvalidValidatorIndex
 	}
-	return (validator.EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.baseRewardPerIncrement(totalActiveBalance), nil
+	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
@@ -274,7 +281,7 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 		return 0, 0, err
 	}
 	totalActiveIncrements := activeBalance / b.beaconConfig.EffectiveBalanceIncrement
-	baseRewardPerInc := b.baseRewardPerIncrement(activeBalance)
+	baseRewardPerInc := b.BaseRewardPerIncrement()
 	totalBaseRewards := baseRewardPerInc * totalActiveIncrements
 	maxParticipantRewards := totalBaseRewards * b.beaconConfig.SyncRewardWeight / b.beaconConfig.WeightDenominator / b.beaconConfig.SlotsPerEpoch
 	participantReward = maxParticipantRewards / b.beaconConfig.SyncCommitteeSize
@@ -417,116 +424,14 @@ func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64)
 }
 
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
-func (b *BeaconState) inactivityLeaking() bool {
+func (b *BeaconState) InactivityLeaking() bool {
 	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
 }
 
-// Implementation defined in ETH 2.0 specs: https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#get_flag_index_deltas.
-// Although giulio made it efficient hopefully. results will be written in the input map.
-func (b *BeaconState) processFlagIndexDeltas(flagIdx int, balanceDeltaMap map[uint64]int64, eligibleValidators []uint64) (err error) {
-	// Initialize variables
-	var (
-		unslashedParticipatingIndicies     []uint64
-		unslashedParticipatingTotalBalance uint64
-		baseReward                         uint64
-	)
-	// Find unslashedParticipatingIndicies for this specific flag index.
-	previousEpoch := b.PreviousEpoch()
-	unslashedParticipatingIndicies, err = b.GetUnslashedParticipatingIndices(flagIdx, previousEpoch)
-	if err != nil {
-		return
-	}
-	// Find current weight for flag index.
-	weights := b.beaconConfig.ParticipationWeights()
-	weight := weights[flagIdx]
-	// Compute participating indices total balance (required in rewards/penalties computation).
-	unslashedParticipatingTotalBalance, err = b.GetTotalBalance(unslashedParticipatingIndicies)
-	if err != nil {
-		return
-	}
-	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
-	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
-	}
-	// Compute relative increments.
-	unslashedParticipatingIncrements := unslashedParticipatingTotalBalance / b.beaconConfig.EffectiveBalanceIncrement
-	activeIncrements := b.GetTotalActiveBalance() / b.beaconConfig.EffectiveBalanceIncrement
-	totalActiveBalance := b.GetTotalActiveBalance()
-	// Now process deltas and whats nots.
-	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
-			if b.inactivityLeaking() {
-				continue
-			}
-			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
-			balanceDeltaMap[index] += int64(rewardNumerator / (activeIncrements * b.beaconConfig.WeightDenominator))
-		} else if flagIdx != int(b.beaconConfig.TimelyHeadFlagIndex) {
-			baseReward, err = b.BaseReward(totalActiveBalance, index)
-			if err != nil {
-				return
-			}
-			balanceDeltaMap[index] -= int64(baseReward * weight / b.beaconConfig.WeightDenominator)
-		}
-	}
-	return
-}
-
-// Implemention defined in https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/beacon-chain.md#modified-get_inactivity_penalty_deltas.
-func (b *BeaconState) processInactivityDeltas(balanceDeltaMap map[uint64]int64, eligibleValidators []uint64) (err error) {
-	var (
-		unslashedParticipatingIndicies []uint64
-		validator                      cltypes.Validator
-	)
-	// Find unslashedParticipatingIndicies for this specific flag index.
-	previousEpoch := b.PreviousEpoch()
-	unslashedParticipatingIndicies, err = b.GetUnslashedParticipatingIndices(int(b.beaconConfig.TimelyHeadFlagIndex), previousEpoch)
-	if err != nil {
-		return
-	}
-	// Make it a map to make the existence check O(1) time-complexity.
-	isUnslashedParticipatingIndicies := make(map[uint64]struct{})
-	for _, index := range unslashedParticipatingIndicies {
-		isUnslashedParticipatingIndicies[index] = struct{}{}
-	}
-	// retrieve penalty quotient based on fork
-	var penaltyQuotient uint64
-	switch b.version {
-	case clparams.Phase0Version:
-		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotient
-	case clparams.AltairVersion:
-		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientAltair
-	case clparams.BellatrixVersion:
-		penaltyQuotient = b.beaconConfig.InactivityPenaltyQuotientBellatrix
-	}
-	for _, index := range eligibleValidators {
-		if _, ok := isUnslashedParticipatingIndicies[index]; ok {
-			continue
-		}
-		// Process inactivity penalties.
-		validator, err = b.ValidatorAt(int(index))
-		if err != nil {
-			return err
-		}
-		penaltyNumerator := validator.EffectiveBalance * b.inactivityScores[index]
-		balanceDeltaMap[index] -= int64(penaltyNumerator / (b.beaconConfig.InactivityScoreBias * penaltyQuotient))
-	}
-	return
-}
-
-// BalanceDeltas return the delta for each validator index.
-func (b *BeaconState) BalanceDeltas() (balanceDeltaMap map[uint64]int64, err error) {
-	balanceDeltaMap = map[uint64]int64{}
-	eligibleValidators := b.EligibleValidatorsIndicies()
-	// process each flag indexes by weight.
-	for i := range b.beaconConfig.ParticipationWeights() {
-		if err = b.processFlagIndexDeltas(i, balanceDeltaMap, eligibleValidators); err != nil {
-			return
-		}
-	}
-	// process inactivity scores now.
-	err = b.processInactivityDeltas(balanceDeltaMap, eligibleValidators)
-	return
+func (b *BeaconState) IsUnslashedParticipatingIndex(epoch, index uint64, flagIdx int) bool {
+	return b.validators[index].Active(epoch) &&
+		b.previousEpochParticipation[index].HasFlag(flagIdx) &&
+		!b.validators[index].Slashed
 }
 
 // Implementation of is_eligible_for_activation_queue. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_eligible_for_activation_queue

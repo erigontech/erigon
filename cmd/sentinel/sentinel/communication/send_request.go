@@ -33,7 +33,7 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	}
 	defer stream.Close()
 
-	log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
+	//log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
 
 	respRetryTimer := time.NewTimer(clparams.RespTimeout)
 	defer respRetryTimer.Stop()

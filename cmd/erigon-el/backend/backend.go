@@ -193,7 +193,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideShanghaiTime, tmpdir)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -325,6 +325,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		for _, protocol := range refCfg.ProtocolVersion {
 			cfg := refCfg
 			cfg.NodeDatabase = filepath.Join(stack.Config().Dirs.Nodes, eth.ProtocolToString[protocol])
+			cfg.TmpDir = stack.Config().Dirs.Tmp
 
 			// pick port from allowed list
 			var picked bool
@@ -488,7 +489,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}
 
 	// proof-of-stake mining
-	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.Block, error) {
+	assembleBlockPOS := func(param *core.BlockBuilderParameters, interrupt *int32) (*types.BlockWithReceipts, error) {
 		miningStatePos := stagedsync.NewProposingState(&config.Miner)
 		miningStatePos.MiningConfig.Etherbase = param.SuggestedFeeRecipient
 		proposingSync := stagedsync.New(
@@ -897,9 +898,24 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if err = agg.ReopenFolder(); err != nil {
+	if err = agg.OpenFolder(); err != nil {
 		return nil, nil, nil, err
 	}
+	agg.OnFreeze(func(frozenFileNames []string) {
+		events := s.notifications.Events
+		events.OnNewSnapshot()
+		if s.downloaderClient != nil {
+			req := &proto_downloader.DownloadRequest{Items: make([]*proto_downloader.DownloadItem, 0, len(frozenFileNames))}
+			for _, fName := range frozenFileNames {
+				req.Items = append(req.Items, &proto_downloader.DownloadItem{
+					Path: filepath.Join("history", fName),
+				})
+			}
+			if _, err := s.downloaderClient.Download(ctx, req); err != nil {
+				log.Warn("[snapshots] notify downloader", "err", err)
+			}
+		}
+	})
 
 	return blockReader, allSnapshots, agg, nil
 }

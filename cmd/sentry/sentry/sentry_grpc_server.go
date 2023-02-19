@@ -563,19 +563,23 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 	for _, p := range protocols {
 		protocol := p
+		var disc enode.Iterator
+		if dialCandidates != nil {
+			disc = dialCandidates()
+		}
 		ss.Protocols = append(ss.Protocols, p2p.Protocol{
 			Name:           eth.ProtocolName,
 			Version:        protocol,
 			Length:         17,
-			DialCandidates: dialCandidates(),
+			DialCandidates: disc,
 			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 				peerID := peer.Pubkey()
 				printablePeerID := hex.EncodeToString(peerID[:])[:20]
 				if ss.getPeer(peerID) != nil {
-					log.Trace(fmt.Sprintf("[%s] Peer already has connection", printablePeerID))
+					log.Trace("[p2p] peer already has connection", "peerId", printablePeerID)
 					return nil
 				}
-				log.Debug(fmt.Sprintf("[%s] Start with peer", printablePeerID))
+				log.Debug("[p2p] start with peer", "peerId", printablePeerID)
 
 				peerInfo := NewPeerInfo(peer, rw)
 				peerInfo.protocol = protocol
@@ -588,10 +592,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					return ss.startSync(ctx, bestHash, peerID)
 				})
 				if err != nil {
-					log.Debug("Handshake failure", "peer", printablePeerID, "err", err)
-					return fmt.Errorf("handshake to peer %s: %w", printablePeerID, err)
+					log.Debug("[p2p] Handshake failure", "peer", printablePeerID, "err", err)
+					return fmt.Errorf("[p2p]handshake to peer %s: %w", printablePeerID, err)
 				}
-				log.Trace(fmt.Sprintf("[%s] Received status message OK", printablePeerID), "name", peer.Name())
+				log.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name())
 
 				err = runPeer(
 					ctx,
@@ -602,7 +606,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 					ss.send,
 					ss.hasSubscribers,
 				) // runPeer never returns a nil error
-				log.Trace(fmt.Sprintf("[%s] Error while running peer: %v", printablePeerID, err))
+				log.Trace("[p2p] error while running peer", "peerId", printablePeerID, "err", err)
 				ss.sendGonePeerToClients(gointerfaces.ConvertHashToH512(peerID))
 				return nil
 			},
@@ -623,7 +627,15 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 // Sentry creates and runs standalone sentry
 func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discoveryDNS []string, cfg *p2p.Config, protocolVersion uint, healthCheck bool) error {
 	dir.MustExist(dirs.DataDir)
-	sentryServer := NewGrpcServer(ctx, nil, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
+
+	discovery := func() enode.Iterator {
+		d, err := setupDiscovery(discoveryDNS)
+		if err != nil {
+			panic(err)
+		}
+		return d
+	}
+	sentryServer := NewGrpcServer(ctx, discovery, func() *eth.NodeInfo { return nil }, cfg, protocolVersion)
 	sentryServer.discoveryDNS = discoveryDNS
 
 	grpcServer, err := grpcSentryServer(ctx, sentryAddr, sentryServer, healthCheck)
@@ -746,7 +758,8 @@ func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUsele
 	peerInfo := ss.getPeer(peerID)
 	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
 		ss.removePeer(peerID)
-		log.Debug("Removed useless peer", "peerId", fmt.Sprintf("%x", peerID)[:8], "name", peerInfo.peer.Name())
+		printablePeerID := hex.EncodeToString(peerID[:])
+		log.Debug("[p2p] Removed useless peer", "peerId", printablePeerID, "name", peerInfo.peer.Name())
 	}
 	return &emptypb.Empty{}, nil
 }

@@ -83,4 +83,9 @@ var (
 		Usage: "connect to existing erigon instance",
 		Value: "",
 	}
+	SentinelStaticPeersFlag = cli.StringFlag{
+		Name:  "sentinel.staticpeers",
+		Usage: "connect to comma-separated Consensus static peers",
+		Value: "",
+	}
 )

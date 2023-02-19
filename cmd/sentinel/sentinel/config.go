@@ -42,6 +42,7 @@ type SentinelConfig struct {
 	HostAddress   string
 	HostDNS       string
 	NoDiscovery   bool
+	TmpDir        string
 }
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {

@@ -234,7 +234,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	if t != nil {
 		db = memdb.NewTestDB(t)
 	} else {
-		db = memdb.New()
+		db = memdb.New(tmpdir)
 	}
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
@@ -249,7 +249,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			panic(err)
 		}
-		if err := agg.ReopenFolder(); err != nil {
+		if err := agg.OpenFolder(); err != nil {
 			panic(err)
 		}
 	}
@@ -313,7 +313,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.txPoolDB = memdb.NewPoolDB()
+		mock.txPoolDB = memdb.NewPoolDB(tmpdir)
 
 		stateChangesClient := direct.NewStateDiffClientDirect(erigonGrpcServeer)
 
@@ -331,7 +331,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec)
+	_, mock.Genesis, err = core.CommitGenesisBlock(mock.DB, gspec, "")
 	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
 		if t != nil {
 			t.Fatal(err)
