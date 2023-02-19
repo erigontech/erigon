@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230217023654-c9efa3d6946e
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230217023806-6b3b7ab434b7
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230215122237-5e33484e9be4
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -101,6 +101,8 @@ require (
 	github.com/consensys/bavard v0.1.13 // indirect
 	github.com/herumi/bls-eth-go-binary v1.28.1 // indirect
 	github.com/kilic/bls12-381 v0.1.1-0.20220929213557-ca162e8a70f4 // indirect
+	github.com/ledgerwatch/interfaces v0.0.0-20230210062155-539b8171d9f0 // indirect
+	github.com/matryer/moq v0.3.0 // indirect
 	github.com/mmcloughlin/addchain v0.4.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
