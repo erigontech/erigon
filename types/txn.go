@@ -137,7 +137,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// therefore we assign the first returned value of Prefix function (list) to legacy variable
 	dataPos, dataLen, legacy, err := rlp.Prefix(payload, pos)
 	if err != nil {
-		return 0, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: size Prefix: %s", ErrParseTxn, err) //nolint
 	}
 	// This handles the transactions coming from other Erigon peers of older versions, which add 0x80 (empty) transactions into packets
 	if dataLen == 0 {
@@ -155,10 +155,10 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy {
 		slot.Type = payload[p]
 		if _, err = ctx.Keccak1.Write(payload[p : p+1]); err != nil {
-			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing IdHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
 		}
 		if _, err = ctx.Keccak2.Write(payload[p : p+1]); err != nil {
-			return 0, fmt.Errorf("%w: computing signHash (hashing type Prefix): %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing signHash (hashing type Prefix): %s", ErrParseTxn, err) //nolint
 		}
 		p++
 		if p >= len(payload) {
@@ -166,11 +166,11 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		}
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: envelope Prefix: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: envelope Prefix: %s", ErrParseTxn, err) //nolint
 		}
 		// Hash the envelope, not the full payload
 		if _, err = ctx.Keccak1.Write(payload[p : dataPos+dataLen]); err != nil {
-			return 0, fmt.Errorf("%w: computing IdHash (hashing the envelope): %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing IdHash (hashing the envelope): %s", ErrParseTxn, err) //nolint
 		}
 		// For legacy transaction, the entire payload in expected to be in "rlp" field
 		// whereas for non-legacy, only the content of the envelope (start with position p)
@@ -192,7 +192,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy {
 		p, err = rlp.U256(payload, p, &ctx.ChainID)
 		if err != nil {
-			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: chainId len: %s", ErrParseTxn, err) //nolint
 		}
 		if ctx.ChainID.IsZero() { // zero indicates that the chain ID was not specified in the tx.
 			if ctx.chainIDRequired {
@@ -207,13 +207,13 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Next follows the nonce, which we need to parse
 	p, slot.Nonce, err = rlp.U64(payload, p)
 	if err != nil {
-		return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: nonce: %s", ErrParseTxn, err) //nolint
 	}
 	// Next follows gas price or tip
 	// Although consensus rules specify that tip can be up to 256 bit long, we narrow it to 64 bit
 	p, err = rlp.U256(payload, p, &slot.Tip)
 	if err != nil {
-		return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: tip: %s", ErrParseTxn, err) //nolint
 	}
 	// Next follows feeCap, but only for dynamic fee transactions, for legacy transaction, it is
 	// equal to tip
@@ -223,18 +223,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		// Although consensus rules specify that feeCap can be up to 256 bit long, we narrow it to 64 bit
 		p, err = rlp.U256(payload, p, &slot.FeeCap)
 		if err != nil {
-			return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: feeCap: %s", ErrParseTxn, err) //nolint
 		}
 	}
 	// Next follows gas
 	p, slot.Gas, err = rlp.U64(payload, p)
 	if err != nil {
-		return 0, fmt.Errorf("%w: gas: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: gas: %s", ErrParseTxn, err) //nolint
 	}
 	// Next follows the destination address (if present)
 	dataPos, dataLen, err = rlp.String(payload, p)
 	if err != nil {
-		return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: to len: %s", ErrParseTxn, err) //nolint
 	}
 	if dataLen != 0 && dataLen != 20 {
 		return 0, fmt.Errorf("%w: unexpected length of to field: %d", ErrParseTxn, dataLen)
@@ -246,12 +246,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Next follows value
 	p, err = rlp.U256(payload, p, &slot.Value)
 	if err != nil {
-		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: value: %s", ErrParseTxn, err) //nolint
 	}
 	// Next goes data, but we are only interesting in its length
 	dataPos, dataLen, err = rlp.String(payload, p)
 	if err != nil {
-		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: data len: %s", ErrParseTxn, err) //nolint
 	}
 	slot.DataLen = dataLen
 
@@ -269,31 +269,31 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if !legacy {
 		dataPos, dataLen, err = rlp.List(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: access list len: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: access list len: %s", ErrParseTxn, err) //nolint
 		}
 		tuplePos := dataPos
 		var tupleLen int
 		for tuplePos < dataPos+dataLen {
 			tuplePos, tupleLen, err = rlp.List(payload, tuplePos)
 			if err != nil {
-				return 0, fmt.Errorf("%w: tuple len: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: tuple len: %s", ErrParseTxn, err) //nolint
 			}
 			var addrPos int
 			addrPos, err = rlp.StringOfLen(payload, tuplePos, 20)
 			if err != nil {
-				return 0, fmt.Errorf("%w: tuple addr len: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: tuple addr len: %s", ErrParseTxn, err) //nolint
 			}
 			slot.AlAddrCount++
 			var storagePos, storageLen int
 			storagePos, storageLen, err = rlp.List(payload, addrPos+20)
 			if err != nil {
-				return 0, fmt.Errorf("%w: storage key list len: %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: storage key list len: %s", ErrParseTxn, err) //nolint
 			}
 			skeyPos := storagePos
 			for skeyPos < storagePos+storageLen {
 				skeyPos, err = rlp.StringOfLen(payload, skeyPos, 32)
 				if err != nil {
-					return 0, fmt.Errorf("%w: tuple storage key len: %s", ErrParseTxn, err)
+					return 0, fmt.Errorf("%w: tuple storage key len: %s", ErrParseTxn, err) //nolint
 				}
 				slot.AlStorCount++
 				skeyPos += 32
@@ -317,7 +317,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if legacy {
 		p, err = rlp.U256(payload, p, &ctx.V)
 		if err != nil {
-			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err) //nolint
 		}
 		ctx.IsProtected = ctx.V.Eq(u256.N27) || ctx.V.Eq(u256.N28)
 		// Compute chainId from V
@@ -349,7 +349,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 		var v uint64
 		p, v, err = rlp.U64(payload, p)
 		if err != nil {
-			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: V: %s", ErrParseTxn, err) //nolint
 		}
 		if v > 1 {
 			return 0, fmt.Errorf("%w: V is loo large: %d", ErrParseTxn, v)
@@ -361,18 +361,18 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	// Next follows R of the signature
 	p, err = rlp.U256(payload, p, &ctx.R)
 	if err != nil {
-		return 0, fmt.Errorf("%w: R: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: R: %s", ErrParseTxn, err) //nolint
 	}
 	// New follows S of the signature
 	p, err = rlp.U256(payload, p, &ctx.S)
 	if err != nil {
-		return 0, fmt.Errorf("%w: S: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: S: %s", ErrParseTxn, err) //nolint
 	}
 
 	// For legacy transactions, hash the full payload
 	if legacy {
 		if _, err = ctx.Keccak1.Write(payload[pos:p]); err != nil {
-			return 0, fmt.Errorf("%w: computing IdHash: %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing IdHash: %s", ErrParseTxn, err) //nolint
 		}
 	}
 	//ctx.keccak1.Sum(slot.IdHash[:0])
@@ -396,25 +396,25 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	if sigHashLen < 56 {
 		ctx.buf[0] = byte(sigHashLen) + 192
 		if _, err := ctx.Keccak2.Write(ctx.buf[:1]); err != nil {
-			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err) //nolint
 		}
 	} else {
 		beLen := (bits.Len(sigHashLen) + 7) / 8
 		binary.BigEndian.PutUint64(ctx.buf[1:], uint64(sigHashLen))
 		ctx.buf[8-beLen] = byte(beLen) + 247
 		if _, err := ctx.Keccak2.Write(ctx.buf[8-beLen : 9]); err != nil {
-			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err)
+			return 0, fmt.Errorf("%w: computing signHash (hashing len Prefix): %s", ErrParseTxn, err) //nolint
 		}
 	}
 	if _, err = ctx.Keccak2.Write(payload[sigHashPos:sigHashEnd]); err != nil {
-		return 0, fmt.Errorf("%w: computing signHash: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: computing signHash: %s", ErrParseTxn, err) //nolint
 	}
 	if legacy {
 		if chainIDLen > 0 {
 			if chainIDBits <= 7 {
 				ctx.buf[0] = byte(ctx.ChainID.Uint64())
 				if _, err := ctx.Keccak2.Write(ctx.buf[:1]); err != nil {
-					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err)
+					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err) //nolint
 				}
 			} else {
 				binary.BigEndian.PutUint64(ctx.buf[1:9], ctx.ChainID[3])
@@ -423,14 +423,14 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 				binary.BigEndian.PutUint64(ctx.buf[25:33], ctx.ChainID[0])
 				ctx.buf[32-chainIDLen] = 128 + byte(chainIDLen)
 				if _, err = ctx.Keccak2.Write(ctx.buf[32-chainIDLen : 33]); err != nil {
-					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err)
+					return 0, fmt.Errorf("%w: computing signHash (hashing legacy chainId): %s", ErrParseTxn, err) //nolint
 				}
 			}
 			// Encode two zeros
 			ctx.buf[0] = 128
 			ctx.buf[1] = 128
 			if _, err := ctx.Keccak2.Write(ctx.buf[:2]); err != nil {
-				return 0, fmt.Errorf("%w: computing signHash (hashing zeros after legacy chainId): %s", ErrParseTxn, err)
+				return 0, fmt.Errorf("%w: computing signHash (hashing zeros after legacy chainId): %s", ErrParseTxn, err) //nolint
 			}
 		}
 	}
@@ -448,12 +448,12 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 	ctx.Sig[64] = vByte
 	// recover sender
 	if _, err = secp256k1.RecoverPubkeyWithContext(secp256k1.DefaultContext, ctx.Sighash[:], ctx.Sig[:], ctx.buf[:0]); err != nil {
-		return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: recovering sender from signature: %s", ErrParseTxn, err) //nolint
 	}
 	//apply keccak to the public key
 	ctx.Keccak2.Reset()
 	if _, err = ctx.Keccak2.Write(ctx.buf[1:65]); err != nil {
-		return 0, fmt.Errorf("%w: computing sender from public key: %s", ErrParseTxn, err)
+		return 0, fmt.Errorf("%w: computing sender from public key: %s", ErrParseTxn, err) //nolint
 	}
 	// squeeze the hash of the public key
 	//ctx.keccak2.Sum(ctx.buf[:0])
