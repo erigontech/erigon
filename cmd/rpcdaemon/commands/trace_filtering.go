@@ -905,7 +905,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 }
 
 func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toAddresses map[common.Address]struct{}) bool {
-	fmt.Printf("filter0: %T\n", pt.Action)
 	switch action := pt.Action.(type) {
 	case *CallTraceAction:
 		_, f := fromAddresses[action.From]
@@ -963,6 +962,7 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, t
 	}, header, false /* gasBailout */, txIndex)
 
 	if cmErr != nil {
+		fmt.Printf("dbg11: %s\n", cmErr)
 		return nil, cmErr
 	}
 
