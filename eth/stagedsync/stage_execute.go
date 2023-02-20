@@ -768,10 +768,14 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 			if err = rawdb.PruneTable(tx, kv.BorReceipts, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxUint32); err != nil {
 				return err
 			}
-			// LogIndex.Prune will read everything what not pruned here
-			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+
+			const maxPruneDelta = 100 // at most 100 blocks will be pruned at once
+			// LogIndex.Prune will read everything what not pruned here, limited
+			pruneTo := limitPruneDelta(s.PruneProgress, cfg.prune.Receipts.PruneTo(s.ForwardProgress), maxPruneDelta)
+			if err = rawdb.PruneTable(tx, kv.Log, pruneTo, ctx, math.MaxInt32); err != nil {
 				return err
 			}
+			s.PruneProgress = pruneTo
 		}
 		if cfg.prune.CallTraces.Enabled() {
 			if err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {
@@ -789,4 +793,21 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		}
 	}
 	return nil
+}
+
+func limitPruneDelta(pruneFrom, pruneTo, limit uint64) uint64 {
+	if pruneTo == 0 || pruneTo <= pruneFrom {
+		return 0
+	}
+	if pruneFrom > math.MaxUint64-limit {
+		return math.MaxUint64
+	}
+	if limit == 0 {
+		return pruneTo
+	}
+
+	if pruneTo > pruneFrom+limit {
+		return pruneFrom + limit
+	}
+	return pruneTo
 }
