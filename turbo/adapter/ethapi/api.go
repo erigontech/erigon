@@ -311,12 +311,12 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
-		fmt.Printf("dbg: txs %d\n", len(txs))
 		for i, tx := range txs {
 			if transactions[i], err = formatTx(tx, i); err != nil {
 				return nil, err
 			}
 		}
+		fmt.Printf("borTx %t\n", borTx == nil)
 
 		if borTx != nil {
 			if fullTx {
@@ -326,6 +326,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 			}
 		}
 
+		fmt.Printf("set txs %d\n", len(transactions))
 		fields["transactions"] = transactions
 	}
 	uncles := block.Uncles()
