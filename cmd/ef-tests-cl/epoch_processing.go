@@ -6,8 +6,6 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -19,29 +17,20 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 				err = fmt.Errorf("panic: %s", recovered)
 			}
 		}()
-		sszSnappyTest, err := os.ReadFile("pre.ssz_snappy")
-		if err != nil {
-			return err
-		}
-		sszSnappyExpected, err := os.ReadFile("post.ssz_snappy")
-		isErrExpected := os.IsNotExist(err)
-		if isErrExpected {
-			err = nil
-		}
 		if err != nil {
 			return err
 		}
 		// Read post and
-		testState := state.New(&clparams.MainnetBeaconConfig)
-		if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappyTest, int(testVersion)); err != nil {
+		testState, err := decodeStateFromFile("pre.ssz_snappy")
+		if err != nil {
 			return err
 		}
-		var expectedState *state.BeaconState
-		if !isErrExpected {
-			expectedState = state.New(&clparams.MainnetBeaconConfig)
-			if err := utils.DecodeSSZSnappyWithVersion(expectedState, sszSnappyExpected, int(testVersion)); err != nil {
-				return err
-			}
+		var isErrExpected bool
+		expectedState, err := decodeStateFromFile("post.ssz_snappy")
+		if os.IsNotExist(err) {
+			isErrExpected = true
+		} else {
+			return err
 		}
 
 		// Make up state transistor

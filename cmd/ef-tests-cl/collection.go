@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path"
 )
 
@@ -10,6 +11,7 @@ var (
 	epochProcessingDivision = "epoch_processing"
 )
 
+// Epoch processing cases
 var (
 	caseEffectiveBalanceUpdates      = "effective_balance_updates"
 	caseEth1DataReset                = "eth1_data_reset"
@@ -24,6 +26,18 @@ var (
 	caseSlashingsReset               = "slashings_reset"
 )
 
+// transitionCoreTest
+var finality = "finality/finality"
+
+// sanity
+var sanityBlocks = "sanity/blocks"
+var sanitySlots = "sanity/slots"
+
+func placeholderTest() error {
+	fmt.Println("hallo")
+	return nil
+}
+
 // Following is just a map for all tests to their execution.
 var TestCollection map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseEffectiveBalanceUpdates):      effectiveBalancesUpdateTest,
@@ -37,4 +51,6 @@ var TestCollection map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseRewardsAndPenalties):          rewardsAndPenaltiesTest,
 	path.Join(epochProcessingDivision, caseSlashings):                    slashingsTest,
 	path.Join(epochProcessingDivision, caseSlashingsReset):               slashingsResetTest,
+	sanityBlocks: testSanityFunction,
+	finality:     finalityTestFunction,
 }

@@ -260,7 +260,7 @@ func (b *BeaconState) GetSeed(epoch uint64, domain [4]byte) libcommon.Hash {
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseRewardPerIncrement() uint64 {
-	if b.activeValidatorsCache == nil {
+	if b.totalActiveBalanceCache == nil {
 		b._refreshActiveBalances()
 	}
 	return b.beaconConfig.EffectiveBalanceIncrement * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache

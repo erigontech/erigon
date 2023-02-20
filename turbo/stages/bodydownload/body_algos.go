@@ -136,17 +136,23 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 			}
 		}
 		if request {
-			if header.UncleHash != types.EmptyUncleHash || header.TxHash != types.EmptyRootHash ||
-				(header.WithdrawalsHash != nil && *header.WithdrawalsHash != types.EmptyRootHash) {
+			if header.UncleHash == types.EmptyUncleHash && header.TxHash == types.EmptyRootHash &&
+				(header.WithdrawalsHash == nil || *header.WithdrawalsHash == types.EmptyRootHash) {
+				// Empty block body
+				body := &types.RawBody{}
+				if header.WithdrawalsHash != nil {
+					// implies *header.WithdrawalsHash == types.EmptyRootHash
+					body.Withdrawals = make([]*types.Withdrawal, 0)
+				}
+				bd.addBodyToCache(blockNum, body)
+				request = false
+			} else {
 				// Perhaps we already have this block
 				block := rawdb.ReadBlock(tx, hash, blockNum)
 				if block != nil {
 					bd.addBodyToCache(blockNum, block.RawBody())
 					request = false
 				}
-			} else {
-				bd.addBodyToCache(blockNum, &types.RawBody{})
-				request = false
 			}
 		}
 		if request {
