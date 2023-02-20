@@ -316,7 +316,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 				return nil, err
 			}
 		}
-		fmt.Printf("borTx %t\n", borTx == nil)
 
 		if borTx != nil {
 			if fullTx {
@@ -326,7 +325,6 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 			}
 		}
 
-		fmt.Printf("set txs %d\n", len(transactions))
 		fields["transactions"] = transactions
 	}
 	uncles := block.Uncles()
