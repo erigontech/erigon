@@ -87,7 +87,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	for _, ghRelease := range ghReleases[0:4] {
+	for _, ghRelease := range ghReleases[0 : releasesCount-1] {
 
 		checksums := map[string]string{}
 
@@ -280,7 +280,7 @@ func addCurrentBinary(releases Releases, b Binary) (Releases, error) {
 	})
 
 	// remove the oldest release to maintain a list of 5
-	if len(releases.Releases) > 5 {
+	if len(releases.Releases) > releasesCount {
 		releases.Releases = releases.Releases[1:]
 	}
 
