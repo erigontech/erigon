@@ -163,6 +163,7 @@ func Setup(ctx *cli.Context) error {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
+		exp.SetupLogsAccess(ctx)
 	}
 
 	// pprof server

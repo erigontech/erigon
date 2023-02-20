@@ -19,14 +19,14 @@ var supportCommand = cli.Command{
 	Action:    MigrateFlags(connectDiagnostics),
 	Name:      "support",
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
-	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --private.api.addr <Erigon host: Erigon port>",
+	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --metrics.url <http://erigon_host:metrics_port>",
 	Flags: []cli.Flag{
-		&utils.PrivateApiAddrFlag,
+		&utils.MetricsURLsFlag,
 		&utils.DiagnosticsURLFlag,
 	},
 	Category: "SUPPORT COMMANDS",
 	Description: `
-The support command connects a running Erigon instance to a diagnostics system specified
+The support command connects a running Erigon instances to a diagnostics system specified
 by the URL.`,
 }
 
