@@ -24,7 +24,7 @@ var (
 	_ Error = new(parseError)
 	_ Error = new(invalidRequestError)
 	_ Error = new(invalidMessageError)
-	_ Error = new(invalidParamsError)
+	_ Error = new(InvalidParamsError)
 	_ Error = new(CustomError)
 )
 
@@ -67,12 +67,12 @@ func (e *invalidMessageError) ErrorCode() int { return -32700 }
 
 func (e *invalidMessageError) Error() string { return e.message }
 
-// unable to decode supplied params, or an invalid number of parameters
-type invalidParamsError struct{ message string }
+// unable to decode supplied params, or invalid parameters
+type InvalidParamsError struct{ Message string }
 
-func (e *invalidParamsError) ErrorCode() int { return -32602 }
+func (e *InvalidParamsError) ErrorCode() int { return -32602 }
 
-func (e *invalidParamsError) Error() string { return e.message }
+func (e *InvalidParamsError) Error() string { return e.Message }
 
 type CustomError struct {
 	Code    int

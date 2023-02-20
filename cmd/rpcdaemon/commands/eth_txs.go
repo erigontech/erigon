@@ -5,10 +5,11 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	types2 "github.com/ledgerwatch/erigon/core/types"
@@ -33,6 +34,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	blockNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
+	}
+	// Private API returns 0 if transaction is not found.
+	if blockNum == 0 && chainConfig.Bor != nil {
+		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
+		if err != nil {
+			return nil, err
+		}
+
+		ok = blockNumPtr != nil
+		if ok {
+			blockNum = *blockNumPtr
+		}
 	}
 	if ok {
 		block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -68,7 +81,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			if borTx == nil {
 				return nil, nil
 			}
-			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee), nil
+			return newRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(len(block.Transactions())), baseFee, chainConfig.ChainID), nil
 		}
 
 		return newRPCTransaction(txn, blockHash, blockNum, txnIndex, baseFee), nil
@@ -184,7 +197,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 			return nil, nil // not error
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
@@ -248,7 +261,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 			return nil, nil
 		}
 		derivedBorTxHash := types2.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil
+		return newRPCBorTransaction(borTx, derivedBorTxHash, block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee(), chainConfig.ChainID), nil
 	}
 
 	return newRPCTransaction(txs[txIndex], block.Hash(), block.NumberU64(), uint64(txIndex), block.BaseFee()), nil

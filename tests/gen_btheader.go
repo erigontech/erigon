@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -18,16 +19,16 @@ var _ = (*btHeaderMarshaling)(nil)
 func (b btHeader) MarshalJSON() ([]byte, error) {
 	type btHeader struct {
 		Bloom            types.Bloom
-		Coinbase         common.Address
-		MixHash          common.Hash
+		Coinbase         libcommon.Address
+		MixHash          libcommon.Hash
 		Nonce            types.BlockNonce
 		Number           *math.HexOrDecimal256
-		Hash             common.Hash
-		ParentHash       common.Hash
-		ReceiptTrie      common.Hash
-		StateRoot        common.Hash
-		TransactionsTrie common.Hash
-		UncleHash        common.Hash
+		Hash             libcommon.Hash
+		ParentHash       libcommon.Hash
+		ReceiptTrie      libcommon.Hash
+		StateRoot        libcommon.Hash
+		TransactionsTrie libcommon.Hash
+		UncleHash        libcommon.Hash
 		ExtraData        hexutil.Bytes
 		Difficulty       *math.HexOrDecimal256
 		GasLimit         math.HexOrDecimal64
@@ -60,16 +61,16 @@ func (b btHeader) MarshalJSON() ([]byte, error) {
 func (b *btHeader) UnmarshalJSON(input []byte) error {
 	type btHeader struct {
 		Bloom            *types.Bloom
-		Coinbase         *common.Address
-		MixHash          *common.Hash
+		Coinbase         *libcommon.Address
+		MixHash          *libcommon.Hash
 		Nonce            *types.BlockNonce
 		Number           *math.HexOrDecimal256
-		Hash             *common.Hash
-		ParentHash       *common.Hash
-		ReceiptTrie      *common.Hash
-		StateRoot        *common.Hash
-		TransactionsTrie *common.Hash
-		UncleHash        *common.Hash
+		Hash             *libcommon.Hash
+		ParentHash       *libcommon.Hash
+		ReceiptTrie      *libcommon.Hash
+		StateRoot        *libcommon.Hash
+		TransactionsTrie *libcommon.Hash
+		UncleHash        *libcommon.Hash
 		ExtraData        *hexutil.Bytes
 		Difficulty       *math.HexOrDecimal256
 		GasLimit         *math.HexOrDecimal64

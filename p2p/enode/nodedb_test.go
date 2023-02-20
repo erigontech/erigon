@@ -87,7 +87,8 @@ var nodeDBInt64Tests = []struct {
 }
 
 func TestDBInt64(t *testing.T) {
-	db, err := OpenDB("")
+	tmpDir := t.TempDir()
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -119,10 +120,11 @@ func TestDBFetchStore(t *testing.T) {
 		30303,
 		30303,
 	)
+	tmpDir := t.TempDir()
 	inst := time.Now()
 	num := 314
 
-	db, err := OpenDB("")
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -253,8 +255,9 @@ func TestDBSeedQuery(t *testing.T) {
 	// times to avoid flakes.
 	const attempts = 15
 	var err error
+	tmpDir := t.TempDir()
 	for i := 0; i < attempts; i++ {
-		if err = testSeedQuery(); err == nil {
+		if err = testSeedQuery(tmpDir); err == nil {
 			return
 		}
 	}
@@ -263,8 +266,8 @@ func TestDBSeedQuery(t *testing.T) {
 	}
 }
 
-func testSeedQuery() error {
-	db, err := OpenDB("")
+func testSeedQuery(tmpDir string) error {
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -314,20 +317,22 @@ func TestDBPersistency(t *testing.T) {
 	)
 
 	// Create a persistent database and store some values
-	db, err := OpenDB(filepath.Join(root, "database"))
+	db, err := OpenDB(filepath.Join(root, "database"), root)
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
+	defer db.Close()
 	if err := db.storeInt64(testKey, testInt); err != nil {
 		t.Fatalf("failed to store value: %v.", err)
 	}
 	db.Close()
 
 	// ReopenSegments the database and check the value
-	db, err = OpenDB(filepath.Join(root, "database"))
+	db, err = OpenDB(filepath.Join(root, "database"), root)
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
+	defer db.Close()
 	if val := db.fetchInt64(testKey); val != testInt {
 		t.Fatalf("value mismatch: have %v, want %v, %T", val, testInt, db)
 	}
@@ -425,7 +430,8 @@ var nodeDBExpirationNodes = []struct {
 }
 
 func TestDBExpiration(t *testing.T) {
-	db, err := OpenDB("")
+	tmpDir := t.TempDir()
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -471,7 +477,8 @@ func TestDBExpiration(t *testing.T) {
 // This test checks that expiration works when discovery v5 data is present
 // in the database.
 func TestDBExpireV5(t *testing.T) {
-	db, err := OpenDB("")
+	tmpDir := t.TempDir()
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}

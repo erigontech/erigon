@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -41,11 +41,11 @@ func TestGasPrice(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.description, func(t *testing.T) {
-			db := createGasPriceTestKV(t, testCase.chainSize)
-			defer db.Close()
+			m := createGasPriceTestKV(t, testCase.chainSize)
+			defer m.DB.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout)
-			eth := NewEthAPI(base, db, nil, nil, nil, 5000000)
+			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReader(), nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000, 100_000)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)
@@ -61,7 +61,7 @@ func TestGasPrice(t *testing.T) {
 
 }
 
-func createGasPriceTestKV(t *testing.T, chainSize int) kv.RwDB {
+func createGasPriceTestKV(t *testing.T, chainSize int) *stages.MockSentry {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
@@ -75,8 +75,8 @@ func createGasPriceTestKV(t *testing.T, chainSize int) kv.RwDB {
 
 	// Generate testing blocks
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *core.BlockGen) {
-		b.SetCoinbase(common.Address{1})
-		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
+		b.SetCoinbase(libcommon.Address{1})
+		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), libcommon.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*params.GWei)), nil), *signer, key)
 		if txErr != nil {
 			t.Fatalf("failed to create tx: %v", txErr)
 		}
@@ -90,5 +90,5 @@ func createGasPriceTestKV(t *testing.T, chainSize int) kv.RwDB {
 		t.Error(err)
 	}
 
-	return m.DB
+	return m
 }

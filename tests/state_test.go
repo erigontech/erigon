@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -38,9 +39,12 @@ func TestState(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win, need generally improve speed of this tests
 	}
-	t.Parallel()
+	//t.Parallel()
 
 	st := new(testMatcher)
+
+	// EOF is not implemented yet
+	st.skipLoad(`^EIPTests/stEOF/`)
 
 	// Very time consuming
 	st.skipLoad(`^stTimeConsuming/`)
@@ -53,17 +57,12 @@ func TestState(t *testing.T) {
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, func(vmconfig vm.Config) error {
-					config, ok := Forks[subtest.Fork]
-					if !ok {
-						return UnsupportedForkError{subtest.Fork}
-					}
-					rules := config.Rules(1)
 					tx, err := db.BeginRw(context.Background())
 					if err != nil {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, err = test.Run(rules, tx, subtest, vmconfig)
+					_, err = test.Run(tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors
@@ -88,7 +87,7 @@ func withTrace(t *testing.T, test func(vm.Config) error) {
 	t.Error(err)
 	buf := new(bytes.Buffer)
 	w := bufio.NewWriter(buf)
-	tracer := vm.NewJSONLogger(&vm.LogConfig{DisableMemory: true}, w)
+	tracer := logger.NewJSONLogger(&logger.LogConfig{DisableMemory: true}, w)
 	config.Debug, config.Tracer = true, tracer
 	err2 := test(config)
 	if !reflect.DeepEqual(err, err2) {

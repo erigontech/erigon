@@ -153,7 +153,7 @@ Returns the current network id.
    * - Type
      - Description
    * - ``STRING``
-     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``3``: Ropsten Testnet |br|  ``4``: Rinkeby Testnet |br|  ``42``: Kovan Testnet |br|
+     - The current network id. One of |br|  ``1``: Ethereum Mainnet |br|  ``4``: Rinkeby Testnet |br|  ``5``: Görli Testnet |br|
 
 --------------
 
@@ -2382,51 +2382,6 @@ Array - An array of type Log some of which may be null found in the block. See e
      - Description
    * - ``ARRAY``
      - An array of type Log some of which may be null found in the block. See ``eth_getFilterChanges``
-
---------------
-erigon_issuance
------------
-
-Returns the total issuance (block reward plus uncle reward) for the given block.
-
-**Parameters**
-
-.. list-table::
-   :widths: 25 75
-   :header-rows: 1
-
-   * - Type
-     - Description
-   * - ``QUANTITY | TAG``
-     - Integer block number or one of "earliest", "latest" or "pending"
-
-
-**Example**
-
-::
-
-   curl -s --data '{"jsonrpc":"2.0","method":"erigon_issuance","params":["0x3"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
-
-**Returns**
-
-Object - An object of type Issuance
-
-.. list-table::
-   :widths: 15 15 70
-   :header-rows: 1
-
-   * - Type
-     - Name
-     - Description
-   * - ``QUANTITY``
-     - ``blockReward``
-     - The issuance to the miner of the block (includes nephew reward but not transaction fees)
-   * - ``QUANTITY``
-     - ``uncleReward``
-     - The issuance to miners of included uncle (if any)
-   * - ``QUANTITY``
-     - ``issuance``
-     - The sum of blockReward and uncleReward
 
 --------------
 

@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -15,8 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -24,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -40,9 +42,9 @@ func TestEstimateGas(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -56,13 +58,13 @@ func TestEthCallNonCanonical(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
+	}, rpc.BlockNumberOrHashWithHash(libcommon.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true), nil); err != nil {
 		if fmt.Sprintf("%v", err) != "hash 3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b is not currently canonical" {
 			t.Errorf("wrong error: %v", err)
 		}
@@ -81,7 +83,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil, nil, nil, 5000000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -107,10 +109,10 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
-	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -145,14 +147,14 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
 	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		t.Error("couldn't retrieve oldest block")
 	}
 
-	response, err := ethapi.RPCMarshalBlock(oldestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -187,11 +189,11 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 
-	response, err := ethapi.RPCMarshalBlock(latestBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -226,7 +228,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -243,7 +245,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 		t.Error("couldn't retrieve middle block")
 	}
 
-	response, err := ethapi.RPCMarshalBlock(middleBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -278,7 +280,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
 	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
@@ -289,7 +291,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	if pickedBlock == nil {
 		t.Error("couldn't retrieve picked block")
 	}
-	response, err := ethapi.RPCMarshalBlock(pickedBlock, true, false)
+	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
 
 	if err != nil {
 		t.Error("couldn't get the rpc marshal block")
@@ -312,7 +314,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	}
 }
 
-func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address, common.Address) {
+func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Address, libcommon.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -320,14 +322,14 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address
 		bankFunds   = big.NewInt(1e9)
 		contract    = hexutil.MustDecode("0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033")
 		gspec       = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey, false)
 	db := m.DB
 
-	var contractAddr common.Address
+	var contractAddr libcommon.Address
 
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
@@ -356,11 +358,15 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, common.Address
 	}
 	defer tx.Rollback()
 
-	st := state.New(state.NewPlainState(tx, 1))
+	stateReader, err := rpchelper.CreateHistoryStateReader(tx, 1, 0, m.HistoryV3, "")
+	assert.NoError(t, err)
+	st := state.New(stateReader)
 	assert.NoError(t, err)
 	assert.False(t, st.Exist(contractAddr), "Contract should not exist at block #1")
 
-	st = state.New(state.NewPlainState(tx, 2))
+	stateReader, err = rpchelper.CreateHistoryStateReader(tx, 2, 0, m.HistoryV3, "")
+	assert.NoError(t, err)
+	st = state.New(stateReader)
 	assert.NoError(t, err)
 	assert.True(t, st.Exist(contractAddr), "Contract should exist at block #2")
 

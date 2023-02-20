@@ -28,7 +28,6 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"golang.org/x/sync/semaphore"
@@ -313,7 +312,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 	}
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New()
+		db = memdb.New("")
 		return db, nil
 	}
 
@@ -327,7 +326,6 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 		}
 		roTxsLimiter := semaphore.NewWeighted(roTxLimit) // 1 less than max to allow unlocking to happen
 		opts := mdbx.NewMDBX(logger).
-			WriteMergeThreshold(4 * 8192).
 			Path(dbPath).Label(label).
 			DBVerbosity(config.DatabaseVerbosity).RoTxsLimiter(roTxsLimiter)
 		if exclusive {
@@ -337,9 +335,6 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 			opts = opts.PageSize(config.MdbxPageSize.Bytes()).MapSize(8 * datasize.TB)
 		} else {
 			opts = opts.GrowthStep(16 * datasize.MB)
-		}
-		if debug.WriteMap() {
-			opts = opts.WriteMap()
 		}
 		return opts.Open()
 	}

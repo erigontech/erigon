@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type TxLookupCfg struct {
@@ -23,8 +25,7 @@ type TxLookupCfg struct {
 	prune     prune.Mode
 	tmpdir    string
 	snapshots *snapshotsync.RoSnapshots
-	isBor     bool
-	borSprint uint64
+	borConfig *chain.BorConfig
 }
 
 func StageTxLookupCfg(
@@ -32,16 +33,14 @@ func StageTxLookupCfg(
 	prune prune.Mode,
 	tmpdir string,
 	snapshots *snapshotsync.RoSnapshots,
-	isBor bool,
-	borSprint uint64,
+	borConfig *chain.BorConfig,
 ) TxLookupCfg {
 	return TxLookupCfg{
 		db:        db,
 		prune:     prune,
 		tmpdir:    tmpdir,
 		snapshots: snapshots,
-		isBor:     isBor,
-		borSprint: borSprint,
+		borConfig: borConfig,
 	}
 }
 
@@ -61,7 +60,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return err
 	}
 	if toBlock > 0 {
-		endBlock = libcommon.Min(endBlock, toBlock)
+		endBlock = cmp.Min(endBlock, toBlock)
 	}
 
 	startBlock := s.BlockNumber
@@ -92,7 +91,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		return fmt.Errorf("txnLookupTransform: %w", err)
 	}
 
-	if cfg.isBor {
+	if cfg.borConfig != nil {
 		if err = borTxnLookupTransform(logPrefix, tx, startBlock, endBlock+1, quitCh, cfg); err != nil {
 			return fmt.Errorf("borTxnLookupTransform: %w", err)
 		}
@@ -114,7 +113,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
 			return fmt.Errorf("transform: empty block body %d, hash %x", blocknum, v)
@@ -130,8 +129,8 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -142,11 +141,11 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, quitCh <-chan struct{}, cfg TxLookupCfg) error {
 	bigNum := new(big.Int)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		blockNumBytes := bigNum.SetUint64(blocknum).Bytes()
 
 		// we add state sync transactions every bor Sprint amount of blocks
-		if blocknum%cfg.borSprint == 0 && rawdb.HasBorReceipts(tx, blocknum) {
+		if blocknum%cfg.borConfig.CalculateSprint(blocknum) == 0 && rawdb.HasBorReceipts(tx, blocknum) {
 			txnHash := types.ComputeBorTxHash(blocknum, blockHash)
 			if err := next(k, txnHash.Bytes(), blockNumBytes); err != nil {
 				return err
@@ -156,8 +155,8 @@ func borTxnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            quitCh,
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -182,13 +181,13 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	blockFrom, blockTo := u.UnwindPoint+1, s.BlockNumber+1
 	if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		smallestInDB := cfg.snapshots.BlocksAvailable()
-		blockFrom, blockTo = libcommon.Max(blockFrom, smallestInDB), libcommon.Max(blockTo, smallestInDB)
+		blockFrom, blockTo = cmp.Max(blockFrom, smallestInDB), cmp.Max(blockTo, smallestInDB)
 	}
 	// etl.Transform uses ExtractEndKey as exclusive bound, therefore blockTo + 1
 	if err := deleteTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 		return fmt.Errorf("unwind TxLookUp: %w", err)
 	}
-	if cfg.isBor {
+	if cfg.borConfig != nil {
 		if err := deleteBorTxLookupRange(tx, s.LogPrefix(), blockFrom, blockTo+1, ctx, cfg); err != nil {
 			return fmt.Errorf("unwind BorTxLookUp: %w", err)
 		}
@@ -204,7 +203,7 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
-func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context) (err error) {
+func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -216,18 +215,26 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	}
 	blockFrom, blockTo := s.PruneProgress, uint64(0)
 
+	var pruneBor bool
+
 	// Forward stage doesn't write anything before PruneTo point
 	if cfg.prune.TxIndex.Enabled() {
 		blockTo = cfg.prune.TxIndex.PruneTo(s.ForwardProgress)
+		pruneBor = true
 	} else if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled {
 		blockTo = snapshotsync.CanDeleteTo(s.ForwardProgress, cfg.snapshots)
 	}
+
+	if !initialCycle { // limit time for pruning
+		blockTo = cmp.Min(blockTo, blockFrom+100)
+	}
+
 	if blockFrom < blockTo {
 		if err = deleteTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 			return fmt.Errorf("prune TxLookUp: %w", err)
 		}
 
-		if cfg.isBor {
+		if cfg.borConfig != nil && pruneBor {
 			if err = deleteBorTxLookupRange(tx, logPrefix, blockFrom, blockTo, ctx, cfg); err != nil {
 				return fmt.Errorf("prune BorTxLookUp: %w", err)
 			}
@@ -249,14 +256,11 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 		body := rawdb.ReadCanonicalBodyWithTransactions(tx, blockHash, blocknum)
 		if body == nil {
-			if cfg.snapshots != nil && cfg.snapshots.Cfg().Enabled && blocknum <= cfg.snapshots.BlocksAvailable() {
-				log.Warn("TxLookup pruning, empty block body", "height", blocknum)
-				return nil
-			}
-			return fmt.Errorf("empty block body %d, hash %x", blocknum, v)
+			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
+			return nil
 		}
 
 		for _, txn := range body.Transactions {
@@ -268,8 +272,8 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},
@@ -279,7 +283,7 @@ func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64
 // deleteTxLookupRange - [blockFrom, blockTo)
 func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg) error {
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.BorTxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
-		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
+		blocknum, blockHash := binary.BigEndian.Uint64(k), libcommon.CastToHash(v)
 
 		borTxHash := types.ComputeBorTxHash(blocknum, blockHash)
 		if err := next(k, borTxHash.Bytes(), nil); err != nil {
@@ -289,8 +293,8 @@ func deleteBorTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uin
 		return nil
 	}, etl.IdentityLoadFunc, etl.TransformArgs{
 		Quit:            ctx.Done(),
-		ExtractStartKey: dbutils.EncodeBlockNumber(blockFrom),
-		ExtractEndKey:   dbutils.EncodeBlockNumber(blockTo),
+		ExtractStartKey: hexutility.EncodeTs(blockFrom),
+		ExtractEndKey:   hexutility.EncodeTs(blockTo),
 		LogDetailsExtract: func(k, v []byte) (additionalLogArguments []interface{}) {
 			return []interface{}{"block", binary.BigEndian.Uint64(k)}
 		},

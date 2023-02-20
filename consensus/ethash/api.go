@@ -19,7 +19,8 @@ package ethash
 import (
 	"errors"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -64,7 +65,7 @@ func (api *API) GetWork() ([4]string, error) {
 // SubmitWork can be used by external miner to submit their POW solution.
 // It returns an indication if the work was accepted.
 // Note either an invalid solution, a stale work a non-existent work will return false.
-func (api *API) SubmitWork(nonce types.BlockNonce, hash, digest common.Hash) bool {
+func (api *API) SubmitWork(nonce types.BlockNonce, hash, digest libcommon.Hash) bool {
 	if api.ethash.remote == nil {
 		return false
 	}
@@ -90,7 +91,7 @@ func (api *API) SubmitWork(nonce types.BlockNonce, hash, digest common.Hash) boo
 //
 // It accepts the miner hash rate and an identifier which must be unique
 // between nodes.
-func (api *API) SubmitHashRate(rate hexutil.Uint64, id common.Hash) bool {
+func (api *API) SubmitHashRate(rate hexutil.Uint64, id libcommon.Hash) bool {
 	if api.ethash.remote == nil {
 		return false
 	}

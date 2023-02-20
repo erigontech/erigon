@@ -3,16 +3,17 @@ package stagedsync
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningFinishCfg struct {
 	db          kv.RwDB
-	chainConfig params.ChainConfig
+	chainConfig chain.Config
 	engine      consensus.Engine
 	sealCancel  chan struct{}
 	miningState MiningState
@@ -20,7 +21,7 @@ type MiningFinishCfg struct {
 
 func StageMiningFinishCfg(
 	db kv.RwDB,
-	chainConfig params.ChainConfig,
+	chainConfig chain.Config,
 	engine consensus.Engine,
 	miningState MiningState,
 	sealCancel chan struct{},
@@ -43,7 +44,8 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//	continue
 	//}
 
-	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts)
+	block := types.NewBlock(current.Header, current.Txs, current.Uncles, current.Receipts, current.Withdrawals)
+	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts}
 	*current = MiningBlock{} // hack to clean global data
 
 	//sealHash := engine.SealHash(block.Header())
@@ -55,7 +57,7 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 	//prev = sealHash
 
 	if cfg.miningState.MiningResultPOSCh != nil {
-		cfg.miningState.MiningResultPOSCh <- block
+		cfg.miningState.MiningResultPOSCh <- blockWithReceipts
 		return nil
 	}
 	// Tests may set pre-calculated nonce

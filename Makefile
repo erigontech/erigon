@@ -18,8 +18,13 @@ DOCKER_TAG ?= thorax/erigon:latest
 # Go to be available, but with docker it's not strictly necessary
 CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
 CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
+#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
+#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
+#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
 CGO_CFLAGS += -O
 CGO_CFLAGS += -D__BLST_PORTABLE__
+CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
@@ -30,7 +35,7 @@ GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
 GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
 
 GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(DBG_CGO_CFLAGS) $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
+GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
 GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
 
 default: all
@@ -101,7 +106,9 @@ erigon: go-version erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
 
 COMMANDS += devnet
+COMMANDS += erigon-el-mock
 COMMANDS += downloader
+COMMANDS += erigon-cl
 COMMANDS += hack
 COMMANDS += integration
 COMMANDS += observer
@@ -114,7 +121,8 @@ COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += lightclient
-COMMANDS += sentinel_node
+COMMANDS += sentinel
+COMMANDS += erigon-el
 
 # build each command using %.cmd rule
 $(COMMANDS): %: %.cmd
@@ -158,7 +166,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.49.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.51.1
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -206,7 +214,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.18.1
+GOLANG_CROSS_VERSION  ?= v1.19.5
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -220,8 +228,8 @@ release-dry-run: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate --skip-publish
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate --skip-publish
 
 .PHONY: release
 release: git-submodules
@@ -235,8 +243,11 @@ release: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate
+
+	@docker image push --all-tags thorax/erigon
+	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
@@ -277,7 +288,13 @@ coverage:
 .PHONY: hive
 hive:
 	DOCKER_TAG=thorax/erigon:ci-local make docker
+	docker pull thorax/hive:latest
 	docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $(OUTPUT_DIR):/work thorax/hive:latest --sim $(SIM) --results-root=/work/results --client erigon_ci-local # run erigon
+
+## automated-tests                    run automated tests (BUILD_ERIGON=0 to prevent erigon build with local image tag)
+.PHONY: automated-tests
+automated-tests:
+	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
 help	:	Makefile

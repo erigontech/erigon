@@ -25,14 +25,15 @@ import (
 	"math/rand"
 	"net"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/testlog"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/rlpx"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -338,6 +339,7 @@ func TestServerPeerLimits(t *testing.T) {
 			Pubkey: crypto.MarshalPubkey(&clientkey.PublicKey),
 			Caps:   []Cap{discard.cap()},
 		},
+		lock: sync.Mutex{},
 	}
 
 	srv := &Server{
@@ -485,14 +487,19 @@ type setupTransport struct {
 
 	calls    string
 	closeErr error
+	lock     sync.Mutex
 }
 
 func (c *setupTransport) doEncHandshake(prv *ecdsa.PrivateKey) (*ecdsa.PublicKey, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.calls += "doEncHandshake,"
 	return c.pubkey, c.encHandshakeErr
 }
 
 func (c *setupTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake, error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.calls += "doProtoHandshake,"
 	if c.protoHandshakeErr != nil {
 		return nil, c.protoHandshakeErr
@@ -501,6 +508,8 @@ func (c *setupTransport) doProtoHandshake(our *protoHandshake) (*protoHandshake,
 }
 
 func (c *setupTransport) close(err error) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	c.calls += "close,"
 	c.closeErr = err
 }

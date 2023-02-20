@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"os"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
@@ -597,18 +600,18 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 }
 
 // StreamHash computes the hash of a stream, as if it was a trie
-func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
+func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (libcommon.Hash, error) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
-	var hashBuf common.Hash
-	var hashBufStorage common.Hash
+	var hashBuf libcommon.Hash
+	var hashBufStorage libcommon.Hash
 	var hashRef []byte
 	var hashRefStorage []byte
 	var groups, hasTree, hasHash []uint16 // Separate groups slices for storage items and for accounts
-	var aRoot common.Hash
+	var aRoot libcommon.Hash
 	var aEmptyRoot = true
 	var isAccount bool
 	var fieldSet uint32
@@ -647,14 +650,14 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 					var err error
 					groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
 					if err != nil {
-						return common.Hash{}, err
+						return libcommon.Hash{}, err
 					}
 					currStorage.Reset()
 					fieldSet += AccountFieldStorageOnly
 				}
 			} else if itemType == AccountStreamItem && !aEmptyRoot {
 				if err := hb.hash(aRoot[:]); err != nil {
-					return common.Hash{}, err
+					return libcommon.Hash{}, err
 				}
 				fieldSet += AccountFieldStorageOnly
 			}
@@ -670,7 +673,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				var err error
 				groups, hasTree, hasHash, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, makeData(fieldSet, hashRef), groups, hasTree, hasHash, trace)
 				if err != nil {
-					return common.Hash{}, err
+					return libcommon.Hash{}, err
 				}
 			}
 			itemType = newItemType
@@ -692,12 +695,12 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				if aCode != nil {
 					fieldSet |= AccountFieldCodeOnly
 					if err := hb.code(aCode); err != nil {
-						return common.Hash{}, err
+						return libcommon.Hash{}, err
 					}
 				} else if !a.IsEmptyCodeHash() {
 					fieldSet |= AccountFieldCodeOnly
 					if err := hb.hash(a.CodeHash[:]); err != nil {
-						return common.Hash{}, err
+						return libcommon.Hash{}, err
 					}
 				}
 				hashRef = nil
@@ -718,7 +721,7 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 				var err error
 				groups, hasTree, hasHash, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
 				if err != nil {
-					return common.Hash{}, err
+					return libcommon.Hash{}, err
 				}
 			}
 			sItemType = newItemType
@@ -743,14 +746,14 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			var err error
 			_, _, _, err = GenStructStep(retain, currStorage.Bytes(), succStorage.Bytes(), hb, nil /* hashCollector */, makeData(0, hashRefStorage), groups, hasTree, hasHash, trace)
 			if err != nil {
-				return common.Hash{}, err
+				return libcommon.Hash{}, err
 			}
 			currStorage.Reset()
 			fieldSet |= AccountFieldStorageOnly
 		}
 	} else if itemType == AccountStreamItem && !aEmptyRoot {
 		if err := hb.hash(aRoot[:]); err != nil {
-			return common.Hash{}, err
+			return libcommon.Hash{}, err
 		}
 		fieldSet |= AccountFieldStorageOnly
 	}
@@ -762,11 +765,11 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 		var err error
 		_, _, _, err = GenStructStep(retain, curr.Bytes(), succ.Bytes(), hb, nil /* hashCollector */, makeData(fieldSet, hashRef), groups, hasTree, hasHash, trace)
 		if err != nil {
-			return common.Hash{}, err
+			return libcommon.Hash{}, err
 		}
 	}
 	if trace {
-		tt := New(common.Hash{})
+		tt := New(libcommon.Hash{})
 		tt.root = hb.root()
 		filename := "root.txt"
 		f, err1 := os.Create(filename)
@@ -790,10 +793,10 @@ func HashWithModifications(
 	newStream *Stream, // Streams that will be reused for old and new stream
 	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
-) (common.Hash, error) {
+) (libcommon.Hash, error) {
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength)+len(sKeys)*(4*common.HashLength+2*common.IncarnationLength)),
+		keyBytes:  make([]byte, len(aKeys)*(2*length.Hash)+len(sKeys)*(4*length.Hash+2*length.Incarnation)),
 		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,

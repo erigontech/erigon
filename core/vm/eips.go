@@ -27,6 +27,7 @@ import (
 
 var activators = map[int]func(*JumpTable){
 	3855: enable3855,
+	3860: enable3860,
 	3529: enable3529,
 	3198: enable3198,
 	2929: enable2929,
@@ -44,6 +45,7 @@ func EnableEIP(eipNum int, jt *JumpTable) error {
 		return fmt.Errorf("undefined eip %d", eipNum)
 	}
 	enablerFn(jt)
+	validateAndFillMaxStack(jt)
 	return nil
 }
 
@@ -75,8 +77,8 @@ func enable1884(jt *JumpTable) {
 	jt[SELFBALANCE] = &operation{
 		execute:     opSelfBalance,
 		constantGas: GasFastStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -93,8 +95,8 @@ func enable1344(jt *JumpTable) {
 	jt[CHAINID] = &operation{
 		execute:     opChainID,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -161,8 +163,8 @@ func enable3198(jt *JumpTable) {
 	jt[BASEFEE] = &operation{
 		execute:     opBaseFee,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -179,8 +181,8 @@ func enable3855(jt *JumpTable) {
 	jt[PUSH0] = &operation{
 		execute:     opPush0,
 		constantGas: GasQuickStep,
-		minStack:    minStack(0, 1),
-		maxStack:    maxStack(0, 1),
+		numPop:      0,
+		numPush:     1,
 	}
 }
 
@@ -188,4 +190,11 @@ func enable3855(jt *JumpTable) {
 func opPush0(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	scope.Stack.Push(new(uint256.Int))
 	return nil, nil
+}
+
+// EIP-3860: Limit and meter initcode
+// https://eips.ethereum.org/EIPS/eip-3860
+func enable3860(jt *JumpTable) {
+	jt[CREATE].dynamicGas = gasCreateEip3860
+	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }

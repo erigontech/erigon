@@ -6,8 +6,12 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -15,12 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/crypto/sha3"
 )
 
 func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stateBlockNumberOrHash rpc.BlockNumberOrHash, timeoutMilliSecondsPtr *int64) (map[string]interface{}, error) {
@@ -34,6 +37,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	if len(txHashes) == 0 {
 		return nil, nil
@@ -74,7 +78,6 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	if err != nil {
 		return nil, err
 	}
-
 	var stateReader state.StateReader
 	if latest {
 		cacheView, err := api.stateCache.View(ctx, tx)
@@ -83,9 +86,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 		stateReader = state.NewCachedReader2(cacheView, tx)
 	} else {
-		stateReader = state.NewPlainState(tx, stateBlockNumber)
+		stateReader, err = rpchelper.CreateHistoryStateReader(tx, stateBlockNumber+1, 0, api.historyV3(tx), chainConfig.ChainName)
+		if err != nil {
+			return nil, err
+		}
 	}
-	st := state.New(stateReader)
+	ibs := state.New(stateReader)
 
 	parent := rawdb.ReadHeader(tx, hash, stateBlockNumber)
 	if parent == nil {
@@ -94,7 +100,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	blockNumber := stateBlockNumber + 1
 
-	timestamp := parent.Time // Dont care about the timestamp
+	timestamp := parent.Time + clparams.MainnetBeaconConfig.SecondsPerSlot
 
 	coinbase := parent.Coinbase
 	header := &types.Header{
@@ -106,16 +112,17 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		Coinbase:   coinbase,
 	}
 
-	// Get a new instance of the EVM
 	signer := types.MakeSigner(chainConfig, blockNumber)
-	rules := chainConfig.Rules(blockNumber)
+	rules := chainConfig.Rules(blockNumber, timestamp)
 	firstMsg, err := txs[0].AsMessage(*signer, nil, rules)
 	if err != nil {
 		return nil, err
 	}
 
-	blockCtx, txCtx := transactions.GetEvmContext(firstMsg, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
-	evm := vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})
+	blockCtx := transactions.NewEVMBlockContext(engine, header, stateBlockNumberOrHash.RequireCanonical, tx, api._blockReader)
+	txCtx := core.NewEVMTxContext(firstMsg)
+	// Get a new instance of the EVM
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Debug: false})
 
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
@@ -147,9 +154,12 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	results := []map[string]interface{}{}
 
-	bundleHash := sha3.NewLegacyKeccak256()
+	bundleHash := cryptopool.NewLegacyKeccak256()
+	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
+
 	for _, txn := range txs {
 		msg, err := txn.AsMessage(*signer, nil, rules)
+		msg.SetCheckNonce(false)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +190,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 
 	ret := map[string]interface{}{}
 	ret["results"] = results
-	ret["bundleHash"] = hexutil.Encode(bundleHash.Sum(nil))
+	ret["bundleHash"] = hexutility.Encode(bundleHash.Sum(nil))
 	return ret, nil
 }
 
@@ -221,7 +231,9 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
-
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(b.Header(), chainConfig.Bor)
+	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -282,6 +294,10 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
 
+	if chainConfig.Bor != nil {
+		response["miner"], _ = ecrecover(block.Header(), chainConfig.Bor)
+	}
+
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -298,6 +314,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	if blockNr == rpc.PendingBlockNumber {
 		b, err := api.blockByRPCNumber(blockNr, tx)
 		if err != nil {
@@ -309,19 +326,24 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		n := hexutil.Uint(len(b.Transactions()))
 		return &n, nil
 	}
+
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if blockNum > latestBlockNumber {
+		// (Compatibility) Every other node just returns `null` for when the block does not exist.
+		return nil, nil
+	}
+
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	if txAmount == 0 {
-		return nil, nil
-	}
-
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
@@ -334,21 +356,18 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
 	}
+
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	if txAmount == 0 {
-		return nil, nil
-	}
-
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil

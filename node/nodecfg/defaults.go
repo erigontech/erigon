@@ -17,8 +17,8 @@
 package nodecfg
 
 import (
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/node/nodecfg/datadir"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
@@ -32,6 +32,8 @@ const (
 	DefaultWSPort      = 8546        // Default TCP port for the websocket RPC server
 	DefaultGRPCHost    = "localhost" // Default host interface for the GRPC server
 	DefaultGRPCPort    = 8547        // Default TCP port for the GRPC server
+	DefaultTCPHost     = "localhost" // default host interrface for TCP RPC server
+	DefaultTCPPort     = 8548        // default TCP port for TCP RPC server
 )
 
 // DefaultConfig contains reasonable default settings.
@@ -45,7 +47,7 @@ var DefaultConfig = Config{
 	WSModules:        []string{"net", "web3"},
 	P2P: p2p.Config{
 		ListenAddr:      ":30303",
-		ProtocolVersion: 66, // eth/66 by default
+		ProtocolVersion: []uint{67, 68},
 		MaxPeers:        100,
 		MaxPendingPeers: 1000,
 		NAT:             nat.Any(),

@@ -17,7 +17,8 @@
 package parlia
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -46,7 +47,7 @@ func (api *API) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 }
 
 // GetSnapshotAtHash retrieves the state snapshot at a given block.
-func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
+func (api *API) GetSnapshotAtHash(hash libcommon.Hash) (*Snapshot, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock
@@ -55,7 +56,7 @@ func (api *API) GetSnapshotAtHash(hash common.Hash) (*Snapshot, error) {
 }
 
 // GetValidators retrieves the list of validators at the specified block.
-func (api *API) GetValidators(number *rpc.BlockNumber) ([]common.Address, error) {
+func (api *API) GetValidators(number *rpc.BlockNumber) ([]libcommon.Address, error) {
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if number == nil || *number == rpc.LatestBlockNumber {
@@ -75,7 +76,7 @@ func (api *API) GetValidators(number *rpc.BlockNumber) ([]common.Address, error)
 }
 
 // GetValidatorsAtHash retrieves the list of validators at the specified block.
-func (api *API) GetValidatorsAtHash(hash common.Hash) ([]common.Address, error) {
+func (api *API) GetValidatorsAtHash(hash libcommon.Hash) ([]libcommon.Address, error) {
 	header := api.chain.GetHeaderByHash(hash)
 	if header == nil {
 		return nil, errUnknownBlock

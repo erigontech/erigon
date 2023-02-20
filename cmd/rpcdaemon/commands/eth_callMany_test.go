@@ -15,10 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 )
 
 // block 1 contains 3 Transactions
@@ -38,7 +38,7 @@ func TestCallMany(t *testing.T) {
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
 		gspec    = &core.Genesis{
-			Config: params.AllEthashProtocolChanges,
+			Config: params.TestChainConfig,
 			Alloc: core.GenesisAlloc{
 				address:  {Balance: big.NewInt(9000000000000000000)},
 				address1: {Balance: big.NewInt(200000000000000000)},
@@ -65,7 +65,7 @@ func TestCallMany(t *testing.T) {
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	contractBackend := backends.NewTestSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
 	defer contractBackend.Close()
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	tokenAddr, _, tokenContract, _ := contracts.DeployToken(transactOpts, contractBackend, address1)
@@ -78,7 +78,8 @@ func TestCallMany(t *testing.T) {
 	var secondNonce hexutil.Uint64 = 2
 
 	db := contractBackend.DB()
-	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout), db, nil, nil, nil, 5000000)
+	engine := contractBackend.Engine()
+	api := NewEthAPI(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), contractBackend.Agg(), false, rpccfg.DefaultEvmCallTimeout, engine), db, nil, nil, nil, 5000000, 100_000)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),

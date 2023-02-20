@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/node"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
 )
 
 var initCommand = cli.Command{
@@ -18,7 +19,7 @@ var initCommand = cli.Command{
 	Usage:     "Bootstrap and initialize a new genesis block",
 	ArgsUsage: "<genesisPath>",
 	Flags: []cli.Flag{
-		utils.DataDirFlag,
+		&utils.DataDirFlag,
 	},
 	Category: "BLOCKCHAIN COMMANDS",
 	Description: `
@@ -57,7 +58,7 @@ func initGenesis(ctx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis)
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "")
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

@@ -32,8 +32,8 @@ var (
 // see https://calver.org
 const (
 	VersionMajor       = 2     // Major version component of the current release
-	VersionMinor       = 28    // Minor version component of the current release
-	VersionMicro       = 1     // Patch version component of the current release
+	VersionMinor       = 39    // Minor version component of the current release
+	VersionMicro       = 0     // Patch version component of the current release
 	VersionModifier    = "dev" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"
 	VersionKeyFinished = "ErigonVersionFinished"
@@ -80,13 +80,10 @@ func ArchiveVersion(gitCommit string) string {
 	return vsn
 }
 
-func VersionWithCommit(gitCommit, gitDate string) string {
+func VersionWithCommit(gitCommit string) string {
 	vsn := VersionWithMeta
 	if len(gitCommit) >= 8 {
 		vsn += "-" + gitCommit[:8]
-	}
-	if !isRelease() && (gitDate != "") {
-		vsn += "-" + gitDate
 	}
 	return vsn
 }

@@ -23,10 +23,12 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/params"
 )
 
@@ -86,22 +88,22 @@ func TestEIP2200(t *testing.T) {
 		i := i
 
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			address := common.BytesToAddress([]byte("contract"))
+			address := libcommon.BytesToAddress([]byte("contract"))
 			_, tx := memdb.NewTestTx(t)
 
 			s := state.New(state.NewPlainStateReader(tx))
 			s.CreateAccount(address, true)
 			s.SetCode(address, hexutil.MustDecode(tt.input))
-			s.SetState(address, &common.Hash{}, *uint256.NewInt(uint64(tt.original)))
+			s.SetState(address, &libcommon.Hash{}, *uint256.NewInt(uint64(tt.original)))
 
-			_ = s.CommitBlock(params.AllEthashProtocolChanges.Rules(0), state.NewPlainStateWriter(tx, tx, 0))
-			vmctx := BlockContext{
-				CanTransfer: func(IntraBlockState, common.Address, *uint256.Int) bool { return true },
-				Transfer:    func(IntraBlockState, common.Address, common.Address, *uint256.Int, bool) {},
+			_ = s.CommitBlock(params.AllProtocolChanges.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+			vmctx := evmtypes.BlockContext{
+				CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+				Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
 			}
-			vmenv := NewEVM(vmctx, TxContext{}, s, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
+			vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.AllProtocolChanges, Config{ExtraEips: []int{2200}})
 
-			_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
+			_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, tt.gaspool, new(uint256.Int), false /* bailout */)
 			if !errors.Is(err, tt.failure) {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
@@ -112,5 +114,52 @@ func TestEIP2200(t *testing.T) {
 				t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 			}
 		})
+	}
+}
+
+var createGasTests = []struct {
+	code    string
+	eip3860 bool
+	gasUsed uint64
+}{
+	// create(0, 0, 0xc000)
+	{"0x61C00060006000f0", false, 41225},
+	// create(0, 0, 0xc000)
+	{"0x61C00060006000f0", true, 44297},
+	// create2(0, 0, 0xc000, 0)
+	{"0x600061C00060006000f5", false, 50444},
+	// create2(0, 0, 0xc000, 0)
+	{"0x600061C00060006000f5", true, 53516},
+}
+
+func TestCreateGas(t *testing.T) {
+	for i, tt := range createGasTests {
+		address := libcommon.BytesToAddress([]byte("contract"))
+		_, tx := memdb.NewTestTx(t)
+
+		s := state.New(state.NewPlainStateReader(tx))
+		s.CreateAccount(address, true)
+		s.SetCode(address, hexutil.MustDecode(tt.code))
+		_ = s.CommitBlock(params.TestChainConfig.Rules(0, 0), state.NewPlainStateWriter(tx, tx, 0))
+
+		vmctx := evmtypes.BlockContext{
+			CanTransfer: func(evmtypes.IntraBlockState, libcommon.Address, *uint256.Int) bool { return true },
+			Transfer:    func(evmtypes.IntraBlockState, libcommon.Address, libcommon.Address, *uint256.Int, bool) {},
+		}
+		config := Config{}
+		if tt.eip3860 {
+			config.ExtraEips = []int{3860}
+		}
+
+		vmenv := NewEVM(vmctx, evmtypes.TxContext{}, s, params.TestChainConfig, config)
+
+		var startGas uint64 = math.MaxUint64
+		_, gas, err := vmenv.Call(AccountRef(libcommon.Address{}), address, nil, startGas, new(uint256.Int), false /* bailout */)
+		if err != nil {
+			t.Errorf("test %d execution failed: %v", i, err)
+		}
+		if gasUsed := startGas - gas; gasUsed != tt.gasUsed {
+			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, gasUsed, tt.gasUsed)
+		}
 	}
 }

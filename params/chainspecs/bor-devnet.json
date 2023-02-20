@@ -14,12 +14,18 @@
   "muirGlacierBlock": 0,
   "berlinBlock": 0,
   "londonBlock": 0,
+  "eip1559FeeCollectorTransition": 23850000,
+  "eip1559FeeCollector": "0x70bca57f4579f58670ab2d18ef16e02c17553c38",
   "bor": {
     "period": {
-      "0": 5
+      "0": 2
     },
-    "producerDelay": 6,
-    "sprint": 64,
+    "producerDelay": {
+      "0": 6
+    },
+    "sprint": {
+      "0": 64
+    },
     "backupMultiplier": {
       "0": 5
     },
@@ -33,9 +39,7 @@
         }
       }
     },
-    "burntContract": {
-      "23850000": "0x70bca57f4579f58670ab2d18ef16e02c17553c38"
-    },
-    "jaipurBlock": 0
+    "jaipurBlock": 0,
+    "delhiBlock":0
   }
 }

@@ -72,6 +72,7 @@ tests/testdata/*
 
 go.work
 go.work.sum
+erigon-lib/
 
 /goerli
 
@@ -80,3 +81,4 @@ docker-compose.*.yml
 coverage.out
 
 dist
+__debug_bin

@@ -21,14 +21,15 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"sync"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const sampleNumber = 3 // Number of transactions sampled in a block
@@ -52,21 +53,26 @@ type Config struct {
 type OracleBackend interface {
 	HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
 	BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error)
-	ChainConfig() *params.ChainConfig
+	ChainConfig() *chain.Config
 
-	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
+	GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
+}
+
+type Cache interface {
+	GetLatest() (libcommon.Hash, *big.Int)
+	SetLatest(hash libcommon.Hash, price *big.Int)
 }
 
 // Oracle recommends gas prices based on the content of recent
 // blocks. Suitable for both light and full clients.
 type Oracle struct {
 	backend     OracleBackend
-	lastHead    common.Hash
+	lastHead    libcommon.Hash
 	lastPrice   *big.Int
 	maxPrice    *big.Int
 	ignorePrice *big.Int
-	cacheLock   sync.RWMutex
+	cache       Cache
 
 	checkBlocks                       int
 	percentile                        int
@@ -75,7 +81,7 @@ type Oracle struct {
 
 // NewOracle returns a new gasprice oracle which can recommend suitable
 // gasprice for newly created transaction.
-func NewOracle(backend OracleBackend, params Config) *Oracle {
+func NewOracle(backend OracleBackend, params Config, cache Cache) *Oracle {
 	blocks := params.Blocks
 	if blocks < 1 {
 		blocks = 1
@@ -107,6 +113,7 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 		ignorePrice:      ignorePrice,
 		checkBlocks:      blocks,
 		percentile:       percent,
+		cache:            cache,
 		maxHeaderHistory: params.MaxHeaderHistory,
 		maxBlockHistory:  params.MaxBlockHistory,
 	}
@@ -116,45 +123,41 @@ func NewOracle(backend OracleBackend, params Config) *Oracle {
 // have a very high chance to be included in the following blocks.
 // NODE: if caller wants legacy tx SuggestedPrice, we need to add
 // baseFee to the returned bigInt
-func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
-	head, err := gpo.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
+func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
+	latestHead, latestPrice := oracle.cache.GetLatest()
+	head, err := oracle.backend.HeaderByNumber(ctx, rpc.LatestBlockNumber)
 	if err != nil {
-		return gpo.lastPrice, err
+		return latestPrice, err
 	}
 	if head == nil {
-		return gpo.lastPrice, nil
+		return latestPrice, nil
 	}
+
 	headHash := head.Hash()
-
-	// If the latest gasprice is still available, return it.
-	gpo.cacheLock.RLock()
-	lastHead, lastPrice := gpo.lastHead, gpo.lastPrice
-	gpo.cacheLock.RUnlock()
-	if headHash == lastHead {
-		return lastPrice, nil
+	if latestHead == headHash {
+		return latestPrice, nil
 	}
 
-	// Try checking the cache again, maybe the last fetch fetched what we need
-	gpo.cacheLock.RLock()
-	lastHead, lastPrice = gpo.lastHead, gpo.lastPrice
-	gpo.cacheLock.RUnlock()
-	if headHash == lastHead {
-		return lastPrice, nil
+	// check again, the last request could have populated the cache
+	latestHead, latestPrice = oracle.cache.GetLatest()
+	if latestHead == headHash {
+		return latestPrice, nil
 	}
+
 	number := head.Number.Uint64()
-	txPrices := make(sortingHeap, 0, sampleNumber*gpo.checkBlocks)
-	for txPrices.Len() < sampleNumber*gpo.checkBlocks && number > 0 {
-		err := gpo.getBlockPrices(ctx, number, sampleNumber, gpo.ignorePrice, &txPrices)
+	txPrices := make(sortingHeap, 0, sampleNumber*oracle.checkBlocks)
+	for txPrices.Len() < sampleNumber*oracle.checkBlocks && number > 0 {
+		err := oracle.getBlockPrices(ctx, number, sampleNumber, oracle.ignorePrice, &txPrices)
 		if err != nil {
-			return lastPrice, err
+			return latestPrice, err
 		}
 		number--
 	}
-	price := lastPrice
+	price := latestPrice
 	if txPrices.Len() > 0 {
 		// Item with this position needs to be extracted from the sorting heap
 		// so we pop all the items before it
-		percentilePosition := (txPrices.Len() - 1) * gpo.percentile / 100
+		percentilePosition := (txPrices.Len() - 1) * oracle.percentile / 100
 		for i := 0; i < percentilePosition; i++ {
 			heap.Pop(&txPrices)
 		}
@@ -163,13 +166,12 @@ func (gpo *Oracle) SuggestTipCap(ctx context.Context) (*big.Int, error) {
 		// Don't need to pop it, just take from the top of the heap
 		price = txPrices[0].ToBig()
 	}
-	if price.Cmp(gpo.maxPrice) > 0 {
-		price = new(big.Int).Set(gpo.maxPrice)
+	if price.Cmp(oracle.maxPrice) > 0 {
+		price = new(big.Int).Set(oracle.maxPrice)
 	}
-	gpo.cacheLock.Lock()
-	gpo.lastHead = headHash
-	gpo.lastPrice = price
-	gpo.cacheLock.Unlock()
+
+	oracle.cache.SetLatest(headHash, price)
+
 	return price, nil
 }
 
@@ -210,6 +212,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 	old := t.txs
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	t.txs = old[0 : n-1]
 	return x
 }
@@ -218,7 +221,7 @@ func (t *transactionsByGasPrice) Pop() interface{} {
 // the block is empty or all transactions are sent by the miner
 // itself(it doesn't make any sense to include this kind of transaction prices for sampling),
 // nil gasprice is returned.
-func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
+func (oracle *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit int,
 	ingoreUnderBig *big.Int, s *sortingHeap) error {
 	ignoreUnder, overflow := uint256.FromBig(ingoreUnderBig)
 	if overflow {
@@ -226,7 +229,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
 	}
-	block, err := gpo.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
+	block, err := oracle.backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		log.Error("gasprice.go: getBlockPrices", "err", err)
 		return err
@@ -253,7 +256,8 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 	txs := newTransactionsByGasPrice(plainTxs, baseFee)
 	heap.Init(&txs)
 
-	for txs.Len() > 0 {
+	count := 0
+	for count < limit && txs.Len() > 0 {
 		tx := heap.Pop(&txs).(types.Transaction)
 		tip := tx.GetEffectiveGasTip(baseFee)
 		if ignoreUnder != nil && tip.Lt(ignoreUnder) {
@@ -262,9 +266,7 @@ func (gpo *Oracle) getBlockPrices(ctx context.Context, blockNum uint64, limit in
 		sender, _ := tx.GetSender()
 		if err == nil && sender != block.Coinbase() {
 			heap.Push(s, tip)
-			if s.Len() >= limit {
-				break
-			}
+			count = count + 1
 		}
 	}
 	return nil
@@ -289,6 +291,7 @@ func (s *sortingHeap) Pop() interface{} {
 	old := *s
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = nil
 	*s = old[0 : n-1]
 	return x
 }

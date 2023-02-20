@@ -2,20 +2,20 @@ package commands
 
 import (
 	"fmt"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-
-	"github.com/ledgerwatch/erigon/common"
 )
 
 const (
-	addr     = "0x71562b71999873DB5b286dF957af199Ec94617F7"
-	ethValue = 10000
+	addr = "0x71562b71999873DB5b286dF957af199Ec94617F7"
 )
 
-func callGetBalance(addr, blockNum string, checkBal uint64) {
+func callGetBalance(addr string, blockNum models.BlockNumber, checkBal uint64) {
 	fmt.Printf("Getting balance for address: %q...\n", addr)
-	address := common.HexToAddress(addr)
+	address := libcommon.HexToAddress(addr)
 	bal, err := requests.GetBalance(models.ReqId, address, blockNum)
 	if err != nil {
 		fmt.Printf("FAILURE => %v\n", err)

@@ -22,10 +22,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -51,8 +52,8 @@ func TestReimportMirroredState(t *testing.T) {
 		signer   = types.LatestSignerForChainID(nil)
 	)
 	genspec := &core.Genesis{
-		ExtraData: make([]byte, clique.ExtraVanity+common.AddressLength+clique.ExtraSeal),
-		Alloc: map[common.Address]core.GenesisAccount{
+		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
+		Alloc: map[libcommon.Address]core.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
 		Config: params.AllCliqueProtocolChanges,
@@ -61,7 +62,7 @@ func TestReimportMirroredState(t *testing.T) {
 	m := stages.MockWithGenesisEngine(t, genspec, engine, false)
 
 	// Generate a batch of blocks, each properly signed
-	getHeader := func(hash common.Hash, number uint64) (h *types.Header) {
+	getHeader := func(hash libcommon.Hash, number uint64) (h *types.Header) {
 		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 			h = rawdb.ReadHeader(tx, hash, number)
 			return nil
@@ -80,7 +81,7 @@ func TestReimportMirroredState(t *testing.T) {
 		// first one. The last is needs a state change again to force a reorg.
 		if i != 1 {
 			baseFee, _ := uint256.FromBig(block.GetHeader().BaseFee)
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), common.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(addr), libcommon.Address{0x00}, new(uint256.Int), params.TxGas, baseFee, nil), *signer, key)
 			if err != nil {
 				panic(err)
 			}

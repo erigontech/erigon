@@ -6,23 +6,26 @@ import (
 	"os"
 	"path/filepath"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/spf13/cobra"
 
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
+
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/internal/debug"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 var (
 	genesisPath string
 	genesis     *core.Genesis
-	chainConfig *params.ChainConfig
+	chainConfig *chain2.Config
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricFlags...))
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
@@ -48,7 +51,7 @@ var rootCmd = &cobra.Command{
 		}
 
 		if chaindata == "" {
-			chaindata = filepath.Join(datadir, "chaindata")
+			chaindata = filepath.Join(datadirCli, "chaindata")
 		}
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
@@ -70,7 +73,7 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 	return genesis
 }
 
-func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *params.ChainConfig) {
+func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *chain2.Config) {
 	if chain == "" {
 		genesis, chainConfig = core.DefaultGenesisBlock(), params.MainnetChainConfig
 	} else {

@@ -6,19 +6,22 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // Constants for Serenity as specified into https://eips.ethereum.org/EIPS/eip-2982
 var (
-	SerenityDifficulty = common.Big0        // Serenity block's difficulty is always 0.
+	SerenityDifficulty = libcommon.Big0     // Serenity block's difficulty is always 0.
 	SerenityNonce      = types.BlockNonce{} // Serenity chain's nonces are 0.
 	RewardSerenity     = big.NewInt(300000000000000000)
 )
@@ -60,13 +63,14 @@ func (s *Serenity) InnerEngine() consensus.Engine {
 }
 
 // Type returns the type of the underlying consensus engine.
-func (s *Serenity) Type() params.ConsensusType {
+func (s *Serenity) Type() chain.ConsensusName {
 	return s.eth1Engine.Type()
 }
 
 // Author implements consensus.Engine, returning the header's coinbase as the
 // proof-of-stake verified author of the block.
-func (s *Serenity) Author(header *types.Header) (common.Address, error) {
+// This is thread-safe (only access the header.Coinbase or the underlying engine's thread-safe method)
+func (s *Serenity) Author(header *types.Header) (libcommon.Address, error) {
 	if !IsPoSHeader(header) {
 		return s.eth1Engine.Author(header)
 	}
@@ -119,37 +123,50 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return nil
 }
 
-func (s *Serenity) Finalize(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, r types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, e, chain, syscall)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
+	}
+	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
+		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
+			return nil, nil, err
+		}
+	}
+	for _, w := range withdrawals {
+		amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+		state.AddBalance(w.Address, amountInWei)
 	}
 	return txs, r, nil
 }
 
-func (s *Serenity) FinalizeAndAssemble(config *params.ChainConfig, header *types.Header, state *state.IntraBlockState,
-	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, e consensus.EpochReader,
-	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+func (s *Serenity) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, e, chain, syscall, call)
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall, call)
 	}
-	return types.NewBlock(header, txs, uncles, receipts), txs, receipts, nil
+	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return types.NewBlock(header, outTxs, uncles, outReceipts, withdrawals), outTxs, outReceipts, nil
 }
 
-func (s *Serenity) SealHash(header *types.Header) (hash common.Hash) {
+func (s *Serenity) SealHash(header *types.Header) (hash libcommon.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentSeal []rlp.RawValue) *big.Int {
+func (s *Serenity) CalcDifficulty(chain consensus.ChainHeaderReader, time, parentTime uint64, parentDifficulty *big.Int, parentNumber uint64, parentHash, parentUncleHash libcommon.Hash, parentAuRaStep uint64) *big.Int {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
 		return nil
 	}
 	if !reached {
-		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentSeal)
+		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
 	return SerenityDifficulty
 }
@@ -184,7 +201,7 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 	}
 
 	// Verify that the block number is parent's +1
-	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(common.Big1) != 0 {
+	if diff := new(big.Int).Sub(header.Number, parent.Number); diff.Cmp(libcommon.Big1) != 0 {
 		return consensus.ErrInvalidNumber
 	}
 
@@ -192,7 +209,19 @@ func (s *Serenity) verifyHeader(chain consensus.ChainHeaderReader, header, paren
 		return errInvalidUncleHash
 	}
 
-	return misc.VerifyEip1559Header(chain.Config(), parent, header)
+	if err := misc.VerifyEip1559Header(chain.Config(), parent, header); err != nil {
+		return err
+	}
+
+	// Verify existence / non-existence of withdrawalsHash
+	shanghai := chain.Config().IsShanghai(header.Time)
+	if shanghai && header.WithdrawalsHash == nil {
+		return fmt.Errorf("missing withdrawalsHash")
+	}
+	if !shanghai && header.WithdrawalsHash != nil {
+		return consensus.ErrUnexpectedWithdrawals
+	}
+	return nil
 }
 
 func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
@@ -202,12 +231,16 @@ func (s *Serenity) Seal(chain consensus.ChainHeaderReader, block *types.Block, r
 	return nil
 }
 
-func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []rlp.RawValue {
+func (s *Serenity) GenerateSeal(chain consensus.ChainHeaderReader, currnt, parent *types.Header, call consensus.Call) []byte {
 	return nil
 }
 
-func (s *Serenity) Initialize(config *params.ChainConfig, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-	s.eth1Engine.Initialize(config, chain, e, header, txs, uncles, syscall)
+func (s *Serenity) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+	return s.eth1Engine.IsServiceTransaction(sender, syscall)
+}
+
+func (s *Serenity) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, e, header, state, txs, uncles, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {
@@ -231,7 +264,7 @@ func IsPoSHeader(header *types.Header) bool {
 // IsTTDReached checks if the TotalTerminalDifficulty has been surpassed on the `parentHash` block.
 // It depends on the parentHash already being stored in the database.
 // If the total difficulty is not stored in the database a ErrUnknownAncestorTD error is returned.
-func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, number uint64) (bool, error) {
+func IsTTDReached(chain consensus.ChainHeaderReader, parentHash libcommon.Hash, number uint64) (bool, error) {
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}

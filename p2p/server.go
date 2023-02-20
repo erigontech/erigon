@@ -139,8 +139,12 @@ type Config struct {
 	// the server is started.
 	ListenAddr string
 
+	// AllowedPorts is list of ports allowed to pick to create Listener on it (see ListenAddr)
+	// for different protocol versions
+	AllowedPorts []uint
+
 	// eth/66, eth/67, etc
-	ProtocolVersion uint
+	ProtocolVersion []uint
 
 	SentryAddr []string
 
@@ -165,6 +169,8 @@ type Config struct {
 
 	// it is actually used but a linter got confused
 	clock mclock.Clock //nolint:structcheck
+
+	TmpDir string
 }
 
 // Server manages all peer connections.
@@ -529,7 +535,7 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.Config.NodeDatabase)
+	db, err := enode.OpenDB(srv.Config.NodeDatabase, srv.Config.TmpDir)
 	if err != nil {
 		return err
 	}

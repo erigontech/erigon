@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"math/big"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -29,38 +31,62 @@ func HasBorReceipts(db kv.Has, number uint64) bool {
 	return true
 }
 
-// ReadBorReceiptRLP retrieves the block receipt belonging to a block in RLP encoding.
-func ReadBorReceiptRLP(db kv.Getter, hash common.Hash, number uint64) rlp.RawValue {
+func ReadRawBorReceipt(db kv.Tx, number uint64) (*types.Receipt, bool, error) {
 	data, err := db.GetOne(kv.BorReceipts, borReceiptKey(number))
 	if err != nil {
-		log.Error("ReadBorReceiptRLP failed", "err", err)
+		return nil, false, fmt.Errorf("ReadBorReceipt failed getting bor receipt with blockNumber=%d, err=%s", number, err)
 	}
-	return data
-}
-
-// ReadBorReceipt retrieves all the bor block receipts belonging to a block, including
-// its correspoinding metadata fields. If it is unable to populate these metadata
-// fields then nil is returned.
-func ReadBorReceipt(db kv.Tx, number uint64) (*types.Receipt, error) {
-	// We're deriving many fields from the block body, retrieve beside the receipt
-	data, err := db.GetOne(kv.BorReceipts, borReceiptKey(number))
-	if err != nil {
-		return nil, fmt.Errorf("ReadBorReceipt failed getting bor receipt with blockNumber=%d, err=%s", number, err)
-	}
-	if data == nil {
-		return nil, nil
+	if len(data) == 0 {
+		return nil, false, nil
 	}
 
 	var borReceipt *types.Receipt
-	if err := rlp.DecodeBytes(data, borReceipt); err != nil {
+	err = cbor.Unmarshal(&borReceipt, bytes.NewReader(data))
+	if err == nil {
+		return borReceipt, false, nil
+	}
+
+	// Convert the receipts from their storage form to their internal representation
+	var borStorageReceipt types.ReceiptForStorage
+	if err := rlp.DecodeBytes(data, &borStorageReceipt); err != nil {
+		log.Error("Invalid receipt array RLP", "err", err)
+		return nil, true, err
+	}
+
+	return (*types.Receipt)(&borStorageReceipt), true, nil
+}
+
+func ReadBorReceipt(db kv.Tx, blockHash libcommon.Hash, blockNumber uint64, receipts types.Receipts) (*types.Receipt, error) {
+	borReceipt, hasEmbeddedLogs, err := ReadRawBorReceipt(db, blockNumber)
+	if err != nil {
 		return nil, err
 	}
+
+	if borReceipt == nil {
+		return nil, nil
+	}
+
+	if !hasEmbeddedLogs {
+		logsData, err := db.GetOne(kv.Log, dbutils.LogKey(blockNumber, uint32(len(receipts))))
+		if err != nil {
+			return nil, fmt.Errorf("ReadBorReceipt failed getting bor logs with blockNumber=%d, err=%s", blockNumber, err)
+		}
+		if logsData != nil {
+			var logs types.Logs
+			if err = cbor.Unmarshal(&logs, bytes.NewReader(logsData)); err != nil {
+				return nil, fmt.Errorf("logs unmarshal failed:  %w", err)
+			}
+			borReceipt.Logs = logs
+		}
+	}
+
+	types.DeriveFieldsForBorReceipt(borReceipt, blockHash, blockNumber, receipts)
 
 	return borReceipt, nil
 }
 
 // WriteBorReceipt stores all the bor receipt belonging to a block (storing the state sync recipt and log).
-func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *types.Receipt) error {
+func WriteBorReceipt(tx kv.RwTx, hash libcommon.Hash, number uint64, borReceipt *types.Receipt) error {
 	// Convert the bor receipt into their storage form and serialize them
 	buf := bytes.NewBuffer(make([]byte, 0, 1024))
 	cbor.Marshal(buf, borReceipt.Logs)
@@ -81,8 +107,9 @@ func WriteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64, borReceipt *ty
 	return nil
 }
 
+/*
 // DeleteBorReceipt removes receipt data associated with a block hash.
-func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
+func DeleteBorReceipt(tx kv.RwTx, hash libcommon.Hash, number uint64) {
 	key := borReceiptKey(number)
 
 	// we delete Bor Receipt log too
@@ -101,21 +128,20 @@ func DeleteBorReceipt(tx kv.RwTx, hash common.Hash, number uint64) {
 	}
 }
 
-/*
 // ReadBorTransactionWithBlockHash retrieves a specific bor (fake) transaction by tx hash and block hash, along with
 // its added positional metadata.
-func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash libcommon.Hash, blockHash libcommon.Hash) (*types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadTxLookupEntry(db, borTxHash)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, err
 	}
 	if blockNumber == nil {
-		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
+		return nil, libcommon.Hash{}, 0, 0, errors.New("missing block number")
 	}
 
 	bodyForStorage, err := ReadStorageBody(db, blockHash, *blockNumber)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, nil
+		return nil, libcommon.Hash{}, 0, 0, nil
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
@@ -125,19 +151,19 @@ func ReadBorTransactionWithBlockHash(db kv.Tx, borTxHash common.Hash, blockHash 
 
 // ReadBorTransaction returns a specific bor (fake) transaction by txn hash, along with
 // its added positional metadata.
-func ReadBorTransaction(db kv.Tx, borTxHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransaction(db kv.Tx, borTxHash libcommon.Hash) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	blockNumber, err := ReadBorTxLookupEntry(db, borTxHash)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, err
 	}
 	if blockNumber == nil {
-		return nil, common.Hash{}, 0, 0, errors.New("missing block number")
+		return nil, libcommon.Hash{}, 0, 0, errors.New("missing block number")
 	}
 
 	return computeBorTransactionForBlockNumber(db, *blockNumber)
 }
 
-func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
+func ReadBorTxLookupEntry(db kv.Tx, borTxHash libcommon.Hash) (*uint64, error) {
 	blockNumBytes, err := db.GetOne(kv.BorTxLookup, borTxHash.Bytes())
 	if err != nil {
 		return nil, err
@@ -152,20 +178,20 @@ func ReadBorTxLookupEntry(db kv.Tx, borTxHash common.Hash) (*uint64, error) {
 
 // ReadBorTransactionForBlockNumber returns a bor (fake) transaction by block number, along with
 // its added positional metadata.
-func ReadBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	if !HasBorReceipts(db, blockNumber) {
-		return nil, common.Hash{}, 0, 0, nil
+		return nil, libcommon.Hash{}, 0, 0, nil
 	}
 	return computeBorTransactionForBlockNumber(db, blockNumber)
 }
 
-func computeBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, common.Hash, uint64, uint64, error) {
+func computeBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	blockHash, err := ReadCanonicalHash(db, blockNumber)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, err
 	}
-	if blockHash == (common.Hash{}) {
-		return nil, common.Hash{}, 0, 0, errors.New("missing block hash")
+	if blockHash == (libcommon.Hash{}) {
+		return nil, libcommon.Hash{}, 0, 0, errors.New("missing block hash")
 	}
 
 	return computeBorTransactionForBlockNumberAndHash(db, blockNumber, blockHash)
@@ -173,17 +199,17 @@ func computeBorTransactionForBlockNumber(db kv.Tx, blockNumber uint64) (types.Tr
 
 // ReadBorTransactionForBlockNumberAndHash returns a bor (fake) transaction by block number and block hash, along with
 // its added positional metadata.
-func ReadBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func ReadBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash libcommon.Hash) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	if !HasBorReceipts(db, blockNumber) {
-		return nil, common.Hash{}, 0, 0, nil
+		return nil, libcommon.Hash{}, 0, 0, nil
 	}
 	return computeBorTransactionForBlockNumberAndHash(db, blockNumber, blockHash)
 }
 
-func computeBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash common.Hash) (types.Transaction, common.Hash, uint64, uint64, error) {
+func computeBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, blockHash libcommon.Hash) (types.Transaction, libcommon.Hash, uint64, uint64, error) {
 	bodyForStorage, err := ReadStorageBody(db, blockHash, blockNumber)
 	if err != nil {
-		return nil, common.Hash{}, 0, 0, err
+		return nil, libcommon.Hash{}, 0, 0, err
 	}
 
 	var tx types.Transaction = types.NewBorTransaction()
@@ -192,21 +218,21 @@ func computeBorTransactionForBlockNumberAndHash(db kv.Tx, blockNumber uint64, bl
 
 // ReadBorTransactionForBlock retrieves a specific bor (fake) transaction associated with a block, along with
 // its added positional metadata.
-func ReadBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, common.Hash, uint64, uint64) {
+func ReadBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, libcommon.Hash, uint64, uint64) {
 	if !HasBorReceipts(db, block.NumberU64()) {
-		return nil, common.Hash{}, 0, 0
+		return nil, libcommon.Hash{}, 0, 0
 	}
 	return computeBorTransactionForBlock(db, block)
 }
 
-func computeBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, common.Hash, uint64, uint64) {
+func computeBorTransactionForBlock(db kv.Tx, block *types.Block) (types.Transaction, libcommon.Hash, uint64, uint64) {
 	var tx types.Transaction = types.NewBorTransaction()
 	return tx, block.Hash(), block.NumberU64(), uint64(len(block.Transactions()))
 }
 
 // TruncateBorReceipts removes all bor receipt for given block number or newer
 func TruncateBorReceipts(db kv.RwTx, number uint64) error {
-	if err := db.ForEach(kv.BorReceipts, dbutils.EncodeBlockNumber(number), func(k, _ []byte) error {
+	if err := db.ForEach(kv.BorReceipts, hexutility.EncodeTs(number), func(k, _ []byte) error {
 		return db.Delete(kv.BorReceipts, k)
 	}); err != nil {
 		return err

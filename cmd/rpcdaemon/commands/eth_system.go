@@ -4,15 +4,16 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -114,7 +115,8 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	gasResult := big.NewInt(0)
 
@@ -125,6 +127,7 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
+
 	return (*hexutil.Big)(gasResult), err
 }
 
@@ -139,7 +142,7 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 	tipcap, err := oracle.SuggestTipCap(ctx)
 	if err != nil {
 		return nil, err
@@ -164,7 +167,7 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO)
+	oracle := gasprice.NewOracle(NewGasPriceOracleBackend(tx, cc, api.BaseAPI), ethconfig.Defaults.GPO, api.gasCache)
 
 	oldest, reward, baseFee, gasUsed, err := oracle.FeeHistory(ctx, int(blockCount), lastBlock, rewardPercentiles)
 	if err != nil {
@@ -194,11 +197,11 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 
 type GasPriceOracleBackend struct {
 	tx      kv.Tx
-	cc      *params.ChainConfig
+	cc      *chain.Config
 	baseApi *BaseAPI
 }
 
-func NewGasPriceOracleBackend(tx kv.Tx, cc *params.ChainConfig, baseApi *BaseAPI) *GasPriceOracleBackend {
+func NewGasPriceOracleBackend(tx kv.Tx, cc *chain.Config, baseApi *BaseAPI) *GasPriceOracleBackend {
 	return &GasPriceOracleBackend{tx: tx, cc: cc, baseApi: baseApi}
 }
 
@@ -215,10 +218,10 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
 	return b.baseApi.blockByRPCNumber(number, b.tx)
 }
-func (b *GasPriceOracleBackend) ChainConfig() *params.ChainConfig {
+func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
 	return b.cc
 }
-func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
+func (b *GasPriceOracleBackend) GetReceipts(ctx context.Context, hash libcommon.Hash) (types.Receipts, error) {
 	return rawdb.ReadReceiptsByHash(b.tx, hash)
 }
 func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Receipts) {

@@ -3,12 +3,14 @@ package dbutils
 import (
 	"testing"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon/common"
 )
 
 func TestPlainParseStoragePrefix(t *testing.T) {
-	expectedAddr := common.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c")
+	expectedAddr := libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c")
 	expectedIncarnation := uint64(999000999)
 
 	prefix := PlainGenerateStoragePrefix(expectedAddr[:], expectedIncarnation)
@@ -20,9 +22,9 @@ func TestPlainParseStoragePrefix(t *testing.T) {
 }
 
 func TestPlainParseCompositeStorageKey(t *testing.T) {
-	expectedAddr := common.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c")
+	expectedAddr := libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c")
 	expectedIncarnation := uint64(999000999)
-	expectedKey := common.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
+	expectedKey := libcommon.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
 
 	compositeKey := PlainGenerateCompositeStorageKey(expectedAddr.Bytes(), expectedIncarnation, expectedKey.Bytes())
 
@@ -34,7 +36,7 @@ func TestPlainParseCompositeStorageKey(t *testing.T) {
 }
 
 func TestParseStoragePrefix(t *testing.T) {
-	expectedAddrHash, _ := common.HashData(common.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
+	expectedAddrHash, _ := common.HashData(libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
 	expectedIncarnation := uint64(999000999)
 
 	prefix := GenerateStoragePrefix(expectedAddrHash[:], expectedIncarnation)
@@ -46,9 +48,9 @@ func TestParseStoragePrefix(t *testing.T) {
 }
 
 func TestParseCompositeStorageKey(t *testing.T) {
-	expectedAddrHash, _ := common.HashData(common.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
+	expectedAddrHash, _ := common.HashData(libcommon.HexToAddress("0x5A0b54D5dc17e0AadC383d2db43B0a0D3E029c4c").Bytes())
 	expectedIncarnation := uint64(999000999)
-	expectedKey := common.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
+	expectedKey := libcommon.HexToHash("0x58833f949125129fb8c6c93d2c6003c5bab7c0b116d695f4ca137b1debf4e472")
 
 	compositeKey := GenerateCompositeStorageKey(expectedAddrHash, expectedIncarnation, expectedKey)
 

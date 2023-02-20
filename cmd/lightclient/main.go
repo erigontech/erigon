@@ -18,18 +18,28 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/sentinel/service"
-	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel_node/cli"
-	"github.com/ledgerwatch/erigon/cmd/sentinel_node/cli/flags"
-	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli"
+	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
+
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
+	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
+	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
+	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runLightClientNode, flags.LightClientDefaultFlags)
+	app := lightclientapp.MakeApp(runLightClientNode, flags.LCDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -39,43 +49,77 @@ func main() {
 	}
 }
 
-func runLightClientNode(cliCtx *cli.Context) {
+func runLightClientNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
-	lcCfg, err := lcCli.SetUpLightClientCfg(cliCtx)
+	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
 		log.Error("[Lightclient] Could not initialize lightclient", "err", err)
 	}
-	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(lcCfg.LogLvl), log.StderrHandler))
-	log.Info("[LightClient]", "chain", cliCtx.GlobalString(flags.LightClientChain.Name))
-	log.Info("[LightClient] Running lightclient", "cfg", lcCfg)
+	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
+	log.Info("[LightClient]", "chain", cliCtx.String(flags.Chain.Name))
+	log.Info("[LightClient] Running lightclient", "cfg", cfg)
+	var db kv.RwDB
+	if cfg.Chaindata == "" {
+		log.Info("chaindata is in-memory")
+		db = memdb.New("" /* tmpDir */)
+	} else {
+		db, err = mdbx.Open(cfg.Chaindata, log.Root(), false)
+		if err != nil {
+			return err
+		}
+	}
+	state, err := core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
+	if err != nil {
+		return err
+	}
+
+	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
+	if err != nil {
+		return err
+	}
+
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        lcCfg.Addr,
-		Port:          int(lcCfg.Port),
-		TCPPort:       lcCfg.ServerTcpPort,
-		GenesisConfig: lcCfg.GenesisCfg,
-		NetworkConfig: lcCfg.NetworkCfg,
-		BeaconConfig:  lcCfg.BeaconCfg,
-		NoDiscovery:   lcCfg.NoDiscovery,
-	}, &service.ServerConfig{Network: lcCfg.ServerProtocol, Addr: lcCfg.ServerAddr})
+		IpAddr:        cfg.Addr,
+		Port:          int(cfg.Port),
+		TCPPort:       cfg.ServerTcpPort,
+		GenesisConfig: cfg.GenesisCfg,
+		NetworkConfig: cfg.NetworkCfg,
+		BeaconConfig:  cfg.BeaconCfg,
+		NoDiscovery:   cfg.NoDiscovery,
+	}, db, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+		ForkDigest:     forkDigest,
+		FinalizedRoot:  state.FinalizedCheckpoint().Root,
+		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
+		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
+		HeadRoot:       state.FinalizedCheckpoint().Root,
+	}, handshake.LightClientRule)
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}
-	log.Info("Sentinel started", "addr", lcCfg.ServerAddr)
-
-	bs, err := lightclient.RetrieveBeaconState(ctx, lcCfg.CheckpointUri)
+	log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
-		return
+		return err
 	}
-	log.Info("Finalized Checkpoint", "Epoch", bs.FinalizedCheckpoint.Epoch)
-	lc, err := lightclient.NewLightClient(ctx, lcCfg.GenesisCfg, lcCfg.BeaconCfg, nil, sentinel, true)
+	var execution remote.ETHBACKENDClient
+	if cfg.ErigonPrivateApi != "" {
+		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
+		if err != nil {
+			log.Error("could not connect to erigon private api", "err", err)
+		}
+		defer cc.Close()
+		execution = remote.NewETHBACKENDClient(cc)
+	}
+	lc, err := lightclient.NewLightClient(ctx, db, cfg.GenesisCfg, cfg.BeaconCfg, nil, execution, sentinel, 0, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
+		return err
 	}
-	if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint.Root); err != nil {
+	if err := lc.BootstrapCheckpoint(ctx, state.FinalizedCheckpoint().Root); err != nil {
 		log.Error("[Bootstrap] failed to bootstrap", "err", err)
-		return
+		return err
 	}
 	lc.Start()
+	return nil
 }

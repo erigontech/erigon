@@ -17,20 +17,22 @@
 package core
 
 import (
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // applyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
+func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
@@ -38,20 +40,28 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 	}
 	msg.SetCheckNonce(!cfg.StatelessExec)
 
+	if msg.FeeCap().IsZero() && engine != nil {
+		// Only zero-gas transactions may be service ones
+		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+			return SysCallContract(contract, data, *config, ibs, header, engine, true /* constCall */)
+		}
+		msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+	}
+
 	txContext := NewEVMTxContext(msg)
 	if cfg.TraceJumpDest {
 		txContext.TxHash = tx.Hash()
 	}
 
 	// Update the evm with the new transaction context.
-	evm.Reset(txContext, statedb)
+	evm.Reset(txContext, ibs)
 
 	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, err
 	}
 	// Update the state with pending changes
-	if err = statedb.FinalizeTx(rules, stateWriter); err != nil {
+	if err = ibs.FinalizeTx(rules, stateWriter); err != nil {
 		return nil, nil, err
 	}
 	*usedGas += result.UsedGas
@@ -74,10 +84,10 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
 		}
 		// Set the receipt logs and create a bloom for filtering
-		receipt.Logs = statedb.GetLogs(tx.Hash())
+		receipt.Logs = ibs.GetLogs(tx.Hash())
 		receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 		receipt.BlockNumber = header.Number
-		receipt.TransactionIndex = uint(statedb.TxIndex())
+		receipt.TransactionIndex = uint(ibs.TxIndex())
 	}
 
 	return receipt, result.ReturnData, err
@@ -87,21 +97,15 @@ func applyTransaction(config *params.ChainConfig, gp *GasPool, statedb *state.In
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, blockHashFunc func(n uint64) common.Hash, engine consensus.Engine, author *common.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
+func ApplyTransaction(config *chain.Config, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment
 
 	// Add addresses to access list if applicable
 	// about the transaction and calling mechanisms.
 	cfg.SkipAnalysis = SkipAnalysis(config, header.Number.Uint64())
 
-	var vmenv vm.VMInterface
+	blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
+	vmenv := vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, config, cfg)
 
-	if tx.IsStarkNet() {
-		vmenv = &vm.CVMAdapter{Cvm: vm.NewCVM(ibs)}
-	} else {
-		blockContext := NewEVMBlockContext(header, blockHashFunc, engine, author)
-		vmenv = vm.NewEVM(blockContext, vm.TxContext{}, ibs, config, cfg)
-	}
-
-	return applyTransaction(config, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
+	return applyTransaction(config, engine, gp, ibs, stateWriter, header, tx, usedGas, vmenv, cfg)
 }

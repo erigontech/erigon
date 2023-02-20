@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 )
 
 func PrintMemStats(short bool) {
 	var m runtime.MemStats
-	common.ReadMemStats(&m)
+	dbg.ReadMemStats(&m)
 	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
 	if short {
 		fmt.Printf("HeapInuse: %vMb\n", ByteToMb(m.HeapInuse))

@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/common"
@@ -39,19 +41,19 @@ var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d
 var waitDeployedTests = map[string]struct {
 	code        string
 	gas         uint64
-	wantAddress common.Address
+	wantAddress libcommon.Address
 	wantErr     error
 }{
 	"successful deploy": {
 		code:        `6060604052600a8060106000396000f360606040526008565b00`,
 		gas:         3000000,
-		wantAddress: common.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a"),
+		wantAddress: libcommon.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a"),
 	},
 	"empty code": {
 		code:        ``,
 		gas:         300000,
 		wantErr:     bind.ErrNoCodeAfterDeploy,
-		wantAddress: common.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a"),
+		wantAddress: libcommon.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a"),
 	},
 }
 
@@ -77,26 +79,27 @@ func TestWaitDeployed(t *testing.T) {
 			// Create the transaction.
 			// Create the transaction.
 			var tx types.Transaction = types.NewContractCreation(0, u256.Num0, test.gas, u256.Num1, common.FromHex(test.code))
-			signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
+			signer := types.MakeSigner(params.TestChainConfig, 1)
 			tx, _ = types.SignTx(tx, *signer, testKey)
 
 			// Wait for it to get mined in the background.
 			var (
 				err     error
-				address common.Address
+				address libcommon.Address
 				mined   = make(chan struct{})
 				ctx     = context.Background()
 			)
-			go func() {
-				address, err = bind.WaitDeployed(ctx, backend, tx)
-				close(mined)
-			}()
 
 			// Send and mine the transaction.
 			if err = backend.SendTransaction(ctx, tx); err != nil {
 				t.Fatalf("test %q: failed to set tx: %v", name, err)
 			}
 			backend.Commit()
+
+			go func() {
+				address, err = bind.WaitDeployed(ctx, backend, tx)
+				close(mined)
+			}()
 
 			select {
 			case <-mined:
@@ -126,8 +129,8 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 
 	// Create a transaction to an account.
 	code := "6060604052600a8060106000396000f360606040526008565b00"
-	signer := types.MakeSigner(params.AllEthashProtocolChanges, 1)
-	var tx types.Transaction = types.NewTransaction(0, common.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
+	signer := types.MakeSigner(params.TestChainConfig, 1)
+	var tx types.Transaction = types.NewTransaction(0, libcommon.HexToAddress("0x01"), u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, testKey)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -144,6 +147,10 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	tx = types.NewContractCreation(1, u256.Num0, 3000000, u256.Num1, common.FromHex(code))
 	tx, _ = types.SignTx(tx, *signer, testKey)
 
+	if err := backend.SendTransaction(ctx, tx); err != nil {
+		t.Errorf("error when sending tx: %v", err)
+	}
+
 	done := make(chan bool)
 	go func() {
 		defer close(done)
@@ -154,9 +161,6 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		done <- true
 	}()
 
-	if err := backend.SendTransaction(ctx, tx); err != nil {
-		t.Errorf("error when sending tx: %v", err)
-	}
 	cancel()
 	<-done
 }

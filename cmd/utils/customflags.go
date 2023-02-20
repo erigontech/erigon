@@ -17,7 +17,6 @@
 package utils
 
 import (
-	"encoding"
 	"errors"
 	"flag"
 	"math/big"
@@ -26,8 +25,9 @@ import (
 	"path"
 	"strings"
 
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/urfave/cli"
 )
 
 // Custom type which is registered in the flags library which cli uses for
@@ -47,100 +47,106 @@ func (s *DirectoryString) Set(value string) error {
 // Custom cli.Flag type which expand the received string to an absolute path.
 // e.g. ~/.ethereum -> /home/username/.ethereum
 type DirectoryFlag struct {
-	Name   string
-	Value  DirectoryString
-	Usage  string
-	EnvVar string
+	Name string
+
+	Category    string
+	DefaultText string
+	Usage       string
+
+	Required   bool
+	Hidden     bool
+	HasBeenSet bool
+
+	Value DirectoryString
+
+	Aliases []string
 }
 
-func (f DirectoryFlag) String() string {
-	return cli.FlagStringer(f)
-}
+func (f *DirectoryFlag) Names() []string { return append([]string{f.Name}, f.Aliases...) }
+func (f *DirectoryFlag) IsSet() bool     { return f.HasBeenSet }
+func (f *DirectoryFlag) String() string  { return cli.FlagStringer(f) }
 
 // called by cli library, grabs variable from environment (if in env)
 // and adds variable to flag set for parsing.
-func (f DirectoryFlag) Apply(set *flag.FlagSet) {
-	eachName(f.Name, func(name string) {
+func (f *DirectoryFlag) Apply(set *flag.FlagSet) error {
+	eachName(f, func(name string) {
 		set.Var(&f.Value, f.Name, f.Usage)
 	})
+	return nil
 }
 
-func (f DirectoryFlag) GetName() string {
-	return f.Name
+func (f *DirectoryFlag) IsRequired() bool { return f.Required }
+
+func (f *DirectoryFlag) IsVisible() bool { return !f.Hidden }
+
+func (f *DirectoryFlag) GetCategory() string { return f.Category }
+
+func (f *DirectoryFlag) TakesValue() bool     { return true }
+func (f *DirectoryFlag) GetUsage() string     { return f.Usage }
+func (f *DirectoryFlag) GetValue() string     { return f.Value.String() }
+func (f *DirectoryFlag) GetEnvVars() []string { return nil } // env not supported
+
+func (f *DirectoryFlag) GetDefaultText() string {
+	if f.DefaultText != "" {
+		return f.DefaultText
+	}
+	return f.GetValue()
 }
 
-func (f *DirectoryFlag) Set(value string) {
-	f.Value.Set(value)
-}
-
-func eachName(longName string, fn func(string)) {
-	parts := strings.Split(longName, ",")
-	for _, name := range parts {
+func eachName(f cli.Flag, fn func(string)) {
+	for _, name := range f.Names() {
 		name = strings.Trim(name, " ")
 		fn(name)
 	}
 }
 
-type TextMarshaler interface {
-	encoding.TextMarshaler
-	encoding.TextUnmarshaler
-}
-
-// textMarshalerVal turns a TextMarshaler into a flag.Value
-type textMarshalerVal struct {
-	v TextMarshaler
-}
-
-func (v textMarshalerVal) String() string {
-	if v.v == nil {
-		return ""
-	}
-	text, _ := v.v.MarshalText()
-	return string(text)
-}
-
-func (v textMarshalerVal) Set(s string) error {
-	return v.v.UnmarshalText([]byte(s))
-}
-
-// TextMarshalerFlag wraps a TextMarshaler value.
-type TextMarshalerFlag struct {
-	Name   string
-	Value  TextMarshaler
-	Usage  string
-	EnvVar string
-}
-
-func (f TextMarshalerFlag) GetName() string {
-	return f.Name
-}
-
-func (f TextMarshalerFlag) String() string {
-	return cli.FlagStringer(f)
-}
-
-func (f TextMarshalerFlag) Apply(set *flag.FlagSet) {
-	eachName(f.Name, func(name string) {
-		set.Var(textMarshalerVal{f.Value}, f.Name, f.Usage)
-	})
-}
-
-// GlobalTextMarshaler returns the value of a TextMarshalerFlag from the global flag set.
-func GlobalTextMarshaler(ctx *cli.Context, name string) TextMarshaler {
-	val := ctx.GlobalGeneric(name)
-	if val == nil {
-		return nil
-	}
-	return val.(textMarshalerVal).v
-}
-
 // BigFlag is a command line flag that accepts 256 bit big integers in decimal or
 // hexadecimal syntax.
 type BigFlag struct {
-	Name   string
-	Value  *big.Int
-	Usage  string
-	EnvVar string
+	Name string
+
+	Category    string
+	DefaultText string
+	Usage       string
+
+	Required   bool
+	Hidden     bool
+	HasBeenSet bool
+
+	Value *big.Int
+
+	Aliases []string
+}
+
+func (f *BigFlag) Names() []string { return append([]string{f.Name}, f.Aliases...) }
+func (f *BigFlag) IsSet() bool     { return f.HasBeenSet }
+func (f *BigFlag) String() string  { return cli.FlagStringer(f) }
+
+func (f *BigFlag) Apply(set *flag.FlagSet) error {
+	eachName(f, func(name string) {
+		f.Value = new(big.Int)
+		set.Var((*bigValue)(f.Value), f.Name, f.Usage)
+	})
+
+	return nil
+}
+
+func (f *BigFlag) IsRequired() bool { return f.Required }
+
+func (f *BigFlag) IsVisible() bool { return !f.Hidden }
+
+func (f *BigFlag) GetCategory() string { return f.Category }
+
+func (f *BigFlag) TakesValue() bool     { return true }
+func (f *BigFlag) GetUsage() string     { return f.Usage }
+func (f *BigFlag) GetValue() string     { return f.Value.String() }
+func (f *BigFlag) GetEnvVars() []string { return nil } // env not supported
+
+func (f *BigFlag) GetDefaultText() string {
+	if f.DefaultText != "" {
+		return f.DefaultText
+	}
+	return f.GetValue()
 }
 
 // bigValue turns *big.Int into a flag.Value
@@ -162,24 +168,9 @@ func (b *bigValue) Set(s string) error {
 	return nil
 }
 
-func (f BigFlag) GetName() string {
-	return f.Name
-}
-
-func (f BigFlag) String() string {
-	return cli.FlagStringer(f)
-}
-
-func (f BigFlag) Apply(set *flag.FlagSet) {
-	eachName(f.Name, func(name string) {
-		f.Value = new(big.Int)
-		set.Var((*bigValue)(f.Value), f.Name, f.Usage)
-	})
-}
-
-// GlobalBig returns the value of a BigFlag from the global flag set.
-func GlobalBig(ctx *cli.Context, name string) *big.Int {
-	val := ctx.GlobalGeneric(name)
+// BigFlagValue returns the value of a BigFlag from the flag set.
+func BigFlagValue(ctx *cli.Context, name string) *big.Int {
+	val := ctx.Generic(name)
 	if val == nil {
 		return nil
 	}

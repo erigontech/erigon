@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/ledgerwatch/erigon/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ugorji/go/codec"
 )
 
@@ -30,8 +30,8 @@ func (l *OperatorUnmarshaller) ReadByteArray() ([]byte, error) {
 	return buffer, nil
 }
 
-func (l *OperatorUnmarshaller) ReadHash() (common.Hash, error) {
-	var hash common.Hash
+func (l *OperatorUnmarshaller) ReadHash() (libcommon.Hash, error) {
+	var hash libcommon.Hash
 	bytesRead, err := l.reader.Read(hash[:])
 	if err != nil {
 		return hash, err
@@ -130,7 +130,7 @@ func (w *OperatorMarshaller) WriteCode(value []byte) error {
 	return w.encoder.Encode(value)
 }
 
-func (w *OperatorMarshaller) WriteHash(hash common.Hash) error {
+func (w *OperatorMarshaller) WriteHash(hash libcommon.Hash) error {
 	w.WithColumn(ColumnHashes)
 	_, err := w.Write(hash[:])
 	return err

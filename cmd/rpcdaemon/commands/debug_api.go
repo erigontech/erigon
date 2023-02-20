@@ -5,20 +5,21 @@ import (
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	"github.com/ledgerwatch/erigon/internal/ethapi"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // AccountRangeMaxResults is the maximum number of results to be returned per call
@@ -53,7 +54,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 	}
 }
 
-// StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
+// storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -65,6 +66,16 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
+	engine := api.engine()
+
+	if api.historyV3(tx) {
+		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+		if err != nil {
+			return StorageRangeResult{}, err
+		}
+		return storageRangeAtV3(tx.(kv.TemporalTx), contractAddress, keyStart, minTxNum+txIndex, maxResult)
+	}
 
 	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
@@ -73,19 +84,12 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	if block == nil {
 		return StorageRangeResult{}, nil
 	}
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, e := api._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
 
-	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
+	_, _, _, _, stateReader, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	return StorageRangeAt(stateReader, contractAddress, keyStart, maxResult)
+	return storageRangeAt(stateReader.(*state.PlainState), contractAddress, keyStart, maxResult)
 }
 
 // AccountRange implements debug_accountRange. Returns a range of accounts involved in the given block rangeb
@@ -128,7 +132,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 		maxResults = AccountRangeMaxResults
 	}
 
-	dumper := state.NewDumper(tx, blockNumber)
+	dumper := state.NewDumper(tx, blockNumber, api.historyV3(tx))
 	res, err := dumper.IteratorDump(excludeCode, excludeStorage, common.BytesToAddress(startKey), maxResults)
 	if err != nil {
 		return state.IteratorDump{}, err
@@ -149,6 +153,7 @@ func (api *PrivateDebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash 
 }
 
 // GetModifiedAccountsByNumber implements debug_getModifiedAccountsByNumber. Returns a list of accounts modified in the given block.
+// [from, to)
 func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startNumber rpc.BlockNumber, endNumber *rpc.BlockNumber) ([]common.Address, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -182,7 +187,46 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
+	//[from, to)
+	if api.historyV3(tx) {
+		startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
+}
+
+// getModifiedAccountsV3 returns a list of addresses that were modified in the block range
+// [startNum:endNum)
+func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	changedAddrs := make(map[common.Address]struct{})
+	it, _ := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		changedAddrs[common.BytesToAddress(k)] = struct{}{}
+	}
+
+	if len(changedAddrs) == 0 {
+		return nil, nil
+	}
+
+	idx := 0
+	result := make([]common.Address, len(changedAddrs))
+	for addr := range changedAddrs {
+		copy(result[idx][:], addr[:])
+		idx++
+	}
+
+	return result, nil
 }
 
 // GetModifiedAccountsByHash implements debug_getModifiedAccountsByHash. Returns a list of accounts modified in the given block.
@@ -218,6 +262,18 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, s
 		return nil, fmt.Errorf("start block (%d) must be less than or equal to end block (%d)", startNum, endNum)
 	}
 
+	//[from, to)
+	if api.historyV3(tx) {
+		startTxNum, err := rawdbv3.TxNums.Min(tx, startNum)
+		if err != nil {
+			return nil, err
+		}
+		endTxNum, err := rawdbv3.TxNums.Max(tx, endNum-1)
+		if err != nil {
+			return nil, err
+		}
+		return getModifiedAccountsV3(tx.(kv.TemporalTx), startTxNum, endTxNum)
+	}
 	return changeset.GetModifiedAccounts(tx, startNum, endNum)
 }
 
@@ -228,10 +284,52 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	}
 	defer tx.Rollback()
 
+	if api.historyV3(tx) {
+		number := rawdb.ReadHeaderNumber(tx, blockHash)
+		if number == nil {
+			return nil, nil
+		}
+		canonicalHash, _ := rawdb.ReadCanonicalHash(tx, *number)
+		isCanonical := canonicalHash == blockHash
+		if !isCanonical {
+			return nil, fmt.Errorf("block hash is not canonical")
+		}
+
+		minTxNum, err := rawdbv3.TxNums.Min(tx, *number)
+		if err != nil {
+			return nil, err
+		}
+		ttx := tx.(kv.TemporalTx)
+		v, ok, err := ttx.DomainGet(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || len(v) == 0 {
+			return &AccountResult{}, nil
+		}
+
+		var a accounts.Account
+		if err := a.DecodeForStorage(v); err != nil {
+			return nil, err
+		}
+		result := &AccountResult{}
+		result.Balance.ToInt().Set(a.Balance.ToBig())
+		result.Nonce = hexutil.Uint64(a.Nonce)
+		result.CodeHash = a.CodeHash
+
+		code, _, err := ttx.DomainGet(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		if err != nil {
+			return nil, err
+		}
+		result.Code = code
+		return result, nil
+	}
+
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
+	engine := api.engine()
 
 	block, err := api.blockByHashWithSenders(tx, blockHash)
 	if err != nil {
@@ -240,10 +338,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 	if block == nil {
 		return nil, nil
 	}
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		return rawdb.ReadHeader(tx, hash, number)
-	}
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, block, chainConfig, getHeader, ethash.NewFaker(), tx, blockHash, txIndex)
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txIndex), api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}

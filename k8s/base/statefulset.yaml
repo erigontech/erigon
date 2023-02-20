@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -17,65 +18,48 @@ spec:
         app: erigon
     spec:
       containers:
-      - args:
-        - '--authrpc.vhosts=*'
-        - '--datadir=/home/erigon/.local/share/erigon'
-        - '--healthcheck'
-        - '--log.json'
-        - '--metrics'
-        - '--metrics.addr=0.0.0.0'
-        - '--metrics.port=6060'
-        - '--nat=none'
-        - '--private.api.ratelimit=50000'
-        - '--private.api.addr=0.0.0.0:9090'
-        - '--torrent.download.rate=3000mb'
-        - '--torrent.download.slots=200'
-        - '--verbosity=3'
-        - —-batchSize=8000M
-        command:
-        - erigon
-        image: erigon-image
-        livenessProbe:
-          initialDelaySeconds: 1800
-          periodSeconds: 20
-          tcpSocket:
-            port: 9090
-        name: erigon
-        ports:
-        - containerPort: 9090
-          name: private-api
-        - containerPort: 8551
-          name: engine
-        - containerPort: 30303
-          name: eth66-pr-tcp
-          protocol: TCP
-        - containerPort: 30303
-          name: eth66-pr-udp
-          protocol: UDP
-        - containerPort: 6060
-          name: metrics
-        - containerPort: 6070
-          name: pprof
-        - containerPort: 42069
-          name: snap-sync-tcp
-          protocol: TCP
-        - containerPort: 42069
-          name: snap-sync-udp
-          protocol: UDP
-        readinessProbe:
-          initialDelaySeconds: 1800
-          periodSeconds: 20
-          tcpSocket:
-            port: 9090
-        resources:
-          requests:
-            cpu: 2462m
-            memory: 16Gi
-        securityContext:
-          allowPrivilegeEscalation: false
-          runAsGroup: 1000
-          runAsUser: 1000
-        volumeMounts: []
+        - args: []
+          command:
+            - erigon
+          env: []
+          image: thorax/erigon
+          name: erigon
+          ports:
+            - containerPort: 9090
+              name: private-api
+            - containerPort: 8551
+              name: engine
+            - containerPort: 30303
+              name: eth66-pr-tcp
+              protocol: TCP
+            - containerPort: 30303
+              name: eth66-pr-udp
+              protocol: UDP
+            - containerPort: 8545
+              name: http
+              protocol: TCP
+            - containerPort: 6060
+              name: metrics
+            - containerPort: 6070
+              name: pprof
+            - containerPort: 42069
+              name: snap-sync-tcp
+              protocol: TCP
+            - containerPort: 42069
+              name: snap-sync-udp
+              protocol: UDP
+          readinessProbe:
+            tcpSocket:
+              port: 8545
+          resources:
+            requests:
+              cpu: 2462m
+              memory: 16Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsGroup: 1000
+            runAsUser: 1000
+          volumeMounts: []
       initContainers: []
       volumes: []
   volumeClaimTemplates: []

@@ -2,49 +2,43 @@ package stagedsync
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
-	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/common"
+
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type MiningBlock struct {
-	Header   *types.Header
-	Uncles   []*types.Header
-	Txs      types.Transactions
-	Receipts types.Receipts
-
-	LocalTxs  types.TransactionsStream
-	RemoteTxs types.TransactionsStream
+	Header      *types.Header
+	Uncles      []*types.Header
+	Txs         types.Transactions
+	Receipts    types.Receipts
+	Withdrawals []*types.Withdrawal
+	PreparedTxs types.TransactionsStream
 }
 
 type MiningState struct {
 	MiningConfig      *params.MiningConfig
 	PendingResultCh   chan *types.Block
 	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.Block
+	MiningResultPOSCh chan *types.BlockWithReceipts
 	MiningBlock       *MiningBlock
 }
 
@@ -62,7 +56,7 @@ func NewProposingState(cfg *params.MiningConfig) MiningState {
 		MiningConfig:      cfg,
 		PendingResultCh:   make(chan *types.Block, 1),
 		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.Block, 1),
+		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:       &MiningBlock{},
 	}
 }
@@ -70,7 +64,7 @@ func NewProposingState(cfg *params.MiningConfig) MiningState {
 type MiningCreateBlockCfg struct {
 	db                     kv.RwDB
 	miner                  MiningState
-	chainConfig            params.ChainConfig
+	chainConfig            chain.Config
 	engine                 consensus.Engine
 	txPool2                *txpool.TxPool
 	txPool2DB              kv.RoDB
@@ -78,7 +72,7 @@ type MiningCreateBlockCfg struct {
 	blockBuilderParameters *core.BlockBuilderParameters
 }
 
-func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig params.ChainConfig, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
+func StageMiningCreateBlockCfg(db kv.RwDB, miner MiningState, chainConfig chain.Config, engine consensus.Engine, txPool2 *txpool.TxPool, txPool2DB kv.RoDB, blockBuilderParameters *core.BlockBuilderParameters, tmpdir string) MiningCreateBlockCfg {
 	return MiningCreateBlockCfg{
 		db:                     db,
 		miner:                  miner,
@@ -98,7 +92,7 @@ var maxTransactions uint16 = 1000
 // - resubmitAdjustCh - variable is not implemented
 func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBlockCfg, quit <-chan struct{}) (err error) {
 	current := cfg.miner.MiningBlock
-	txPoolLocals := []common.Address{} //txPoolV2 has no concept of local addresses (yet?)
+	txPoolLocals := []libcommon.Address{} //txPoolV2 has no concept of local addresses (yet?)
 	coinbase := cfg.miner.MiningConfig.Etherbase
 
 	const (
@@ -120,7 +114,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 		return fmt.Errorf("wrong head block: %x (current) vs %x (requested)", parent.Hash(), cfg.blockBuilderParameters.ParentHash)
 	}
 
-	if cfg.miner.MiningConfig.Etherbase == (common.Address{}) {
+	if cfg.miner.MiningConfig.Etherbase == (libcommon.Address{}) {
 		if cfg.blockBuilderParameters == nil {
 			return fmt.Errorf("refusing to mine without etherbase")
 		}
@@ -129,51 +123,13 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	}
 
 	blockNum := executionAt + 1
-	txSlots := types2.TxsRlp{}
-	var onTime bool
-	if err = cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
-		var err error
-		counter := 0
-		for !onTime && counter < 1000 {
-			if onTime, err = cfg.txPool2.Best(maxTransactions, &txSlots, poolTx, executionAt); err != nil {
-				return err
-			}
-			time.Sleep(1 * time.Millisecond)
-			counter++
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var skipByChainIDMismatch uint64 = 0
-	var txs []types.Transaction //nolint:prealloc
-	for i := range txSlots.Txs {
-		s := rlp.NewStream(bytes.NewReader(txSlots.Txs[i]), uint64(len(txSlots.Txs[i])))
 
-		transaction, err := types.DecodeTransaction(s)
-		if err == io.EOF {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if transaction.GetChainID().ToBig().Uint64() != 0 && transaction.GetChainID().ToBig().Cmp(cfg.chainConfig.ChainID) != 0 {
-			skipByChainIDMismatch++
-			continue
-		}
-		var sender common.Address
-		copy(sender[:], txSlots.Senders.At(i))
-		// Check if tx nonce is too low
-		txs = append(txs, transaction)
-		txs[len(txs)-1].SetSender(sender)
-	}
-	log.Debug(fmt.Sprintf("[%s] Candidate txs", logPrefix), "amount", len(txs))
 	localUncles, remoteUncles, err := readNonCanonicalHeaders(tx, blockNum, cfg.engine, coinbase, txPoolLocals)
 	if err != nil {
 		return err
 	}
 	chain := ChainReader{Cfg: cfg.chainConfig, Db: tx}
-	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
+	var GetBlocksFromHash = func(hash libcommon.Hash, n int) (blocks []*types.Block) {
 		number := rawdb.ReadHeaderNumber(tx, hash)
 		if number == nil {
 			return nil
@@ -219,15 +175,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	header.Coinbase = coinbase
 	header.Extra = cfg.miner.MiningConfig.ExtraData
 
-	txs, err = filterBadTransactions(tx, txs, cfg.chainConfig, blockNum, header.BaseFee, cfg.tmpdir)
-	if err != nil {
-		return err
-	}
-	current.RemoteTxs = types.NewTransactionsFixedOrder(txs)
-	// txpool v2 - doesn't prioritise local txs over remote
-	current.LocalTxs = types.NewTransactionsFixedOrder(nil)
-
-	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit, "txs", len(txs))
+	log.Info(fmt.Sprintf("[%s] Start mine", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
@@ -249,6 +197,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 		current.Header = header
 		current.Uncles = nil
+		current.Withdrawals = cfg.blockBuilderParameters.Withdrawals
 		return nil
 	}
 
@@ -270,7 +219,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	var makeUncles = func(proposedUncles mapset.Set) []*types.Header {
 		var uncles []*types.Header
 		proposedUncles.Each(func(item interface{}) bool {
-			hash, ok := item.(common.Hash)
+			hash, ok := item.(libcommon.Hash)
 			if !ok {
 				return false
 			}
@@ -317,7 +266,7 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 	// Accumulate the miningUncles for the env block
 	// Prefer to locally generated uncle
 	uncles := make([]*types.Header, 0, 2)
-	for _, blocks := range []map[common.Hash]*types.Header{localUncles, remoteUncles} {
+	for _, blocks := range []map[libcommon.Hash]*types.Header{localUncles, remoteUncles} {
 		// Clean up stale uncle blocks first
 		for hash, uncle := range blocks {
 			if uncle.Number.Uint64()+staleThreshold <= header.Number.Uint64() {
@@ -339,11 +288,12 @@ func SpawnMiningCreateBlockStage(s *StageState, tx kv.RwTx, cfg MiningCreateBloc
 
 	current.Header = header
 	current.Uncles = makeUncles(env.uncles)
+	current.Withdrawals = nil
 	return nil
 }
 
-func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase common.Address, txPoolLocals []common.Address) (localUncles, remoteUncles map[common.Hash]*types.Header, err error) {
-	localUncles, remoteUncles = map[common.Hash]*types.Header{}, map[common.Hash]*types.Header{}
+func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine, coinbase libcommon.Address, txPoolLocals []libcommon.Address) (localUncles, remoteUncles map[libcommon.Hash]*types.Header, err error) {
+	localUncles, remoteUncles = map[libcommon.Hash]*types.Header{}, map[libcommon.Hash]*types.Header{}
 	nonCanonicalBlocks, err := rawdb.ReadHeadersByNumber(tx, blockNum)
 	if err != nil {
 		return
@@ -357,124 +307,4 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine consensus.Engine,
 
 	}
 	return
-}
-
-func filterBadTransactions(tx kv.Tx, transactions []types.Transaction, config params.ChainConfig, blockNumber uint64, baseFee *big.Int, tmpDir string) ([]types.Transaction, error) {
-	initialCnt := len(transactions)
-	var filtered []types.Transaction
-	simulationTx := memdb.NewMemoryBatch(tx, tmpDir)
-	defer simulationTx.Rollback()
-	gasBailout := config.Consensus == params.ParliaConsensus
-
-	missedTxs := 0
-	noSenderCnt := 0
-	noAccountCnt := 0
-	nonceTooLowCnt := 0
-	notEOACnt := 0
-	feeTooLowCnt := 0
-	balanceTooLowCnt := 0
-	overflowCnt := 0
-	for len(transactions) > 0 && missedTxs != len(transactions) {
-		transaction := transactions[0]
-		sender, ok := transaction.GetSender()
-		if !ok {
-			transactions = transactions[1:]
-			noSenderCnt++
-			continue
-		}
-		var account accounts.Account
-		ok, err := rawdb.ReadAccount(simulationTx, sender, &account)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			transactions = transactions[1:]
-			noAccountCnt++
-			continue
-		}
-		// Check transaction nonce
-		if account.Nonce > transaction.GetNonce() {
-			transactions = transactions[1:]
-			nonceTooLowCnt++
-			continue
-		}
-		if account.Nonce < transaction.GetNonce() {
-			missedTxs++
-			transactions = append(transactions[1:], transaction)
-			continue
-		}
-		missedTxs = 0
-
-		// Make sure the sender is an EOA (EIP-3607)
-		if !account.IsEmptyCodeHash() {
-			transactions = transactions[1:]
-			notEOACnt++
-			continue
-		}
-
-		if config.IsLondon(blockNumber) {
-			baseFee256 := uint256.NewInt(0)
-			if overflow := baseFee256.SetFromBig(baseFee); overflow {
-				return nil, fmt.Errorf("bad baseFee %s", baseFee)
-			}
-			// Make sure the transaction gasFeeCap is greater than the block's baseFee.
-			if !transaction.GetFeeCap().IsZero() || !transaction.GetTip().IsZero() {
-				if err := core.CheckEip1559TxGasFeeCap(sender, transaction.GetFeeCap(), transaction.GetTip(), baseFee256); err != nil {
-					transactions = transactions[1:]
-					feeTooLowCnt++
-					continue
-				}
-			}
-		}
-		txnGas := transaction.GetGas()
-		txnPrice := transaction.GetPrice()
-		value := transaction.GetValue()
-		accountBalance := account.Balance
-
-		want := uint256.NewInt(0)
-		want.SetUint64(txnGas)
-		want, overflow := want.MulOverflow(want, txnPrice)
-		if overflow {
-			transactions = transactions[1:]
-			overflowCnt++
-			continue
-		}
-
-		if transaction.GetFeeCap() != nil {
-			want.SetUint64(txnGas)
-			want, overflow = want.MulOverflow(want, transaction.GetFeeCap())
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
-			want, overflow = want.AddOverflow(want, value)
-			if overflow {
-				transactions = transactions[1:]
-				overflowCnt++
-				continue
-			}
-		}
-
-		if accountBalance.Cmp(want) < 0 {
-			if !gasBailout {
-				transactions = transactions[1:]
-				balanceTooLowCnt++
-				continue
-			}
-		}
-		// Updates account in the simulation
-		account.Nonce++
-		account.Balance.Sub(&account.Balance, want)
-		accountBuffer := make([]byte, account.EncodingLengthForStorage())
-		account.EncodeForStorage(accountBuffer)
-		if err := simulationTx.Put(kv.PlainState, sender[:], accountBuffer); err != nil {
-			return nil, err
-		}
-		// Mark transaction as valid
-		filtered = append(filtered, transaction)
-		transactions = transactions[1:]
-	}
-	log.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "filtered", len(filtered))
-	return filtered, nil
 }

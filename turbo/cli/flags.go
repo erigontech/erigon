@@ -5,22 +5,24 @@ import (
 	"strings"
 	"time"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli"
 )
 
 var (
@@ -39,15 +41,15 @@ var (
 		Usage: "Buffer size for ETL operations.",
 		Value: etl.BufferOptimalSize.String(),
 	}
-	BlockDownloaderWindowFlag = cli.IntFlag{
-		Name:  "blockDownloaderWindow",
-		Usage: "Outstanding limit of block bodies being downloaded",
-		Value: ethconfig.Defaults.Sync.BlockDownloaderWindow,
+	BodyCacheLimitFlag = cli.StringFlag{
+		Name:  "bodies.cache",
+		Usage: "Limit on the cache for block bodies",
+		Value: fmt.Sprintf("%d", ethconfig.Defaults.Sync.BodyCacheLimit),
 	}
 
 	PrivateApiAddr = cli.StringFlag{
 		Name:  "private.api.addr",
-		Usage: "private api network address, for example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
+		Usage: "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. example: 127.0.0.1:9090, empty string means not to start the listener. do not expose to public network. serves remote database interface",
 		Value: "127.0.0.1:9090",
 	}
 
@@ -197,58 +199,76 @@ var (
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	mode, err := prune.FromCli(
 		cfg.Genesis.Config.ChainID.Uint64(),
-		ctx.GlobalString(PruneFlag.Name),
-		ctx.GlobalUint64(PruneHistoryFlag.Name),
-		ctx.GlobalUint64(PruneReceiptFlag.Name),
-		ctx.GlobalUint64(PruneTxIndexFlag.Name),
-		ctx.GlobalUint64(PruneCallTracesFlag.Name),
-		ctx.GlobalUint64(PruneHistoryBeforeFlag.Name),
-		ctx.GlobalUint64(PruneReceiptBeforeFlag.Name),
-		ctx.GlobalUint64(PruneTxIndexBeforeFlag.Name),
-		ctx.GlobalUint64(PruneCallTracesBeforeFlag.Name),
-		strings.Split(ctx.GlobalString(ExperimentsFlag.Name), ","),
+		ctx.String(PruneFlag.Name),
+		ctx.Uint64(PruneHistoryFlag.Name),
+		ctx.Uint64(PruneReceiptFlag.Name),
+		ctx.Uint64(PruneTxIndexFlag.Name),
+		ctx.Uint64(PruneCallTracesFlag.Name),
+		ctx.Uint64(PruneHistoryBeforeFlag.Name),
+		ctx.Uint64(PruneReceiptBeforeFlag.Name),
+		ctx.Uint64(PruneTxIndexBeforeFlag.Name),
+		ctx.Uint64(PruneCallTracesBeforeFlag.Name),
+		strings.Split(ctx.String(ExperimentsFlag.Name), ","),
 	)
 	if err != nil {
 		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
-	if ctx.GlobalString(BatchSizeFlag.Name) != "" {
-		err := cfg.BatchSize.UnmarshalText([]byte(ctx.GlobalString(BatchSizeFlag.Name)))
+	if ctx.String(BatchSizeFlag.Name) != "" {
+		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
-	if ctx.GlobalString(EtlBufferSizeFlag.Name) != "" {
+	if ctx.String(EtlBufferSizeFlag.Name) != "" {
 		sizeVal := datasize.ByteSize(0)
 		size := &sizeVal
-		err := size.UnmarshalText([]byte(ctx.GlobalString(EtlBufferSizeFlag.Name)))
+		err := size.UnmarshalText([]byte(ctx.String(EtlBufferSizeFlag.Name)))
 		if err != nil {
 			utils.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
 
-	cfg.StateStream = !ctx.GlobalBool(StateStreamDisableFlag.Name)
-	cfg.Sync.BlockDownloaderWindow = ctx.GlobalInt(BlockDownloaderWindowFlag.Name)
+	cfg.StateStream = !ctx.Bool(StateStreamDisableFlag.Name)
+	if ctx.String(BodyCacheLimitFlag.Name) != "" {
+		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
+		if err != nil {
+			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
+		}
+	}
 
-	if ctx.GlobalString(SyncLoopThrottleFlag.Name) != "" {
-		syncLoopThrottle, err := time.ParseDuration(ctx.GlobalString(SyncLoopThrottleFlag.Name))
+	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
+		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
 		if err != nil {
 			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if ctx.GlobalString(BadBlockFlag.Name) != "" {
-		bytes, err := hexutil.Decode(ctx.GlobalString(BadBlockFlag.Name))
+	if ctx.String(BadBlockFlag.Name) != "" {
+		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
 		if err != nil {
-			log.Warn("Error decoding block hash", "hash", ctx.GlobalString(BadBlockFlag.Name), "err", err)
+			log.Warn("Error decoding block hash", "hash", ctx.String(BadBlockFlag.Name), "err", err)
 		} else {
-			cfg.BadBlockHash = common.BytesToHash(bytes)
+			cfg.BadBlockHash = libcommon.BytesToHash(bytes)
 		}
 	}
 
+	disableIPV6 := ctx.Bool(utils.DisableIPV6.Name)
+	disableIPV4 := ctx.Bool(utils.DisableIPV4.Name)
+	downloadRate := ctx.String(utils.TorrentDownloadRateFlag.Name)
+	uploadRate := ctx.String(utils.TorrentUploadRateFlag.Name)
+
+	log.Info("[Downloader] Runnning with", "ipv6-enabled", !disableIPV6, "ipv4-enabled", !disableIPV4, "download.rate", downloadRate, "upload.rate", uploadRate)
+	if ctx.Bool(utils.DisableIPV6.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv6 = true
+	}
+
+	if ctx.Bool(utils.DisableIPV4.Name) {
+		cfg.Downloader.ClientConfig.DisableIPv4 = true
+	}
 }
 
 func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
@@ -316,73 +336,84 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 func ApplyFlagsForNodeConfig(ctx *cli.Context, cfg *nodecfg.Config) {
 	setPrivateApi(ctx, cfg)
 	setEmbeddedRpcDaemon(ctx, cfg)
-	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.GlobalInt(DatabaseVerbosityFlag.Name))
+	cfg.DatabaseVerbosity = kv.DBVerbosityLvl(ctx.Int(DatabaseVerbosityFlag.Name))
 }
 
 func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
-	jwtSecretPath := ctx.GlobalString(utils.JWTSecretPath.Name)
+	jwtSecretPath := ctx.String(utils.JWTSecretPath.Name)
 	if jwtSecretPath == "" {
 		jwtSecretPath = cfg.Dirs.DataDir + "/jwt.hex"
 	}
 
-	apis := ctx.GlobalString(utils.HTTPApiFlag.Name)
+	apis := ctx.String(utils.HTTPApiFlag.Name)
 	log.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
-		Enabled: ctx.GlobalBool(utils.HTTPEnabledFlag.Name),
+		Enabled: ctx.Bool(utils.HTTPEnabledFlag.Name),
 		Dirs:    cfg.Dirs,
 
 		TLSKeyFile:  cfg.TLSKeyFile,
 		TLSCACert:   cfg.TLSCACert,
 		TLSCertfile: cfg.TLSCertFile,
 
-		HttpListenAddress:        ctx.GlobalString(utils.HTTPListenAddrFlag.Name),
-		HttpPort:                 ctx.GlobalInt(utils.HTTPPortFlag.Name),
-		AuthRpcHTTPListenAddress: ctx.GlobalString(utils.AuthRpcAddr.Name),
-		AuthRpcPort:              ctx.GlobalInt(utils.AuthRpcPort.Name),
+		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
+		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
+		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
+		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
+		AuthRpcPort:              ctx.Int(utils.AuthRpcPort.Name),
 		JWTSecretPath:            jwtSecretPath,
-		TraceRequests:            ctx.GlobalBool(utils.HTTPTraceFlag.Name),
-		HttpCORSDomain:           strings.Split(ctx.GlobalString(utils.HTTPCORSDomainFlag.Name), ","),
-		HttpVirtualHost:          strings.Split(ctx.GlobalString(utils.HTTPVirtualHostsFlag.Name), ","),
-		AuthRpcVirtualHost:       strings.Split(ctx.GlobalString(utils.AuthRpcVirtualHostsFlag.Name), ","),
+		TraceRequests:            ctx.Bool(utils.HTTPTraceFlag.Name),
+		HttpCORSDomain:           strings.Split(ctx.String(utils.HTTPCORSDomainFlag.Name), ","),
+		HttpVirtualHost:          strings.Split(ctx.String(utils.HTTPVirtualHostsFlag.Name), ","),
+		AuthRpcVirtualHost:       strings.Split(ctx.String(utils.AuthRpcVirtualHostsFlag.Name), ","),
 		API:                      strings.Split(apis, ","),
 		HTTPTimeouts: rpccfg.HTTPTimeouts{
-			ReadTimeout:  ctx.GlobalDuration(HTTPReadTimeoutFlag.Name),
-			WriteTimeout: ctx.GlobalDuration(HTTPWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
+			ReadTimeout:  ctx.Duration(HTTPReadTimeoutFlag.Name),
+			WriteTimeout: ctx.Duration(HTTPWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
 		AuthRpcTimeouts: rpccfg.HTTPTimeouts{
-			ReadTimeout:  ctx.GlobalDuration(AuthRpcReadTimeoutFlag.Name),
-			WriteTimeout: ctx.GlobalDuration(AuthRpcWriteTimeoutFlag.Name),
-			IdleTimeout:  ctx.GlobalDuration(HTTPIdleTimeoutFlag.Name),
+			ReadTimeout:  ctx.Duration(AuthRpcReadTimeoutFlag.Name),
+			WriteTimeout: ctx.Duration(AuthRpcWriteTimeoutFlag.Name),
+			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
-		EvmCallTimeout: ctx.GlobalDuration(EvmCallTimeoutFlag.Name),
+		EvmCallTimeout: ctx.Duration(EvmCallTimeoutFlag.Name),
 
-		WebsocketEnabled:     ctx.GlobalIsSet(utils.WSEnabledFlag.Name),
-		RpcBatchConcurrency:  ctx.GlobalUint(utils.RpcBatchConcurrencyFlag.Name),
-		RpcStreamingDisable:  ctx.GlobalBool(utils.RpcStreamingDisableFlag.Name),
-		DBReadConcurrency:    ctx.GlobalInt(utils.DBReadConcurrencyFlag.Name),
-		RpcAllowListFilePath: ctx.GlobalString(utils.RpcAccessListFlag.Name),
-		Gascap:               ctx.GlobalUint64(utils.RpcGasCapFlag.Name),
-		MaxTraces:            ctx.GlobalUint64(utils.TraceMaxtracesFlag.Name),
-		TraceCompatibility:   ctx.GlobalBool(utils.RpcTraceCompatFlag.Name),
+		WebsocketEnabled:     ctx.IsSet(utils.WSEnabledFlag.Name),
+		RpcBatchConcurrency:  ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),
+		RpcStreamingDisable:  ctx.Bool(utils.RpcStreamingDisableFlag.Name),
+		DBReadConcurrency:    ctx.Int(utils.DBReadConcurrencyFlag.Name),
+		RpcAllowListFilePath: ctx.String(utils.RpcAccessListFlag.Name),
+		Gascap:               ctx.Uint64(utils.RpcGasCapFlag.Name),
+		MaxTraces:            ctx.Uint64(utils.TraceMaxtracesFlag.Name),
+		TraceCompatibility:   ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		BatchLimit:           ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:      ctx.Int(utils.RpcReturnDataLimit.Name),
 
-		TxPoolApiAddr: ctx.GlobalString(utils.TxpoolApiAddrFlag.Name),
+		TxPoolApiAddr: ctx.String(utils.TxpoolApiAddrFlag.Name),
 
 		StateCache: kvcache.DefaultCoherentConfig,
 	}
-	if ctx.GlobalIsSet(utils.HttpCompressionFlag.Name) {
-		c.HttpCompression = ctx.GlobalBool(utils.HttpCompressionFlag.Name)
+	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
+		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
 	} else {
 		c.HttpCompression = true
 	}
-	if ctx.GlobalIsSet(utils.WsCompressionFlag.Name) {
-		c.WebsocketCompression = ctx.GlobalBool(utils.WsCompressionFlag.Name)
+	if ctx.IsSet(utils.WsCompressionFlag.Name) {
+		c.WebsocketCompression = ctx.Bool(utils.WsCompressionFlag.Name)
 	} else {
 		c.WebsocketCompression = true
 	}
 
-	c.StateCache.CodeKeysLimit = ctx.GlobalInt(utils.StateCacheFlag.Name)
+	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
+
+	err = c.StateCache.CodeCacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
+	if err != nil {
+		utils.Fatalf("Invalid state.cache value provided")
+	}
 
 	/*
 		rootCmd.PersistentFlags().BoolVar(&cfg.GRPCServerEnabled, "grpc", false, "Enable GRPC server")
@@ -396,16 +427,16 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 // setPrivateApi populates configuration fields related to the remote
 // read-only interface to the database
 func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
-	cfg.PrivateApiAddr = ctx.GlobalString(PrivateApiAddr.Name)
-	cfg.PrivateApiRateLimit = uint32(ctx.GlobalUint64(PrivateApiRateLimit.Name))
+	cfg.PrivateApiAddr = ctx.String(PrivateApiAddr.Name)
+	cfg.PrivateApiRateLimit = uint32(ctx.Uint64(PrivateApiRateLimit.Name))
 	maxRateLimit := uint32(kv.ReadersLimit - 128) // leave some readers for P2P
 	if cfg.PrivateApiRateLimit > maxRateLimit {
 		log.Warn("private.api.ratelimit is too big", "force", maxRateLimit)
 		cfg.PrivateApiRateLimit = maxRateLimit
 	}
-	if ctx.GlobalBool(TLSFlag.Name) {
-		certFile := ctx.GlobalString(TLSCertFlag.Name)
-		keyFile := ctx.GlobalString(TLSKeyFlag.Name)
+	if ctx.Bool(TLSFlag.Name) {
+		certFile := ctx.String(TLSCertFlag.Name)
+		keyFile := ctx.String(TLSKeyFlag.Name)
 		if certFile == "" {
 			log.Warn("Could not establish TLS grpc: missing certificate")
 			return
@@ -416,7 +447,7 @@ func setPrivateApi(ctx *cli.Context, cfg *nodecfg.Config) {
 		cfg.TLSConnection = true
 		cfg.TLSCertFile = certFile
 		cfg.TLSKeyFile = keyFile
-		cfg.TLSCACert = ctx.GlobalString(TLSCACertFlag.Name)
+		cfg.TLSCACert = ctx.String(TLSCACertFlag.Name)
 	}
-	cfg.HealthCheck = ctx.GlobalBool(HealthCheckFlag.Name)
+	cfg.HealthCheck = ctx.Bool(HealthCheckFlag.Name)
 }

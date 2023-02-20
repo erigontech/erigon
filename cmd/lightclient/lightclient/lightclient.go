@@ -14,21 +14,31 @@
 package lightclient
 
 import (
-	"bytes"
 	"context"
+	"errors"
+	"runtime"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/clparams"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/rpc/lightrpc"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/utils"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 )
 
-const maxRecentHashes = 5 // 0.16 KB
-const safetyRange = 8     // 8 block of safety
+const (
+	maxRecentHashes   = 5  // 0.16 KB
+	safetyRange       = 16 // 16 block of safety
+	maxChainExtension = 8  // 8 blocks of chain extension
+)
 
 type LightClient struct {
 	ctx           context.Context
@@ -36,27 +46,38 @@ type LightClient struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	chainTip      *ChainTipSubscriber
 
-	verbose           bool
-	highestSeen       uint64 // Highest ETH1 block seen
-	recentHashesCache *lru.Cache
-	sentinel          lightrpc.SentinelClient
-	execution         remote.ETHBACKENDServer
-	store             *LightClientStore
-	lastValidated     *cltypes.LightClientUpdate
+	verbose              bool
+	highestSeen          uint64       // Highest ETH1 block seen.
+	highestValidated     uint64       // Highest ETH2 slot validated.
+	highestProcessedRoot common2.Hash // Highest processed ETH2 block root.
+	lastEth2ParentRoot   common2.Hash // Last ETH2 Parent root.
+	finalizedEth1Hash    common2.Hash
+	recentHashesCache    *lru.Cache
+	db                   kv.RwDB
+	rpc                  *rpc.BeaconRpcP2P
+	// Either execution server or client
+	execution       remote.ETHBACKENDServer
+	executionClient remote.ETHBACKENDClient
+	store           *LightClientStore
 }
 
-func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
-	execution remote.ETHBACKENDServer, sentinel lightrpc.SentinelClient, verbose bool) (*LightClient, error) {
+func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+	execution remote.ETHBACKENDServer, executionClient remote.ETHBACKENDClient, sentinel sentinel.SentinelClient,
+	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
+	rpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	return &LightClient{
 		ctx:               ctx,
 		beaconConfig:      beaconConfig,
 		genesisConfig:     genesisConfig,
-		chainTip:          NewChainTipSubscriber(ctx, sentinel),
+		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel, rpc),
 		recentHashesCache: recentHashesCache,
-		sentinel:          sentinel,
+		rpc:               rpc,
 		execution:         execution,
 		verbose:           verbose,
+		highestSeen:       highestSeen,
+		db:                db,
+		executionClient:   executionClient,
 	}, err
 }
 
@@ -65,7 +86,15 @@ func (l *LightClient) Start() {
 		log.Error("No trusted setup")
 		return
 	}
+	tx, err := l.db.BeginRw(l.ctx)
+	if err != nil {
+		log.Error("Could not open MDBX transaction", "err", err)
+		return
+	}
+	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
+
+	updateStatusSentinel := time.NewTicker(2 * time.Minute)
 	go l.chainTip.StartLoop()
 	for {
 		start := time.Now()
@@ -112,70 +141,149 @@ func (l *LightClient) Start() {
 				updates = append(updates, newUpdate)
 			}
 		}
+
 		// Push updates
 		for _, update := range updates {
 			err := l.processLightClientUpdate(update)
 			if err != nil {
 				log.Warn("Could not validate update", "err", err)
+				updates = []*cltypes.LightClientUpdate{}
+				break
 			}
 		}
 		// log new validated segment
 		if len(updates) > 0 {
-			l.lastValidated = updates[len(updates)-1]
-			if l.verbose {
-				log.Info("[LightClient] Validated Chain Segments",
-					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.Slot-1,
-					"to", l.lastValidated.AttestedHeader.Slot)
-			}
-			prev, curr := l.chainTip.GetLastBlocks()
-			if prev == nil {
-				continue
-			}
-			// Skip if we went out of sync and weird network stuff happen
-			if prev.Slot != l.lastValidated.AttestedHeader.Slot {
-				continue
-			}
-			// Validate update against block N-1
-			prevRoot, err := prev.Body.HashTreeRoot()
+			lastValidated := updates[len(updates)-1]
+			l.highestValidated = lastValidated.AttestedHeader.HeaderEth2.Slot
+			l.highestProcessedRoot, err = lastValidated.AttestedHeader.HeaderEth2.HashSSZ()
 			if err != nil {
-				log.Warn("[LightClient] Could not retrive body root of block N-1", "err", err)
+				log.Warn("could not compute root", "err", err)
 				continue
 			}
-			if !bytes.Equal(prevRoot[:], l.lastValidated.AttestedHeader.BodyRoot[:]) {
-				log.Warn("[LightClient] Could validate block N-1")
-				continue
+			// Save to Database
+			if lastValidated.HasNextSyncCommittee() {
+				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
+					log.Warn("Could not write lightclient update to db", "err", err)
+				}
 			}
-			// Check if N.hash == (N-1).hash for ETH1, we really dont care about ETH2 validity at this point
-			if !bytes.Equal(prev.Body.ExecutionPayload.BlockHash[:],
-				curr.Body.ExecutionPayload.ParentHash[:]) {
-				log.Warn("[LightClient] Wrong ETH1 hashes")
-				continue
+			if lastValidated.IsFinalityUpdate() {
+				if err := rawdb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
+					AttestedHeader:  lastValidated.AttestedHeader,
+					FinalizedHeader: lastValidated.FinalizedHeader,
+					FinalityBranch:  lastValidated.FinalityBranch,
+					SyncAggregate:   lastValidated.SyncAggregate,
+					SignatureSlot:   lastValidated.SignatureSlot,
+				}); err != nil {
+					log.Warn("Could not write finality lightclient update to db", "err", err)
+				}
 			}
-			eth1Number := curr.Body.ExecutionPayload.BlockNumber
-			if l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange {
-				continue
+			if err := rawdb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
+				AttestedHeader: lastValidated.AttestedHeader,
+				SyncAggregate:  lastValidated.SyncAggregate,
+				SignatureSlot:  lastValidated.SignatureSlot,
+			}); err != nil {
+				log.Warn("Could not write optimistic lightclient update to db", "err", err)
 			}
-			// If all of the above is gud then do the push
-			if err := l.processBeaconBlock(curr); err != nil {
-				log.Warn("Could not send beacon block to ETH1", "err", err)
-			} else {
-				l.highestSeen = eth1Number
+
+			if err := tx.Commit(); err != nil {
+				log.Error("[LightClient] could not commit to database", "err", err)
+				return
+			}
+			tx, err = l.db.BeginRw(l.ctx)
+			if err != nil {
+				log.Error("[LightClient] could not begin database transaction", "err", err)
+				return
+			}
+			defer tx.Rollback()
+
+			if l.verbose {
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info("[LightClient] Validated Chain Segments",
+					"elapsed", time.Since(start), "from", updates[0].AttestedHeader.HeaderEth2.Slot-1,
+					"to", lastValidated.AttestedHeader.HeaderEth2.Slot, "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			}
 		}
+		l.importBlockIfPossible()
 		// do not have high CPU load
 		timer := time.NewTimer(200 * time.Millisecond)
 		select {
 		case <-timer.C:
 		case <-logPeers.C:
-			peers, err := l.sentinel.GetPeers(l.ctx, &lightrpc.EmptyRequest{})
+			peers, err := l.rpc.Peers()
 			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
-			log.Info("[LightClient] P2P", "peers", peers.Amount)
+			log.Info("[LightClient] P2P", "peers", peers)
+		case <-updateStatusSentinel.C:
+			if err := l.updateStatus(); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				log.Error("Could not update sentinel status", "err", err)
+				return
+			}
 		case <-l.ctx.Done():
 			return
 		}
 	}
+}
 
+func (l *LightClient) importBlockIfPossible() {
+	var err error
+	curr := l.chainTip.GetLastBlock()
+	if curr == nil {
+		return
+	}
+	// Skip if we are too far ahead without validating
+	if curr.Slot > l.highestValidated+maxChainExtension {
+		return
+	}
+	currentRoot, err := curr.HashSSZ()
+	if err != nil {
+		log.Warn("Could not send beacon block to ETH1", "err", err)
+		return
+	}
+
+	if (curr.Slot+1)%l.beaconConfig.SlotsPerEpoch == 0 {
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
+	}
+
+	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
+		l.lastEth2ParentRoot = curr.ParentRoot
+		return
+	}
+	l.lastEth2ParentRoot = curr.ParentRoot
+	l.highestProcessedRoot = currentRoot
+
+	eth1Number := curr.Body.ExecutionPayload.NumberU64()
+	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
+		return
+	}
+	if l.verbose {
+		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.NumberU64())
+	}
+
+	// If all of the above is gud then do the push
+	if err := l.processBeaconBlock(curr); err != nil {
+		log.Warn("Could not send beacon block to ETH1", "err", err)
+	} else {
+		l.highestSeen = eth1Number
+	}
+}
+
+func (l *LightClient) updateStatus() error {
+	finalizedRoot, err := l.store.finalizedHeader.HashSSZ()
+	if err != nil {
+		return err
+	}
+	headRoot, err := l.store.optimisticHeader.HashSSZ()
+	if err != nil {
+		return err
+	}
+	return l.rpc.SetStatus(finalizedRoot, l.store.finalizedHeader.Slot/32, headRoot, l.store.optimisticHeader.Slot)
 }
