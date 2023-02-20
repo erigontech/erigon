@@ -356,6 +356,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config) {
 		TLSCACert:   cfg.TLSCACert,
 		TLSCertfile: cfg.TLSCertFile,
 
+		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),

@@ -277,6 +277,11 @@ var (
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
 	}
+	GraphQLEnabledFlag = cli.BoolFlag{
+		Name:  "graphql",
+		Usage: "Enable the graphql endpoint",
+		Value: nodecfg.DefaultConfig.GraphQLEnabled,
+	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
 		Usage: "HTTP-RPC server (enabled by default). Use --http=false to disable it",
