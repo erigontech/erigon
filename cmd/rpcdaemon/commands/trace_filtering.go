@@ -686,6 +686,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
 		}
+		fmt.Printf("dbg3: %t\n", isFnalTxn)
 		if isFnalTxn {
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
