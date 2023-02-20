@@ -82,6 +82,9 @@ type Config struct {
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
+	// Bor fork blocks
+	CalcuttaBlock *big.Int `json:"calcuttaBlock,omitempty"`
+
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -253,6 +256,15 @@ func (c *Config) IsNano(num uint64) bool {
 
 func (c *Config) IsOnNano(num *big.Int) bool {
 	return numEqual(c.NanoBlock, num)
+}
+
+// IsCalcutta returns whether num is either equal to the euler fork block or greater.
+func (c *Config) IsCalcutta(num uint64) bool {
+	return isForked(c.CalcuttaBlock, num)
+}
+
+func (c *Config) IsOnCalcutta(num *big.Int) bool {
+	return numEqual(c.CalcuttaBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
