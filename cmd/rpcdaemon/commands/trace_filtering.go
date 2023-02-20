@@ -698,6 +698,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
 				stream.WriteObjectEnd()
+				fmt.Printf("dbg30\n")
 				continue
 			}
 			// Block reward section, handle specially
