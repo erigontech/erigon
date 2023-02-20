@@ -240,7 +240,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			response[field] = nil
 		}
 	}
-	fmt.Printf("and: %s\n", response["transactions"])
+	fmt.Printf("and: %t, %s\n", fullTx, response["transactions"])
 	return response, err
 }
 
