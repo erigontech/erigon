@@ -190,6 +190,7 @@ func TraceTx(
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
 			stream.WriteMore()
+			stream.WriteObjectField("resultHack") // higher-level func will assing it to NULL
 		} else {
 			stream.WriteNil()
 		}
