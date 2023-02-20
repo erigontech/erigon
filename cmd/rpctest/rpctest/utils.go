@@ -572,7 +572,6 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	fmt.Printf("Request=%s\n", request)
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
