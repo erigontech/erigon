@@ -411,6 +411,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(hashErr, stream)
 			stream.WriteObjectEnd()
+			fmt.Printf("dbg3\n")
 			continue
 		}
 
@@ -424,6 +425,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(bErr, stream)
 			stream.WriteObjectEnd()
+			fmt.Printf("dbg4\n")
 			continue
 		}
 		if block == nil {
@@ -435,6 +437,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
 			stream.WriteObjectEnd()
+			fmt.Printf("dbg5\n")
 			continue
 		}
 
@@ -455,6 +458,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(tErr, stream)
 			stream.WriteObjectEnd()
+			fmt.Printf("dbg6\n")
 			continue
 		}
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
@@ -479,6 +483,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
 						stream.WriteObjectEnd()
+						fmt.Printf("dbg7\n")
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -497,6 +502,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// if we are in POS
 		// we dont check for uncles or block rewards
 		if isPos {
+			fmt.Printf("dbg8\n")
 			continue
 		}
 
@@ -525,6 +531,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
 				stream.WriteObjectEnd()
+				fmt.Printf("dbg9\n")
 				continue
 			}
 			if nSeen > after && nExported < count {
@@ -563,6 +570,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
 						stream.WriteObjectEnd()
+						fmt.Printf("dbg10\n")
 						continue
 					}
 					if nSeen > after && nExported < count {
