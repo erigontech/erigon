@@ -372,6 +372,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	if err != nil {
 		return err
 	}
+	fmt.Printf("all: %d\n", allBlocks.ToArray())
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -598,6 +599,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
+	all, _ := iter.ToU64Arr(allTxs)
+	fmt.Printf("allTxs: %d\n", all)
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
