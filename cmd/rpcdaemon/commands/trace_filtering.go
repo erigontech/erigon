@@ -443,9 +443,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 
 		blockHash := block.Hash()
 		blockNumber := block.NumberU64()
-		if !isPos && api._chainConfig.TerminalTotalDifficulty != nil {
+		if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 			header := block.Header()
-			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(api._chainConfig.TerminalTotalDifficulty) >= 0
+			isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 		}
 		txs := block.Transactions()
 		t, tErr := api.callManyTransactions(ctx, dbtx, txs, []string{TraceTypeTrace}, block.ParentHash(), rpc.BlockNumber(block.NumberU64()-1), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, b), chainConfig.Rules(b, block.Time()))
@@ -642,6 +642,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
+	isPos := false
 	fmt.Printf("dbg1\n")
 	for it.HasNext() {
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
@@ -659,6 +660,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		if blockNumChanged {
+
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
 				if first {
 					first = false
@@ -680,6 +682,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				rpc.HandleError(fmt.Errorf("header not found: %d", blockNum), stream)
 				stream.WriteObjectEnd()
 				continue
+			}
+
+			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
+				header := lastHeader
+				isPos = header.Difficulty.Cmp(common.Big0) == 0 || header.Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
 			}
 
 			lastBlockHash = lastHeader.Hash()
