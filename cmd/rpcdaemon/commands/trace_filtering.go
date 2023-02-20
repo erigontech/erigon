@@ -372,7 +372,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	if err != nil {
 		return err
 	}
-	fmt.Printf("all: %d\n", allBlocks.ToArray())
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -394,6 +393,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	nSeen := uint64(0)
 	nExported := uint64(0)
+	fmt.Printf("all: %d\n", allBlocks.ToArray())
 
 	it := allBlocks.Iterator()
 	isPos := false
@@ -599,8 +599,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	if err != nil {
 		return err
 	}
-	all, _ := iter.ToU64Arr(allTxs)
-	fmt.Printf("allTxs: %d\n", all)
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -635,9 +633,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	stateReader := state.NewHistoryReaderV3()
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
-
+	fmt.Printf("dbg1\n")
 	for it.HasNext() {
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
+		fmt.Printf("dbg2: %d, %d\n", txNum, blockNum)
 		if err != nil {
 			if first {
 				first = false
