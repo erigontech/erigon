@@ -686,8 +686,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			lastSigner = types.MakeSigner(chainConfig, blockNum)
 			lastRules = chainConfig.Rules(blockNum, lastHeader.Time)
 		}
-		fmt.Printf("dbg3: %t\n", isFnalTxn)
 		if isFnalTxn {
+			fmt.Printf("dbg3: %t\n", isFnalTxn)
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
@@ -783,6 +783,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if txIndex == -1 { //is system tx
 			continue
 		}
+		fmt.Printf("dbg4: %d\n", txIndex)
 		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
