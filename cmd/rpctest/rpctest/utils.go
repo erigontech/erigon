@@ -589,7 +589,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 	err = json.Unmarshal(b, response)
 	if err != nil {
-		log.Info("json", "json", b)
+		log.Info("json", "json", string(b))
 	}
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
