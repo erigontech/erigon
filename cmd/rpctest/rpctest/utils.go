@@ -585,6 +585,10 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 	decoder := json.NewDecoder(r.Body)
 	err = decoder.Decode(response)
+	if err != nil {
+		b, _ := io.ReadAll(r.Body)
+		log.Info("json", "json", b)
+	}
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }
