@@ -121,7 +121,6 @@ func main() {
 			}
 
 			// add current binary to releases (if doesn't already exist)
-			// TODO: should we update the signature/checksum if this is a release being rebuilt? (seems a very odd edge case)
 			releases, err = addCurrentBinary(releases, binary)
 			if err != nil {
 				fmt.Println(err)

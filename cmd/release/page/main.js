@@ -72,7 +72,6 @@ fetch("./data.json")
       const html = os.stable.map((release, index) => {
         eventIdsToAdd.push(`${release.version}-${os.os}`);
           let cls = "panel";
-          console.log(index);
           if (index == 0) {
               cls += " panel-active";
           }
