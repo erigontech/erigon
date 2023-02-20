@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -133,6 +134,14 @@ func main() {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				panic(err)
 			}
+		}
+
+		if err = stages.SaveStageProgress(tx, stages.Execution, block.NumberU64()); err != nil {
+			panic(err)
+		}
+
+		if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
+			panic(err)
 		}
 
 		if err = tx.Commit(); err != nil {
