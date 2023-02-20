@@ -232,13 +232,11 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 }
 
 func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult) error {
-	fmt.Printf("dbg1\n")
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {
 		return fmt.Errorf("could not invoke %s (Erigon): %w", methodName, res.Err)
 	}
-	fmt.Printf("dbg2\n")
 	errVal := res.Result.Get("error")
 	if errVal != nil {
 		if !needCompare && channel == nil {
