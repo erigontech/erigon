@@ -962,7 +962,6 @@ func (api *TraceAPIImpl) callManyTransactions(ctx context.Context, dbtx kv.Tx, t
 	}, header, false /* gasBailout */, txIndex)
 
 	if cmErr != nil {
-		fmt.Printf("dbg11: %s\n", cmErr)
 		return nil, cmErr
 	}
 
