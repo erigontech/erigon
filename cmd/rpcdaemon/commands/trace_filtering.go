@@ -702,8 +702,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				continue
 			}
 			// Block reward section, handle specially
-			fmt.Printf("dbg32: %x\n", lastHeader.Coinbase)
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
+			_, ook := toAddresses[lastHeader.Coinbase]
+			fmt.Printf("dbg32: %t, %t, %x\n", includeAll, ook, lastHeader.Coinbase)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				nSeen++
 				var tr ParityTrace
