@@ -34,7 +34,7 @@ services:
       - first
     image: thorax/erigon:$ERIGON_TAG
     command: |
-       rpcdaemon --private.api.addr=erigon:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --log.dir.path=/logs/node1
+       rpcdaemon --private.api.addr=erigon:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --graphql --log.dir.path=/logs/node1
     volumes:
       - ./logdir:/logs
     user: ${DOCKER_UID}:${DOCKER_GID}
