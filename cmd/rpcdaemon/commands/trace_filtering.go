@@ -704,8 +704,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			_, ook := toAddresses[lastHeader.Coinbase]
-			fmt.Printf("dbg32: %t, %t, %x\n", includeAll, ook, lastHeader.Coinbase)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
+				fmt.Printf("dbg32: %t, %t, %x\n", includeAll, ook, lastHeader.Coinbase)
 				nSeen++
 				var tr ParityTrace
 				var rewardAction = &RewardTraceAction{}
@@ -720,6 +720,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				tr.Type = "reward" // nolint: goconst
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
+				fmt.Printf("dbg33: %s\n", err)
 				if err != nil {
 					if first {
 						first = false
@@ -731,6 +732,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 					stream.WriteObjectEnd()
 					continue
 				}
+				fmt.Printf("dbg34: %d, %d,%d,%d\n", nSeen, after, nExported, count)
 				if nSeen > after && nExported < count {
 					if first {
 						first = false
