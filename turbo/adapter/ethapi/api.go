@@ -311,6 +311,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs), len(txs)+1)
 		var err error
+		fmt.Printf("dbg: txs %d\n", len(txs))
 		for i, tx := range txs {
 			if transactions[i], err = formatTx(tx, i); err != nil {
 				return nil, err
