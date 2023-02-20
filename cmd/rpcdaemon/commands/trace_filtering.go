@@ -796,6 +796,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
+		fmt.Printf("txn is nil: %t\n", txn == nil)
 		if txn == nil {
 			continue //guess block doesn't have transactions
 		}
