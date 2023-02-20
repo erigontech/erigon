@@ -583,10 +583,12 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	if r.StatusCode != 200 {
 		return fmt.Errorf("status %s", r.Status)
 	}
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(response)
+	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		b, _ := io.ReadAll(r.Body)
+		return err
+	}
+	err = json.Unmarshal(b, response)
+	if err != nil {
 		log.Info("json", "json", b)
 	}
 	log.Info("Got in", "time", time.Since(start).Seconds())
