@@ -71,6 +71,7 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 			return
 		}
 
+		fmt.Printf("dbg0: %d\n", len(b.Result.Transactions))
 		for _, tx := range b.Result.Transactions {
 			reqGen.reqID++
 			request := reqGen.getTransactionReceipt(tx.Hash)
