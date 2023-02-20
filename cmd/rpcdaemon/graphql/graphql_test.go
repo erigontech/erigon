@@ -9,6 +9,7 @@ import (
 )
 
 func TestGraphQLQueryBlock(t *testing.T) {
+	t.Skip("Not a unit test")
 
 	for i, tt := range []struct {
 		body string
