@@ -455,7 +455,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectEnd()
 			continue
 		}
-
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 		for i, trace := range t {
 			txPosition := uint64(i)
@@ -649,7 +648,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		if blockNumChanged {
-
 			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
 				if first {
 					first = false
