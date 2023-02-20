@@ -393,13 +393,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	}
 	nSeen := uint64(0)
 	nExported := uint64(0)
-	fmt.Printf("all: %d\n", allBlocks.ToArray())
 
 	it := allBlocks.Iterator()
 	isPos := false
 	for it.HasNext() {
 		b := it.Next()
-		fmt.Printf("dbg: %d\n", b)
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
@@ -411,7 +409,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(hashErr, stream)
 			stream.WriteObjectEnd()
-			fmt.Printf("dbg3\n")
 			continue
 		}
 
@@ -425,7 +422,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(bErr, stream)
 			stream.WriteObjectEnd()
-			fmt.Printf("dbg4\n")
 			continue
 		}
 		if block == nil {
@@ -437,7 +433,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(fmt.Errorf("could not find block %x %d", hash, b), stream)
 			stream.WriteObjectEnd()
-			fmt.Printf("dbg5\n")
 			continue
 		}
 
@@ -458,12 +453,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			stream.WriteObjectStart()
 			rpc.HandleError(tErr, stream)
 			stream.WriteObjectEnd()
-			fmt.Printf("dbg6\n")
 			continue
 		}
 
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
-		fmt.Printf("includeAll: %t\n", includeAll)
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
@@ -485,7 +478,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
 						stream.WriteObjectEnd()
-						fmt.Printf("dbg7\n")
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -504,7 +496,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		// if we are in POS
 		// we dont check for uncles or block rewards
 		if isPos {
-			fmt.Printf("dbg8\n")
 			continue
 		}
 
@@ -643,10 +634,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	stateReader.SetTx(dbtx)
 	noop := state.NewNoopWriter()
 	isPos := false
-	fmt.Printf("dbg1\n")
 	for it.HasNext() {
 		txNum, blockNum, txIndex, isFnalTxn, blockNumChanged, err := it.Next()
-		fmt.Printf("dbg2: %d, %d\n", txNum, blockNum)
 		if err != nil {
 			if first {
 				first = false
@@ -701,7 +690,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			}
 
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
-			fmt.Printf("dbg3: %t , %s\n", body == nil, err)
 			if err != nil {
 				if first {
 					first = false
@@ -711,14 +699,11 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
 				stream.WriteObjectEnd()
-				fmt.Printf("dbg30\n")
 				continue
 			}
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
-			_, ook := toAddresses[lastHeader.Coinbase]
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
-				fmt.Printf("dbg32: %t, %t, %x\n", includeAll, ook, lastHeader.Coinbase)
 				nSeen++
 				var tr ParityTrace
 				var rewardAction = &RewardTraceAction{}
@@ -733,7 +718,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				tr.Type = "reward" // nolint: goconst
 				tr.TraceAddress = []int{}
 				b, err := json.Marshal(tr)
-				fmt.Printf("dbg33: %s\n", err)
 				if err != nil {
 					if first {
 						first = false
@@ -745,7 +729,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 					stream.WriteObjectEnd()
 					continue
 				}
-				fmt.Printf("dbg34: %d, %d,%d,%d\n", nSeen, after, nExported, count)
 				if nSeen > after && nExported < count {
 					if first {
 						first = false
@@ -801,7 +784,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if txIndex == -1 { //is system tx
 			continue
 		}
-		fmt.Printf("dbg4: %d\n", txIndex)
 		txIndexU64 := uint64(txIndex)
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txNum, blockNum, txIndex)
 		txn, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNum, txIndex)
@@ -816,7 +798,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		fmt.Printf("txn is nil: %t\n", txn == nil)
 		if txn == nil {
 			continue //guess block doesn't have transactions
 		}
@@ -857,7 +838,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ibs.Prepare(txHash, lastBlockHash, txIndex)
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
-		fmt.Printf("dbg11: %s\n", err)
 		if err != nil {
 			if first {
 				first = false
@@ -932,14 +912,12 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	case *CallTraceAction:
 		_, f := fromAddresses[action.From]
 		_, t := toAddresses[action.To]
-		fmt.Printf("filter1: %t, %t\n", f, t)
 
 		if f || t {
 			return true
 		}
 	case *CreateTraceAction:
 		_, f := fromAddresses[action.From]
-		fmt.Printf("filter2: %t\n", f)
 		if f {
 			return true
 		}
@@ -954,7 +932,6 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	case *SuicideTraceAction:
 		_, f := fromAddresses[action.Address]
 		_, t := toAddresses[action.RefundAddress]
-		fmt.Printf("filter3: %t, %t\n", f, t)
 		if f || t {
 			return true
 		}
