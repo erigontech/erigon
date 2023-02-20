@@ -59,6 +59,7 @@ func (c *ChainTipSubscriber) StartLoop() {
 
 	go func() {
 		reqAfter := time.NewTicker(time.Duration(c.beaconConfig.SecondsPerSlot * 2 * uint64(time.Second)))
+		defer reqAfter.Stop()
 		for {
 			select {
 			case <-reqAfter.C:
