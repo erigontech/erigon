@@ -185,6 +185,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		blockNum uint64
 		trace    bool
 		vmConfig vm.Config
+		started  = time.Now()
 
 		txNum uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
 	)
@@ -234,7 +235,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		if spaceDirty >= dirtySpaceThreshold {
 			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
 		}
-		log.Info("database commitment", "block", blockNum, "txNum", txn)
+		log.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
 		if err := agg.Flush(ctx); err != nil {
 			return err
 		}
@@ -248,7 +249,10 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		if rwTx, err = db.BeginRw(ctx); err != nil {
 			return err
 		}
+
+		readWrapper.ac.Close()
 		agg.SetTx(rwTx)
+
 		readWrapper.roTx = rwTx
 		readWrapper.ac = agg.MakeContext()
 		return nil
