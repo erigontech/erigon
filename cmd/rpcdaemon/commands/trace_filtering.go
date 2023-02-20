@@ -461,7 +461,9 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 			fmt.Printf("dbg6\n")
 			continue
 		}
+
 		includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
+		fmt.Printf("includeAll: %t\n", includeAll)
 		for i, trace := range t {
 			txPosition := uint64(i)
 			txHash := txs[i].Hash()
@@ -531,7 +533,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
 				stream.WriteObjectEnd()
-				fmt.Printf("dbg9\n")
 				continue
 			}
 			if nSeen > after && nExported < count {
@@ -570,7 +571,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 						stream.WriteObjectStart()
 						rpc.HandleError(err, stream)
 						stream.WriteObjectEnd()
-						fmt.Printf("dbg10\n")
 						continue
 					}
 					if nSeen > after && nExported < count {
@@ -909,11 +909,14 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	case *CallTraceAction:
 		_, f := fromAddresses[action.From]
 		_, t := toAddresses[action.To]
+		fmt.Printf("filter1: %t, %t\n", f, t)
+
 		if f || t {
 			return true
 		}
 	case *CreateTraceAction:
 		_, f := fromAddresses[action.From]
+		fmt.Printf("filter2: %t\n", f)
 		if f {
 			return true
 		}
@@ -928,6 +931,7 @@ func filter_trace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, to
 	case *SuicideTraceAction:
 		_, f := fromAddresses[action.Address]
 		_, t := toAddresses[action.RefundAddress]
+		fmt.Printf("filter3: %t, %t\n", f, t)
 		if f || t {
 			return true
 		}
