@@ -399,6 +399,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 	isPos := false
 	for it.HasNext() {
 		b := it.Next()
+		fmt.Printf("dbg: %d\n", b)
 		// Extract transactions from block
 		hash, hashErr := rawdb.ReadCanonicalHash(dbtx, b)
 		if hashErr != nil {
