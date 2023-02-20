@@ -16,6 +16,7 @@ import (
 
 type Binary struct {
 	Name     string `json:"name"`
+	FileName string `json:"file_name"`
 	File     string `json:"file"`
 	OS       string `json:"os"`
 	Arch     string `json:"arch"`
@@ -110,6 +111,7 @@ func main() {
 			binary := Binary{
 				Name:     name,
 				File:     asset.BrowserDownloadUrl,
+				FileName: asset.Name,
 				OS:       o,
 				Arch:     arch,
 				SigFile:  "",

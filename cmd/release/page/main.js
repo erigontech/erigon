@@ -92,10 +92,10 @@ fetch("./data.json")
                 <thead class="table-head">
                   <tr>
                     <th class="table-head-col" style="padding-left:18px;">Binary</th>
-                    <th class="table-head-col">File</th>
+                    <th class="table-head-col">Arch</th>
+                    <th class="table-head-col">File</th>              
                     <th class="table-head-col">Checksum</th>
                     <th class="table-head-col">Tag</th>
-                    <th class="table-head-col" style="padding-right:18px;">Release</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -105,10 +105,10 @@ fetch("./data.json")
                     return `
                       <tr class="table-row">
                         <td class="table-col" style="padding-left:18px;">${binary.name}</td>
-                        <td class="table-col"><a href="${binary.file}">${binary.name}_${binary.arch}</a></td>
+                        <td class="table-col">${binary.arch}</td>
+                        <td class="table-col"><a href="${binary.file}">${binary.file_name}</a></td>
                         <td class="table-col">${binary.checksum}</td>
                         <td class="table-col">${binary.tag}</td>
-                        <td class="table-col" style="padding-right:18px;">${binary.release}</td>
                       </tr>
                   `;
                   })
