@@ -167,21 +167,21 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 	return tx.Put(kv.BeaconBlocks, key, value)
 }
 
-func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, error) {
-	signedBlock, _, _, _, err := ReadBeaconBlockForStorage(tx, slot)
+func ReadBeaconBlock(tx kv.RwTx, slot uint64) (*cltypes.SignedBeaconBlock, uint64, libcommon.Hash, error) {
+	signedBlock, eth1Number, eth1Hash, _, err := ReadBeaconBlockForStorage(tx, slot)
 	if err != nil {
-		return nil, err
+		return nil, 0, libcommon.Hash{}, err
 	}
 	if signedBlock == nil {
-		return nil, nil
+		return nil, 0, libcommon.Hash{}, err
 	}
 
 	attestations, err := ReadAttestations(tx, slot)
 	if err != nil {
-		return nil, err
+		return nil, 0, libcommon.Hash{}, err
 	}
 	signedBlock.Block.Body.Attestations = attestations
-	return signedBlock, err
+	return signedBlock, eth1Number, eth1Hash, err
 }
 
 func ReadBeaconBlockForStorage(tx kv.Getter, slot uint64) (block *cltypes.SignedBeaconBlock, eth1Number uint64, eth1Hash libcommon.Hash, eth2Hash libcommon.Hash, err error) {

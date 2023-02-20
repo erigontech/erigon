@@ -156,7 +156,7 @@ func generateChain(
 	var tokenContract *contracts.Token
 
 	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 10, func(i int, block *core.BlockGen) {
+	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -260,6 +260,9 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+		case 10:
+			// Empty block
+			break
 		}
 
 		if err != nil {

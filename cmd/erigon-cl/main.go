@@ -127,7 +127,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  beaconState.FinalizedCheckpoint().Root,
 		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch,
-		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * 32,
+		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       beaconState.FinalizedCheckpoint().Root,
 	}, handshake.FullClientRule)
 	if err != nil {

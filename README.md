@@ -1,6 +1,6 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (execution client), on the efficiency frontier, written in Go.
+Erigon is an implementation of Ethereum (execution client), on the efficiency frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -36,13 +36,12 @@ Erigon is an implementation of Ethereum (execution client), on the efficiency fr
 
 <!--te-->
 
+**Disclaimer**: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
+changes but we don't guarantee anything. Things can and will break.
 
-NB! <code>In-depth links are marked by the microscope sign (🔬) </code>
+**Important defaults**: Erigon is an Archive Node by default (to remove history see: `--prune` flags in `erigon --help`). We don't allow change this flag after first start.
 
-**Disclaimer: this software is currently a tech preview. We will do our best to keep it stable and make no breaking
-changes but we don't guarantee anything. Things can and will break.**
-
-<code>🔬 Alpha/Beta Designation has been discontinued. For release version numbering, please see [this blog post](https://erigon.substack.com/p/post-merge-release-of-erigon-dropping)</code>
+<code>In-depth links are marked by the microscope sign (🔬) </code>
 
 System Requirements
 ===================
@@ -370,7 +369,7 @@ Examples of stages are:
 
 ### JSON-RPC daemon
 
-Most of Erigon's components (sentry, txpool, snapshots downloader, can work inside Erigon and as independent process.
+Most of Erigon's components (txpool, rpcdaemon, snapshots downloader, sentry, ...) can work inside Erigon and as independent process.
 
 To enable built-in RPC server: `--http` and `--ws` (sharing same port with http)
 
@@ -493,7 +492,8 @@ Windows support for docker-compose is not ready yet. Please help us with .ps1 po
 
 `docker-compose up prometheus grafana`, [detailed docs](./cmd/prometheus/Readme.md).
 
-### Prune old data
+### 
+old data
 
 Disabled by default. To enable see `./build/bin/erigon --help` for flags `--prune`
 

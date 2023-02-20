@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -128,21 +127,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.txIndex = 0
 	maps.Clear(sdb.logs)
 	sdb.logSize = 0
-	//sdb.clearJournalAndRefund()
-	//sdb.accessList = newAccessList() // this reset by .Prepare() method
 	maps.Clear(sdb.balanceInc)
-
-	//sdb.nilAccounts = make(map[libcommon.Address]struct{})
-	//sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-	//sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-	//sdb.thash = libcommon.Hash{}
-	//sdb.bhash = libcommon.Hash{}
-	//sdb.txIndex = 0
-	//sdb.logs = make(map[libcommon.Hash][]*types.Log)
-	//sdb.logSize = 0
-	//sdb.clearJournalAndRefund()
-	//sdb.accessList = newAccessList()
-	//sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -514,21 +499,19 @@ func (sdb *IntraBlockState) CreateAccount(addr libcommon.Address, contractCreati
 		if previous != nil && previous.selfdestructed {
 			prevInc = previous.data.Incarnation
 		} else {
-			inc, err := sdb.stateReader.ReadAccountIncarnation(addr)
-			if sdb.trace && err != nil {
-				log.Error("error while ReadAccountIncarnation", "err", err)
-			}
-			if err == nil {
+			if inc, err := sdb.stateReader.ReadAccountIncarnation(addr); err == nil {
 				prevInc = inc
+			} else {
+				sdb.savedErr = err
 			}
 		}
 	}
 
 	newObj := sdb.createObject(addr, previous)
-	if previous != nil {
+	if previous != nil && !previous.selfdestructed {
 		newObj.data.Balance.Set(&previous.data.Balance)
-		newObj.data.Initialised = true
 	}
+	newObj.data.Initialised = true
 
 	if contractCreation {
 		newObj.created = true

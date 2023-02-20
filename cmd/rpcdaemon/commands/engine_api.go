@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
@@ -70,7 +71,7 @@ type TransitionConfiguration struct {
 }
 
 type ExecutionPayloadBodyV1 struct {
-	Transactions [][]byte            `json:"transactions" gencodec:"required"`
+	Transactions []hexutil.Bytes     `json:"transactions" gencodec:"required"`
 	Withdrawals  []*types.Withdrawal `json:"withdrawals"  gencodec:"required"`
 }
 
@@ -84,7 +85,7 @@ type EngineAPI interface {
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
-	GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error)
+	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -366,6 +367,10 @@ func (e *EngineImpl) ExchangeTransitionConfigurationV1(ctx context.Context, beac
 }
 
 func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error) {
+	if len(hashes) > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
 	h := make([]*types2.H256, len(hashes))
 	for i, hash := range hashes {
 		h[i] = gointerfaces.ConvertHashToH256(hash)
@@ -379,8 +384,15 @@ func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []comm
 	return convertExecutionPayloadV1(apiRes), nil
 }
 
-func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
-	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
+func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error) {
+	if start == 0 || count == 0 {
+		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
+	}
+	if count > 1024 {
+		return nil, &privateapi.TooLargeRequestErr
+	}
+
+	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: uint64(start), Count: uint64(count)})
 	if err != nil {
 		return nil, err
 	}
@@ -436,8 +448,11 @@ func convertExecutionPayloadV1(response *remote.EngineGetPayloadBodiesV1Response
 			result[idx] = nil
 		} else {
 			pl := &ExecutionPayloadBodyV1{
-				Transactions: body.Transactions,
+				Transactions: make([]hexutil.Bytes, len(body.Transactions)),
 				Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(body.Withdrawals),
+			}
+			for i := range body.Transactions {
+				pl.Transactions[i] = body.Transactions[i]
 			}
 			result[idx] = pl
 		}

@@ -1251,10 +1251,16 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 	}
 	res, err := certifierAbi().Unpack("certified", out)
 	if err != nil {
-		panic(err)
+		log.Warn("error while detecting service tx on AuRa", "err", err)
+		return false
 	}
-	certified := res[0].(bool)
-	return certified
+	if len(res) == 0 {
+		return false
+	}
+	if certified, ok := res[0].(bool); ok {
+		return certified
+	}
+	return false
 }
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.

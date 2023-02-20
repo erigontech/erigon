@@ -83,6 +83,20 @@ func DecodeSSZSnappy(dst ssz_utils.Unmarshaler, src []byte) error {
 	return nil
 }
 
+func DecodeSSZSnappyWithVersion(dst ssz_utils.Unmarshaler, src []byte, version int) error {
+	dec, err := snappy.Decode(nil, src)
+	if err != nil {
+		return err
+	}
+
+	err = dst.DecodeSSZWithVersion(dec, version)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func CompressZstd(b []byte) []byte {
 	wr, err := zstd.NewWriter(nil)
 	if err != nil {
@@ -97,4 +111,14 @@ func DecompressZstd(b []byte) ([]byte, error) {
 		panic(err)
 	}
 	return r.DecodeAll(b, nil)
+}
+
+// Check if it is sorted and check if there are duplicates. O(N) complexity.
+func IsSliceSortedSet(vals []uint64) bool {
+	for i := 0; i < len(vals)-1; i++ {
+		if vals[i] >= vals[i+1] {
+			return false
+		}
+	}
+	return true
 }

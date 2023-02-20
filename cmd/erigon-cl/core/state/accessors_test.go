@@ -1,11 +1,13 @@
 package state_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/stretchr/testify/require"
 )
@@ -39,13 +41,13 @@ func TestActiveValidatorIndices(t *testing.T) {
 		ActivationEpoch:  3,
 		ExitEpoch:        9,
 		EffectiveBalance: 2e9,
-	})
+	}, 2e9)
 	// Active Validator
 	testState.AddValidator(&cltypes.Validator{
 		ActivationEpoch:  1,
 		ExitEpoch:        9,
 		EffectiveBalance: 2e9,
-	})
+	}, 2e9)
 	testState.SetSlot(epoch * 32) // Epoch
 	testFlags := cltypes.ParticipationFlagsListFromBytes([]byte{1, 1})
 	testState.SetCurrentEpochParticipation(testFlags)
@@ -55,9 +57,7 @@ func TestActiveValidatorIndices(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, set, []uint64{1})
 	// Check if balances are retrieved correctly
-	totalBalance, err := testState.GetTotalActiveBalance()
-	require.NoError(t, err)
-	require.Equal(t, totalBalance, uint64(2e9))
+	require.Equal(t, testState.GetTotalActiveBalance(), uint64(2e9))
 }
 
 func TestGetBlockRoot(t *testing.T) {
@@ -146,7 +146,8 @@ func TestComputeShuffledIndex(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			for i, val := range tc.startInds {
 				state := state.New(&clparams.MainnetBeaconConfig)
-				got, err := state.ComputeShuffledIndex(val, uint64(len(tc.startInds)), tc.seed)
+				preInputs := state.ComputeShuffledIndexPreInputs(tc.seed)
+				got, err := state.ComputeShuffledIndex(val, uint64(len(tc.startInds)), tc.seed, preInputs, utils.Keccak256)
 				// Non-failure case.
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
@@ -162,7 +163,7 @@ func TestComputeShuffledIndex(t *testing.T) {
 func generateBeaconStateWithValidators(n int) *state.BeaconState {
 	b := state.GetEmptyBeaconState()
 	for i := 0; i < n; i++ {
-		b.AddValidator(&cltypes.Validator{EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance})
+		b.AddValidator(&cltypes.Validator{EffectiveBalance: clparams.MainnetBeaconConfig.MaxEffectiveBalance}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
 	}
 	return b
 }
@@ -200,12 +201,6 @@ func TestComputeProposerIndex(t *testing.T) {
 			expected:    7,
 		},
 		{
-			description: "zero_active_indices",
-			indices:     []uint64{},
-			seed:        seed,
-			wantErr:     true,
-		},
-		{
 			description: "active_index_out_of_range",
 			indices:     []uint64{100},
 			state:       generateBeaconStateWithValidators(1),
@@ -235,9 +230,116 @@ func TestComputeProposerIndex(t *testing.T) {
 
 func TestSyncReward(t *testing.T) {
 	s := state.GetEmptyBeaconState()
-	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2})
+	s.AddValidator(&cltypes.Validator{EffectiveBalance: 3099999999909, ExitEpoch: 2}, 3099999999909)
 	propReward, partRew, err := s.SyncRewards()
 	require.NoError(t, err)
 	require.Equal(t, propReward, uint64(30))
 	require.Equal(t, partRew, uint64(214))
+}
+
+func TestComputeCommittee(t *testing.T) {
+	// Create 10 committees
+	committeeCount := uint64(10)
+	validatorCount := committeeCount * clparams.MainnetBeaconConfig.TargetCommitteeSize
+	validators := make([]*cltypes.Validator, validatorCount)
+
+	for i := 0; i < len(validators); i++ {
+		var k [48]byte
+		copy(k[:], strconv.Itoa(i))
+		validators[i] = &cltypes.Validator{
+			PublicKey: k,
+			ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
+		}
+	}
+	state := state.GetEmptyBeaconState()
+	state.SetValidators(validators)
+	state.SetSlot(200)
+
+	epoch := state.Epoch()
+	indices := state.GetActiveValidatorsIndices(epoch)
+	seed := state.GetSeed(epoch, clparams.MainnetBeaconConfig.DomainBeaconAttester)
+	committees, err := state.ComputeCommittee(indices, seed, 0, 1, utils.Keccak256)
+	require.NoError(t, err, "Could not compute committee")
+
+	// Test shuffled indices are correct for index 5 committee
+	index := uint64(5)
+	committee5, err := state.ComputeCommittee(indices, seed, index, committeeCount, utils.Keccak256)
+	require.NoError(t, err, "Could not compute committee")
+	start := (validatorCount * index) / committeeCount
+	end := (validatorCount * (index + 1)) / committeeCount
+	require.Equal(t, committee5, committees[start:end], "Committee has different shuffled indices")
+}
+
+func TestAttestationParticipationFlagIndices(t *testing.T) {
+	beaconState := state.GetEmptyBeaconState()
+	//beaconState, _ := util.DeterministicGenesisStateAltair(t, params.BeaconConfig().MaxValidatorsPerCommittee)
+	beaconState.SetSlot(1)
+	cfg := clparams.MainnetBeaconConfig
+
+	tests := []struct {
+		name                 string
+		inputState           state.BeaconState
+		inputData            *cltypes.AttestationData
+		inputDelay           uint64
+		participationIndices []uint8
+	}{
+		{
+			name: "none",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{
+					Root: [32]byte{2},
+				},
+			},
+			inputDelay:           cfg.SlotsPerEpoch,
+			participationIndices: []uint8{},
+		},
+		{
+			name: "participated source",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{
+					Root: [32]byte{2},
+				},
+			},
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex},
+		},
+		{
+			name: "participated source and target",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{},
+			},
+			inputDelay:           utils.IntegerSquareRoot(cfg.SlotsPerEpoch) - 1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex},
+		},
+		{
+			name: "participated source and target and head",
+			inputState: func() state.BeaconState {
+				return *beaconState
+			}(),
+			inputData: &cltypes.AttestationData{
+				Source: &cltypes.Checkpoint{},
+				Target: &cltypes.Checkpoint{},
+			},
+			inputDelay:           1,
+			participationIndices: []uint8{cfg.TimelySourceFlagIndex, cfg.TimelyTargetFlagIndex, cfg.TimelyHeadFlagIndex},
+		},
+	}
+
+	for _, test := range tests {
+		flagIndices, err := test.inputState.GetAttestationParticipationFlagIndicies(test.inputData, test.inputDelay)
+		require.NoError(t, err, test.name)
+		require.Equal(t, test.participationIndices, flagIndices, test.name)
+	}
 }

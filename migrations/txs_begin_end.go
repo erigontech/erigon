@@ -9,6 +9,7 @@ import (
 	"time"
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -21,8 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rlp"
 )
-
-const ASSERT = false
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
 
@@ -76,7 +75,7 @@ var txsBeginEnd = Migration{
 			}
 
 			var oldBlock *types.Body
-			if ASSERT {
+			if assert.Enable {
 				oldBlock = readCanonicalBodyWithTransactionsDeprecated(tx, canonicalHash, blockNum)
 			}
 
@@ -113,7 +112,7 @@ var txsBeginEnd = Migration{
 				return err
 			}
 
-			if ASSERT {
+			if assert.Enable {
 				newBlock, baseTxId, txAmount := rawdb.ReadBody(tx, canonicalHash, blockNum)
 				newBlock.Transactions, err = rawdb.CanonicalTransactions(tx, baseTxId, txAmount)
 				for i, oldTx := range oldBlock.Transactions {

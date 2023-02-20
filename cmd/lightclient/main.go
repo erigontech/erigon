@@ -18,11 +18,13 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -37,7 +39,7 @@ import (
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runLightClientNode, flags.CLDefaultFlags)
+	app := lightclientapp.MakeApp(runLightClientNode, flags.LCDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -59,7 +61,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	var db kv.RwDB
 	if cfg.Chaindata == "" {
 		log.Info("chaindata is in-memory")
-		db = memdb.New()
+		db = memdb.New("" /* tmpDir */)
 	} else {
 		db, err = mdbx.Open(cfg.Chaindata, log.Root(), false)
 		if err != nil {
@@ -88,7 +90,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  state.FinalizedCheckpoint().Root,
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
-		HeadSlot:       state.FinalizedCheckpoint().Epoch * 32,
+		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       state.FinalizedCheckpoint().Root,
 	}, handshake.LightClientRule)
 	if err != nil {
@@ -96,18 +98,20 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	}
 	log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return err
-	}
-
-	tx.Rollback()
-
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	lc, err := lightclient.NewLightClient(ctx, db, cfg.GenesisCfg, cfg.BeaconCfg, nil, sentinel, 0, true)
+	var execution remote.ETHBACKENDClient
+	if cfg.ErigonPrivateApi != "" {
+		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
+		if err != nil {
+			log.Error("could not connect to erigon private api", "err", err)
+		}
+		defer cc.Close()
+		execution = remote.NewETHBACKENDClient(cc)
+	}
+	lc, err := lightclient.NewLightClient(ctx, db, cfg.GenesisCfg, cfg.BeaconCfg, nil, execution, sentinel, 0, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 		return err

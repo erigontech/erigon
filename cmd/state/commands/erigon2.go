@@ -172,7 +172,7 @@ func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	w := agg.MakeStateWriter(changesets /* beforeOn */)
 	var rootHash []byte
 	if block == 0 {
-		genBlock, genesisIbs, err4 := genesis.ToBlock()
+		genBlock, genesisIbs, err4 := genesis.ToBlock("")
 		if err4 != nil {
 			return err4
 		}

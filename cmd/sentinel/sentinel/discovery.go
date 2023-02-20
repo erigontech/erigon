@@ -15,6 +15,7 @@ package sentinel
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -26,7 +27,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 
-	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/go-bitfield"
 )
 
@@ -35,7 +35,7 @@ func (s *Sentinel) connectWithPeer(ctx context.Context, info peer.AddrInfo, skip
 		return nil
 	}
 	if s.peers.IsBadPeer(info.ID) {
-		return errors.New("refused to connect to bad peer")
+		return fmt.Errorf("refused to connect to bad peer")
 	}
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, clparams.MaxDialTimeout)
 	defer cancel()
@@ -62,6 +62,19 @@ func (s *Sentinel) connectWithAllPeers(multiAddrs []multiaddr.Multiaddr) error {
 }
 
 func (s *Sentinel) listenForPeers() {
+	enodes := []*enode.Node{}
+	for _, node := range s.cfg.NetworkConfig.StaticPeers {
+		newNode, err := enode.Parse(enode.ValidSchemes, node)
+		if err == nil {
+			enodes = append(enodes, newNode)
+		} else {
+			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
+		}
+	}
+
+	multiAddresses := convertToMultiAddr(enodes)
+	s.connectWithAllPeers(multiAddresses)
+
 	iterator := s.listener.RandomNodes()
 	defer iterator.Close()
 	for {
@@ -130,6 +143,7 @@ func (s *Sentinel) onConnection(net network.Network, conn network.Conn) {
 		peerId := conn.RemotePeer()
 		invalid := !s.handshaker.ValidatePeer(peerId)
 		if invalid {
+			log.Trace("Handshake was unsuccessful")
 			s.peers.DisconnectPeer(peerId)
 		}
 	}()
