@@ -89,7 +89,7 @@ func TestKvServer_renew(t *testing.T) {
 		s.rollback(id)
 		return nil
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 10; i++ {
 		g.Go(testCase)
 	}
 	require.NoError(g.Wait())

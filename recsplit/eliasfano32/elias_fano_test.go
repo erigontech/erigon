@@ -18,11 +18,48 @@ package eliasfano32
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestEliasFanoSeek(t *testing.T) {
+	count := uint64(1_000_000)
+	maxOffset := (count - 1) * 123
+	ef := NewEliasFano(count, maxOffset)
+	for offset := uint64(0); offset < count; offset++ {
+		ef.AddOffset(offset * 123)
+	}
+	ef.Build()
+
+	v2, ok2 := ef.Search(ef.Max())
+	require.True(t, ok2, v2)
+	require.Equal(t, ef.Max(), v2)
+
+	v2, ok2 = ef.Search(ef.Min())
+	require.True(t, ok2, v2)
+	require.Equal(t, ef.Min(), v2)
+
+	v2, ok2 = ef.Search(0)
+	require.True(t, ok2, v2)
+	require.Equal(t, ef.Min(), v2)
+
+	v2, ok2 = ef.Search(math.MaxUint32)
+	require.False(t, ok2, v2)
+
+	v2, ok2 = ef.Search((count+1)*123 + 1)
+	require.False(t, ok2, v2)
+
+	for i := uint64(0); i < count; i++ {
+		v := i * 123
+		v2, ok2 = ef.Search(v)
+		require.True(t, ok2, v)
+		require.GreaterOrEqual(t, int(v2), int(v))
+	}
+}
 
 func TestEliasFano(t *testing.T) {
 	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}

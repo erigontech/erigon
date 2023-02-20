@@ -175,7 +175,7 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 	}
 
 	sel = bitutil.Select64(window, d)
-	val = ((currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask))
+	val = (currWord*64+uint64(sel)-i)<<ef.l | (lower & ef.lowerBitsMask)
 
 	return
 }
@@ -198,18 +198,52 @@ func (ef *EliasFano) Get2(i uint64) (val uint64, valNext uint64) {
 	}
 
 	lower >>= ef.l
-	valNext = ((currWord*64+uint64(bits.TrailingZeros64(window))-i-1)<<ef.l | (lower & ef.lowerBitsMask))
+	valNext = (currWord*64+uint64(bits.TrailingZeros64(window))-i-1)<<ef.l | (lower & ef.lowerBitsMask)
 	return
 }
 
+func (ef *EliasFano) upper(i uint64) uint64 {
+	jumpSuperQ := (i / superQ) * superQSize
+	jumpInsideSuperQ := (i % superQ) / q
+	idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 1)
+	shift := 32 * (jumpInsideSuperQ % 2)
+	mask := uint64(0xffffffff) << shift
+	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
+	currWord := jump / 64
+	window := ef.upperBits[currWord] & (uint64(0xffffffffffffffff) << (jump % 64))
+	d := int(i & qMask)
+
+	for bitCount := bits.OnesCount64(window); bitCount <= d; bitCount = bits.OnesCount64(window) {
+		currWord++
+		window = ef.upperBits[currWord]
+		d -= bitCount
+	}
+
+	sel := bitutil.Select64(window, d)
+	return currWord*64 + uint64(sel) - i
+}
+
 // Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Search(offset uint64) (uint64, bool) {
-	i := uint64(sort.Search(int(ef.count+1), func(i int) bool {
-		val, _, _, _, _ := ef.get(uint64(i))
-		return val >= offset
-	}))
-	if i <= ef.count {
-		return ef.Get(i), true
+func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+	if v == 0 {
+		return ef.Min(), true
+	}
+	if v == ef.Max() {
+		return ef.Max(), true
+	}
+	if v > ef.Max() {
+		return 0, false
+	}
+
+	hi := v >> ef.l
+	i := sort.Search(int(ef.count+1), func(i int) bool {
+		return ef.upper(uint64(i)) >= hi
+	})
+	for j := uint64(i); j <= ef.count; j++ {
+		val, _, _, _, _ := ef.get(j)
+		if val >= v {
+			return val, true
+		}
 	}
 	return 0, false
 }
@@ -359,7 +393,7 @@ func Min(r []byte) uint64 {
 	}
 	sel := bitutil.Select64(window, 0)
 	lowerBitsMask := (uint64(1) << l) - 1
-	val := ((currWord*64+uint64(sel))<<l | (lower & lowerBitsMask))
+	val := (currWord*64+uint64(sel))<<l | (lower & lowerBitsMask)
 	return val
 }
 
