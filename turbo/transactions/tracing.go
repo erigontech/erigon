@@ -189,6 +189,7 @@ func TraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+			stream.WriteMore()
 		} else {
 			stream.WriteNil()
 		}
