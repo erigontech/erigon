@@ -61,6 +61,8 @@ func main() {
 	genesis.Config = &chainConfig
 	core.MustCommitGenesisBlock(db, &genesis)
 
+	totalDifficulty := big.NewInt(0)
+
 	for blockNum, path := range os.Args[1:] {
 		file, err := os.Open(path)
 		if err != nil {
@@ -103,11 +105,11 @@ func main() {
 			panic(err)
 		}
 
-		if err = rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64()); err != nil {
+		if err := rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64()); err != nil {
 			panic(err)
 		}
 
-		if err = rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64()); err != nil {
+		if err := rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64()); err != nil {
 			panic(err)
 		}
 
@@ -115,18 +117,18 @@ func main() {
 			panic(err)
 		}
 
-		if err = batch.Commit(); err != nil {
+		if err := batch.Commit(); err != nil {
 			panic(err)
 		}
 
-		if err = rawdb.WriteBlock(tx, &block); err != nil {
+		if err := rawdb.WriteBlock(tx, &block); err != nil {
 			panic(err)
 		}
 
 		receipts := execRs.Receipts
 		stateSyncReceipt := execRs.StateSyncReceipt
 
-		if err = rawdb.AppendReceipts(tx, (uint64)(blockNum+1), receipts); err != nil {
+		if err := rawdb.AppendReceipts(tx, (uint64)(blockNum+1), receipts); err != nil {
 			panic(err)
 		}
 
@@ -136,13 +138,21 @@ func main() {
 			}
 		}
 
-		if err = stages.SaveStageProgress(tx, stages.Execution, block.NumberU64()); err != nil {
+		if err := stages.SaveStageProgress(tx, stages.Execution, block.NumberU64()); err != nil {
 			panic(err)
 		}
 
 		if err := rawdb.WriteSenders(tx, block.Hash(), block.NumberU64(), block.Body().SendersFromTxs()); err != nil {
 			panic(err)
 		}
+
+		totalDifficulty.Add(totalDifficulty, block.Difficulty())
+		if err := rawdb.WriteTd(tx, block.Hash(), block.NumberU64(), totalDifficulty); err != nil {
+			panic(err)
+		}
+
+		// NOTE: it's absolutely inconsistent that `WriteTxLookupEntries` doesn't return err
+		rawdb.WriteTxLookupEntries(tx, &block)
 
 		if err = tx.Commit(); err != nil {
 			panic(err)
