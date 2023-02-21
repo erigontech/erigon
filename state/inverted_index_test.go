@@ -66,7 +66,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites()
+	ii.StartWrites(true, false)
 	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
@@ -144,7 +144,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		}
 	}()
 	ii.SetTx(tx)
-	ii.StartWrites()
+	ii.StartWrites(true, false)
 	defer ii.FinishWrites()
 
 	ii.SetTxNum(2)
@@ -215,7 +215,7 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64) (string, k
 	require.NoError(err)
 	defer tx.Rollback()
 	ii.SetTx(tx)
-	ii.StartWrites()
+	ii.StartWrites(true, false)
 	defer ii.FinishWrites()
 
 	var flusher flusher

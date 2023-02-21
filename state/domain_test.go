@@ -73,7 +73,7 @@ func TestCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -132,7 +132,7 @@ func TestIterationBasic(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -173,7 +173,7 @@ func TestAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -246,7 +246,7 @@ func filledDomain(t *testing.T) (string, kv.RwDB, *Domain, uint64) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	txs := uint64(1000)
@@ -353,7 +353,7 @@ func TestIterationMultistep(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	d.SetTxNum(2)
@@ -522,7 +522,7 @@ func TestDelete(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	// Put on even txNum, delete on odd txNum
@@ -564,7 +564,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount uint64) (string, kv.
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	// keys are encodings of numbers 1..31
@@ -665,7 +665,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	d.SetTx(tx)
-	d.StartWrites()
+	d.StartWrites(true, false)
 	defer d.FinishWrites()
 
 	// keys are encodings of numbers 1..31

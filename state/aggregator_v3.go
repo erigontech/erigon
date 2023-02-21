@@ -671,25 +671,35 @@ func (a *AggregatorV3) Warmup(ctx context.Context, txFrom, limit uint64) {
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
-	a.accounts.DiscardHistory()
-	a.storage.DiscardHistory()
-	a.code.DiscardHistory()
-	a.logAddrs.DiscardHistory(a.tmpdir)
-	a.logTopics.DiscardHistory(a.tmpdir)
-	a.tracesFrom.DiscardHistory(a.tmpdir)
-	a.tracesTo.DiscardHistory(a.tmpdir)
+	a.accounts.StartWrites(false, true)
+	a.storage.StartWrites(false, true)
+	a.code.StartWrites(false, true)
+	a.logAddrs.StartWrites(false, true)
+	a.logTopics.StartWrites(false, true)
+	a.tracesFrom.StartWrites(false, true)
+	a.tracesTo.StartWrites(false, true)
 	return a
 }
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *AggregatorV3) StartWrites() *AggregatorV3 {
-	a.accounts.StartWrites()
-	a.storage.StartWrites()
-	a.code.StartWrites()
-	a.logAddrs.StartWrites()
-	a.logTopics.StartWrites()
-	a.tracesFrom.StartWrites()
-	a.tracesTo.StartWrites()
+	a.accounts.StartWrites(true, false)
+	a.storage.StartWrites(true, false)
+	a.code.StartWrites(true, false)
+	a.logAddrs.StartWrites(true, false)
+	a.logTopics.StartWrites(true, false)
+	a.tracesFrom.StartWrites(true, false)
+	a.tracesTo.StartWrites(true, false)
+	return a
+}
+func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
+	a.accounts.StartWrites(false, false)
+	a.storage.StartWrites(false, false)
+	a.code.StartWrites(false, false)
+	a.logAddrs.StartWrites(false, false)
+	a.logTopics.StartWrites(false, false)
+	a.tracesFrom.StartWrites(false, false)
+	a.tracesTo.StartWrites(false, false)
 	return a
 }
 func (a *AggregatorV3) FinishWrites() {

@@ -474,17 +474,11 @@ func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
 	return err
 }
 
-func (h *History) DiscardHistory() {
-	h.InvertedIndex.StartWrites()
+func (h *History) StartWrites(buffered, discard bool) {
+	h.InvertedIndex.StartWrites(buffered, discard)
 	h.walLock.Lock()
 	defer h.walLock.Unlock()
-	h.wal = h.newWriter(h.tmpdir, false, true)
-}
-func (h *History) StartWrites() {
-	h.InvertedIndex.StartWrites()
-	h.walLock.Lock()
-	defer h.walLock.Unlock()
-	h.wal = h.newWriter(h.tmpdir, true, false)
+	h.wal = h.newWriter(h.tmpdir, buffered, discard)
 }
 func (h *History) FinishWrites() {
 	h.InvertedIndex.FinishWrites()
