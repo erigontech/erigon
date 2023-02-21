@@ -13,7 +13,6 @@
   "istanbulBlock": 3395000,
   "muirGlacierBlock": 3395000,
   "berlinBlock": 14750000,
-  "calcuttaBlock": 22156660,
   "londonBlock": 23850000,
   "eip1559FeeCollectorTransition": 23850000,
   "eip1559FeeCollector": "0x70bca57f4579f58670ab2d18ef16e02c17553c38",
@@ -53,6 +52,7 @@
         }
       }
     },
+    "calcuttaBlock": 22156660,
     "jaipurBlock": 23850000,
     "delhiBlock": 38189056
   }
