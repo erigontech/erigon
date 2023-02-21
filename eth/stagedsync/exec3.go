@@ -755,7 +755,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			//continue
 
 			// immediately retry once
-			applyWorker.RunTxTaskNoLock(txTask)
+			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
 				return txTask.Error
 				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
