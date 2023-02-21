@@ -1614,7 +1614,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(ExternalConsensusFlag.Name) {
 		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
 	} else {
-		cfg.ExternalCL = !clparams.EmbeddedSupported(cfg.NetworkID)
+		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
 	}
 	nodeConfig.Http.InternalCL = !cfg.ExternalCL
 }

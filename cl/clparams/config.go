@@ -906,3 +906,9 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111 || id == 100 || id == 10200
 }
+
+// Subset of supported networks where embedded CL is stable enough
+// (sufficient number of light-client peers) as to be enabled by default
+func EmbeddedEnabledByDefault(id uint64) bool {
+	return id == 1 || id == 5 || id == 11155111
+}
