@@ -111,6 +111,10 @@ func (rw *Worker) Run() {
 func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.RunTxTaskNoLock(txTask)
+}
+
+func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
