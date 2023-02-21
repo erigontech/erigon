@@ -82,9 +82,6 @@ type Config struct {
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
 	Eip1559FeeCollectorTransition *big.Int        `json:"eip1559FeeCollectorTransition,omitempty"` // (Optional) Block from which burnt EIP-1559 fees go to the Eip1559FeeCollector
 
-	// Bor fork blocks
-	CalcuttaBlock *big.Int `json:"calcuttaBlock,omitempty"`
-
 	// Various consensus engines
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Clique *CliqueConfig `json:"clique,omitempty"`
@@ -256,15 +253,6 @@ func (c *Config) IsNano(num uint64) bool {
 
 func (c *Config) IsOnNano(num *big.Int) bool {
 	return numEqual(c.NanoBlock, num)
-}
-
-// IsCalcutta returns whether num is either equal to the euler fork block or greater.
-func (c *Config) IsCalcutta(num uint64) bool {
-	return isForked(c.CalcuttaBlock, num)
-}
-
-func (c *Config) IsOnCalcutta(num *big.Int) bool {
-	return numEqual(c.CalcuttaBlock, num)
 }
 
 // IsMuirGlacier returns whether num is either equal to the Muir Glacier (EIP-2384) fork block or greater.
@@ -584,8 +572,9 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	JaipurBlock *big.Int `json:"jaipurBlock"` // Jaipur switch block (nil = no fork, 0 = already on jaipur)
-	DelhiBlock  *big.Int `json:"delhiBlock"`  // Delhi switch block (nil = no fork, 0 = already on delhi)
+	CalcuttaBlock *big.Int `json:"calcuttaBlock"` // Calcutta switch block (nil = no fork, 0 = already on calcutta)
+	JaipurBlock   *big.Int `json:"jaipurBlock"`   // Jaipur switch block (nil = no fork, 0 = already on jaipur)
+	DelhiBlock    *big.Int `json:"delhiBlock"`    // Delhi switch block (nil = no fork, 0 = already on delhi)
 }
 
 // String implements the stringer interface, returning the consensus engine details.
@@ -615,6 +604,14 @@ func (c *BorConfig) IsJaipur(number uint64) bool {
 
 func (c *BorConfig) IsDelhi(number uint64) bool {
 	return isForked(c.DelhiBlock, number)
+}
+
+func (c *BorConfig) IsCalcutta(number uint64) bool {
+	return isForked(c.CalcuttaBlock, number)
+}
+
+func (c *BorConfig) IsOnCalcutta(number *big.Int) bool {
+	return numEqual(c.CalcuttaBlock, number)
 }
 
 func (c *BorConfig) calcConfig(field map[string]uint64, number uint64) uint64 {
