@@ -707,11 +707,7 @@ func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
 func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
 func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList { return r.readLists }
 func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet() {
-	if !r.discardReadList {
-		r.readLists = newReadList()
-	}
-}
+func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
