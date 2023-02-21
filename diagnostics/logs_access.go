@@ -1,4 +1,4 @@
-package exp
+package diagnostics
 
 import (
 	"errors"
@@ -17,6 +17,9 @@ import (
 
 func SetupLogsAccess(ctx *cli.Context) {
 	dirPath := ctx.String(logging.LogDirPathFlag.Name)
+	if dirPath == "" {
+		return
+	}
 	http.HandleFunc("/debug/metrics/logs/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		writeLogsList(w, dirPath)
