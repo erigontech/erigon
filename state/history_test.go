@@ -71,7 +71,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites(true, false)
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	h.SetTxNum(2)
@@ -175,7 +175,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites(true, false)
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	h.SetTxNum(2)
@@ -233,7 +233,7 @@ func filledHistory(tb testing.TB) (string, kv.RwDB, *History, uint64) {
 	require.NoError(tb, err)
 	defer tx.Rollback()
 	h.SetTx(tx)
-	h.StartWrites(true, false)
+	h.StartWrites()
 	defer h.FinishWrites()
 
 	txs := uint64(1000)

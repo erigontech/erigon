@@ -158,9 +158,9 @@ func NewDomain(
 
 	return d, nil
 }
-func (d *Domain) StartWrites(buffered, discard bool) {
+func (d *Domain) StartWrites() {
 	d.defaultDc = d.MakeContext()
-	d.History.StartWrites(buffered, discard)
+	d.History.StartWrites()
 }
 func (d *Domain) FinishWrites() {
 	d.defaultDc.Close()

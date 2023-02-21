@@ -1013,14 +1013,14 @@ func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum i
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *Aggregator) StartWrites() *Aggregator {
-	a.accounts.StartWrites(true, false)
-	a.storage.StartWrites(true, false)
-	a.code.StartWrites(true, false)
-	a.commitment.StartWrites(true, false)
-	a.logAddrs.StartWrites(true, false)
-	a.logTopics.StartWrites(true, false)
-	a.tracesFrom.StartWrites(true, false)
-	a.tracesTo.StartWrites(true, false)
+	a.accounts.StartWrites()
+	a.storage.StartWrites()
+	a.code.StartWrites()
+	a.commitment.StartWrites()
+	a.logAddrs.StartWrites()
+	a.logTopics.StartWrites()
+	a.tracesFrom.StartWrites()
+	a.tracesTo.StartWrites()
 	return a
 }
 func (a *Aggregator) FinishWrites() {
