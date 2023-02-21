@@ -767,6 +767,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x90000070
 	cfg.BellatrixForkEpoch = 100
 	cfg.BellatrixForkVersion = 0x90000071
+	cfg.CapellaForkEpoch = 56832
+	cfg.CapellaForkVersion = 0x90000072
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
