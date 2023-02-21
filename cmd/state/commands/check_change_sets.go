@@ -30,8 +30,8 @@ import (
 )
 
 var (
-	historyfile string
-	nocheck     bool
+	historyfile    string
+	nocheck        bool
 	transactionsV3 bool
 )
 
@@ -81,7 +81,7 @@ func CheckChangeSets(genesis *core.Genesis, logger log.Logger, blockNum uint64, 
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionV3)
-	
+
 	chainDb := db
 	defer chainDb.Close()
 	historyDb := chainDb

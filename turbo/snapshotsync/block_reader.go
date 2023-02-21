@@ -154,7 +154,7 @@ func (back *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash l
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn *RoSnapshots
+	sn             *RoSnapshots
 	TransactionsV3 bool
 }
 
