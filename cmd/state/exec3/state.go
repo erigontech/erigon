@@ -82,7 +82,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 	return w
 }
 
-func (rw *Worker) Tx() kv.Tx { return rw.chainTx }
+func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
+func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
