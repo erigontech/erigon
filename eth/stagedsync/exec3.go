@@ -493,7 +493,6 @@ func ExecV3(ctx context.Context,
 
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	//isBor := cfg.chainConfig.Bor != nil
-	defer func(t time.Time) { fmt.Printf("exec3.go:496: %s\n", time.Since(t)) }(time.Now())
 
 	var b *types.Block
 	var blockNum uint64
