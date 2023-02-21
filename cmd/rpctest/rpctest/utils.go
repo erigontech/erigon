@@ -572,7 +572,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	fmt.Printf("Request=%s\n", request)
+	//fmt.Printf("Request=%s\n", request)
 	log.Info("Getting", "url", url, "request", request)
 	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
@@ -583,8 +583,15 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	if r.StatusCode != 200 {
 		return fmt.Errorf("status %s", r.Status)
 	}
-	decoder := json.NewDecoder(r.Body)
-	err = decoder.Decode(response)
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(b, response)
+	if err != nil {
+		fmt.Printf("json: %s\n", string(b))
+		panic(err)
+	}
 	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }

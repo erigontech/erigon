@@ -59,12 +59,14 @@ func (c *ChainTipSubscriber) StartLoop() {
 
 	go func() {
 		reqAfter := time.NewTicker(time.Duration(c.beaconConfig.SecondsPerSlot * 2 * uint64(time.Second)))
+		defer reqAfter.Stop()
 		for {
 			select {
 			case <-reqAfter.C:
 				var update *cltypes.LightClientOptimisticUpdate
 				update, err = c.rpc.SendLightClientOptimisticUpdateReqV1()
 				for err != nil {
+					time.Sleep(2 * time.Second)
 					update, err = c.rpc.SendLightClientOptimisticUpdateReqV1()
 				}
 				if update.SignatureSlot < c.lastReceivedSlot {

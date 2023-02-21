@@ -690,7 +690,9 @@ type StateReaderV3 struct {
 	trace     bool
 	rs        *StateV3
 	composite []byte
-	readLists map[string]*exec22.KvList
+
+	discardReadList bool
+	readLists       map[string]*exec22.KvList
 }
 
 func NewStateReader22(rs *StateV3) *StateReaderV3 {
@@ -700,25 +702,12 @@ func NewStateReader22(rs *StateV3) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) SetTxNum(txNum uint64) {
-	r.txNum = txNum
-}
-
-func (r *StateReaderV3) SetTx(tx kv.Tx) {
-	r.tx = tx
-}
-
-func (r *StateReaderV3) ResetReadSet() {
-	r.readLists = newReadList()
-}
-
-func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList {
-	return r.readLists
-}
-
-func (r *StateReaderV3) SetTrace(trace bool) {
-	r.trace = trace
-}
+func (r *StateReaderV3) DiscardReadList()                   { r.discardReadList = true }
+func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
+func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList { return r.readLists }
+func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
+func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
@@ -730,9 +719,11 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 			return nil, err
 		}
 	}
-	// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+	if !r.discardReadList {
+		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
+		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
+		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+	}
 	if len(enc) == 0 {
 		return nil, nil
 	}
@@ -756,8 +747,10 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 			return nil, err
 		}
 	}
-	r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, composite)
-	r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+	if !r.discardReadList {
+		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, composite)
+		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+	}
 	if r.trace {
 		if enc == nil {
 			fmt.Printf("ReadAccountStorage [%x] [%x] => [], txNum: %d\n", address, key.Bytes(), r.txNum)
@@ -781,8 +774,10 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 			return nil, err
 		}
 	}
-	r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
-	r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc)
+	if !r.discardReadList {
+		r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
+		r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc)
+	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -801,8 +796,10 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	}
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
-	r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address.Bytes())
-	r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
+	if !r.discardReadList {
+		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address.Bytes())
+		r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
+	}
 	size := len(enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
@@ -819,8 +816,10 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 			return 0, err
 		}
 	}
-	r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
-	r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
+	if !r.discardReadList {
+		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
+		r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
+	}
 	if len(enc) == 0 {
 		return 0, nil
 	}

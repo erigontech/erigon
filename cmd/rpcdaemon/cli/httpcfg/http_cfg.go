@@ -12,6 +12,7 @@ import (
 type HttpCfg struct {
 	Enabled                  bool
 	PrivateApiAddr           string
+	GraphQLEnabled           bool
 	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	DataDir                  string
 	Dirs                     datadir.Dirs
