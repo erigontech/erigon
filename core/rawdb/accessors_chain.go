@@ -491,7 +491,7 @@ func WriteTransactions(db kv.RwTx, txs []types.Transaction, baseTxId uint64, blo
 	return nil
 }
 
-func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash *libcommon.Hash) error {
+func WriteRawTransactions(tx kv.RwTx, txs [][]byte, baseTxId uint64, blockHash *common2.Hash) error {
 	txId := baseTxId
 	for _, txn := range txs {
 		txIdKey := make([]byte, 8)
