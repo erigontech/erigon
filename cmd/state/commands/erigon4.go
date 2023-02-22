@@ -14,12 +14,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/params"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -48,11 +53,20 @@ func init() {
 	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	erigon4Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	rootCmd.AddCommand(erigon4Cmd)
 }
 
 var (
-	commitmentsMode string // flag --commitments.mode [direct|update]
+	commitmentsMode     string                           // flag --commitments.mode [direct|update]
+	logInterval         = 30 * time.Second               // time period to print aggregation stat to log
+	dirtySpaceThreshold = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
+	commitmentFrequency int                              // How many blocks to skip between calculating commitment
+	commitments         bool
+	commitmentTrie      string
+
+	blockExecutionTimer       = metrics.GetOrCreateSummary("chain_execution_seconds")
+	blockRootMismatchExpected bool // if trie variant is not hex, we could not have another rootHash with to verify it
 )
 
 var erigon4Cmd = &cobra.Command{
@@ -111,15 +125,16 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
-	if err3 != nil {
-		return fmt.Errorf("create aggregator: %w", err3)
+	var trieVariant commitment.TrieVariant
+	switch commitmentTrie {
+	case "bin":
+		trieVariant = commitment.VariantBinPatriciaTrie
+		blockRootMismatchExpected = true
+	case "hex":
+		fallthrough
+	default:
+		trieVariant = commitment.VariantHexPatriciaTrie
 	}
-	if err := agg.ReopenFolder(); err != nil {
-		return err
-	}
-
-	defer agg.Close()
 
 	var mode libstate.CommitmentMode
 	switch commitmentsMode {
@@ -128,7 +143,18 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	default:
 		mode = libstate.CommitmentModeDirect
 	}
-	agg.SetCommitmentMode(mode)
+
+	logger.Info("aggregator commitment trie", "variant", trieVariant, "mode", mode)
+
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep, mode, trieVariant)
+	if err3 != nil {
+		return fmt.Errorf("create aggregator: %w", err3)
+	}
+	if err := agg.ReopenFolder(); err != nil {
+		return err
+	}
+
+	defer agg.Close()
 
 	startTxNum := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
@@ -150,7 +176,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		agg.SetTx(rwTx)
 		agg.SetTxNum(0)
-		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper23{w: agg}); err != nil {
+		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &Writer4{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
 
@@ -209,8 +235,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		return h
 	}
-	readWrapper := &ReaderWrapper23{ac: agg.MakeContext(), roTx: rwTx}
-	writeWrapper := &WriterWrapper23{w: agg}
+	readWrapper := &Reader4{ac: agg.MakeContext(), roTx: rwTx}
+	writeWrapper := &Writer4{w: agg}
 
 	commitFn := func(txn uint64) error {
 		if db == nil || rwTx == nil {
@@ -243,7 +269,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return nil
 	}
 
-	agg.SetCommitFn(commitFn)
+	roots := agg.AggregatedRoots()
 
 	for !interrupt {
 		blockNum++
@@ -264,7 +290,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		agg.SetTx(rwTx)
 		agg.SetTxNum(txNum)
 
-		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
+		if txNum, _, err = processBlock4(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
 			return fmt.Errorf("processing block %d: %w", blockNum, err)
 		}
 
@@ -276,6 +302,11 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 			if err := commitFn(txNum); err != nil {
 				log.Error("db commit", "err", err)
 			}
+		case <-roots:
+			if err := commitFn(txNum); err != nil {
+				log.Error("db commit", "err", err)
+			}
+
 		default:
 		}
 	}
@@ -329,8 +360,8 @@ func (s *stat23) delta(aStats libstate.FilesStats, blockNum, txNum uint64) *stat
 	return s
 }
 
-func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *ReaderWrapper23, ww *WriterWrapper23, chainConfig *chain2.Config,
-	engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
+func processBlock4(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader4, ww *Writer4, chainConfig *chain2.Config,
+	 engine consensus.Engine, getHeader func(hash libcommon.Hash, number uint64) *types.Header, block *types.Block, vmConfig vm.Config,
 ) (uint64, types.Receipts, error) {
 	defer blockExecutionTimer.UpdateDuration(time.Now())
 
@@ -342,7 +373,6 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
-	ww.w.SetBlockNum(block.NumberU64())
 	rw.blockNum = block.NumberU64()
 	ww.blockNum = block.NumberU64()
 
@@ -454,7 +484,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 			if err != nil {
 				return 0, nil, err
 			}
-			if !bytes.Equal(rootHash, header.Root[:]) {
+			if blockRootMismatchExpected && !bytes.Equal(rootHash, header.Root[:]) {
 				return 0, nil, fmt.Errorf("invalid root hash for block %d: expected %x got %x", block.NumberU64(), header.Root, rootHash)
 			}
 		}
@@ -468,18 +498,18 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 }
 
 // Implements StateReader and StateWriter
-type ReaderWrapper23 struct {
+type Reader4 struct {
 	roTx     kv.Tx
 	ac       *libstate.AggregatorContext
 	blockNum uint64
 }
 
-type WriterWrapper23 struct {
+type Writer4 struct {
 	blockNum uint64
 	w        *libstate.Aggregator
 }
 
-func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
+func (rw *Reader4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -516,7 +546,7 @@ func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts
 	return &a, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
+func (rw *Reader4) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	enc, err := rw.ac.ReadAccountStorage(address.Bytes(), key.Bytes(), rw.roTx)
 	if err != nil {
 		return nil, err
@@ -530,19 +560,19 @@ func (rw *ReaderWrapper23) ReadAccountStorage(address libcommon.Address, incarna
 	return enc, nil
 }
 
-func (rw *ReaderWrapper23) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
+func (rw *Reader4) ReadAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) ([]byte, error) {
 	return rw.ac.ReadAccountCode(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
+func (rw *Reader4) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
 	return rw.ac.ReadAccountCodeSize(address.Bytes(), rw.roTx)
 }
 
-func (rw *ReaderWrapper23) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
+func (rw *Reader4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	return 0, nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+func (ww *Writer4) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
 	var l int
 	l++
 	if account.Nonce > 0 {
@@ -612,27 +642,58 @@ func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original
 	return nil
 }
 
-func (ww *WriterWrapper23) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
+func (ww *Writer4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if err := ww.w.UpdateAccountCode(address.Bytes(), code); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
+func (ww *Writer4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if err := ww.w.DeleteAccount(address.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
+func (ww *Writer4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if err := ww.w.WriteAccountStorage(address.Bytes(), key.Bytes(), value.Bytes()); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (ww *WriterWrapper23) CreateContract(address libcommon.Address) error {
+func (ww *Writer4) CreateContract(address libcommon.Address) error {
 	return nil
+}
+
+func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+	l := log.New()
+	config := ethconfig.Defaults
+
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if cc.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
+	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
 }

@@ -11,15 +11,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -40,6 +42,11 @@ func init() {
 	history22Cmd.Flags().IntVar(&blockTo, "blockto", 0, "block number to stop replay of history at")
 	rootCmd.AddCommand(history22Cmd)
 }
+
+var (
+	blockTo    int
+	traceBlock int
+)
 
 var history22Cmd = &cobra.Command{
 	Use:   "history22",
@@ -72,7 +79,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadirCli, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep, libstate.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
