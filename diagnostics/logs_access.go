@@ -36,6 +36,7 @@ func writeLogsList(w io.Writer, dirPath string) {
 		fmt.Fprintf(w, "ERROR: listing directory %s: %v\n", dirPath, err)
 		return
 	}
+	//nolint: prealloc
 	var infos []fs.FileInfo
 	for _, entry := range entries {
 		fileInfo, err := os.Stat(filepath.Join(dirPath, entry.Name()))

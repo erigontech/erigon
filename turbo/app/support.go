@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -50,7 +49,7 @@ func connectDiagnostics(ctx *cli.Context) error {
 	for !interrupt {
 		select {
 		case interrupt = <-interruptCh:
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup"))
+			log.Info("interrupted, please wait for cleanup")
 		case <-pollEvery.C:
 			pollResponse, err := client.Get(giveRequestsUrl)
 			if err != nil {
@@ -64,6 +63,7 @@ func connectDiagnostics(ctx *cli.Context) error {
 				}
 				log.Info("Polling response", "resp", string(buf))
 			}
+			pollResponse.Body.Close()
 		}
 	}
 	return nil
