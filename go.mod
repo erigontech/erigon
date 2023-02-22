@@ -3,12 +3,12 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230221214943-02940aceae54
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230222071807-58768de5f5eb
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230215122237-5e33484e9be4
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.5
+	github.com/torquem-ch/mdbx-go v0.28.2-0.20230222023854-4ec3395ee4e4
 )
 
 require (
@@ -45,6 +45,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
+	github.com/hashicorp/golang-lru/v2 v2.0.1
 	github.com/holiman/uint256 v1.2.1
 	github.com/huandu/xstrings v1.3.2
 	github.com/huin/goupnp v1.0.3
@@ -54,7 +55,7 @@ require (
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
 	github.com/klauspost/compress v1.15.15
 	github.com/libp2p/go-libp2p v0.25.1
-	github.com/libp2p/go-libp2p-pubsub v0.9.0
+	github.com/libp2p/go-libp2p-pubsub v0.9.1-0.20230221111042-3dbc2fd5baca
 	github.com/maticnetwork/crand v1.0.2
 	github.com/maticnetwork/polyproto v0.0.2
 	github.com/multiformats/go-multiaddr v0.8.0
@@ -151,11 +152,9 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20230207041349-798e818bf904 // indirect
 	github.com/google/uuid v1.3.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.1 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20220405231054-a1ae3e4bba26 // indirect
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/ipfs/go-cid v0.3.2 // indirect
-	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/jbenet/go-temp-err-catcher v0.1.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
@@ -199,7 +198,6 @@ require (
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/onsi/ginkgo/v2 v2.8.0 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
-	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pion/datachannel v1.5.2 // indirect
 	github.com/pion/dtls/v2 v2.2.4 // indirect
 	github.com/pion/ice/v2 v2.2.6 // indirect

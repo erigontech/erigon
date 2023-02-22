@@ -40,11 +40,13 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 		}
 	}()
 
-	for b == nil {
-		b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
+	b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
+	for err != nil || b == nil {
 		if err != nil {
-			log.Debug("[Checkpoint Sync] could not retrieve bootstrap", "err", err)
+			log.Debug("[lightclient] SendLightClientBootstrapReqV1", "err", err)
 		}
+		time.Sleep(2 * time.Second)
+		b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
 	}
 
 	s, err := NewLightClientStore(finalized, b)
