@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"syscall"
 	"time"
 
@@ -46,10 +46,7 @@ func connectDiagnostics(ctx *cli.Context) error {
 	client := &http.Client{}
 	defer client.CloseIdleConnections()
 	diagnosticsUrl := ctx.String(utils.DiagnosticsURLFlag.Name)
-	giveRequestsUrl, err := url.JoinPath(diagnosticsUrl, "giveRequests")
-	if err != nil {
-		return fmt.Errorf("construct giveRequestUrl: %w", err)
-	}
+	giveRequestsUrl := path.Join(diagnosticsUrl, "giveRequests")
 	for !interrupt {
 		select {
 		case interrupt = <-interruptCh:
