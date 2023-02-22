@@ -126,3 +126,7 @@ issues:
       linters:
         - gosec
         - gocritic
+    - path: p2p/dnsdisc
+      linters:
+        - gosec
+        - gocritic

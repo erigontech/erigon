@@ -466,7 +466,7 @@ func (mr mapResolver) LookupTXT(ctx context.Context, name string) ([]string, err
 }
 
 func parseNodes(rec []string) []*enode.Node {
-	var ns []*enode.Node
+	ns := make([]*enode.Node, 0, len(rec))
 	for _, r := range rec {
 		var n enode.Node
 		if err := n.UnmarshalText([]byte(r)); err != nil {
