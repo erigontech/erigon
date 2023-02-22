@@ -24,6 +24,7 @@ import (
 	metrics2 "github.com/VictoriaMetrics/metrics"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon/common/fdlimit"
+	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/metrics/exp"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
@@ -163,7 +164,8 @@ func Setup(ctx *cli.Context) error {
 		metricsPort := ctx.Int(metricsPortFlag.Name)
 		address := fmt.Sprintf("%s:%d", metricsAddr, metricsPort)
 		exp.Setup(address)
-		exp.SetupLogsAccess(ctx)
+		diagnostics.SetupLogsAccess(ctx)
+		diagnostics.SetupDbAccess(ctx)
 	}
 
 	// pprof server
