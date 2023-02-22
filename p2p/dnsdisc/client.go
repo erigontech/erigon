@@ -27,7 +27,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon/common/lru"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -97,9 +97,14 @@ func (cfg Config) withDefaults() Config {
 func NewClient(cfg Config) *Client {
 	cfg = cfg.withDefaults()
 	rlimit := rate.NewLimiter(rate.Limit(cfg.RateLimit), 10)
+
+	entries, err := lru.New[string, entry](cfg.CacheLimit)
+	if err != nil {
+		log.Warn("can't create lru", "err", err)
+	}
 	return &Client{
 		cfg:       cfg,
-		entries:   lru.NewCache[string, entry](cfg.CacheLimit),
+		entries:   entries,
 		clock:     mclock.System{},
 		ratelimit: rlimit,
 	}
