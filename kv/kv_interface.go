@@ -298,6 +298,7 @@ type StatelessRwTx interface {
 //   - ReadOnly transactions do not lock goroutine to thread, RwTx does
 type Tx interface {
 	StatelessReadTx
+	BucketMigratorRO
 
 	// ID returns the identifier associated with this transaction. For a
 	// read-only transaction, this corresponds to the snapshot being read;
@@ -363,13 +364,17 @@ type RwTx interface {
 	CollectMetrics()
 }
 
+type BucketMigratorRO interface {
+	ListBuckets() ([]string, error)
+}
+
 // BucketMigrator used for buckets migration, don't use it in usual app code
 type BucketMigrator interface {
+	BucketMigratorRO
 	DropBucket(string) error
 	CreateBucket(string) error
 	ExistsBucket(string) (bool, error)
 	ClearBucket(string) error
-	ListBuckets() ([]string, error)
 }
 
 // Cursor - class for navigating through a database

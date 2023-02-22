@@ -37,6 +37,7 @@ import (
 	"github.com/pbnjay/memory"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -184,6 +185,27 @@ func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts {
 func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts {
 	opts.bucketsCfg = f
 	return opts
+}
+
+var pathDbMap = map[string]kv.RoDB{}
+var pathDbMapLock sync.Mutex
+
+func addToPathDbMap(path string, db kv.RoDB) {
+	pathDbMapLock.Lock()
+	defer pathDbMapLock.Unlock()
+	pathDbMap[path] = db
+}
+
+func removeFromPathDbMap(path string) {
+	pathDbMapLock.Lock()
+	defer pathDbMapLock.Unlock()
+	delete(pathDbMap, path)
+}
+
+func PathDbMap() map[string]kv.RoDB {
+	pathDbMapLock.Lock()
+	defer pathDbMapLock.Unlock()
+	return maps.Clone(pathDbMap)
 }
 
 func (opts MdbxOpts) Open() (kv.RwDB, error) {
@@ -368,6 +390,8 @@ func (opts MdbxOpts) Open() (kv.RwDB, error) {
 		}
 
 	}
+	db.path = opts.path
+	addToPathDbMap(opts.path, db)
 	return db, nil
 }
 
@@ -388,6 +412,7 @@ type MdbxKV struct {
 	opts         MdbxOpts
 	txSize       uint64
 	closed       atomic.Bool
+	path         string
 }
 
 func (db *MdbxKV) PageSize() uint64 { return db.opts.pageSize }
@@ -444,6 +469,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("failed to remove in-mem db file", "err", err)
 		}
 	}
+	removeFromPathDbMap(db.path)
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
