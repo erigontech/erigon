@@ -35,7 +35,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-stack/stack"
 	"github.com/google/btree"
-	"github.com/hashicorp/golang-lru/simplelru"
+	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
@@ -309,16 +309,16 @@ type TxPool struct {
 	//   - batch notifications about new txs (reduce P2P spam to other nodes about txs propagation)
 	//   - and as a result reducing lock contention
 	unprocessedRemoteTxs    *types.TxSlots
-	unprocessedRemoteByHash map[string]int     // to reject duplicates
-	byHash                  map[string]*metaTx // tx_hash => tx : only not committed to db yet records
-	discardReasonsLRU       *simplelru.LRU     // tx_hash => discard_reason : non-persisted
+	unprocessedRemoteByHash map[string]int                        // to reject duplicates
+	byHash                  map[string]*metaTx                    // tx_hash => tx : only not committed to db yet records
+	discardReasonsLRU       *simplelru.LRU[string, DiscardReason] // tx_hash => discard_reason : non-persisted
 	pending                 *PendingPool
 	baseFee                 *SubPool
 	queued                  *SubPool
-	isLocalLRU              *simplelru.LRU           // tx_hash => is_local : to restore isLocal flag of unwinded transactions
-	newPendingTxs           chan types.Announcements // notifications about new txs in Pending sub-pool
-	all                     *BySenderAndNonce        // senderID => (sorted map of tx nonce => *metaTx)
-	deletedTxs              []*metaTx                // list of discarded txs since last db commit
+	isLocalLRU              *simplelru.LRU[string, struct{}] // tx_hash => is_local : to restore isLocal flag of unwinded transactions
+	newPendingTxs           chan types.Announcements         // notifications about new txs in Pending sub-pool
+	all                     *BySenderAndNonce                // senderID => (sorted map of tx nonce => *metaTx)
+	deletedTxs              []*metaTx                        // list of discarded txs since last db commit
 	promoted                types.Announcements
 	cfg                     Config
 	chainID                 uint256.Int
@@ -331,11 +331,12 @@ type TxPool struct {
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
-	localsHistory, err := simplelru.NewLRU(10_000, nil)
+	var err error
+	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
-	discardHistory, err := simplelru.NewLRU(10_000, nil)
+	discardHistory, err := simplelru.NewLRU[string, DiscardReason](10_000, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -883,14 +884,14 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 	}
 }
 
-func fillDiscardReasons(reasons []DiscardReason, newTxs types.TxSlots, discardReasonsLRU *simplelru.LRU) []DiscardReason {
+func fillDiscardReasons(reasons []DiscardReason, newTxs types.TxSlots, discardReasonsLRU *simplelru.LRU[string, DiscardReason]) []DiscardReason {
 	for i := range reasons {
 		if reasons[i] != NotSet {
 			continue
 		}
 		reason, ok := discardReasonsLRU.Get(string(newTxs.Txs[i].IDHash[:]))
 		if ok {
-			reasons[i] = reason.(DiscardReason)
+			reasons[i] = reason
 		} else {
 			reasons[i] = Success
 		}
@@ -1615,7 +1616,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	}
 	for i, txHash := range txHashes {
 		binary.BigEndian.PutUint64(encID, uint64(i))
-		if err := tx.Append(kv.RecentLocalTransaction, encID, []byte(txHash.(string))); err != nil {
+		if err := tx.Append(kv.RecentLocalTransaction, encID, []byte(txHash)); err != nil {
 			return err
 		}
 	}
