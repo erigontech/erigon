@@ -21,7 +21,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -276,6 +275,11 @@ var (
 	IPCPathFlag = DirectoryFlag{
 		Name:  "ipcpath",
 		Usage: "Filename for IPC socket/pipe within the datadir (explicit paths escape it)",
+	}
+	GraphQLEnabledFlag = cli.BoolFlag{
+		Name:  "graphql",
+		Usage: "Enable the graphql endpoint",
+		Value: nodecfg.DefaultConfig.GraphQLEnabled,
 	}
 	HTTPEnabledFlag = cli.BoolFlag{
 		Name:  "http",
@@ -598,6 +602,10 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
+	MetricsURLsFlag = cli.StringSliceFlag{
+		Name:  "metrics.urls",
+		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
+	}
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
 		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
@@ -749,6 +757,10 @@ var (
 		Name:  "sentinel.port",
 		Usage: "Port for sentinel",
 		Value: 7777,
+	}
+	DiagnosticsURLFlag = cli.StringFlag{
+		Name:  "diagnostics.url",
+		Usage: "URL of the diagnostics system provided by the support team",
 	}
 )
 
@@ -1116,62 +1128,11 @@ func SetNodeConfigCobra(cmd *cobra.Command, cfg *nodecfg.Config) {
 	setDataDirCobra(flags, cfg)
 }
 
-func DataDirForNetwork(datadir string, network string) string {
-	if datadir != paths.DefaultDataDir() {
-		return datadir
-	}
-
-	switch network {
-	case networkname.DevChainName:
-		return "" // unless explicitly requested, use memory databases
-	case networkname.RinkebyChainName:
-		return networkDataDirCheckingLegacy(datadir, "rinkeby")
-	case networkname.GoerliChainName:
-		return networkDataDirCheckingLegacy(datadir, "goerli")
-	case networkname.SokolChainName:
-		return networkDataDirCheckingLegacy(datadir, "sokol")
-	case networkname.MumbaiChainName:
-		return networkDataDirCheckingLegacy(datadir, "mumbai")
-	case networkname.BorMainnetChainName:
-		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
-	case networkname.BorDevnetChainName:
-		return networkDataDirCheckingLegacy(datadir, "bor-devnet")
-	case networkname.SepoliaChainName:
-		return networkDataDirCheckingLegacy(datadir, "sepolia")
-	case networkname.GnosisChainName:
-		return networkDataDirCheckingLegacy(datadir, "gnosis")
-	case networkname.ChiadoChainName:
-		return networkDataDirCheckingLegacy(datadir, "chiado")
-
-	default:
-		return datadir
-	}
-}
-
-// networkDataDirCheckingLegacy checks if the datadir for the network already exists and uses that if found.
-// if not checks for a LOCK file at the root of the datadir and uses this if found
-// or by default assume a fresh node and to use the nested directory for the network
-func networkDataDirCheckingLegacy(datadir, network string) string {
-	anticipated := filepath.Join(datadir, network)
-
-	if _, err := os.Stat(anticipated); !os.IsNotExist(err) {
-		return anticipated
-	}
-
-	legacyLockFile := filepath.Join(datadir, "LOCK")
-	if _, err := os.Stat(legacyLockFile); !os.IsNotExist(err) {
-		log.Info("Using legacy datadir")
-		return datadir
-	}
-
-	return anticipated
-}
-
 func setDataDir(ctx *cli.Context, cfg *nodecfg.Config) {
 	if ctx.IsSet(DataDirFlag.Name) {
 		cfg.Dirs.DataDir = ctx.String(DataDirFlag.Name)
 	} else {
-		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, ctx.String(ChainFlag.Name))
+		cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, ctx.String(ChainFlag.Name))
 	}
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 
@@ -1203,10 +1164,10 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	if dirname != "" {
 		cfg.Dirs.DataDir = dirname
 	} else {
-		cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
+		cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, chain)
 	}
 
-	cfg.Dirs.DataDir = DataDirForNetwork(cfg.Dirs.DataDir, chain)
+	cfg.Dirs.DataDir = paths.DataDirForNetwork(cfg.Dirs.DataDir, chain)
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 }
 
@@ -1614,7 +1575,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(ExternalConsensusFlag.Name) {
 		cfg.ExternalCL = ctx.Bool(ExternalConsensusFlag.Name)
 	} else {
-		cfg.ExternalCL = !clparams.EmbeddedSupported(cfg.NetworkID)
+		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
 	}
 	nodeConfig.Http.InternalCL = !cfg.ExternalCL
 }
