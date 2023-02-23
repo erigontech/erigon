@@ -152,7 +152,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		cnt++
 	}
 	_ = cnt
-	//log.Warn("cnt", "cnt", cnt)
+	log.Warn("cnt", "cnt", cnt)
 	return nil, nil
 
 	if blockNumbers.IsEmpty() {
@@ -395,8 +395,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	if err != nil {
 		return logs, err
 	}
-	_, _ = iter.CountU64(txNumbers)
-	//log.Warn("cnt", "cnt", cnt)
+	cnt, _ := iter.CountU64(txNumbers)
+	log.Warn("cnt", "cnt", cnt)
 	return nil, nil
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
