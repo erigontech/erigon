@@ -146,11 +146,13 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	}
 
 	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
-
+	cnt := 0
 	iter2 := blockNumbers.Iterator()
 	for iter2.HasNext() {
 		_ = iter2.Next()
+		cnt++
 	}
+	log.Warn("cnt", "cnt", cnt)
 	return nil, nil
 
 	if blockNumbers.IsEmpty() {
@@ -397,6 +399,8 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
 	cnt, _ := iter.CountU64(txNumbers)
 	log.Warn("cnt", "cnt", cnt)
+	return nil, nil
+
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
 	for _, v := range crit.Addresses {
 		addrMap[v] = struct{}{}
