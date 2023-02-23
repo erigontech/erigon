@@ -141,11 +141,10 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
+	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
-
-	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
 	cnt := 0
 	iter2 := blockNumbers.Iterator()
 	for iter2.HasNext() {
@@ -293,7 +292,6 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 }
 
 func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
-	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	out.AddRange(begin, end+1) // [from,to)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
@@ -350,7 +348,6 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 */
 
 func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
-	defer func(t time.Time) { log.Warn("applyFiltersV3", "took", time.Since(t)) }(time.Now())
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
@@ -392,11 +389,11 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
+	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
-	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
 	cnt, _ := iter.CountU64(txNumbers)
 	log.Warn("cnt", "cnt", cnt)
 	return nil, nil
