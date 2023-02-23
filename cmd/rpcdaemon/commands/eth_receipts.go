@@ -242,7 +242,7 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 			if err != nil {
 				return nil, err
 			}
-			if m.GetCardinality() > 600 {
+			if m.GetCardinality() > 2000 {
 				log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], m.GetCardinality()))
 			}
 			if bitmapForORing == nil {
@@ -279,7 +279,7 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		if err != nil {
 			return nil, err
 		}
-		if m.GetCardinality() > 600 {
+		if m.GetCardinality() > 2000 {
 			log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], m.GetCardinality()))
 		}
 		rx[idx] = m
@@ -562,7 +562,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 				return nil, err
 			}
 			cnt, _ := iter.CountU64(it)
-			if cnt > 600 {
+			if cnt > 2000 {
 				log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], cnt))
 			}
 			topicsUnion = iter.Union[uint64](topicsUnion, it)
@@ -584,7 +584,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 			return nil, err
 		}
 		cnt, _ := iter.CountU64(it)
-		if cnt > 600 {
+		if cnt > 2000 {
 			log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], cnt))
 		}
 		res = iter.Union[uint64](res, it)
