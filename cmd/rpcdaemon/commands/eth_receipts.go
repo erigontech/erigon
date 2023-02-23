@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
@@ -140,7 +141,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	//defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
@@ -389,7 +390,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	//defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
+	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
 	if err != nil {
 		return logs, err
