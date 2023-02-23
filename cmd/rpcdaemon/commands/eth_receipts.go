@@ -144,6 +144,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
+
+	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
+
+	iter2 := blockNumbers.Iterator()
+	for iter2.HasNext() {
+		_ = iter2.Next()
+	}
+	return nil, nil
+
 	if blockNumbers.IsEmpty() {
 		return logs, nil
 	}
