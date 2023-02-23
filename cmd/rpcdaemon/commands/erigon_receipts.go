@@ -107,9 +107,9 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
-	iter := blockNumbers.Iterator()
-	for iter.HasNext() {
-		_ = iter.Next()
+	iter2 := blockNumbers.Iterator()
+	for iter2.HasNext() {
+		_ = iter2.Next()
 	}
 	return nil, nil
 
