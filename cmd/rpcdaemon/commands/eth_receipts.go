@@ -277,7 +277,9 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 		if err != nil {
 			return nil, err
 		}
-		log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], m.GetCardinality()))
+		if m.GetCardinality() > 0 {
+			log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], m.GetCardinality()))
+		}
 		rx[idx] = m
 	}
 	return roaring.FastOr(rx...), nil
