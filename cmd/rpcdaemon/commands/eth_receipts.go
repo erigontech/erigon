@@ -141,7 +141,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
+	//defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return logs, err
 	}
@@ -152,7 +152,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		cnt++
 	}
 	_ = cnt
-	log.Warn("cnt", "cnt", cnt)
+	//log.Warn("cnt", "cnt", cnt)
 	return nil, nil
 
 	if blockNumbers.IsEmpty() {
