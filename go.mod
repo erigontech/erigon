@@ -15,7 +15,7 @@ require (
 	github.com/99designs/gqlgen v0.17.24
 	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.3
-	github.com/VictoriaMetrics/fastcache v1.12.0
+	github.com/VictoriaMetrics/fastcache v1.12.1
 	github.com/VictoriaMetrics/metrics v1.23.1
 	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.48.1-0.20230219022425-e8971ea0f1bf
@@ -79,7 +79,7 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli/v2 v2.24.3
+	github.com/urfave/cli/v2 v2.24.4
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.1
 	github.com/xsleonard/go-merkle v1.1.0
