@@ -12,7 +12,9 @@ hr {
 }
 
 .container {
-  width: 100%;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   margin: 0 auto;
   padding: 0 15px;
 }
@@ -59,8 +61,7 @@ hr {
 }
 
 .logo img {
-  width: 100%;
-  max-width: 120px;
+  width: 120px;
   height: auto;
 }
 
@@ -78,8 +79,7 @@ hr {
 }
 
 .header-logo img {
-  width: 100%;
-  max-width: 250px;
+  width: 250px;
   height: auto;
 }
 
