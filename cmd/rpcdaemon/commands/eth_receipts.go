@@ -242,7 +242,9 @@ func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring
 			if err != nil {
 				return nil, err
 			}
-			log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], m.GetCardinality()))
+			if m.GetCardinality() > 0 {
+				log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], m.GetCardinality()))
+			}
 			if bitmapForORing == nil {
 				bitmapForORing = m
 				continue
@@ -560,7 +562,9 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 				return nil, err
 			}
 			cnt, _ := iter.CountU64(it)
-			log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], cnt))
+			if cnt > 0 {
+				log.Warn(fmt.Sprintf("topic: %x: %d\n", topic[:], cnt))
+			}
 			topicsUnion = iter.Union[uint64](topicsUnion, it)
 		}
 
