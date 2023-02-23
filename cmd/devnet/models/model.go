@@ -70,7 +70,7 @@ const (
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
 	PrivateApiParamNoMine = "localhost:9091"
 	// HttpApiParam is the http.api default parameter for rpcdaemon
-	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity"
+	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
@@ -112,12 +112,17 @@ const (
 	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
 	// ETHGetBlockByNumber represents the eth_getBlockByNumber method
 	ETHGetBlockByNumber RPCMethod = "eth_getBlockByNumber"
+	// ETHGetBlock represents the eth_getBlock method
+	ETHGetBlock RPCMethod = "eth_getBlock"
 	// ETHGetLogs represents the eth_getLogs method
 	ETHGetLogs RPCMethod = "eth_getLogs"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod = "txpool_content"
+
+	// OTSGetBlockDetails represents the ots_getBlockDetails method
+	OTSGetBlockDetails RPCMethod = "ots_getBlockDetails"
 
 	// ETHNewHeads represents the eth_newHeads sub method
 	ETHNewHeads SubMethod = "eth_newHeads"

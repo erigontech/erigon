@@ -83,6 +83,11 @@ func (req *RequestGenerator) GetBlockByNumber(blockNum uint64, withTxs bool) str
 	return fmt.Sprintf(template, models.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
 }
 
+func (req *RequestGenerator) GetBlockByNumberI(blockNum string, withTxs bool) string {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["%s",%t],"id":%d}`
+	return fmt.Sprintf(template, models.ETHGetBlockByNumber, blockNum, withTxs, req.reqID)
+}
+
 func (req *RequestGenerator) GetLogs(fromBlock, toBlock uint64, address libcommon.Address) string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[{"fromBlock":"0x%x","toBlock":"0x%x","address":"0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, models.ETHGetLogs, fromBlock, toBlock, address, req.reqID)
@@ -101,6 +106,11 @@ func (req *RequestGenerator) SendRawTransaction(signedTx []byte) string {
 func (req *RequestGenerator) TxpoolContent() string {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
 	return fmt.Sprintf(template, models.TxpoolContent, req.reqID)
+}
+
+func (req *RequestGenerator) GetBlockDetails(blockNum string) string {
+	const template = `{"jsonrpc":"2.0","method":%q,"params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, models.OTSGetBlockDetails, blockNum, req.reqID)
 }
 
 func (req *RequestGenerator) PingErigonRpc() rpctest.CallResult {

@@ -3,9 +3,11 @@ package devnetutils
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -154,4 +156,10 @@ func CompareLogEvents(expected, actual rpctest.Log) ([]error, bool) {
 func GenerateTopic(signature string) []libcommon.Hash {
 	hashed := crypto.Keccak256([]byte(signature))
 	return []libcommon.Hash{libcommon.BytesToHash(hashed)}
+}
+
+func RandomNumbersInRange(min, max uint64) int {
+	rand.Seed(time.Now().UnixNano())
+	diff := int(max - min + 1)
+	return rand.Intn(diff) + int(min)
 }

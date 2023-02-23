@@ -19,11 +19,30 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-const gasPrice = 912345678
+const gasPrice = 912_345_678
+const gasAmount = 875_000_000
 
 var (
 	signer = types.LatestSigner(params.AllCliqueProtocolChanges)
 )
+
+func CreateManyEIP1559TransactionsRefWithBaseFee(addr string, startingNonce *uint64) ([]*types.Transaction, []*types.Transaction, error) {
+	toAddress := libcommon.HexToAddress(addr)
+
+	baseFeePerGas, err := BaseFeeFromBlock()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
+	}
+
+	fmt.Printf("BaseFeePerGas: %v\n", baseFeePerGas)
+
+	lowerBaseFeeTransactions, higherBaseFeeTransactions, err := signEIP1559TxsLowerAndHigherThanBaseFee2(1, 1, baseFeePerGas, startingNonce, toAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed signEIP1559TxsLowerAndHigherThanBaseFee2: %v", err)
+	}
+
+	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
+}
 
 // CreateTransaction creates a transaction depending on the type of transaction being passed
 func CreateTransaction(txType models.TransactionType, addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, *contracts.Subscription, *bind.TransactOpts, error) {
@@ -34,12 +53,12 @@ func CreateTransaction(txType models.TransactionType, addr string, value, nonce 
 			return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create non-contract transaction: %v", err)
 		}
 		return tx, address, nil, nil, nil
-	case models.DynamicFee:
-		tx, address, err := createDynamicTx(addr, value, nonce)
-		if err != nil {
-			return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create dynamic fee transaction: %v", err)
-		}
-		return tx, address, nil, nil, nil
+	//case models.DynamicFee:
+	//	tx, address, err := createDynamicTx(addr, value, nonce)
+	//	if err != nil {
+	//		return nil, libcommon.Address{}, nil, nil, fmt.Errorf("failed to create dynamic fee transaction: %v", err)
+	//	}
+	//	return tx, address, nil, nil, nil
 	case models.ContractTx:
 		return createContractTx(nonce)
 	default:
@@ -63,31 +82,171 @@ func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, 
 	return &signedTx, toAddress, nil
 }
 
-// createDynamicTx creates a transaction of the DynamicFee type
-func createDynamicTx(addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, error) {
-	toAddress := libcommon.HexToAddress(addr)
+//// createDynamicTx creates a transaction of the DynamicFee type
+//func createDynamicTx(addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, error) {
+//	toAddress := libcommon.HexToAddress(addr)
+//
+//	baseFeePerGas, err := BaseFeeFromBlock()
+//	if err != nil {
+//		return nil, libcommon.Address{}, fmt.Errorf("failed to sign dynamic fee transaction: %v", err)
+//	}
+//
+//	lowerBaseFeeTransactions, higherBaseFeeTransactions, err := signEIP1559TxsLowerAndHigherThanBaseFee2(2, 2, baseFeePerGas, nonce, toAddress, value)
+//	if err != nil {
+//		return nil, libcommon.Address{}, fmt.Errorf("failed to sign dynamic fee transaction: %v", err)
+//	}
+//
+//	// create a new transaction using the parameters to send
+//	transaction := types.NewEIP1559Transaction(*signer.ChainID(), nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasAmount), nil)
+//
+//	// sign the transaction using the developer signed private key
+//	signedTx, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+//	if err != nil {
+//		return nil, libcommon.Address{}, fmt.Errorf("failed to sign dynamic fee transaction: %v", err)
+//	}
+//
+//	return &signedTx, toAddress, nil
+//}
 
-	// TODO: Get the current header and the chain config and calc the base fee
-	// TODO: Using the base fee, test for cases where the gas fee cap is less than the base fee and greater than the base fee
-	//db := mdbx.MustOpen(models.DataDirParam + fmt.Sprintf("%d", 0))
-	//defer db.Close()
-	//tx, err := db.BeginRo(context.Background())
-	//val := misc.CalcBaseFee(params.AllCliqueProtocolChanges, rawdb.ReadCurrentHeader(tx))
-	//fmt.Printf("Base Fee value pointer is: %+v\n", val)
-	//if val != nil {
-	//	fmt.Printf("Base Fee value is: %+v\n", *val)
-	//}
+//// signEIP1559TxsLowerAndHigherThanBaseFee creates amountLower number of transactions with gasFeeCap lower than baseFeePerGas
+//// and amountHigher number of transactions with gasFeeCap higher than baseFeePerGas
+//func signEIP1559TxsLowerAndHigherThanBaseFee(amountLower, amountHigher int, baseFeePerGas uint64, nonce uint64, toAddress libcommon.Address, value uint64) ([]types.Transaction, error) {
+//	var signedTransactions []types.Transaction
+//
+//	var (
+//		lowerMinFeeCap  = baseFeePerGas - 300_000_000
+//		lowerMaxFeeCap  = baseFeePerGas - 100_000_000
+//		higherMinFeeCap = baseFeePerGas
+//		higherMaxFeeCap = baseFeePerGas + 100_000_000
+//
+//		gasFeeCap uint64
+//	)
+//
+//	for i := 0; i < (amountLower + amountHigher); i++ {
+//		if i < amountLower {
+//			gasFeeCap = uint64(devnetutils.RandomNumbersInRange(lowerMinFeeCap, lowerMaxFeeCap))
+//		} else {
+//			gasFeeCap = uint64(devnetutils.RandomNumbersInRange(higherMinFeeCap, higherMaxFeeCap))
+//		}
+//
+//		transaction := types.NewEIP1559Transaction(*signer.ChainID(), nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
+//
+//		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+//		if err != nil {
+//			return nil, err
+//		}
+//
+//		signedTransactions = append(signedTransactions, signedTransaction)
+//	}
+//
+//	return signedTransactions, nil
+//}
 
-	// create a new transaction using the parameters to send
-	transaction := types.NewEIP1559Transaction(*signer.ChainID(), nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasPrice), nil)
-
-	// sign the transaction using the developer signed private key
-	signedTx, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+func signEIP1559TxsLowerAndHigherThanBaseFee2(amountLower, amountHigher int, baseFeePerGas uint64, nonce *uint64, toAddress libcommon.Address) ([]*types.Transaction, []*types.Transaction, error) {
+	lowerBaseFeeTransactions, err := signEIP1559TxsLowerThanBaseFee(amountLower, baseFeePerGas, nonce, toAddress)
 	if err != nil {
-		return nil, libcommon.Address{}, fmt.Errorf("failed to sign dynamic fee transaction: %v", err)
+		return nil, nil, fmt.Errorf("failed signEIP1559TxsLowerThanBaseFee: %v", err)
 	}
 
-	return &signedTx, toAddress, nil
+	higherBaseFeeTransactions, err := signEIP1559TxsHigherThanBaseFee(amountHigher, baseFeePerGas, nonce, toAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed signEIP1559TxsHigherThanBaseFee: %v", err)
+	}
+
+	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
+}
+
+// signEIP1559TxsLowerThanBaseFee creates n number of transactions with gasFeeCap lower than baseFeePerGas
+func signEIP1559TxsLowerThanBaseFee2(signedTransactions *[]types.Transaction, n int, baseFeePerGas uint64, nonce uint64, toAddress libcommon.Address, value uint64) error {
+	var (
+		lowerMinFeeCap  = baseFeePerGas - 300_000_000
+		lowerMaxFeeCap  = baseFeePerGas - 100_000_000
+		higherMinFeeCap = baseFeePerGas
+		higherMaxFeeCap = baseFeePerGas + 100_000_000
+
+		gasFeeCap uint64
+	)
+
+	for i := 0; i < n; i++ {
+		if i < (n / 2) {
+			gasFeeCap = uint64(devnetutils.RandomNumbersInRange(lowerMinFeeCap, lowerMaxFeeCap))
+		} else {
+			gasFeeCap = uint64(devnetutils.RandomNumbersInRange(higherMinFeeCap, higherMaxFeeCap))
+		}
+
+		transaction := types.NewEIP1559Transaction(*signer.ChainID(), nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
+
+		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+		if err != nil {
+			return err
+		}
+
+		*signedTransactions = append(*signedTransactions, signedTransaction)
+	}
+
+	return nil
+}
+
+// signEIP1559TxsLowerThanBaseFee creates n number of transactions with gasFeeCap lower than baseFeePerGas
+func signEIP1559TxsLowerThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64, toAddress libcommon.Address) ([]*types.Transaction, error) {
+	var signedTransactions []*types.Transaction
+
+	var (
+		minFeeCap = baseFeePerGas - 300_000_000
+		maxFeeCap = baseFeePerGas - 100_000_000
+	)
+
+	for i := 0; i < n; i++ {
+		gasFeeCap := uint64(devnetutils.RandomNumbersInRange(minFeeCap, maxFeeCap))
+		value := uint64(devnetutils.RandomNumbersInRange(0, 100_000))
+
+		transaction := types.NewEIP1559Transaction(*signer.ChainID(), *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
+
+		fmt.Printf("LOWER => Nonce for transaction %d is: %v\n", i, transaction.Nonce)
+		fmt.Printf("LOWER => Value for transaction %d is: %v\n", i, transaction.Value)
+		fmt.Printf("LOWER => Value for transaction %d is: %v\n", i, transaction.FeeCap)
+
+		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+
+		signedTransactions = append(signedTransactions, &signedTransaction)
+		*nonce++
+	}
+
+	return signedTransactions, nil
+}
+
+// signEIP1559TxsHigherThanBaseFee creates amount number of transactions with gasFeeCap higher than baseFeePerGas
+func signEIP1559TxsHigherThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64, toAddress libcommon.Address) ([]*types.Transaction, error) {
+	var signedTransactions []*types.Transaction
+
+	var (
+		minFeeCap = baseFeePerGas
+		maxFeeCap = baseFeePerGas + 100_000_000
+	)
+
+	for i := 0; i < n; i++ {
+		gasFeeCap := uint64(devnetutils.RandomNumbersInRange(minFeeCap, maxFeeCap))
+		value := uint64(devnetutils.RandomNumbersInRange(0, 100_000))
+
+		transaction := types.NewEIP1559Transaction(*signer.ChainID(), *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
+
+		fmt.Printf("HIGHER => Nonce for transaction %d is: %v\n", i, transaction.Nonce)
+		fmt.Printf("HIGHER => Value for transaction %d is: %v\n", i, transaction.Value)
+		fmt.Printf("HIGHER => Value for transaction %d is: %v\n", i, transaction.FeeCap)
+
+		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
+		if err != nil {
+			return nil, err
+		}
+
+		signedTransactions = append(signedTransactions, &signedTransaction)
+		*nonce++
+	}
+
+	return signedTransactions, nil
 }
 
 // createContractTx creates and signs a transaction using the developer address, returns the contract and the signed transaction
@@ -184,4 +343,37 @@ func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactO
 	fmt.Printf("Tx submitted, adding tx with hash %q to txpool\n", hash)
 
 	return hash, nil
+}
+
+func BaseFeeFromBlock() (uint64, error) {
+	var val uint64
+	res, err := requests.GetBlockByNumberDetails(0, "latest", false)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get base fee from block: %v\n", err)
+	}
+
+	if v, ok := res["baseFeePerGas"]; !ok {
+		return val, fmt.Errorf("baseFeePerGas field missing from response")
+	} else {
+		val = devnetutils.HexToInt(v.(string))
+	}
+
+	return val, err
+}
+
+func SendManyTransactions(signedTransactions []*types.Transaction) ([]*libcommon.Hash, error) {
+	fmt.Println("Sending multiple transactions to the txpool...")
+	var hashes []*libcommon.Hash
+
+	for _, tx := range signedTransactions {
+		hash, err := requests.SendTransaction(models.ReqId, tx)
+		if err != nil {
+			fmt.Printf("failed SendTransaction: %s\n", err)
+			return nil, err
+		}
+		fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
+		hashes = append(hashes, hash)
+	}
+
+	return hashes, nil
 }

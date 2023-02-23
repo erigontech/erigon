@@ -41,7 +41,7 @@ func ExecuteAllMethods() {
 
 	// USING DYNAMIC FEE
 	// send a token from the dev address to the recipient address
-	_, err := callSendTxWithDynamicFee(sendValue, recipientAddress, models.DevAddress)
+	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
 	if err != nil {
 		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
 		return
