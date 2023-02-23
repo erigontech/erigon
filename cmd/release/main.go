@@ -87,7 +87,24 @@ func main() {
 		os.Exit(1)
 	}
 
-	for _, ghRelease := range ghReleases[0 : releasesCount-1] {
+	// loop binaries to get stable and rc versions
+	var stable []GithubRelease
+	var rc []GithubRelease
+	for _, ghRelease := range ghReleases {
+		if strings.Contains(ghRelease.TagName, "rc") {
+			if len(rc) < releasesCount {
+				rc = append(rc, ghRelease)
+			}
+		} else {
+			if len(stable) < releasesCount {
+				stable = append(stable, ghRelease)
+			}
+		}
+	}
+
+	allReleases := append(stable, rc...)
+
+	for _, ghRelease := range allReleases {
 
 		checksums := map[string]string{}
 
