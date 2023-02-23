@@ -9,64 +9,58 @@ builds:
   - id: darwin-amd64
     main: ./cmd/erigon
     binary: erigon
-    goos:
-      - darwin
-    goarch:
-      - amd64
+    goos: [ darwin ]
+    goarch: [ amd64 ]
     env:
       - CC=o64-clang
       - CXX=o64-clang++
-    tags:
-      - netgo
-    ldflags:
-      -s -w
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
 
   - id: darwin-arm64
     main: ./cmd/erigon
     binary: erigon
-    goos:
-      - darwin
-    goarch:
-      - arm64
+    goos: [ darwin ]
+    goarch: [ arm64 ]
     env:
       - CC=oa64-clang
       - CXX=oa64-clang++
-    tags:
-      - netgo
-    ldflags:
-      -s -w
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
 
   - id: linux-amd64
     main: ./cmd/erigon
     binary: erigon
-    goos:
-      - linux
-    goarch:
-      - amd64
+    goos: [ linux ]
+    goarch: [ amd64 ]
     env:
-      - CC=gcc
-      - CXX=g++
-    tags:
-      - netgo
-    ldflags:
-      # We need to build a static binary because we are building in a glibc based system and running in a musl container
-      -s -w -extldflags "-static"
+      - CC=x86_64-linux-gnu-gcc
+      - CXX=x86_64-linux-gnu-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
 
   - id: linux-arm64
     main: ./cmd/erigon
     binary: erigon
-    goos:
-      - linux
-    goarch:
-      - arm64
+    goos: [ linux ]
+    goarch: [ arm64 ]
     env:
       - CC=aarch64-linux-gnu-gcc
       - CXX=aarch64-linux-gnu-g++
-    tags:
-      - netgo
-    ldflags:
-      # We need to build a static binary because we are building in a glibc based system and running in a musl container
-      -s -w -extldflags "-static"
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w -extldflags "-static" # We need to build a static binary because we are building in a glibc based system and running in a musl container
+
+  - id: windows-amd64
+    main: ./cmd/erigon
+    binary: erigon
+    goos: [ windows ]
+    goarch: [ amd64 ]
+    env:
+      - CC=x86_64-w64-mingw32-gcc
+      - CXX=x86_64-w64-mingw32-g++
+    tags: [ nosqlite, noboltdb ]
+    ldflags: -s -w
+
 
 snapshot:
   name_template: "{{ .Tag }}.next"
@@ -74,8 +68,10 @@ snapshot:
 dockers:
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
     dockerfile: Dockerfile.release
     use: buildx
+    skip_push: true
     goarch: amd64
     ids:
       - linux-amd64
@@ -84,7 +80,9 @@ dockers:
 
   - image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
     dockerfile: Dockerfile.release
+    skip_push: true
     use: buildx
     goarch: arm64
     ids:
@@ -94,14 +92,28 @@ dockers:
 
 docker_manifests:
   - name_template: thorax/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
     image_templates:
       - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
       - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
 
-  - name_template: thorax/{{ .ProjectName }}:latest
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}
+    skip_push: true
     image_templates:
-    - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
-    - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: thorax/{{ .ProjectName }}:latest
+    skip_push: true
+    image_templates:
+      - thorax/{{ .ProjectName }}:{{ .Version }}-amd64
+      - thorax/{{ .ProjectName }}:{{ .Version }}-arm64
+
+  - name_template: ghcr.io/ledgerwatch/{{ .ProjectName }}:latest
+    skip_push: true
+    image_templates:
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-amd64
+      - ghcr.io/ledgerwatch/{{ .ProjectName }}:{{ .Version }}-arm64
 
 announce:
   slack:

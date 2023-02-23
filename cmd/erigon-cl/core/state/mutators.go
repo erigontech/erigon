@@ -2,14 +2,17 @@ package state
 
 import (
 	"fmt"
+
+	"github.com/ledgerwatch/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (b *BeaconState) IncreaseBalance(index int, delta uint64) error {
-	currentBalance, err := b.ValidatorBalance(index)
+func (b *BeaconState) IncreaseBalance(index, delta uint64) error {
+	currentBalance, err := b.ValidatorBalance(int(index))
 	if err != nil {
 		return err
 	}
-	return b.SetValidatorBalance(index, currentBalance+delta)
+	return b.SetValidatorBalance(int(index), currentBalance+delta)
 }
 
 func (b *BeaconState) DecreaseBalance(index, delta uint64) error {
@@ -29,12 +32,8 @@ func (b *BeaconState) ComputeActivationExitEpoch(epoch uint64) uint64 {
 }
 
 func (b *BeaconState) GetValidatorChurnLimit() uint64 {
-	inds := b.GetActiveValidatorsIndices(b.Epoch())
-	churnLimit := uint64(len(inds)) / b.beaconConfig.ChurnLimitQuotient
-	if churnLimit > b.beaconConfig.MinPerEpochChurnLimit {
-		return churnLimit
-	}
-	return b.beaconConfig.MinPerEpochChurnLimit
+	activeIndsCount := uint64(len(b.GetActiveValidatorsIndices(b.Epoch())))
+	return utils.Max64(activeIndsCount/b.beaconConfig.ChurnLimitQuotient, b.beaconConfig.MinPerEpochChurnLimit)
 }
 
 func (b *BeaconState) InitiateValidatorExit(index uint64) error {
@@ -49,10 +48,8 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	currentEpoch := b.Epoch()
 	exitQueueEpoch := b.ComputeActivationExitEpoch(currentEpoch)
 	for _, v := range b.validators {
-		if v.ExitEpoch != b.beaconConfig.FarFutureEpoch {
-			if v.ExitEpoch > exitQueueEpoch {
-				exitQueueEpoch = v.ExitEpoch
-			}
+		if v.ExitEpoch != b.beaconConfig.FarFutureEpoch && v.ExitEpoch > exitQueueEpoch {
+			exitQueueEpoch = v.ExitEpoch
 		}
 	}
 
@@ -67,7 +64,11 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 	}
 
 	validator.ExitEpoch = exitQueueEpoch
-	validator.WithdrawableEpoch = exitQueueEpoch + b.beaconConfig.MinValidatorWithdrawabilityDelay
+	var overflow bool
+	if validator.WithdrawableEpoch, overflow = math.SafeAdd(validator.ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
+		return fmt.Errorf("withdrawable epoch is too big")
+	}
+
 	return b.SetValidatorAt(int(index), &validator)
 }
 
@@ -101,8 +102,8 @@ func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error 
 	}
 	whistleBlowerReward := newValidator.EffectiveBalance / b.beaconConfig.WhistleBlowerRewardQuotient
 	proposerReward := whistleBlowerReward / b.beaconConfig.ProposerRewardQuotient
-	if err := b.IncreaseBalance(int(proposerInd), proposerReward); err != nil {
+	if err := b.IncreaseBalance(proposerInd, proposerReward); err != nil {
 		return err
 	}
-	return b.IncreaseBalance(int(whistleblowerInd), whistleBlowerReward)
+	return b.IncreaseBalance(whistleblowerInd, whistleBlowerReward)
 }

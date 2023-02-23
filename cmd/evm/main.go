@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	app = cli2.NewApp(params.GitCommit, "", "the evm command line interface")
+	app = cli2.NewApp(params.GitCommit, "the evm command line interface")
 
 	DebugFlag = cli.BoolFlag{
 		Name:  "debug",

@@ -167,7 +167,7 @@ func newAgg(t *testing.T) *libstate.AggregatorV3 {
 	dir, ctx := t.TempDir(), context.Background()
 	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
 	require.NoError(t, err)
-	err = agg.ReopenFiles()
+	err = agg.OpenFolder()
 	require.NoError(t, err)
 	return agg
 }

@@ -72,7 +72,7 @@ func (s *SentinelServer) SendRequest(_ context.Context, req *sentinelrpc.Request
 				// Wait a bit to not exhaust CPU and skip.
 				continue
 			}
-			log.Trace("[sentinel] Sent request", "pid", pid)
+			//log.Trace("[sentinel] Sent request", "pid", pid)
 			s.sentinel.Peers().PeerDoRequest(pid)
 			go func() {
 				data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.sentinel.Host(), req.Data, req.Topic, pid)

@@ -211,7 +211,7 @@ func TestProcessRandao(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, true)
-			err := s.ProcessRandao(tc.body.RandaoReveal)
+			err := s.ProcessRandao(tc.body.RandaoReveal, propInd)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

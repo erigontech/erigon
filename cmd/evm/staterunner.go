@@ -114,7 +114,7 @@ func aggregateResultsFromStateTests(
 		Tracer: tracer,
 		Debug:  ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 	}
-	db := memdb.New()
+	db := memdb.New("")
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

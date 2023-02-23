@@ -108,7 +108,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.kv = memdb.New()
+	s.kv = memdb.New("")
 	tx, err := s.kv.BeginRw(context.Background()) //nolint
 	if err != nil {
 		panic(err)

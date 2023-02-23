@@ -85,7 +85,7 @@ func (s *StateTransistor) processJustificationBitsAndFinalityAltair() error {
 	if err != nil {
 		return err
 	}
-	totalActiveBalance, err := s.state.GetTotalActiveBalance()
+	totalActiveBalance := s.state.GetTotalActiveBalance()
 	if err != nil {
 		return err
 	}
