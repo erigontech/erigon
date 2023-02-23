@@ -107,6 +107,12 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
+	iter := blockNumbers.Iterator()
+	for iter.HasNext() {
+		_ = iter.Next()
+	}
+	return nil, nil
+
 	if blockNumbers.IsEmpty() {
 		return erigonLogs, nil
 	}
