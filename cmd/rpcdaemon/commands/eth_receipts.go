@@ -584,7 +584,9 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 			return nil, err
 		}
 		cnt, _ := iter.CountU64(it)
-		log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], cnt))
+		if cnt > 0 {
+			log.Warn(fmt.Sprintf("addr: %x: %d\n", addr[:], cnt))
+		}
 		res = iter.Union[uint64](res, it)
 	}
 	return res, nil
