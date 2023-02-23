@@ -30,6 +30,7 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
+	fromPrefix                     string
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
@@ -74,6 +75,10 @@ func withBlock(cmd *cobra.Command) {
 
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
+}
+
+func withFrom(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&fromPrefix, "from.prefix", "", "prefix to start from")
 }
 
 func withPruneTo(cmd *cobra.Command) {

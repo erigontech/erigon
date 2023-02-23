@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -135,6 +136,7 @@ func init() {
 
 	withDataDir(cmdWarmup)
 	withBucket(cmdWarmup)
+	withFrom(cmdWarmup)
 
 	rootCmd.AddCommand(cmdWarmup)
 
@@ -173,9 +175,13 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
+	from := 0
+	if len(fromPrefix) > 0 {
+		from = int(common.FromHex(fromPrefix)[0])
+	}
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(ThreadsLimit)
-	for i := 0; i < 256; i++ {
+	for i := from; i < 256; i++ {
 		for j := 0; j < 256; j++ {
 			i := i
 			j := j
@@ -205,6 +211,36 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 				})
 			})
 		}
+	}
+	if len(fromPrefix) >= 8 {
+		from = int(binary.BigEndian.Uint64(common.FromHex(fromPrefix)))
+	}
+	for i := from; i < 1_000; i++ {
+		i := i
+		g.Go(func() error {
+			return db.View(ctx, func(tx kv.Tx) error {
+				seek := make([]byte, 8)
+				binary.BigEndian.PutUint64(seek, uint64(i*100_000))
+				it, err := tx.Prefix(bucket, seek)
+				if err != nil {
+					return err
+				}
+				for it.HasNext() {
+					_, _, err = it.Next()
+					if err != nil {
+						return err
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						log.Info(fmt.Sprintf("Progress: %.2f%%", 100*float64(progress.Load())/float64(total)))
+					default:
+					}
+				}
+				return nil
+			})
+		})
 	}
 	g.Wait()
 	return nil
