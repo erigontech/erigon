@@ -386,7 +386,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return logs, err
 	}
 	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
-	iter.Intersect[uint64](txNumbers, iter.Range[uint64](1, 10))
+	txNumbers := iter.Intersect[uint64](txNumbers, iter.Range[uint64](1, 10))
 	cnt, _ := iter.CountU64(txNumbers)
 	log.Warn("cnt", "cnt", cnt)
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
