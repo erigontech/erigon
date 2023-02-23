@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,7 +214,10 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 		}
 	}
 	if len(fromPrefix) >= 8 {
-		from = int(binary.BigEndian.Uint64(common.FromHex(fromPrefix)))
+		parsed, err := strconv.Atoi(fromPrefix)
+		if err == nil {
+			from = parsed
+		}
 	}
 	for i := from; i < 1_000; i++ {
 		i := i
