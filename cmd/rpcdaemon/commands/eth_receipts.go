@@ -280,23 +280,14 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 			bitmapdb.ReturnToPool(bm)
 		}
 	}()
-	defer func(t time.Time) { fmt.Printf("eth_receipts.go:283: %s\n", time.Since(t)) }(time.Now())
 	for idx, addr := range addrs {
 		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
 		if err != nil {
 			return nil, err
 		}
-		log.Warn(fmt.Sprintf("cnt: %x, %d\n", addr[:], m.GetCardinality()))
 		rx[idx] = m
 	}
-	defer func(t time.Time) { fmt.Printf("eth_receipts.go:292: %s\n", time.Since(t)) }(time.Now())
-	res := roaring.FastOr(rx...)
-	defer func(t time.Time) { fmt.Printf("eth_receipts.go:292: %s\n", time.Since(t)) }(time.Now())
-	res2 := rx[0]
-	for _, mb := range rx[1:] {
-		res2.Or(mb)
-	}
-	return res, nil
+	return roaring.FastOr(rx...), nil
 }
 
 func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
