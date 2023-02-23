@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
-	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
@@ -390,13 +389,14 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) ([]*types.Log, error) {
 	logs := []*types.Log{}
 
-	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
+	//defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	txNumbers, err := applyFiltersV3(tx, begin, end, crit)
 	if err != nil {
 		return logs, err
 	}
 	cnt, _ := iter.CountU64(txNumbers)
-	log.Warn("cnt", "cnt", cnt)
+	_ = cnt
+	//log.Warn("cnt", "cnt", cnt)
 	return nil, nil
 
 	addrMap := make(map[common.Address]struct{}, len(crit.Addresses))
