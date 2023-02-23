@@ -107,6 +107,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, err
 	}
 	defer func(t time.Time) { log.Warn("after applyFilters", "took", time.Since(t)) }(time.Now())
+
 	iter2 := blockNumbers.Iterator()
 	for iter2.HasNext() {
 		_ = iter2.Next()
