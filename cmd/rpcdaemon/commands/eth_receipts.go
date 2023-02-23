@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
@@ -281,6 +282,7 @@ func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring
 }
 
 func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
+	defer func(t time.Time) { log.Warn("applyFilters", "took", time.Since(t)) }(time.Now())
 	out.AddRange(begin, end+1) // [from,to)
 	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
 	if err != nil {
@@ -337,6 +339,7 @@ func applyFiltersV3(out *roaring64.Bitmap, tx kv.TemporalTx, begin, end uint64, 
 */
 
 func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria) (out iter.U64, err error) {
+	defer func(t time.Time) { log.Warn("applyFiltersV3", "took", time.Since(t)) }(time.Now())
 	//[from,to)
 	var fromTxNum, toTxNum uint64
 	if begin > 0 {
