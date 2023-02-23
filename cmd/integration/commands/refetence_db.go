@@ -219,12 +219,12 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 			from = parsed
 		}
 	}
-	for i := from; i < 1_000; i++ {
+	for i := uint64(from); i < 100_000_000; i += 100_000 {
 		i := i
 		g.Go(func() error {
 			return db.View(ctx, func(tx kv.Tx) error {
 				seek := make([]byte, 8)
-				binary.BigEndian.PutUint64(seek, uint64(i*100_000))
+				binary.BigEndian.PutUint64(seek, i)
 				it, err := tx.Prefix(bucket, seek)
 				if err != nil {
 					return err
