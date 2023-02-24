@@ -17,7 +17,7 @@ import (
 
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
-	if err := s.processSlots(currentBlock.Slot); err != nil {
+	if err := s.ProcessSlots(currentBlock.Slot); err != nil {
 		return err
 	}
 	// Write the block root to the cache
@@ -80,7 +80,7 @@ func (s *StateTransistor) transitionSlot() error {
 	return nil
 }
 
-func (s *StateTransistor) processSlots(slot uint64) error {
+func (s *StateTransistor) ProcessSlots(slot uint64) error {
 	stateSlot := s.state.Slot()
 	if slot <= stateSlot {
 		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
