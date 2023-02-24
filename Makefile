@@ -1,46 +1,15 @@
-GO = go # if using docker, should not need to be installed/linked
-GOBIN = $(CURDIR)/build/bin
-UNAME = $(shell uname) # Supported: Darwin, Linux
-DOCKER := $(shell command -v docker 2> /dev/null)
+# import .env - create from .env.example if it doesn't exist
+ifeq ($(wildcard .env),)
+    $(shell cp .env.example .env)
+endif
 
-GIT_COMMIT ?= $(shell git rev-list -1 HEAD)
-GIT_BRANCH ?= $(shell git rev-parse --abbrev-ref HEAD)
-GIT_TAG    ?= $(shell git describe --tags '--match=v*' --dirty)
-ERIGON_USER ?= erigon
-# if using volume-mounting data dir, then must exist on host OS
-DOCKER_UID ?= $(shell id -u)
-DOCKER_GID ?= $(shell id -g)
-DOCKER_TAG ?= thorax/erigon:latest
-
-# Variables below for building on host OS, and are ignored for docker
-#
-# Pipe error below to /dev/null since Makefile structure kind of expects
-# Go to be available, but with docker it's not strictly necessary
-CGO_CFLAGS := $(shell $(GO) env CGO_CFLAGS 2>/dev/null) # don't lose default
-CGO_CFLAGS += -DMDBX_FORCE_ASSERTIONS=0 # Enable MDBX's asserts by default in 'devel' branch and disable in releases
-#CGO_CFLAGS += -DMDBX_DISABLE_VALIDATION=1 # This feature is not ready yet
-#CGO_CFLAGS += -DMDBX_ENABLE_PROFGC=0 # Disabled by default, but may be useful for performance debugging
-#CGO_CFLAGS += -DMDBX_ENABLE_PGOP_STAT=0 # Disabled by default, but may be useful for performance debugging
-#CGO_CFLAGS += -DMDBX_ENV_CHECKPID=0 # Erigon doesn't do fork() syscall
-CGO_CFLAGS += -O
-CGO_CFLAGS += -D__BLST_PORTABLE__
-CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can https://github.com/ledgerwatch/erigon/issues/6113#issuecomment-1359526277
-CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
-DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
-
-BUILD_TAGS = nosqlite,noboltdb
-PACKAGE = github.com/ledgerwatch/erigon
-
-GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
-GO_FLAGS += -ldflags "-X ${PACKAGE}/params.GitCommit=${GIT_COMMIT} -X ${PACKAGE}/params.GitBranch=${GIT_BRANCH} -X ${PACKAGE}/params.GitTag=${GIT_TAG}"
-
-GOBUILD = $(CGO_CFLAGS) $(GO) build $(GO_FLAGS)
-GO_DBG_BUILD = $(GO) build $(GO_FLAGS) -tags $(BUILD_TAGS),debug -gcflags=all="-N -l"  # see delve docs
-GOTEST = $(CGO_CFLAGS) GODEBUG=cgocheck=0 $(GO) test $(GO_FLAGS) ./... -p 2
+include .env
+export
 
 default: all
 
 ## go-version:                        print and verify go version
+.PHONY: go-version
 go-version:
 	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
 		echo "minimum required Golang version is 1.18"; \
@@ -48,6 +17,7 @@ go-version:
 	fi
 
 ## validate_docker_build_args:        ensure docker build args are valid
+.PHONY: validate_docker_build_args
 validate_docker_build_args:
 	@echo "Docker build args:"
 	@echo "    DOCKER_UID: $(DOCKER_UID)"
@@ -77,7 +47,8 @@ ifdef XDG_DATA_HOME
 endif
 xdg_data_home_subdirs = $(xdg_data_home)/erigon $(xdg_data_home)/erigon-grafana $(xdg_data_home)/erigon-prometheus
 
-## setup_xdg_data_home:               TODO
+## setup_xdg_data_home:              sets up the xdg data home directory for storing data
+.PHONY: setup_xdg_data_home
 setup_xdg_data_home:
 	mkdir -p $(xdg_data_home_subdirs)
 	ls -aln $(xdg_data_home) | grep -E "472.*0.*erigon-grafana" || chown -R 472:0 $(xdg_data_home)/erigon-grafana
@@ -85,6 +56,7 @@ setup_xdg_data_home:
 	@ls -al $(xdg_data_home)
 
 ## docker-compose:                    validate build args, setup xdg data home, and run docker-compose up
+.PHONY: docker-compose
 docker-compose: validate_docker_build_args setup_xdg_data_home
 	docker-compose up
 
@@ -97,9 +69,6 @@ dbg:
 	@echo "Building $*"
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
-
-## geth:                              run erigon (TODO: remove?)
-geth: erigon
 
 ## erigon:                            build erigon
 erigon: go-version erigon.cmd
@@ -131,6 +100,7 @@ $(COMMANDS): %: %.cmd
 all: erigon $(COMMANDS)
 
 ## db-tools:                          build db tools
+.PHONY: db-tools
 db-tools:
 	@echo "Building db-tools"
 
@@ -141,34 +111,44 @@ db-tools:
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
 ## test:                              run unit tests with a 50s timeout
+.PHONY: test
 test:
 	$(GOTEST) --timeout 50s
 
+## test3:                             run erigon 3 unit tests with a 50s timeout
+.PHONY: test3
 test3:
 	$(GOTEST) --timeout 50s -tags $(BUILD_TAGS),erigon3
 
 ## test-integration:                  run integration tests with a 30m timeout
+.PHONY: test-integration
 test-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration
 
+## test3-integration:                 run erigon 3 integration tests with a 30m timeout
+.PHONY: test3-integration
 test3-integration:
 	$(GOTEST) --timeout 30m -tags $(BUILD_TAGS),integration,erigon3
 
 ## lint:                              run golangci-lint with .golangci.yml config file
+.PHONY: lint
 lint:
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 ## lintci:                            run golangci-lint (additionally outputs message before run)
+.PHONY: lintci
 lintci:
 	@echo "--> Running linter for code"
 	@./build/bin/golangci-lint run --config ./.golangci.yml
 
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
+.PHONY: lintci-deps
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
 	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.51.1
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
+.PHONY: clean
 clean:
 	go clean -cache
 	rm -fr build/*
@@ -177,6 +157,7 @@ clean:
 # You need to put $GOBIN (or $GOPATH/bin) in your PATH to use 'go generate'.
 
 ## devtools:                          installs dev tools (and checks for npm installation etc.)
+.PHONY: devtools
 devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
@@ -192,19 +173,23 @@ devtools:
 	@type "protoc" 2> /dev/null || echo 'Please install protoc'
 
 ## bindings:                          generate test contracts and core contracts
+.PHONY: bindings
 bindings:
 	PATH=$(GOBIN):$(PATH) go generate ./tests/contracts/
 	PATH=$(GOBIN):$(PATH) go generate ./core/state/contracts/
 
-## prometheus:                        run prometheus and grafana with docker-compose
+## prometheus:                        run prometheus and grafana with docker-composei
+.PHONY: prometheus
 prometheus:
 	docker-compose up prometheus grafana
 
 ## escape:                            run escape path={path} to check for memory leaks e.g. run escape path=cmd/erigon
+.PHONY: escape
 escape:
 	cd $(path) && go test -gcflags "-m -m" -run none -bench=BenchmarkJumpdest* -benchmem -memprofile mem.out
 
 ## git-submodules:                    update git submodules
+.PHONY: git-submodules
 git-submodules:
 	@[ -d ".git" ] || (echo "Not a git repository" && exit 1)
 	@echo "Updating git submodules"
@@ -213,9 +198,7 @@ git-submodules:
 	@git submodule sync --quiet --recursive || true
 	@git submodule update --quiet --init --recursive --force || true
 
-PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.19.5
-
+## release-dry-run:                   run goreleaser in dry-run mode (does not release!)
 .PHONY: release-dry-run
 release-dry-run: git-submodules
 	@docker run \
@@ -231,6 +214,7 @@ release-dry-run: git-submodules
 		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
 		--clean --skip-validate --skip-publish
 
+## release:                           run goreleaser (WARNING: will create a release)
 .PHONY: release
 release: git-submodules
 	@docker run \
@@ -249,13 +233,8 @@ release: git-submodules
 	@docker image push --all-tags thorax/erigon
 	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
 
-# since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
-# we need separate envvars to facilitate creation of the erigon user on the host OS.
-ERIGON_USER_UID ?= 3473
-ERIGON_USER_GID ?= 3473
-ERIGON_USER_XDG_DATA_HOME ?= ~$(ERIGON_USER)/.local/share
-
 ## user_linux:                        create "erigon" user (Linux)
+.PHONY : user_linux
 user_linux:
 ifdef DOCKER
 	sudo groupadd -f docker
@@ -270,6 +249,7 @@ endif
 	sudo -u $(ERIGON_USER) mkdir -p $(ERIGON_USER_XDG_DATA_HOME)
 
 ## user_macos:                        create "erigon" user (MacOS)
+.PHONY: user_macos
 user_macos:
 	sudo dscl . -create /Users/$(ERIGON_USER)
 	sudo dscl . -create /Users/$(ERIGON_USER) UserShell /bin/bash
@@ -297,5 +277,6 @@ automated-tests:
 	./tests/automated-testing/run.sh
 
 ## help:                              print commands help
+.PHONY: help
 help	:	Makefile
 	@sed -n 's/^##//p' $<
