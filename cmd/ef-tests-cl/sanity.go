@@ -28,17 +28,20 @@ func testSanityFunction() error {
 	}
 	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 	for _, block := range blocks {
-		err := transistor.TransitionState(block)
-		if expectedError && err == nil {
-			return fmt.Errorf("expected error")
-		}
+		err = transistor.TransitionState(block)
 		if err != nil {
-			if expectedError {
-				return nil
-			}
-			return err
+			break
 		}
-
+	}
+	// Deal with transition error
+	if expectedError && err == nil {
+		return fmt.Errorf("expected error")
+	}
+	if err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
 	}
 	expectedRoot, err := expectedState.HashSSZ()
 	if err != nil {
