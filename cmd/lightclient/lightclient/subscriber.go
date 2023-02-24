@@ -64,7 +64,10 @@ func (c *ChainTipSubscriber) StartLoop() {
 			case <-reqAfter.C:
 				var update *cltypes.LightClientOptimisticUpdate
 				update, err = c.rpc.SendLightClientOptimisticUpdateReqV1()
-				for err != nil {
+				for err != nil || update == nil {
+					if err != nil {
+						log.Debug("[lightclient] SendLightClientOptimisticUpdateReqV1", "err", err)
+					}
 					update, err = c.rpc.SendLightClientOptimisticUpdateReqV1()
 				}
 				if update.SignatureSlot < c.lastReceivedSlot {
