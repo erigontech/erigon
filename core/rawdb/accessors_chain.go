@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"math"
 	"math/big"
 	"time"
@@ -719,7 +720,12 @@ func WriteBody(db kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body)
 	if err := WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	err = WriteTransactions(db, body.Transactions, baseTxId+1, &hash)
+	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
+	if transactionV3 {
+		err = WriteTransactions(db, body.Transactions, baseTxId+1, &hash)
+	} else {
+		err = WriteTransactions(db, body.Transactions, baseTxId+1, nil)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to WriteTransactions: %w", err)
 	}
