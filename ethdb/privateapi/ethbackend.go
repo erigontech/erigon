@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"reflect"
 	"sync"
 	"time"
 
@@ -60,15 +61,17 @@ type EthBackendServer struct {
 	db          kv.RoDB
 	blockReader services.BlockAndTxnReader
 	config      *chain.Config
-	// Block proposing for proof-of-stake
-	payloadId uint64
-	builders  map[uint64]*builder.BlockBuilder
 
-	builderFunc builder.BlockBuilderFunc
-	proposing   bool
-	lock        sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
-	logsFilter  *LogsFilterAggregator
-	hd          *headerdownload.HeaderDownload
+	// Block proposing for proof-of-stake
+	payloadId      uint64
+	lastParameters *core.BlockBuilderParameters
+	builders       map[uint64]*builder.BlockBuilder
+	builderFunc    builder.BlockBuilderFunc
+	proposing      bool
+
+	lock       sync.Mutex // Engine API is asynchronous, we want to avoid CL to call different APIs at the same time
+	logsFilter *LogsFilterAggregator
+	hd         *headerdownload.HeaderDownload
 }
 
 type EthBackend interface {
@@ -671,17 +674,27 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 	if payloadAttributes.Version >= 2 {
 		param.Withdrawals = ConvertWithdrawalsFromRpc(payloadAttributes.Withdrawals)
 	}
-
 	if err := s.checkWithdrawalsPresence(payloadAttributes.Timestamp, param.Withdrawals); err != nil {
 		return nil, err
 	}
 
-	// Initiate payload building
+	// First check if we're already building a block with the requested parameters
+	if reflect.DeepEqual(s.lastParameters, &param) {
+		return &remote.EngineForkChoiceUpdatedResponse{
+			PayloadStatus: &remote.EnginePayloadStatus{
+				Status:          remote.EngineStatus_VALID,
+				LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
+			},
+			PayloadId: s.payloadId,
+		}, nil
+	}
 
+	// Initiate payload building
 	s.evictOldBuilders()
 
-	// payload IDs start from 1 (0 signifies null)
 	s.payloadId++
+	param.PayloadId = s.payloadId
+	s.lastParameters = &param
 
 	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
 	log.Debug("BlockBuilder added", "payload", s.payloadId)
