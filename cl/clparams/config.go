@@ -848,6 +848,20 @@ func chiadoConfig() BeaconChainConfig {
 	return cfg
 }
 
+func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version:
+		return b.MinSlashingPenaltyQuotient
+	case AltairVersion:
+		return b.MinSlashingPenaltyQuotientAltair
+	case BellatrixVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
+	default:
+		panic("not implemented")
+	}
+
+}
+
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	MainnetNetwork: mainnetConfig(),

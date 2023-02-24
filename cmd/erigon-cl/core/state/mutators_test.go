@@ -185,7 +185,8 @@ func TestSlashValidator(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := tc.state.SlashValidator(uint64(slashedInd), uint64(whistleblowerInd))
+			w := uint64(whistleblowerInd)
+			err := tc.state.SlashValidator(uint64(slashedInd), &w)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wantErr is true")

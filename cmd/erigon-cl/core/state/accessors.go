@@ -291,10 +291,7 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 
 func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Validator {
 	amount := deposit.Data.Amount
-	effectiveBalance := amount - amount%b.beaconConfig.EffectiveBalanceIncrement
-	if effectiveBalance > b.beaconConfig.EffectiveBalanceIncrement {
-		effectiveBalance = b.beaconConfig.EffectiveBalanceIncrement
-	}
+	effectiveBalance := utils.Min64(amount-amount%b.beaconConfig.EffectiveBalanceIncrement, b.beaconConfig.EffectiveBalanceIncrement)
 
 	return &cltypes.Validator{
 		PublicKey:                  deposit.Data.PubKey,
