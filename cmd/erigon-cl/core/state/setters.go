@@ -96,14 +96,13 @@ func (b *BeaconState) SetValidators(validators []*cltypes.Validator) error {
 }
 
 func (b *BeaconState) AddValidator(validator *cltypes.Validator, balance uint64) {
-	b.touchedLeaves[ValidatorsLeafIndex] = true
 	b.validators = append(b.validators, validator)
 	b.balances = append(b.balances, balance)
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	b.touchedLeaves[BalancesLeafIndex] = true
 	b.publicKeyIndicies[validator.PublicKey] = uint64(len(b.validators)) - 1
 	// change in validator set means cache purging
-	b.activeValidatorsCache.Purge()
 	b.totalActiveBalanceCache = nil
-
 }
 
 func (b *BeaconState) SetBalances(balances []uint64) {

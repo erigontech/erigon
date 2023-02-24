@@ -17,7 +17,9 @@ import (
 
 func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
 	currentBlock := block.Block
-	s.processSlots(currentBlock.Slot)
+	if err := s.processSlots(currentBlock.Slot); err != nil {
+		return err
+	}
 	// Write the block root to the cache
 	if !s.noValidate {
 		valid, err := s.verifyBlockSignature(block)

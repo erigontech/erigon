@@ -291,10 +291,7 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 
 func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Validator {
 	amount := deposit.Data.Amount
-	effectiveBalance := amount - amount%b.beaconConfig.EffectiveBalanceIncrement
-	if effectiveBalance > b.beaconConfig.EffectiveBalanceIncrement {
-		effectiveBalance = b.beaconConfig.EffectiveBalanceIncrement
-	}
+	effectiveBalance := utils.Min64(amount-amount%b.beaconConfig.EffectiveBalanceIncrement, b.beaconConfig.MaxEffectiveBalance)
 
 	return &cltypes.Validator{
 		PublicKey:                  deposit.Data.PubKey,
@@ -455,4 +452,12 @@ func (b *BeaconState) ValidatorChurnLimit() (limit uint64) {
 	}
 	return
 
+}
+
+func (b *BeaconState) IsMergeTransitionComplete() bool {
+	return b.latestExecutionPayloadHeader.Root != libcommon.Hash{}
+}
+
+func (b *BeaconState) ComputeTimestampAtSlot(slot uint64) uint64 {
+	return b.genesisTime + (slot-b.beaconConfig.GenesisSlot)*b.beaconConfig.SecondsPerSlot
 }
