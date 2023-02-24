@@ -38,11 +38,7 @@ func (b *BeaconState) GetValidatorChurnLimit() uint64 {
 }
 
 func (b *BeaconState) InitiateValidatorExit(index uint64) error {
-	validator, err := b.ValidatorAt(int(index))
-	if err != nil {
-		return err
-	}
-	if validator.ExitEpoch != b.beaconConfig.FarFutureEpoch {
+	if b.validators[index].ExitEpoch != b.beaconConfig.FarFutureEpoch {
 		return nil
 	}
 
@@ -64,13 +60,13 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 		exitQueueEpoch += 1
 	}
 
-	validator.ExitEpoch = exitQueueEpoch
+	b.validators[index].ExitEpoch = exitQueueEpoch
 	var overflow bool
-	if validator.WithdrawableEpoch, overflow = math.SafeAdd(validator.ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
+	if b.validators[index].WithdrawableEpoch, overflow = math.SafeAdd(b.validators[index].ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
 		return fmt.Errorf("withdrawable epoch is too big")
 	}
-
-	return b.SetValidatorAt(int(index), &validator)
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	return nil
 }
 
 func (b *BeaconState) getSlashingProposerReward(whistleBlowerReward uint64) uint64 {

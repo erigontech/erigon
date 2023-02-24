@@ -49,7 +49,7 @@ func testSanityFunction() error {
 		return err
 	}
 	if haveRoot != expectedRoot {
-		return fmt.Errorf("mismatching state roots.")
+		return fmt.Errorf("mismatching state roots")
 	}
 	return nil
 }
