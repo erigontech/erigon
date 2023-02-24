@@ -52,5 +52,6 @@ var TestCollection map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseSlashings):                    slashingsTest,
 	path.Join(epochProcessingDivision, caseSlashingsReset):               slashingsResetTest,
 	sanityBlocks: testSanityFunction,
+	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,
 }
