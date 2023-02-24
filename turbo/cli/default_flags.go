@@ -118,6 +118,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MetricsHTTPFlag,
 	&utils.MetricsPortFlag,
 	&utils.HistoryV3Flag,
+	&utils.TransactionV3Flag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,

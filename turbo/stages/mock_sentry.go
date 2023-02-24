@@ -99,6 +99,7 @@ type MockSentry struct {
 	txPoolDB         kv.RwDB
 
 	HistoryV3      bool
+	TransactionsV3 bool
 	agg            *libstate.AggregatorV3
 	BlockSnapshots *snapshotsync.RoSnapshots
 }
@@ -284,11 +285,12 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		HistoryV3:      cfg.HistoryV3,
+		TransactionsV3: cfg.TransactionsV3,
 	}
 	if t != nil {
 		t.Cleanup(mock.Close)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(mock.BlockSnapshots, mock.TransactionsV3)
 
 	mock.Address = crypto.PubkeyToAddress(mock.Key.PublicKey)
 
@@ -436,6 +438,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 				mock.BlockSnapshots,
 				blockReader,
 				cfg.HistoryV3,
+				cfg.TransactionsV3,
 			),
 			stagedsync.StageSendersCfg(mock.DB, mock.ChainConfig, false, dirs.Tmp, prune, blockRetire, mock.sentriesClient.Hd),
 			stagedsync.StageExecuteBlocksCfg(
@@ -488,7 +491,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil),
+			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(mock.DB, dirs, cfg.HistoryV3, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, false, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
 			stagedsync.StageMiningFinishCfg(mock.DB, *mock.ChainConfig, mock.Engine, miner, miningCancel),
