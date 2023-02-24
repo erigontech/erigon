@@ -43,7 +43,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer c.Close()
-		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
+		clear := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfAccounts, nil, math.MaxInt32)
+		defer clear()
 
 		trieAcc2, err := tx.Cursor(kv.TrieOfAccounts)
 		if err != nil {
@@ -56,7 +57,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer accC.Close()
-		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
+		clear2 := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxInt32)
+		defer clear2()
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
@@ -157,7 +159,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer c.Close()
-		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
+		clear := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.TrieOfStorage, nil, math.MaxInt32)
+		defer clear()
 
 		trieStorage, err := tx.Cursor(kv.TrieOfStorage)
 		if err != nil {
@@ -170,7 +173,8 @@ func Trie(db kv.RoDB, tx kv.Tx, slowChecks bool, ctx context.Context) {
 			panic(err)
 		}
 		defer storageC.Close()
-		kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
+		clear2 := kv.ReadAhead(readAheadCtx, db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxInt32)
+		defer clear2()
 
 		for k, v, errc := c.First(); k != nil; k, v, errc = c.Next() {
 			if errc != nil {
