@@ -123,6 +123,9 @@ type JsonSpec struct {
 	// This contract is primarily required to store the address of the Certifier contract.
 	Registrar *libcommon.Address `json:"registrar"`
 
+	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	WithdrawalContractAddress *libcommon.Address `json:"withdrawalContractAddress"`
+
 	RewriteBytecode map[uint64]map[libcommon.Address]hexutil.Bytes `json:"rewriteBytecode"`
 }
 
@@ -197,6 +200,9 @@ type AuthorityRoundParams struct {
 	// This contract is primarily required to store the address of the Certifier contract.
 	Registrar *libcommon.Address
 
+	// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+	WithdrawalContractAddress *libcommon.Address
+
 	RewriteBytecode map[uint64]map[libcommon.Address][]byte
 }
 
@@ -208,6 +214,7 @@ func FromJson(jsonParams JsonSpec) (AuthorityRoundParams, error) {
 		BlockGasLimitContractTransitions: jsonParams.BlockGasLimitContractTransitions,
 		PosdaoTransition:                 jsonParams.PosdaoTransition,
 		Registrar:                        jsonParams.Registrar,
+		WithdrawalContractAddress:        jsonParams.WithdrawalContractAddress,
 	}
 	params.StepDurations = map[uint64]uint64{}
 	if jsonParams.StepDuration != nil {
