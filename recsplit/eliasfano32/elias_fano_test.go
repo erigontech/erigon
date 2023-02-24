@@ -117,14 +117,32 @@ func TestIterator(t *testing.T) {
 		ef.AddOffset(offset)
 	}
 	ef.Build()
-	efi := ef.Iterator()
-	i := 0
-	var values []uint64
-	for efi.HasNext() {
-		v, _ := efi.Next()
-		values = append(values, v)
-		assert.Equal(t, offsets[i], v, "iter")
-		i++
-	}
-	iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
+	t.Run("scan", func(t *testing.T) {
+		efi := ef.Iterator()
+		i := 0
+		var values []uint64
+		for efi.HasNext() {
+			v, _ := efi.Next()
+			values = append(values, v)
+			assert.Equal(t, offsets[i], v, "iter")
+			i++
+		}
+		iter.ExpectEqualU64(t, iter.ReverseArray(values), ef.ReverseIterator())
+	})
+
+	t.Run("seek", func(t *testing.T) {
+		iter2 := ef.Iterator()
+		iter2.Seek(2)
+		n, err := iter2.Next()
+		require.NoError(t, err)
+		require.Equal(t, 4, int(n))
+
+		iter2.Seek(5)
+		n, err = iter2.Next()
+		require.NoError(t, err)
+		require.Equal(t, 6, int(n))
+
+		iter2.Seek(1024)
+		require.False(t, iter2.HasNext())
+	})
 }

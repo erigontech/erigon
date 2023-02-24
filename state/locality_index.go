@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
+	atomic2 "go.uber.org/atomic"
 )
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
@@ -46,6 +47,9 @@ type LocalityIndex struct {
 
 	file *filesItem
 	bm   *bitmapdb.FixedSizeBitmaps
+
+	roFiles  atomic2.Pointer[ctxItem]
+	roBmFile atomic2.Pointer[bitmapdb.FixedSizeBitmaps]
 }
 
 func NewLocalityIndex(
@@ -160,7 +164,7 @@ func (li *LocalityIndex) openFiles() (err error) {
 			}
 		}
 	}
-
+	li.reCalcRoFiles()
 	return nil
 }
 
@@ -177,37 +181,47 @@ func (li *LocalityIndex) closeFiles() {
 		li.bm = nil
 	}
 }
-
-func (li *LocalityIndex) MakeContext(out *ctxLocalityItem) {
+func (li *LocalityIndex) reCalcRoFiles() {
 	if li == nil || li.file == nil {
 		return
 	}
-	out.file = li.file
-	out.reader = li.NewIdxReader()
-	out.bm = li.bm
-	if out.file != nil {
-		out.file.refcount.Inc()
-	}
+	li.roFiles.Store(&ctxItem{
+		startTxNum: li.file.startTxNum,
+		endTxNum:   li.file.endTxNum,
+		i:          0,
+		src:        li.file,
+	})
+	li.roBmFile.Store(li.bm)
 }
-func (li *LocalityIndex) CloseContext(out *ctxLocalityItem) {
+
+func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 	if li == nil || li.file == nil {
+		return nil
+	}
+	x := &ctxLocalityIdx{
+		file: li.roFiles.Load(),
+		bm:   li.roBmFile.Load(),
+	}
+	if x.file.src != nil {
+		x.file.src.refcount.Inc()
+	}
+	return x
+}
+
+func (out *ctxLocalityIdx) Close() {
+	if out == nil || out.file.src == nil {
 		return
 	}
-	if out.file != nil {
-		refCnt := out.file.refcount.Dec()
-		if refCnt == 0 && out.file.canDelete.Load() {
-			li.closeFilesAndRemove(out)
-		}
+	refCnt := out.file.src.refcount.Dec()
+	if refCnt == 0 && out.file.src.canDelete.Load() {
+		closeLocalityIndexFilesAndRemove(out)
 	}
 }
 
-func (li *LocalityIndex) closeFilesAndRemove(i *ctxLocalityItem) {
-	if li == nil {
-		return
-	}
-	if i.file != nil {
-		i.file.closeFilesAndRemove()
-		i.file = nil
+func closeLocalityIndexFilesAndRemove(i *ctxLocalityIdx) {
+	if i.file.src != nil {
+		i.file.src.closeFilesAndRemove()
+		i.file.src = nil
 	}
 	if i.bm != nil {
 		if err := i.bm.Close(); err != nil {
@@ -220,7 +234,10 @@ func (li *LocalityIndex) closeFilesAndRemove(i *ctxLocalityItem) {
 	}
 }
 
-func (li *LocalityIndex) Close()                { li.closeFiles() }
+func (li *LocalityIndex) Close() {
+	li.closeWhatNotInList([]string{})
+	li.reCalcRoFiles()
+}
 func (li *LocalityIndex) Files() (res []string) { return res }
 func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 	if li != nil && li.file != nil && li.file.index != nil {
@@ -231,20 +248,24 @@ func (li *LocalityIndex) NewIdxReader() *recsplit.IndexReader {
 
 // LocalityIndex return exactly 2 file (step)
 // prevents searching key in many files
-func (li *LocalityIndex) lookupIdxFiles(r *recsplit.IndexReader, bm *bitmapdb.FixedSizeBitmaps, file *filesItem, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
-	if li == nil || r == nil || bm == nil || file == nil {
+func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxNum uint64) (exactShard1, exactShard2 uint64, lastIndexedTxNum uint64, ok1, ok2 bool) {
+	if li == nil || loc == nil || loc.bm == nil {
 		return 0, 0, 0, false, false
 	}
-	if fromTxNum >= file.endTxNum {
+	if loc.reader == nil {
+		loc.reader = recsplit.NewIndexReader(loc.file.src.index)
+	}
+
+	if fromTxNum >= loc.file.endTxNum {
 		return 0, 0, fromTxNum, false, false
 	}
 
 	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fn1, fn2, ok1, ok2, err := bm.First2At(r.Lookup(key), fromFileNum)
+	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
 	if err != nil {
 		panic(err)
 	}
-	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, file.endTxNum, ok1, ok2
+	return fn1 * StepsInBiggestFile, fn2 * StepsInBiggestFile, loc.file.endTxNum, ok1, ok2
 }
 
 func (li *LocalityIndex) missedIdxFiles(ii *InvertedIndex) (toStep uint64, idxExists bool) {
@@ -369,6 +390,7 @@ func (li *LocalityIndex) integrateFiles(sf LocalityIndexFiles, txNumFrom, txNumT
 		frozen:     false,
 	}
 	li.bm = sf.bm
+	li.reCalcRoFiles()
 }
 
 func (li *LocalityIndex) BuildMissedIndices(ctx context.Context, ii *InvertedIndex) error {

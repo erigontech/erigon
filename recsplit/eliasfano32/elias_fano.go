@@ -222,15 +222,15 @@ func (ef *EliasFano) upper(i uint64) uint64 {
 }
 
 // Search returns the value in the sequence, equal or greater than given value
-func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+func (ef *EliasFano) search(v uint64) (nextV uint64, nextI uint64, ok bool) {
 	if v == 0 {
-		return ef.Min(), true
+		return ef.Min(), 0, true
 	}
 	if v == ef.Max() {
-		return ef.Max(), true
+		return ef.Max(), ef.count, true
 	}
 	if v > ef.Max() {
-		return 0, false
+		return 0, 0, false
 	}
 
 	hi := v >> ef.l
@@ -240,10 +240,15 @@ func (ef *EliasFano) Search(v uint64) (uint64, bool) {
 	for j := uint64(i); j <= ef.count; j++ {
 		val, _, _, _, _ := ef.get(j)
 		if val >= v {
-			return val, true
+			return val, j, true
 		}
 	}
-	return 0, false
+	return 0, 0, false
+}
+
+func (ef *EliasFano) Search(v uint64) (uint64, bool) {
+	n, _, ok := ef.search(v)
+	return n, ok
 }
 
 func (ef *EliasFano) Max() uint64 {
@@ -259,7 +264,7 @@ func (ef *EliasFano) Count() uint64 {
 }
 
 func (ef *EliasFano) Iterator() *EliasFanoIter {
-	return &EliasFanoIter{upperMask: 1, upperStep: uint64(1) << ef.l, lowerBits: ef.lowerBits, upperBits: ef.upperBits, count: ef.count, l: ef.l, lowerBitsMask: ef.lowerBitsMask}
+	return &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l, lowerBits: ef.lowerBits, upperBits: ef.upperBits, count: ef.count, l: ef.l, lowerBitsMask: ef.lowerBitsMask}
 }
 func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 	//TODO: this is very un-optimal, need implement proper reverse-iterator
@@ -276,6 +281,7 @@ func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 }
 
 type EliasFanoIter struct {
+	ef            *EliasFano
 	lowerBits     []uint64
 	upperBits     []uint64
 	lowerBitsMask uint64
@@ -294,12 +300,29 @@ func (efi *EliasFanoIter) HasNext() bool {
 	return efi.idx <= efi.count
 }
 
-func (efi *EliasFanoIter) Next() (uint64, error) {
-	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
-	lower := efi.lowerBits[idx64] >> shift
-	if shift > 0 {
-		lower |= efi.lowerBits[idx64+1] << (64 - shift)
+func (efi *EliasFanoIter) Reset() {
+	efi.upperMask = 1
+	efi.upperStep = uint64(1) << efi.l
+	efi.upperIdx = 0
+
+	efi.upper = 0
+	efi.lowerIdx = 0
+	efi.idx = 0
+}
+
+func (efi *EliasFanoIter) Seek(n uint64) {
+	efi.Reset()
+	_, i, ok := efi.ef.search(n)
+	if !ok {
+		efi.idx = efi.count + 1
+		return
 	}
+	for j := uint64(0); j < i; j++ {
+		efi.increment()
+	}
+}
+
+func (efi *EliasFanoIter) increment() {
 	if efi.upperMask == 0 {
 		efi.upperIdx++
 		efi.upperMask = 1
@@ -315,6 +338,15 @@ func (efi *EliasFanoIter) Next() (uint64, error) {
 	efi.upperMask <<= 1
 	efi.lowerIdx += efi.l
 	efi.idx++
+}
+
+func (efi *EliasFanoIter) Next() (uint64, error) {
+	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
+	lower := efi.lowerBits[idx64] >> shift
+	if shift > 0 {
+		lower |= efi.lowerBits[idx64+1] << (64 - shift)
+	}
+	efi.increment()
 	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 

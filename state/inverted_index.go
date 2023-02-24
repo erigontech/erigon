@@ -529,14 +529,13 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	var ic = InvertedIndexContext{
 		ii:    ii,
 		files: *ii.roFiles.Load(),
+		loc:   ii.localityIndex.MakeContext(),
 	}
 	for _, item := range ic.files {
 		if !item.src.frozen {
 			item.src.refcount.Inc()
 		}
 	}
-
-	ii.localityIndex.MakeContext(&ic.loc)
 	return &ic
 }
 func (ic *InvertedIndexContext) Close() {
@@ -551,7 +550,7 @@ func (ic *InvertedIndexContext) Close() {
 		}
 	}
 
-	ic.ii.localityIndex.CloseContext(&ic.loc)
+	ic.loc.Close()
 }
 
 // InvertedIterator allows iteration over range of tx numbers
@@ -604,7 +603,11 @@ func (it *InvertedIterator) advanceInFiles() {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
 				if it.orderAscend {
-					it.efIt = it.ef.Iterator()
+					efiter := it.ef.Iterator()
+					if it.startTxNum > 0 {
+						efiter.Seek(uint64(it.startTxNum))
+					}
+					it.efIt = efiter
 				} else {
 					it.efIt = it.ef.ReverseIterator()
 				}
@@ -801,7 +804,7 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []*compress.Getter
 	readers []*recsplit.IndexReader
-	loc     ctxLocalityItem
+	loc     *ctxLocalityIdx
 }
 
 func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {
