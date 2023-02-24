@@ -33,6 +33,10 @@ var finality = "finality/finality"
 var sanityBlocks = "sanity/blocks"
 var sanitySlots = "sanity/slots"
 
+// random
+var random = "random/random"
+
+// Stays here bc debugging >:-(
 func placeholderTest() error {
 	fmt.Println("hallo")
 	return nil
@@ -54,4 +58,5 @@ var TestCollection map[string]testFunc = map[string]testFunc{
 	sanityBlocks: testSanityFunction,
 	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,
+	random:       testSanityFunction, // Same as sanity handler.
 }
