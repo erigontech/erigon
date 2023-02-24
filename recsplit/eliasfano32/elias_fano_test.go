@@ -19,6 +19,7 @@ package eliasfano32
 import (
 	"bytes"
 	"math"
+	"math/bits"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -30,35 +31,110 @@ func TestEliasFanoSeek(t *testing.T) {
 	count := uint64(1_000_000)
 	maxOffset := (count - 1) * 123
 	ef := NewEliasFano(count, maxOffset)
+	vals := make([]uint64, 0, count)
 	for offset := uint64(0); offset < count; offset++ {
-		ef.AddOffset(offset * 123)
+		val := offset * 123
+		vals = append(vals, val)
+		ef.AddOffset(val)
 	}
 	ef.Build()
 
-	v2, ok2 := ef.Search(ef.Max())
-	require.True(t, ok2, v2)
-	require.Equal(t, ef.Max(), v2)
+	t.Run("iter match vals", func(t *testing.T) {
+		it := ef.Iterator()
+		for i := 0; it.HasNext(); i++ {
+			n, err := it.Next()
+			require.NoError(t, err)
+			require.Equal(t, int(vals[i]), int(n))
+		}
+	})
+	t.Run("iter grow", func(t *testing.T) {
+		it := ef.Iterator()
+		prev, _ := it.Next()
+		for it.HasNext() {
+			n, _ := it.Next()
+			require.GreaterOrEqual(t, int(n), int(prev))
+		}
+	})
 
-	v2, ok2 = ef.Search(ef.Min())
-	require.True(t, ok2, v2)
-	require.Equal(t, ef.Min(), v2)
+	{
+		v2, ok2 := ef.Search(ef.Max())
+		require.True(t, ok2, v2)
+		require.Equal(t, ef.Max(), v2)
+		it := ef.Iterator()
+		//it.SeekDeprecated(ef.Max())
+		for i := 0; i < int(ef.Count()-1); i++ {
+			it.Next()
+		}
+		//save all fields values
+		//v1, v2, v3, v4, v5 := it.upperIdx, it.upperMask, it.lowerIdx, it.upper, it.idx
+		// seek to same item and check new fields
+		it.Seek(ef.Max())
+		//require.Equal(t, int(v1), int(it.upperIdx))
+		//require.Equal(t, int(v3), int(it.lowerIdx))
+		//require.Equal(t, int(v5), int(it.idx))
+		//require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(it.upperMask))
+		//require.Equal(t, int(v4), int(it.upper))
 
-	v2, ok2 = ef.Search(0)
-	require.True(t, ok2, v2)
-	require.Equal(t, ef.Min(), v2)
-
-	v2, ok2 = ef.Search(math.MaxUint32)
-	require.False(t, ok2, v2)
-
-	v2, ok2 = ef.Search((count+1)*123 + 1)
-	require.False(t, ok2, v2)
-
-	for i := uint64(0); i < count; i++ {
-		v := i * 123
-		v2, ok2 = ef.Search(v)
-		require.True(t, ok2, v)
-		require.GreaterOrEqual(t, int(v2), int(v))
+		require.True(t, it.HasNext(), v2)
+		itV, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, int(ef.Max()), int(itV))
 	}
+
+	{
+		v2, ok2 := ef.Search(ef.Min())
+		require.True(t, ok2, v2)
+		require.Equal(t, int(ef.Min()), int(v2))
+		it := ef.Iterator()
+		it.Seek(ef.Min())
+		require.True(t, it.HasNext(), v2)
+		itV, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, int(ef.Min()), int(itV))
+	}
+
+	{
+		v2, ok2 := ef.Search(0)
+		require.True(t, ok2, v2)
+		require.Equal(t, int(ef.Min()), int(v2))
+		it := ef.Iterator()
+		it.Seek(0)
+		require.True(t, it.HasNext(), v2)
+		itV, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, int(ef.Min()), int(itV))
+	}
+
+	{
+		v2, ok2 := ef.Search(math.MaxUint32)
+		require.False(t, ok2, v2)
+		it := ef.Iterator()
+		it.Seek(math.MaxUint32)
+		require.False(t, it.HasNext(), v2)
+	}
+
+	{
+		v2, ok2 := ef.Search((count+1)*123 + 1)
+		require.False(t, ok2, v2)
+		it := ef.Iterator()
+		it.Seek((count+1)*123 + 1)
+		require.False(t, it.HasNext(), v2)
+	}
+
+	t.Run("search and seek can't return smaller", func(t *testing.T) {
+		for i := uint64(0); i < count; i++ {
+			search := i * 123
+			v, ok2 := ef.Search(search)
+			require.True(t, ok2, search)
+			require.GreaterOrEqual(t, int(v), int(search))
+			it := ef.Iterator()
+			it.Seek(search)
+			itV, err := it.Next()
+			require.NoError(t, err)
+			require.GreaterOrEqual(t, int(itV), int(search), int(v))
+		}
+	})
+
 }
 
 func TestEliasFano(t *testing.T) {
@@ -142,7 +218,76 @@ func TestIterator(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 6, int(n))
 
+		iter2.Seek(62)
+		n, err = iter2.Next()
+		require.NoError(t, err)
+		require.Equal(t, 62, int(n))
+
 		iter2.Seek(1024)
 		require.False(t, iter2.HasNext())
+	})
+}
+
+func TestIteratorAndSeekAreBasedOnSameFields(t *testing.T) {
+	vals := []uint64{1, 123, 789}
+	ef := NewEliasFano(uint64(len(vals)), vals[len(vals)-1])
+	for _, v := range vals {
+		ef.AddOffset(v)
+	}
+	ef.Build()
+
+	for i := range vals {
+		checkSeek(t, i, ef, vals)
+	}
+}
+
+func checkSeek(t *testing.T, j int, ef *EliasFano, vals []uint64) {
+	t.Helper()
+	efi := ef.Iterator()
+	// drain iterator to given item
+	for i := 0; i < j; i++ {
+		efi.Next()
+	}
+	//save all fields values
+	v1, v2, v3, v4, v5 := efi.upperIdx, efi.upperMask, efi.lowerIdx, efi.upper, efi.idx
+	// seek to same item and check new fields
+	efi.Seek(vals[j])
+	require.Equal(t, int(v1), int(efi.upperIdx))
+	require.Equal(t, int(v3), int(efi.lowerIdx))
+	require.Equal(t, int(v4), int(efi.upper))
+	require.Equal(t, int(v5), int(efi.idx))
+	require.Equal(t, bits.TrailingZeros64(v2), bits.TrailingZeros64(efi.upperMask))
+}
+
+func BenchmarkName(b *testing.B) {
+	count := uint64(1_000_000)
+	maxOffset := (count - 1) * 123
+	ef := NewEliasFano(count, maxOffset)
+	for offset := uint64(0); offset < count; offset++ {
+		ef.AddOffset(offset * 123)
+	}
+	ef.Build()
+	b.Run("next", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.Iterator()
+			for it.HasNext() {
+				n, _ := it.Next()
+				if n > 1_000_000 {
+					break
+				}
+			}
+		}
+	})
+	b.Run("seek", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.Iterator()
+			it.SeekDeprecated(1_000_000)
+		}
+	})
+	b.Run("seek2", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			it := ef.Iterator()
+			it.Seek(1_000_000)
+		}
 	})
 }

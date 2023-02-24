@@ -281,19 +281,24 @@ func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 }
 
 type EliasFanoIter struct {
-	ef            *EliasFano
-	lowerBits     []uint64
-	upperBits     []uint64
-	lowerBitsMask uint64
-	count         uint64
-	l             uint64
+	ef        *EliasFano
+	lowerBits []uint64
+	upperBits []uint64
 
+	//constants
+	count         uint64
+	lowerBitsMask uint64
+	l             uint64
+	upperStep     uint64
+
+	//fields of current value
+	upper    uint64
+	upperIdx uint64
+
+	//fields of next value
 	idx       uint64
 	lowerIdx  uint64
-	upperIdx  uint64
 	upperMask uint64
-	upper     uint64
-	upperStep uint64
 }
 
 func (efi *EliasFanoIter) HasNext() bool {
@@ -310,7 +315,7 @@ func (efi *EliasFanoIter) Reset() {
 	efi.idx = 0
 }
 
-func (efi *EliasFanoIter) Seek(n uint64) {
+func (efi *EliasFanoIter) SeekDeprecated(n uint64) {
 	efi.Reset()
 	_, i, ok := efi.ef.search(n)
 	if !ok {
@@ -320,6 +325,36 @@ func (efi *EliasFanoIter) Seek(n uint64) {
 	for j := uint64(0); j < i; j++ {
 		efi.increment()
 	}
+	//fmt.Printf("seek: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
+	//fmt.Printf("seek: efi.upper=%d\n", efi.upper)
+}
+
+func (efi *EliasFanoIter) Seek(n uint64) {
+	//fmt.Printf("b seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
+	//fmt.Printf("b seek2: efi.upper=%d\n", efi.upper)
+	efi.Reset()
+	nn, nextI, ok := efi.ef.search(n)
+	_ = nn
+	if !ok {
+		efi.idx = efi.count + 1
+		return
+	}
+	if nextI == 0 {
+		return
+	}
+
+	// fields of current value
+	v, _, sel, currWords, lower := efi.ef.get(nextI - 1) //TODO: search can return same info
+	efi.upper = v &^ (lower & efi.ef.lowerBitsMask)
+	efi.upperIdx = currWords
+
+	// fields of next value
+	efi.lowerIdx = nextI * efi.l
+	efi.idx = nextI
+	efi.upperMask = 1 << (sel + 1)
+
+	//fmt.Printf("seek2: efi.upperMask(%d)=%d, upperIdx=%d, lowerIdx=%d, idx=%d\n", n, bits.TrailingZeros64(efi.upperMask), efi.upperIdx, efi.lowerIdx, efi.idx)
+	//fmt.Printf("seek2: efi.upper=%d\n", efi.upper)
 }
 
 func (efi *EliasFanoIter) increment() {
