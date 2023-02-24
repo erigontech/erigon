@@ -27,7 +27,7 @@ const (
 	maxBadPeers       = 50
 	maxPeerRecordSize = 1000
 	DefaultMaxPeers   = 33
-	MaxBadResponses   = 10
+	MaxBadResponses   = 50
 )
 
 // Time to wait before asking the same peer again.
