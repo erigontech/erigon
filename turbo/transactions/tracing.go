@@ -9,10 +9,12 @@ import (
 	"time"
 
 	jsoniter "github.com/json-iterator/go"
+	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -184,11 +186,21 @@ func TraceTx(
 		stream.WriteObjectField("structLogs")
 		stream.WriteArrayStart()
 	}
-	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+
+	var result *core.ExecutionResult
+	if config.BorTx != nil && *config.BorTx {
+		callmsg := prepareCallMessage(message)
+		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
+	} else {
+		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()), refunds, false /* gasBailout */)
+	}
+
 	if err != nil {
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
+			stream.WriteMore()
+			stream.WriteObjectField("resultHack") // higher-level func will assing it to NULL
 		} else {
 			stream.WriteNil()
 		}
@@ -220,4 +232,17 @@ func TraceTx(
 		}
 	}
 	return nil
+}
+
+func prepareCallMessage(msg core.Message) statefull.Callmsg {
+	return statefull.Callmsg{
+		CallMsg: ethereum.CallMsg{
+			From:       msg.From(),
+			To:         msg.To(),
+			Gas:        msg.Gas(),
+			GasPrice:   msg.GasPrice(),
+			Value:      msg.Value(),
+			Data:       msg.Data(),
+			AccessList: msg.AccessList(),
+		}}
 }

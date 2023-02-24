@@ -65,13 +65,14 @@ func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.Gen
 	execution remote.ETHBACKENDServer, executionClient remote.ETHBACKENDClient, sentinel sentinel.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 	recentHashesCache, err := lru.New(maxRecentHashes)
+	rpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	return &LightClient{
 		ctx:               ctx,
 		beaconConfig:      beaconConfig,
 		genesisConfig:     genesisConfig,
-		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel),
+		chainTip:          NewChainTipSubscriber(ctx, beaconConfig, genesisConfig, sentinel, rpc),
 		recentHashesCache: recentHashesCache,
-		rpc:               rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig),
+		rpc:               rpc,
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
