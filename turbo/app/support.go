@@ -3,8 +3,12 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
+	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/net/http2"
 )
 
 var supportCommand = cli.Command{
@@ -94,8 +99,28 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 
 	diagnosticsUrl := cliCtx.String(utils.DiagnosticsURLFlag.Name)
 
+	// Create a pool with the server certificate since it is not signed
+	// by a known CA
+	certPool := x509.NewCertPool()
+	srvCert, err := ioutil.ReadFile("diagnostics.crt")
+	if err != nil {
+		log.Error("Reading server certificate", "err", err)
+	}
+	caCert, err := ioutil.ReadFile("CA-cert.pem")
+	if err != nil {
+		log.Error("Reading server certificate", "err", err)
+	}
+	certPool.AppendCertsFromPEM(srvCert)
+	certPool.AppendCertsFromPEM(caCert)
+
+	// Create TLS configuration with the certificate of the server
+	tlsConfig := &tls.Config{
+		RootCAs:            certPool,
+		InsecureSkipVerify: true,
+	}
+
 	reader, writer := io.Pipe()
-	httpClient := &http.Client{ /*Transport: &http2.Transport{}*/ }
+	httpClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
 
 	// Create a request object to send to the server
 	req, err := http.NewRequest(http.MethodPost, diagnosticsUrl, reader)
@@ -127,7 +152,7 @@ outerLoop:
 	for {
 		var buf [4096]byte
 		var readLen int
-		for readLen < len(buf) && (readLen == 0 || buf[readLen-1] == '\n') {
+		for readLen < len(buf) && (readLen == 0 || buf[readLen-1] != '\n') {
 			len, err := resp.Body.Read(buf[readLen:])
 			if err != nil {
 				log.Error("Connection read", "err", err)
@@ -139,6 +164,7 @@ outerLoop:
 			log.Error("Request too long, circuit breaker")
 			break outerLoop
 		}
+		fmt.Printf("Got request: %s\n", buf[:readLen-1])
 		metricsResponse, err := client.Get(metricsURL + string(buf[:readLen-1]))
 		if err != nil {
 			log.Error("Problem requesting metrics", "url", metricsURL, "query", string(buf[:readLen-1]), "err", err)
@@ -152,6 +178,7 @@ outerLoop:
 			break outerLoop
 		}
 		metricsResponse.Body.Close()
+		fmt.Printf("Got response:\n%s\n", metricsBuf.Bytes())
 		var sizeBuf [4]byte
 		binary.BigEndian.PutUint32(sizeBuf[:], uint32(metricsBuf.Len()))
 		if _, err := writer.Write(sizeBuf[:]); err != nil {
