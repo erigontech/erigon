@@ -752,7 +752,6 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 			repeatCount.Inc()
 
 			//rs.AddWork(txTask)
-			//repeatCount.Inc()
 			//continue
 
 			// immediately retry once
@@ -767,12 +766,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs
 				i++
 			} else {
 				rs.AddWork(txTask)
-			}
-			if txTask.Error != nil {
-				return txTask.Error
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				//rs.AddWork(txTask)
-				//continue
+				continue
 			}
 		}
 
