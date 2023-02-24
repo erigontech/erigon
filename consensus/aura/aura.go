@@ -856,7 +856,7 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("insert_pending_trancition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
+			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 		if err = e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, nil, err
@@ -1405,6 +1405,36 @@ func registrarAbi() abi.ABI {
 		panic(err)
 	}
 	return a
+}
+
+func withdrawalAbi() abi.ABI {
+	a, err := abi.JSON(bytes.NewReader(contracts.Withdrawal))
+	if err != nil {
+		panic(err)
+	}
+	return a
+}
+
+// See https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
+func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall consensus.SystemCall) error {
+	if c.cfg.WithdrawalContractAddress == nil {
+		return nil
+	}
+
+	amounts := make([]uint64, 0, len(withdrawals))
+	addresses := make([]libcommon.Address, 0, len(withdrawals))
+	for _, w := range withdrawals {
+		amounts = append(amounts, w.Amount)
+		addresses = append(addresses, w.Address)
+	}
+
+	packed, err := withdrawalAbi().Pack("executeSystemWithdrawals", amounts, addresses)
+	if err != nil {
+		return err
+	}
+
+	_, err = syscall(*c.cfg.WithdrawalContractAddress, packed)
+	return err
 }
 
 func getCertifier(registrar libcommon.Address, syscall consensus.SystemCall) *libcommon.Address {
