@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math/big"
 	"os"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,7 +14,7 @@ import (
 func main() {
 	logger := newLogger()
 
-	db, err := NewDB(".", logger)
+	db, err := NewDB("./db", logger)
 	if err != nil {
 		panic(err)
 	}
@@ -42,18 +41,6 @@ func main() {
 			panic(err)
 		}
 	}
-}
-
-func max_balance() *big.Int {
-	var bytes [32]uint8
-	for i, _ := range bytes {
-		bytes[i] = 255
-	}
-
-	val := &big.Int{}
-	val.SetBytes(bytes[:])
-
-	return val
 }
 
 func newLogger() log.Logger {

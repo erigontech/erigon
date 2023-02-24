@@ -26,6 +26,9 @@ type State struct {
 	chainConfig     *chain.Config
 }
 
+// Account that is used to perform withdraws/deposits
+const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
+
 func NewState(db *DB) (*State, error) {
 	tx, err := db.GetChain().BeginRw(context.Background())
 	if err != nil {
@@ -39,14 +42,15 @@ func NewState(db *DB) (*State, error) {
 		// add genesis block
 		genesis := core.Genesis{}
 		initState := make(core.GenesisAlloc)
-		initState[common.HexToAddress("0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b")] = core.GenesisAccount{
-			Balance: max_balance(),
+		initState[common.HexToAddress(ownerAccount)] = core.GenesisAccount{
+			Balance: maxBalance(),
 		}
 		genesis.Alloc = initState
 		chainConfig := chain.Config{
 			ChainID: big.NewInt(355113),
 		}
 		genesis.Config = &chainConfig
+		tx.Commit()
 		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis)
 		if err != nil {
 			return nil, err
@@ -71,9 +75,10 @@ func NewState(db *DB) (*State, error) {
 		if state.chainConfig, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash()); err != nil {
 			return nil, err
 		}
+
+		tx.Commit()
 	}
 
-	tx.Commit()
 	return state, err
 }
 
@@ -104,7 +109,8 @@ func (state *State) ProcessBlock(block types.Block) error {
 	if err != nil {
 		return err
 	}
-	if execRs.StateSyncReceipt.Status == types.ReceiptStatusFailed {
+	stateSyncReceipt := execRs.StateSyncReceipt
+	if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusFailed {
 		return fmt.Errorf("block execution failed")
 	}
 	if len(execRs.Rejected) != 0 {
@@ -128,7 +134,6 @@ func (state *State) ProcessBlock(block types.Block) error {
 	}
 
 	receipts := execRs.Receipts
-	stateSyncReceipt := execRs.StateSyncReceipt
 	if err := rawdb.AppendReceipts(tx, (uint64)(state.blockNum.Uint64()+1), receipts); err != nil {
 		return err
 	}
@@ -154,13 +159,23 @@ func (state *State) ProcessBlock(block types.Block) error {
 	// NOTE: it's absolutely inconsistent that `WriteTxLookupEntries` doesn't return err
 	rawdb.WriteTxLookupEntries(tx, &block)
 
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-
-	return nil
+	state.blockNum.Add(state.blockNum, big.NewInt(1))
+	return tx.Commit()
 }
 
 func (state *State) BlockNum() uint64 {
 	return state.blockNum.Uint64()
+}
+
+// Returns the max ETH balance to init a owner account
+func maxBalance() *big.Int {
+	var bytes [32]uint8
+	for i, _ := range bytes {
+		bytes[i] = 255
+	}
+
+	val := &big.Int{}
+	val.SetBytes(bytes[:])
+
+	return val
 }
