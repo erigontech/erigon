@@ -176,6 +176,12 @@ func Union[T constraints.Ordered](x, y Unary[T]) Unary[T] {
 	if y == nil {
 		return x
 	}
+	if !x.HasNext() {
+		return y
+	}
+	if !y.HasNext() {
+		return x
+	}
 	m := &UnionIter[T]{x: x, y: y}
 	m.advanceX()
 	m.advanceY()
@@ -241,7 +247,7 @@ type IntersectIter[T constraints.Ordered] struct {
 }
 
 func Intersect[T constraints.Ordered](x, y Unary[T]) Unary[T] {
-	if x == nil || y == nil {
+	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &EmptyUnary[T]{}
 	}
 	m := &IntersectIter[T]{x: x, y: y}

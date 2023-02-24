@@ -90,3 +90,25 @@ func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
 	m.i++
 	return []byte(fmt.Sprintf("%x", m.i)), []byte(fmt.Sprintf("%x", m.i)), nil
 }
+
+func Count[T any](s Unary[T]) (cnt int, err error) {
+	for s.HasNext() {
+		_, err := s.Next()
+		if err != nil {
+			return cnt, err
+		}
+		cnt++
+	}
+	return cnt, err
+}
+
+func CountDual[K, V any](s Dual[K, V]) (cnt int, err error) {
+	for s.HasNext() {
+		_, _, err := s.Next()
+		if err != nil {
+			return cnt, err
+		}
+		cnt++
+	}
+	return cnt, err
+}

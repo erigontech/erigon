@@ -125,23 +125,24 @@ func (ef *EliasFano) Build() {
 					lastSuperQ = i*64 + b
 					ef.jump[(c/superQ)*superQSize] = lastSuperQ
 				}
-				if (c & qMask) == 0 {
-					// When c is multiple of 2^8 (256)
-					var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-					// offset needs to be encoded as 16-bit integer, therefore the following check
-					if offset >= (1 << 32) {
-						fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
-						fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-						panic("")
-					}
-					// c % superQ is the bit index inside the group of 4096 bits
-					jumpSuperQ := (c / superQ) * superQSize
-					jumpInsideSuperQ := (c % superQ) / q
-					idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 1)
-					shift := 32 * (jumpInsideSuperQ % 2)
-					mask := uint64(0xffffffff) << shift
-					ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
+				if (c & qMask) != 0 {
+					c++
+					continue
 				}
+				// When c is multiple of 2^8 (256)
+				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+				// offset needs to be encoded as 16-bit integer, therefore the following check
+				if offset >= (1 << 32) {
+					fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
+					fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
+					panic("")
+				}
+				// c % superQ is the bit index inside the group of 4096 bits
+				jumpSuperQ := (c / superQ) * superQSize
+				jumpInsideSuperQ := (c % superQ) / q
+				idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
+				mask := uint64(0xffffffff) << shift
+				ef.jump[idx64] = (ef.jump[idx64] &^ mask) | (offset << shift)
 				c++
 			}
 		}
@@ -150,8 +151,7 @@ func (ef *EliasFano) Build() {
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
 	lower = i * ef.l
-	idx64 := lower / 64
-	shift := lower % 64
+	idx64, shift := lower/64, lower%64
 	lower = ef.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -159,8 +159,7 @@ func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord
 
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx64 = jumpSuperQ + 1 + (jumpInsideSuperQ >> 1)
-	shift = 32 * (jumpInsideSuperQ % 2)
+	idx64, shift = jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 
@@ -205,8 +204,7 @@ func (ef *EliasFano) Get2(i uint64) (val uint64, valNext uint64) {
 func (ef *EliasFano) upper(i uint64) uint64 {
 	jumpSuperQ := (i / superQ) * superQSize
 	jumpInsideSuperQ := (i % superQ) / q
-	idx64 := jumpSuperQ + 1 + (jumpInsideSuperQ >> 1)
-	shift := 32 * (jumpInsideSuperQ % 2)
+	idx64, shift := jumpSuperQ+1+(jumpInsideSuperQ>>1), 32*(jumpInsideSuperQ%2)
 	mask := uint64(0xffffffff) << shift
 	jump := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 	currWord := jump / 64
@@ -261,8 +259,7 @@ func (ef *EliasFano) Count() uint64 {
 }
 
 func (ef *EliasFano) Iterator() *EliasFanoIter {
-	it := &EliasFanoIter{ef: ef, upperMask: 1, upperStep: uint64(1) << ef.l}
-	return it
+	return &EliasFanoIter{upperMask: 1, upperStep: uint64(1) << ef.l, lowerBits: ef.lowerBits, upperBits: ef.upperBits, count: ef.count, l: ef.l, lowerBitsMask: ef.lowerBitsMask}
 }
 func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 	//TODO: this is very un-optimal, need implement proper reverse-iterator
@@ -279,7 +276,12 @@ func (ef *EliasFano) ReverseIterator() *iter.ArrStream[uint64] {
 }
 
 type EliasFanoIter struct {
-	ef        *EliasFano
+	lowerBits     []uint64
+	upperBits     []uint64
+	lowerBitsMask uint64
+	count         uint64
+	l             uint64
+
 	idx       uint64
 	lowerIdx  uint64
 	upperIdx  uint64
@@ -289,21 +291,20 @@ type EliasFanoIter struct {
 }
 
 func (efi *EliasFanoIter) HasNext() bool {
-	return efi.idx <= efi.ef.count
+	return efi.idx <= efi.count
 }
 
 func (efi *EliasFanoIter) Next() (uint64, error) {
-	idx64 := efi.lowerIdx >> 6
-	shift := efi.lowerIdx & 63
-	lower := efi.ef.lowerBits[idx64] >> shift
+	idx64, shift := efi.lowerIdx/64, efi.lowerIdx%64
+	lower := efi.lowerBits[idx64] >> shift
 	if shift > 0 {
-		lower |= efi.ef.lowerBits[idx64+1] << (64 - shift)
+		lower |= efi.lowerBits[idx64+1] << (64 - shift)
 	}
 	if efi.upperMask == 0 {
 		efi.upperIdx++
 		efi.upperMask = 1
 	}
-	for efi.ef.upperBits[efi.upperIdx]&efi.upperMask == 0 {
+	for efi.upperBits[efi.upperIdx]&efi.upperMask == 0 {
 		efi.upper += efi.upperStep
 		efi.upperMask <<= 1
 		if efi.upperMask == 0 {
@@ -312,10 +313,9 @@ func (efi *EliasFanoIter) Next() (uint64, error) {
 		}
 	}
 	efi.upperMask <<= 1
-	efi.lowerIdx += efi.ef.l
+	efi.lowerIdx += efi.l
 	efi.idx++
-	val := (lower & efi.ef.lowerBitsMask) | efi.upper
-	return val, nil
+	return efi.upper | (lower & efi.lowerBitsMask), nil
 }
 
 // Write outputs the state of golomb rice encoding into a writer, which can be recovered later by Read
@@ -358,6 +358,15 @@ func ReadEliasFano(r []byte) (*EliasFano, int) {
 	ef.maxOffset = ef.u - 1
 	ef.deriveFields()
 	return ef, 16 + 8*len(ef.data)
+}
+
+// Reset - like ReadEliasFano, but for existing object
+func (ef *EliasFano) Reset(r []byte) {
+	ef.count = binary.BigEndian.Uint64(r[:8])
+	ef.u = binary.BigEndian.Uint64(r[8:16])
+	ef.data = unsafe.Slice((*uint64)(unsafe.Pointer(&r[16])), (len(r)-16)/uint64Size)
+	ef.maxOffset = ef.u - 1
+	ef.deriveFields()
 }
 
 func Max(r []byte) uint64   { return binary.BigEndian.Uint64(r[8:16]) - 1 }
@@ -562,8 +571,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 // setBits assumes that bits are set in monotonic order, so that
 // we can skip the masking for the second word
 func setBits(bits []uint64, start uint64, width int, value uint64) {
-	shift := int(start & 63)
-	idx64 := start >> 6
+	idx64, shift := start>>6, int(start&63)
 	mask := (uint64(1)<<width - 1) << shift
 	//fmt.Printf("mask = %b, idx64 = %d\n", mask, idx64)
 	bits[idx64] = (bits[idx64] &^ mask) | (value << shift)
@@ -595,8 +603,7 @@ func (ef *DoubleEliasFano) Data() []uint64 {
 func (ef *DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
 	windowCumKeys uint64, selectCumKeys int, currWordCumKeys uint64, lower uint64, cumDelta uint64) {
 	posLower := i * (ef.lCumKeys + ef.lPosition)
-	idx64 := posLower / 64
-	shift := posLower % 64
+	idx64, shift := posLower/64, posLower%64
 	lower = ef.lowerBits[idx64] >> shift
 	if shift > 0 {
 		lower |= ef.lowerBits[idx64+1] << (64 - shift)
@@ -606,13 +613,11 @@ func (ef *DoubleEliasFano) get2(i uint64) (cumKeys uint64, position uint64,
 	jumpSuperQ := (i / superQ) * superQSize * 2
 	jumpInsideSuperQ := (i % superQ) / q
 	idx16 := 2*(jumpSuperQ+2) + 2*jumpInsideSuperQ
-	idx64 = idx16 / 2
-	shift = 32 * (idx16 % 2)
+	idx64, shift = idx16/2, 32*(idx16%2)
 	mask := uint64(0xffffffff) << shift
 	jumpCumKeys := ef.jump[jumpSuperQ] + (ef.jump[idx64]&mask)>>shift
 	idx16++
-	idx64 = idx16 / 2
-	shift = 32 * (idx16 % 2)
+	idx64, shift = idx16/2, 32*(idx16%2)
 	mask = uint64(0xffffffff) << shift
 	jumpPosition := ef.jump[jumpSuperQ+1] + (ef.jump[idx64]&mask)>>shift
 	//fmt.Printf("i = %d, jumpCumKeys = %d, jumpPosition = %d\n", i, jumpCumKeys, jumpPosition)

@@ -576,6 +576,8 @@ type InvertedIterator struct {
 
 	res []uint64
 	bm  *roaring64.Bitmap
+
+	ef *eliasfano32.EliasFano
 }
 
 func (it *InvertedIterator) Close() {
@@ -600,12 +602,11 @@ func (it *InvertedIterator) advanceInFiles() {
 			k, _ := g.NextUncompressed()
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
-				ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-
+				it.ef.Reset(eliasVal)
 				if it.orderAscend {
-					it.efIt = ef.Iterator()
+					it.efIt = it.ef.Iterator()
 				} else {
-					it.efIt = ef.ReverseIterator()
+					it.efIt = it.ef.ReverseIterator()
 				}
 			}
 		}
@@ -855,6 +856,7 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum in
 		hasNextInDb: true,
 		orderAscend: asc,
 		limit:       limit,
+		ef:          eliasfano32.NewEliasFano(1, 1),
 	}
 	if asc {
 		for i := len(ic.files) - 1; i >= 0; i-- {
