@@ -89,6 +89,9 @@ func (s *StateTransistor) processInactivityDeltas(eligibleValidators []uint64) (
 
 // ProcessRewardsAndPenalties applies rewards/penalties accumulated during previous epoch.
 func (s *StateTransistor) ProcessRewardsAndPenalties() (err error) {
+	if s.state.Epoch() == s.beaconConfig.GenesisEpoch {
+		return nil
+	}
 	eligibleValidators := s.state.EligibleValidatorsIndicies()
 	// process each flag indexes by weight.
 	for i := range s.beaconConfig.ParticipationWeights() {

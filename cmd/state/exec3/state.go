@@ -82,7 +82,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 	return w
 }
 
-func (rw *Worker) Tx() kv.Tx { return rw.chainTx }
+func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
+func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
@@ -110,6 +111,10 @@ func (rw *Worker) Run() {
 func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.RunTxTaskNoLock(txTask)
+}
+
+func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {

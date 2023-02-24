@@ -18,6 +18,7 @@ var CLDefaultFlags = []cli.Flag{
 	&BeaconConfigFlag,
 	&GenesisSSZFlag,
 	&CheckpointSyncUrlFlag,
+	&SentinelStaticPeersFlag,
 }
 
 var LCDefaultFlags = []cli.Flag{
@@ -36,5 +37,6 @@ var LCDefaultFlags = []cli.Flag{
 	&BeaconConfigFlag,
 	&GenesisSSZFlag,
 	&CheckpointSyncUrlFlag,
+	&SentinelStaticPeersFlag,
 	&ErigonPrivateApiFlag,
 }
