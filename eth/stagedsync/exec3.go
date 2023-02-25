@@ -744,23 +744,30 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 
 func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) error {
 	var txTask *exec22.TxTask
+	var i int
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			repeatCount.Inc()
 
+			//send to re-exex
 			//rs.AddWork(txTask)
-			//repeatCount.Inc()
 			//continue
 
-			// immediately retry once
-			applyWorker.RunTxTask(txTask)
-			if txTask.Error != nil {
-				return txTask.Error
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				//rs.AddWork(txTask)
-				//continue
+			if i == 0 {
+				// re-exec right here: conflict-free
+				applyWorker.RunTxTask(txTask)
+				if txTask.Error != nil {
+					return txTask.Error
+					//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
+					//rs.AddWork(txTask)
+					//continue
+				}
+				i++
+			} else {
+				rs.AddWork(txTask)
+				continue
 			}
 		}
 

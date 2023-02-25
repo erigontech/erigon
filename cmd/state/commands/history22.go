@@ -141,7 +141,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
 	readWrapper := state.NewHistoryReader23(h.MakeContext(), ri)
 
 	for !interrupt {

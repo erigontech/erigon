@@ -69,7 +69,6 @@ func (c *ChainTipSubscriber) StartLoop() {
 					if err != nil {
 						log.Debug("[lightclient] SendLightClientOptimisticUpdateReqV1", "err", err)
 					}
-					time.Sleep(3 * time.Second)
 					update, err = c.rpc.SendLightClientOptimisticUpdateReqV1()
 				}
 				if update.SignatureSlot < c.lastReceivedSlot {

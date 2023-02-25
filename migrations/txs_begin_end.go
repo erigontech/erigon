@@ -239,7 +239,7 @@ func writeRawBodyDeprecated(db kv.RwTx, hash common2.Hash, number uint64, body *
 	if err = rawdb.WriteBodyForStorage(db, hash, number, &data); err != nil {
 		return fmt.Errorf("failed to write body: %w", err)
 	}
-	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId); err != nil {
+	if err = rawdb.WriteRawTransactions(db, body.Transactions, baseTxId, &hash); err != nil {
 		return fmt.Errorf("failed to WriteRawTransactions: %w, blockNum=%d", err, number)
 	}
 	return nil

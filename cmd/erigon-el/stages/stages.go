@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
@@ -42,14 +41,10 @@ func NewStagedSync(ctx context.Context,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
+	transactionsV3 bool,
 ) (*stagedsync.Sync, error) {
 	dirs := cfg.Dirs
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, transactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
@@ -100,6 +95,7 @@ func NewStagedSync(ctx context.Context,
 				snapshots,
 				blockReader,
 				cfg.HistoryV3,
+				cfg.TransactionsV3,
 			),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

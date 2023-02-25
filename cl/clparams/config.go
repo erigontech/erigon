@@ -44,7 +44,7 @@ const (
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 1 * time.Second
-	RespTimeout    time.Duration = 15 * time.Second
+	RespTimeout    time.Duration = 1 * time.Second
 )
 
 var (
@@ -846,6 +846,20 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.EpochsPerSyncCommitteePeriod = 512
 	cfg.InitializeForkSchedule()
 	return cfg
+}
+
+func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version:
+		return b.MinSlashingPenaltyQuotient
+	case AltairVersion:
+		return b.MinSlashingPenaltyQuotientAltair
+	case BellatrixVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
+	default:
+		panic("not implemented")
+	}
+
 }
 
 // Beacon configs

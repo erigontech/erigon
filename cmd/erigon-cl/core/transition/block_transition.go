@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
@@ -17,9 +18,10 @@ func (s *StateTransistor) processBlock(signedBlock *cltypes.SignedBeaconBlock) e
 	if err := s.ProcessBlockHeader(block); err != nil {
 		return fmt.Errorf("ProcessBlockHeader: %s", err)
 	}
-	if s.state.Version() >= clparams.BellatrixVersion {
-		// Set execution header accordingly to state.
-		s.state.SetLatestExecutionPayloadHeader(block.Body.ExecutionPayload.Header)
+	if s.state.Version() >= clparams.BellatrixVersion && s.executionEnabled(block.Body.ExecutionPayload) {
+		if err := s.ProcessExecutionPayload(block.Body.ExecutionPayload); err != nil {
+			return err
+		}
 	}
 	if err := s.ProcessRandao(block.Body.RandaoReveal, block.ProposerIndex); err != nil {
 		return fmt.Errorf("ProcessRandao: %s", err)
@@ -81,4 +83,25 @@ func (s *StateTransistor) maximumDeposits() (maxDeposits uint64) {
 		maxDeposits = s.beaconConfig.MaxDeposits
 	}
 	return
+}
+
+// ProcessExecutionPayload sets the latest payload header accordinly.
+func (s *StateTransistor) ProcessExecutionPayload(payload *cltypes.Eth1Block) error {
+	if s.state.IsMergeTransitionComplete() {
+		if payload.Header.ParentHash != s.state.LatestExecutionPayloadHeader().BlockHashCL {
+			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
+		}
+	}
+	if payload.Header.MixDigest != s.state.GetRandaoMixes(s.state.Epoch()) {
+		return fmt.Errorf("ProcessExecutionPayload: randao mix mismatches with mix digest")
+	}
+	if payload.Header.Time != s.state.ComputeTimestampAtSlot(s.state.Slot()) {
+		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
+	}
+	s.state.SetLatestExecutionPayloadHeader(payload.Header)
+	return nil
+}
+
+func (s *StateTransistor) executionEnabled(payload *cltypes.Eth1Block) bool {
+	return (!s.state.IsMergeTransitionComplete() && payload.Header.Root != libcommon.Hash{}) || s.state.IsMergeTransitionComplete()
 }
