@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -50,10 +51,28 @@ func (c *ChainTipSubscriber) StartLoop() {
 	}
 	log.Info("[LightClient Gossip] Started Gossip")
 	c.started = true
+
+Retry:
+	for {
+		if err := c.subscribeGossip(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
+			if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+				time.Sleep(3 * time.Second)
+				continue Retry
+			}
+
+			log.Warn("[Lightclient] could not read gossip :/", "reason", err)
+			time.Sleep(time.Second)
+		}
+	}
+}
+
+func (c *ChainTipSubscriber) subscribeGossip() error {
 	stream, err := c.sentinel.SubscribeGossip(c.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
-		log.Warn("could not start lightclient", "reason", err)
-		return
+		return err
 	}
 	defer stream.CloseSend()
 
@@ -89,10 +108,7 @@ func (c *ChainTipSubscriber) StartLoop() {
 	for {
 		data, err := stream.Recv()
 		if err != nil {
-			if !errors.Is(err, context.Canceled) {
-				log.Debug("[Lightclient] could not read gossip :/", "reason", err)
-			}
-			continue
+			return err
 		}
 		if err := c.handleGossipData(data); err != nil {
 			log.Warn("could not process new gossip",
