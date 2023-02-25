@@ -543,7 +543,7 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		return err
 	}
 
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
+	listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
@@ -564,8 +564,10 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		log.Info("TCP Endpoint opened", "url", tcpEndpoint)
 	}
 
-	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
-		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+	info := []interface{}{
+		"url", httpAddr, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled,
+	}
 
 	var (
 		healthServer *grpcHealth.Server
@@ -594,7 +596,7 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
-		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+		log.Info("HTTP endpoint closed", "url", httpAddr)
 
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
@@ -731,13 +733,13 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 		return nil, nil, "", err
 	}
 
-	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
+	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", true, "ws.compression", cfg.WebsocketCompression}
+	engineInfo := []interface{}{"url", engineAddr, "ws", true, "ws.compression", cfg.WebsocketCompression}
 	log.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
-	return engineListener, engineSrv, engineHttpEndpoint, nil
+	return engineListener, engineSrv, engineAddr.String(), nil
 }
