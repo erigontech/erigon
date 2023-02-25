@@ -33,6 +33,7 @@ func (s *StateTransistor) processFlagIndexDeltas(flagIdx int, eligibleValidators
 	activeIncrements := s.state.GetTotalActiveBalance() / s.beaconConfig.EffectiveBalanceIncrement
 	// denominators
 	rewardDenominator := activeIncrements * s.beaconConfig.WeightDenominator
+	rewardMultiplier := weight * unslashedParticipatingIncrements
 	// Now process deltas and whats nots.
 	for _, index := range eligibleValidators {
 		baseReward, err = s.state.BaseReward(index)
@@ -43,7 +44,7 @@ func (s *StateTransistor) processFlagIndexDeltas(flagIdx int, eligibleValidators
 			if s.state.InactivityLeaking() {
 				continue
 			}
-			rewardNumerator := baseReward * weight * unslashedParticipatingIncrements
+			rewardNumerator := baseReward * rewardMultiplier
 			if err := s.state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 				return err
 			}

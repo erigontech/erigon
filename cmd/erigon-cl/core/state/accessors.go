@@ -325,7 +325,7 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 		justifiedCheckpoint = b.previousJustifiedCheckpoint
 	}
 	// Matching roots
-	if *data.Source != *justifiedCheckpoint {
+	if !data.Source.Equal(justifiedCheckpoint) {
 		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := b.GetBlockRoot(data.Target.Epoch)
