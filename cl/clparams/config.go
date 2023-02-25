@@ -859,7 +859,19 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 	default:
 		panic("not implemented")
 	}
+}
 
+func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version:
+		return b.InactivityPenaltyQuotient
+	case AltairVersion:
+		return b.InactivityPenaltyQuotientAltair
+	case BellatrixVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	default:
+		panic("not implemented")
+	}
 }
 
 // Beacon configs
