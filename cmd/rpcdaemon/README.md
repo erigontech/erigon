@@ -330,6 +330,13 @@ The following table shows the current implementation status of Erigon's RPC daem
 | bor_getCurrentValidators                   | Yes     | Bor only                             |
 | bor_getRootHash                            | Yes     | Bor only                             |
 
+### GraphQL
+
+| Command                                    | Avail   | Notes                                |
+|--------------------------------------------|---------|--------------------------------------|
+| GetBlockDetails                            | Yes     |                                      |
+| GetChainID                                 | Yes     |                                      |
+
 This table is constantly updated. Please visit again.
 
 ### Securing the communication between RPC daemon and Erigon instance via TLS and authentication

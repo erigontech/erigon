@@ -30,7 +30,7 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
@@ -118,7 +118,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 func TestGeneratedTraceApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTraces(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
@@ -277,7 +277,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 func TestGeneratedTraceApiCollision(t *testing.T) {
 	m := rpcdaemontest.CreateTestSentryForTracesCollision(t)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})

@@ -85,7 +85,7 @@ type EngineAPI interface {
 	GetPayloadV2(ctx context.Context, payloadID hexutil.Bytes) (*GetPayloadV2Response, error)
 	ExchangeTransitionConfigurationV1(ctx context.Context, transitionConfiguration *TransitionConfiguration) (*TransitionConfiguration, error)
 	GetPayloadBodiesByHashV1(ctx context.Context, hashes []common.Hash) ([]*ExecutionPayloadBodyV1, error)
-	GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error)
+	GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error)
 }
 
 // EngineImpl is implementation of the EngineAPI interface
@@ -384,7 +384,7 @@ func (e *EngineImpl) GetPayloadBodiesByHashV1(ctx context.Context, hashes []comm
 	return convertExecutionPayloadV1(apiRes), nil
 }
 
-func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64, count uint64) ([]*ExecutionPayloadBodyV1, error) {
+func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start, count hexutil.Uint64) ([]*ExecutionPayloadBodyV1, error) {
 	if start == 0 || count == 0 {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
@@ -392,7 +392,7 @@ func (e *EngineImpl) GetPayloadBodiesByRangeV1(ctx context.Context, start uint64
 		return nil, &privateapi.TooLargeRequestErr
 	}
 
-	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: start, Count: count})
+	apiRes, err := e.api.EngineGetPayloadBodiesByRangeV1(ctx, &remote.EngineGetPayloadBodiesByRangeV1Request{Start: uint64(start), Count: uint64(count)})
 	if err != nil {
 		return nil, err
 	}

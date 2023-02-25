@@ -1,0 +1,57 @@
+{
+  block(number: 10000000) {
+    number
+    difficulty
+    extraData
+    gasLimit
+    gasUsed
+    logsBloom
+    ommerHash
+    ommers {
+      hash
+    }
+    miner {
+      address
+    }
+    mixHash
+    nonce
+    hash
+    parent {
+      hash
+    }
+    receiptsRoot
+    stateRoot
+    timestamp
+    transactionsRoot
+    totalDifficulty
+    transactions {
+			createdContract {
+				address
+		  }
+			cumulativeGasUsed
+			from {
+				address
+			}
+			gasUsed
+			gasPrice
+			inputData
+      nonce
+			index
+			value
+			logs {
+				account {
+					address
+				}
+				data
+				index
+				topics
+			}
+			hash
+			index
+			to {
+				address
+				}
+			status
+    }
+  }
+}

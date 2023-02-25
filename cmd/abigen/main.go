@@ -99,7 +99,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "", "ethereum checkpoint helper tool")
+	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,

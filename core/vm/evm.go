@@ -401,9 +401,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 
 	ret, err = run(evm, contract, nil, false)
 
-	// check whether the max code size has been exceeded
-	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize && !evm.chainRules.IsAura {
-		err = ErrMaxCodeSizeExceeded
+	// EIP-170: Contract code size limit
+	if err == nil && evm.chainRules.IsSpuriousDragon && len(ret) > params.MaxCodeSize {
+		// Gnosis Chain prior to Shanghai didn't have EIP-170 enabled,
+		// but EIP-3860 (part of Shanghai) requires EIP-170.
+		if !evm.chainRules.IsAura || evm.config.HasEip3860(evm.chainRules) {
+			err = ErrMaxCodeSizeExceeded
+		}
 	}
 
 	// Reject code starting with 0xEF if EIP-3541 is enabled.

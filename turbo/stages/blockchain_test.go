@@ -490,7 +490,7 @@ func TestChainTxReorgs(t *testing.T) {
 			t.Errorf("drop %d: receipt %v found while shouldn't have been", i, rcpt)
 		}
 	}
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
 	// added tx
 	txs = types.Transactions{pastAdd, freshAdd, futureAdd}
@@ -793,7 +793,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		require.Equal(uint64(0), found.Minimum())
 	}
 
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
 	if pm.TxIndex.Enabled() {
 		b, err := rawdb.ReadBlockByNumber(tx, 1)
@@ -1425,8 +1425,18 @@ func TestCVE2020_26265(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 
 		aa        = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
-		aaStorage = make(map[libcommon.Hash]libcommon.Hash)         // Initial storage in AA
-		aaCode    = []byte{byte(vm.ADDRESS), byte(vm.SELFDESTRUCT)} // Code for AA (selfdestruct to itself)
+		aaStorage = make(map[libcommon.Hash]libcommon.Hash) // Initial storage in AA
+		aaCode    = []byte{
+			byte(vm.CALLVALUE),
+			byte(vm.PUSH1), 0x06, // Destination for JUMPI
+			byte(vm.JUMPI),
+			byte(vm.ADDRESS),
+			byte(vm.SELFDESTRUCT),
+			byte(vm.JUMPDEST),
+			byte(vm.SELFBALANCE),
+			byte(vm.PUSH1), 0x00,
+			byte(vm.SSTORE),
+		} // Code for AAAA (selfdestruct to itself, but only when CALLVALUE is 0)
 
 		caller        = libcommon.HexToAddress("0x000000000000000000000000000000000000bbbb")
 		callerStorage = make(map[libcommon.Hash]libcommon.Hash) // Initial storage in CALLER

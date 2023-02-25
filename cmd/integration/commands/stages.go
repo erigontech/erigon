@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -55,7 +56,9 @@ var cmdStageSnapshots = &cobra.Command{
 		defer db.Close()
 
 		if err := stageSnapshots(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -70,7 +73,9 @@ var cmdStageHeaders = &cobra.Command{
 		defer db.Close()
 
 		if err := stageHeaders(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -85,7 +90,9 @@ var cmdStageBodies = &cobra.Command{
 		defer db.Close()
 
 		if err := stageBodies(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -100,7 +107,9 @@ var cmdStageSenders = &cobra.Command{
 		defer db.Close()
 
 		if err := stageSenders(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -114,7 +123,9 @@ var cmdStageExec = &cobra.Command{
 		defer db.Close()
 
 		if err := stageExec(db, cmd.Context()); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -129,7 +140,9 @@ var cmdStageTrie = &cobra.Command{
 		defer db.Close()
 
 		if err := stageTrie(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -144,7 +157,9 @@ var cmdStageHashState = &cobra.Command{
 		defer db.Close()
 
 		if err := stageHashState(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -159,7 +174,9 @@ var cmdStageHistory = &cobra.Command{
 		defer db.Close()
 
 		if err := stageHistory(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -174,7 +191,9 @@ var cmdLogIndex = &cobra.Command{
 		defer db.Close()
 
 		if err := stageLogIndex(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -189,7 +208,9 @@ var cmdCallTraces = &cobra.Command{
 		defer db.Close()
 
 		if err := stageCallTraces(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -204,7 +225,9 @@ var cmdStageTxLookup = &cobra.Command{
 		defer db.Close()
 
 		if err := stageTxLookup(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -218,7 +241,9 @@ var cmdPrintStages = &cobra.Command{
 		defer db.Close()
 
 		if err := printAllStages(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -232,7 +257,9 @@ var cmdPrintMigrations = &cobra.Command{
 		db := openDB(dbCfg(kv.ChainDB, chaindata), false)
 		defer db.Close()
 		if err := printAppliedMigrations(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -246,7 +273,9 @@ var cmdRemoveMigration = &cobra.Command{
 		db := openDB(dbCfg(kv.ChainDB, chaindata), false)
 		defer db.Close()
 		if err := removeMigration(db, ctx); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -269,7 +298,10 @@ var cmdSetPrune = &cobra.Command{
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
 		if err := overrideStorageMode(db); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 	},
 }
@@ -287,7 +319,9 @@ var cmdSetSnap = &cobra.Command{
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return snap.ForceSetFlags(tx, sn.Cfg())
 		}); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -302,7 +336,9 @@ var cmdForceSetHistoryV3 = &cobra.Command{
 		if err := db.Update(context.Background(), func(tx kv.RwTx) error {
 			return kvcfg.HistoryV3.ForceWrite(tx, _forceSetHistoryV3)
 		}); err != nil {
-			log.Error("Error", "err", err)
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
 			return
 		}
 	},
@@ -549,7 +585,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 	sn, agg := allSnapshots(ctx, db)
 	defer sn.Close()
 	defer agg.Close()
-	chainConfig, historyV3 := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db)
+	chainConfig, historyV3, transactionsV3 := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), kvcfg.TransactionsV3.FromDB(db)
 	_, _, sync, _, _ := newSync(ctx, db, nil)
 
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
@@ -561,7 +597,7 @@ func stageBodies(db kv.RwDB, ctx context.Context) error {
 			}
 
 			u := sync.NewUnwindState(stages.Bodies, s.BlockNumber-unwind, s.BlockNumber)
-			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, getBlockReader(db), historyV3), ctx); err != nil {
+			if err := stagedsync.UnwindBodiesStage(u, tx, stagedsync.StageBodiesCfg(db, nil, nil, nil, nil, 0, *chainConfig, sn, getBlockReader(db), historyV3, transactionsV3), ctx); err != nil {
 				return err
 			}
 
@@ -1153,7 +1189,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		if err != nil {
 			panic(err)
 		}
-		err = _aggSingleton.ReopenFolder()
+		err = _aggSingleton.OpenFolder()
 		if err != nil {
 			panic(err)
 		}
@@ -1180,11 +1216,9 @@ var _blockReaderSingleton services.FullBlockReader
 
 func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 	openBlockReaderOnce.Do(func() {
-		_blockReaderSingleton = snapshotsync.NewBlockReader()
-		if sn, _ := allSnapshots(context.Background(), db); sn.Cfg().Enabled {
-			x := snapshotsync.NewBlockReaderWithSnapshots(sn)
-			_blockReaderSingleton = x
-		}
+		sn, _ := allSnapshots(context.Background(), db)
+		transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
+		_blockReaderSingleton = snapshotsync.NewBlockReaderWithSnapshots(sn, transactionsV3)
 	})
 	return _blockReaderSingleton
 }
@@ -1256,7 +1290,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	miningSync := stagedsync.New(
 		stagedsync.MiningStages(ctx,
 			stagedsync.StageMiningCreateBlockCfg(db, miner, *chainConfig, engine, nil, nil, nil, dirs.Tmp),
-			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil),
+			stagedsync.StageMiningExecCfg(db, miner, events, *chainConfig, engine, &vm.Config{}, dirs.Tmp, nil, 0, nil, nil, allSn, cfg.TransactionsV3),
 			stagedsync.StageHashStateCfg(db, dirs, historyV3, agg),
 			stagedsync.StageTrieCfg(db, false, true, false, dirs.Tmp, br, nil, historyV3, agg),
 			stagedsync.StageMiningFinishCfg(db, *chainConfig, engine, miner, miningCancel),

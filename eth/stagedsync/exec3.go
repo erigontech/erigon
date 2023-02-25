@@ -132,7 +132,8 @@ func ExecV3(ctx context.Context,
 	}
 
 	var block, stageProgress uint64
-	var outputTxNum, maxTxNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var maxTxNum uint64
+	var outputTxNum = atomic2.NewUint64(0)
 	var inputTxNum uint64
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
@@ -146,11 +147,11 @@ func ExecV3(ctx context.Context,
 			defer agg.StartWrites().FinishWrites()
 		}
 
-		_maxTxNum, err := rawdbv3.TxNums.Max(applyTx, maxBlockNum)
+		var err error
+		maxTxNum, err = rawdbv3.TxNums.Max(applyTx, maxBlockNum)
 		if err != nil {
 			return err
 		}
-		maxTxNum.Store(_maxTxNum)
 		if block > 0 {
 			_outputTxNum, err := rawdbv3.TxNums.Max(applyTx, execStage.BlockNumber)
 			if err != nil {
@@ -162,11 +163,11 @@ func ExecV3(ctx context.Context,
 		}
 	} else {
 		if err := chainDb.View(ctx, func(tx kv.Tx) error {
-			_maxTxNum, err := rawdbv3.TxNums.Max(tx, maxBlockNum)
+			var err error
+			maxTxNum, err = rawdbv3.TxNums.Max(tx, maxBlockNum)
 			if err != nil {
 				return err
 			}
-			maxTxNum.Store(_maxTxNum)
 			if block > 0 {
 				_outputTxNum, err := rawdbv3.TxNums.Max(tx, execStage.BlockNumber)
 				if err != nil {
@@ -191,12 +192,14 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
-	var rwsLock sync.RWMutex
-	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
-	execWorkers, applyWorker, resultCh, stopWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
+	execWorkers, applyWorker, resultCh, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
+	applyWorker.DiscardReadList()
+
+	var rwsLock sync.Mutex
+	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
@@ -221,11 +224,14 @@ func ExecV3(ctx context.Context,
 		notifyReceived := func() { rwsReceiveCond.Signal() }
 		var t time.Time
 		var lastBlockNum uint64
-		for outputTxNum.Load() < maxTxNum.Load() {
+		for outputTxNum.Load() < maxTxNum {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case txTask := <-resultCh:
+			case txTask, ok := <-resultCh:
+				if !ok {
+					return nil
+				}
 				if txTask.BlockNum > lastBlockNum {
 					if lastBlockNum > 0 {
 						core.BlockExecutionTimer.UpdateDuration(t)
@@ -284,16 +290,15 @@ func ExecV3(ctx context.Context,
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
 			go applyLoop(applyCtx, rwLoopErrCh)
-
-			for outputTxNum.Load() < maxTxNum.Load() {
+			for outputTxNum.Load() < maxTxNum {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
 
 				case <-logEvery.C:
-					rwsLock.RLock()
+					rwsLock.Lock()
 					rwsLen := rws.Len()
-					rwsLock.RUnlock()
+					rwsLock.Unlock()
 
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
@@ -332,7 +337,10 @@ func ExecV3(ctx context.Context,
 							var drained bool
 							for !drained {
 								select {
-								case txTask := <-resultCh:
+								case txTask, ok := <-resultCh:
+									if !ok {
+										return nil
+									}
 									resultsSize.Add(txTask.ResultsSize)
 									heap.Push(rws, txTask)
 								default:
@@ -355,7 +363,10 @@ func ExecV3(ctx context.Context,
 						var drained bool
 						for !drained {
 							select {
-							case txTask := <-resultCh:
+							case txTask, ok := <-resultCh:
+								if !ok {
+									return nil
+								}
 								rs.AddWork(txTask)
 							default:
 								drained = true
@@ -442,7 +453,6 @@ func ExecV3(ctx context.Context,
 			defer rwLoopWg.Done()
 
 			defer applyLoopWg.Wait()
-			defer rwsReceiveCond.Broadcast() // unlock listners in case of cancelation
 			defer rs.Finish()
 
 			if err := rwLoop(rwLoopCtx); err != nil {
@@ -524,11 +534,6 @@ Loop:
 			func() {
 				needWait := rs.QueueLen() > queueSize
 				if !needWait {
-					rwsLock.RLock()
-					needWait = rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold
-					rwsLock.RUnlock()
-				}
-				if !needWait {
 					return
 				}
 				rwsLock.Lock()
@@ -591,17 +596,7 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						currentQueueSize := rs.AddWork(txTask)
-						if currentQueueSize > queueSize {
-							time.Sleep(10 * time.Microsecond)
-						} else {
-							rwsLock.RLock()
-							needWait := rws.Len() > queueSize
-							rwsLock.RUnlock()
-							if needWait {
-								time.Sleep(10 * time.Microsecond)
-							}
-						}
+						rs.AddWork(txTask)
 					}
 				} else {
 					rs.AddWork(txTask)
@@ -695,18 +690,16 @@ Loop:
 		}
 
 		if blockSnapshots.Cfg().Produce {
-			if err := agg.BuildFilesInBackground(chainDb); err != nil {
-				return err
-			}
+			agg.BuildFilesInBackground()
 		}
 	}
 
 	if parallel {
-		stopWorkers()
-		rwLoopWg.Wait()
-		if err, ok := <-rwLoopErrCh; ok && err != nil {
+		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
+		rwLoopWg.Wait()
+		waitWorkers()
 	} else {
 		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
 			return err
@@ -720,9 +713,7 @@ Loop:
 	}
 
 	if blockSnapshots.Cfg().Produce {
-		if err := agg.BuildFilesInBackground(chainDb); err != nil {
-			return err
-		}
+		agg.BuildFilesInBackground()
 	}
 
 	if !useExternalTx && applyTx != nil {
@@ -753,19 +744,30 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 
 func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) error {
 	var txTask *exec22.TxTask
+	var i int
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
 		txTask = heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			repeatCount.Inc()
 
-			// immediately retry once
-			applyWorker.RunTxTask(txTask)
-			if txTask.Error != nil {
-				return txTask.Error
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				//rs.AddWork(txTask)
-				//continue
+			//send to re-exex
+			//rs.AddWork(txTask)
+			//continue
+
+			if i == 0 {
+				// re-exec right here: conflict-free
+				applyWorker.RunTxTask(txTask)
+				if txTask.Error != nil {
+					return txTask.Error
+					//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
+					//rs.AddWork(txTask)
+					//continue
+				}
+				i++
+			} else {
+				rs.AddWork(txTask)
+				continue
 			}
 		}
 

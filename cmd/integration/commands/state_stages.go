@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -52,7 +53,7 @@ Examples:
 --chaindata.reference # When finish all cycles, does comparison to this db file.
 		`,
 	Example: "go run ./cmd/integration state_stages --datadir=... --verbosity=3 --unwind=100 --unwind.every=100000 --block=2000000",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
@@ -65,23 +66,26 @@ Examples:
 		defer db.Close()
 
 		if err := syncBySmallSteps(db, miningConfig, ctx); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		if referenceChaindata != "" {
 			if err := compareStates(ctx, chaindata, referenceChaindata); err != nil {
-				log.Error(err.Error())
-				return nil
+				if !errors.Is(err, context.Canceled) {
+					log.Error(err.Error())
+				}
+				return
 			}
 		}
-		return nil
 	},
 }
 
 var loopIhCmd = &cobra.Command{
 	Use: "loop_ih",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -90,17 +94,17 @@ var loopIhCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopIh(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
 var loopExecCmd = &cobra.Command{
 	Use: "loop_exec",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common2.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -108,11 +112,11 @@ var loopExecCmd = &cobra.Command{
 			unwind = 1
 		}
 		if err := loopExec(db, ctx, unwind); err != nil {
-			log.Error("Error", "err", err)
-			return nil
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 

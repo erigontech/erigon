@@ -388,7 +388,7 @@ func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Lo
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	log.Info("[Snapshots] Blocks Stat",
+	log.Info("[snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -1043,7 +1043,8 @@ func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 }
 
 type BlockRetire struct {
-	working atomic.Bool
+	working               atomic.Bool
+	needSaveFilesListInDB atomic.Bool
 
 	workers   int
 	tmpDir    string
@@ -1052,15 +1053,16 @@ type BlockRetire struct {
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
-
-	BackgroundResult *BackgroundResult
 }
 
 func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, BackgroundResult: &BackgroundResult{}}
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
+func (br *BlockRetire) NeedSaveFilesListInDB() bool {
+	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
+}
 
 func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
@@ -1113,7 +1115,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if br.snapshots.cfg.KeepBlocks {
 		return nil
 	}
@@ -1122,26 +1124,21 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
-	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
-	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), 100); err != nil {
+	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), limit); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
-	if br.working.Load() {
+	ok := br.working.CompareAndSwap(false, true)
+	if !ok {
 		// go-routine is still working
 		return
 	}
-	if br.BackgroundResult.Has() {
-		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
-		return
-	}
-
-	br.working.Store(true)
 	go func() {
 		defer br.working.Store(false)
 
@@ -1152,9 +1149,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
 		if err != nil {
-			br.BackgroundResult.Set(fmt.Errorf("retire blocks error: %w, fromBlock=%d, toBlock=%d", err, blockFrom, blockTo))
-		} else {
-			br.BackgroundResult.Set(nil)
+			log.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 		}
 	}()
 }
@@ -2100,7 +2095,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 					return ctx.Err()
 				case <-logEvery.C:
 					_, fName := filepath.Split(targetFile)
-					log.Info("[Snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
+					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
 				default:
 				}
 			}

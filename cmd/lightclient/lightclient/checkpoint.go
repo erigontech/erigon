@@ -17,16 +17,36 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 
 	logInterval := time.NewTicker(10 * time.Second)
 	defer logInterval.Stop()
+
+	doneLogCh := make(chan struct{})
 	var (
 		b   *cltypes.LightClientBootstrap
 		err error
 	)
+	// Start log go routine.
 
-	for b == nil {
-		b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
-		if err != nil {
-			log.Debug("[Checkpoint Sync] could not retrieve bootstrap", "err", err)
+	go func() {
+		for {
+			select {
+			case <-logInterval.C:
+				peers, err := l.rpc.Peers()
+				if err != nil {
+					continue
+				}
+				log.Info("[Checkpoint Sync] P2P", "peers", peers)
+			case <-doneLogCh:
+				return
+			}
 		}
+	}()
+
+	b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
+	for err != nil || b == nil {
+		if err != nil {
+			log.Debug("[lightclient] SendLightClientBootstrapReqV1", "err", err)
+		}
+		time.Sleep(2 * time.Second)
+		b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
 	}
 
 	s, err := NewLightClientStore(finalized, b)

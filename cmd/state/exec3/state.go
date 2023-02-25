@@ -82,7 +82,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 	return w
 }
 
-func (rw *Worker) Tx() kv.Tx { return rw.chainTx }
+func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
+func (rw *Worker) DiscardReadList() { rw.stateReader.DiscardReadList() }
 func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if rw.background && rw.chainTx != nil {
 		rw.chainTx.Rollback()
@@ -110,6 +111,10 @@ func (rw *Worker) Run() {
 func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
+	rw.RunTxTaskNoLock(txTask)
+}
+
+func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {
@@ -313,7 +318,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func()) {
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	queueSize := workerCount * 2
@@ -323,7 +328,12 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+	var clearDone bool
 	clear = func() {
+		if clearDone {
+			return
+		}
+		clearDone = true
 		cancel()
 		wg.Wait()
 		for _, w := range reconWorkers {
@@ -341,5 +351,5 @@ func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chai
 			}(i)
 		}
 	}
-	return reconWorkers, applyWorker, resultCh, clear
+	return reconWorkers, applyWorker, resultCh, clear, wg.Wait
 }

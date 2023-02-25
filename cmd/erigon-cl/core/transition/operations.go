@@ -9,44 +9,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-func IsSlashableValidator(validator *cltypes.Validator, epoch uint64) bool {
-	return !validator.Slashed && (validator.ActivationEpoch <= epoch) && (epoch < validator.WithdrawableEpoch)
+func (s *StateTransistor) isSlashableAttestationData(d1, d2 *cltypes.AttestationData) bool {
+	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
+		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)
 }
 
-func IsSlashableAttestationData(d1, d2 *cltypes.AttestationData) (bool, error) {
-	hash1, err := d1.HashSSZ()
-	if err != nil {
-		return false, fmt.Errorf("unable to hash attestation data 1: %v", err)
-	}
-
-	hash2, err := d2.HashSSZ()
-	if err != nil {
-		return false, fmt.Errorf("unable to hash attestation data 2: %v", err)
-	}
-
-	return (hash1 != hash2 && d1.Target.Epoch == d2.Target.Epoch) || (d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch), nil
-}
-
-func GetSetIntersection(v1, v2 []uint64) []uint64 {
-	intersection := []uint64{}
-	present := map[uint64]bool{}
-
-	for _, v := range v1 {
-		present[v] = true
-	}
-
-	for _, v := range v2 {
-		if present[v] {
-			intersection = append(intersection, v)
-		}
-	}
-	return intersection
-}
-
-func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
+func (s *StateTransistor) isValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
 	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
 		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
@@ -54,14 +24,14 @@ func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 
 	pks := [][]byte{}
 	for _, v := range inds {
-		val, err := state.ValidatorAt(int(v))
+		val, err := s.state.ValidatorAt(int(v))
 		if err != nil {
 			return false, err
 		}
 		pks = append(pks, val.PublicKey[:])
 	}
 
-	domain, err := state.GetDomain(clparams.MainnetBeaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
+	domain, err := s.state.GetDomain(clparams.MainnetBeaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -109,7 +79,7 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 	if err != nil {
 		return err
 	}
-	if !IsSlashableValidator(&proposer, s.state.Epoch()) {
+	if !proposer.IsSlashable(s.state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
@@ -132,7 +102,7 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
-	s.state.SlashValidator(h1.ProposerIndex, 0)
+	s.state.SlashValidator(h1.ProposerIndex, nil)
 	return nil
 }
 
@@ -140,15 +110,11 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
-	slashable, err := IsSlashableAttestationData(att1.Data, att2.Data)
-	if err != nil {
-		return fmt.Errorf("unable to determine if attestation data was slashable: %v", err)
-	}
-	if !slashable {
+	if !s.isSlashableAttestationData(att1.Data, att2.Data) {
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := isValidIndexedAttestation(s.state, att1)
+	valid, err := s.isValidIndexedAttestation(att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -156,7 +122,7 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = isValidIndexedAttestation(s.state, att2)
+	valid, err = s.isValidIndexedAttestation(att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
@@ -165,14 +131,14 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	}
 
 	slashedAny := false
-	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
-	for _, ind := range indices {
-		currentValidator, err := s.state.ValidatorAt(int(ind))
+	currentEpoch := s.state.GetEpochAtSlot(s.state.Slot())
+	for _, ind := range utils.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
+		validator, err := s.state.ValidatorAt(int(ind))
 		if err != nil {
 			return err
 		}
-		if IsSlashableValidator(&currentValidator, s.state.GetEpochAtSlot(s.state.Slot())) {
-			err := s.state.SlashValidator(ind, 0)
+		if validator.IsSlashable(currentEpoch) {
+			err := s.state.SlashValidator(ind, nil)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
 			}
@@ -197,7 +163,7 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 	depositIndex := s.state.Eth1DepositIndex()
 	eth1Data := s.state.Eth1Data()
 	// Validate merkle proof for deposit leaf.
-	if !s.noValidate && utils.IsValidMerkleBranch(
+	if !s.noValidate && !utils.IsValidMerkleBranch(
 		depositLeaf,
 		deposit.Proof,
 		s.beaconConfig.DepositContractTreeDepth+1,
@@ -229,10 +195,13 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		if err != nil {
 			return err
 		}
-		if valid {
-			// Append validator
-			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit), amount)
-			// Altair only
+		if !valid {
+			return nil
+		}
+		// Append validator
+		s.state.AddValidator(s.state.ValidatorFromDeposit(deposit), amount)
+		// Altair forward
+		if s.state.Version() >= clparams.AltairVersion {
 			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
 			s.state.AddInactivityScore(0)
@@ -241,7 +210,6 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 	}
 	// Increase the balance if exists already
 	return s.state.IncreaseBalance(validatorIndex, amount)
-
 }
 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.

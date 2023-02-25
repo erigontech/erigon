@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -102,8 +102,8 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache // thread-safe
-	blocksLRU    *lru.Cache    // thread-safe
+	stateCache   kvcache.Cache                         // thread-safe
+	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
 	filters      *rpchelper.Filters
 	_chainConfig *chain.Config
 	_genesis     *types.Block
@@ -125,7 +125,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if !singleNodeMode {
 		blocksLRUSize = 512
 	}
-	blocksLRU, err := lru.New(blocksLRUSize)
+	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
 	}
@@ -163,7 +163,7 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	number := rawdb.ReadHeaderNumber(tx, hash)
@@ -177,7 +177,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)

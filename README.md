@@ -538,11 +538,11 @@ node.
 
 #### `RPC` ports
 
-| Port | Protocol |      Purpose      | Expose  |
-|:----:|:--------:|:-----------------:|:-------:|
-| 8545 |   TCP    | HTTP & WebSockets | Private |
+| Port | Protocol |           Purpose           | Expose  |
+|:----:|:--------:|:---------------------------:|:-------:|
+| 8545 |   TCP    | HTTP & WebSockets & GraphQL | Private |
 
-Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same
+Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket and GraphQL are on the same
 port.
 
 #### `sentry` ports
