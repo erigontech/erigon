@@ -39,7 +39,10 @@ func NewState(db *DB) (*State, error) {
 	state := &State{db: db}
 
 	if blockNum := rawdb.ReadCurrentBlockNumber(tx); blockNum == nil || *blockNum == 0 {
-		// add genesis block
+		// Close the transaction
+		tx.Rollback()
+
+		// Add genesis block
 		genesis := core.Genesis{}
 		initState := make(core.GenesisAlloc)
 		initState[common.HexToAddress(ownerAccount)] = core.GenesisAccount{
@@ -50,7 +53,6 @@ func NewState(db *DB) (*State, error) {
 			ChainID: big.NewInt(355113),
 		}
 		genesis.Config = &chainConfig
-		tx.Commit()
 		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis)
 		if err != nil {
 			return nil, err
@@ -90,8 +92,8 @@ func (state *State) ProcessBlock(block types.Block) error {
 	defer tx.Rollback()
 
 	batch := olddb.NewHashBatch(tx, make(<-chan struct{}), ".")
-	stateReader := coreState.NewPlainStateReader(batch)
-	stateWriter := coreState.NewPlainStateWriter(batch, tx, block.NumberU64())
+	stateReader := coreState.NewPlainStateReader(tx)
+	stateWriter := coreState.NewPlainStateWriter(tx, tx, block.NumberU64())
 	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
 		return nil, nil
 	}
@@ -109,6 +111,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 	if err != nil {
 		return err
 	}
+
 	stateSyncReceipt := execRs.StateSyncReceipt
 	if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusFailed {
 		return fmt.Errorf("block execution failed")
@@ -129,6 +132,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 	if err := batch.Commit(); err != nil {
 		return err
 	}
+
 	if err := rawdb.WriteBlock(tx, &block); err != nil {
 		return err
 	}
@@ -160,6 +164,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 	rawdb.WriteTxLookupEntries(tx, &block)
 
 	state.blockNum.Add(state.blockNum, big.NewInt(1))
+
 	return tx.Commit()
 }
 

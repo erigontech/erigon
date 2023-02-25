@@ -162,6 +162,31 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		tx = t
+	case 42:
+		kind, size, err := s.Kind()
+		if err != nil {
+			return nil, err
+		}
+		if kind != rlp.List {
+			return nil, fmt.Errorf("unexpected rlp kind")
+		}
+
+		tx := &LegacyTx{}
+		if err = tx.DecodeRLP(s, size); err != nil {
+			return nil, err
+		}
+
+		b, err = s.Bytes()
+		if err != nil {
+			return nil, err
+		}
+
+		if len(b) != 20 {
+			return nil, fmt.Errorf("invalid 'from' address length: %d", len(b))
+		}
+
+		tx.SetSender(libcommon.BytesToAddress(b))
+		return tx, nil
 	default:
 		return nil, fmt.Errorf("%w, got: %d", rlp.ErrUnknownTxTypePrefix, b[0])
 	}
