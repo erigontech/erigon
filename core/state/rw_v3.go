@@ -673,7 +673,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
@@ -798,7 +798,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address.Bytes())
+		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address[:])
 		r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
 	}
 	size := len(enc)
@@ -809,16 +809,17 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 }
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
+	addrBytes := address[:]
+	enc := r.rs.Get(kv.IncarnationMap, addrBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.IncarnationMap, address.Bytes())
+		enc, err = r.tx.GetOne(kv.IncarnationMap, addrBytes)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
+		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, addrBytes)
 		r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
 	}
 	if len(enc) == 0 {
@@ -830,10 +831,10 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.Code:              {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.PlainContractCode: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.IncarnationMap:    {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.PlainState:        {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
+			kv.Code:              {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
+			kv.PlainContractCode: {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
+			kv.IncarnationMap:    {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 		}
 	},
 }
@@ -849,16 +850,28 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
+	if len(v[kv.PlainState].Keys) > 4096 {
+		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
+	}
+	if len(v[kv.Code].Keys) > 256 {
+		log.Warn("need increase returnWriteList kv.Code", "len", len(v[kv.Code].Keys))
+	}
+	if len(v[kv.PlainContractCode].Keys) > 256 {
+		log.Warn("need increase returnWriteList kv.PlainContractCode", "len", len(v[kv.PlainContractCode].Keys))
+	}
+	if len(v[kv.IncarnationMap].Keys) > 64 {
+		log.Warn("need increase returnWriteList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
+	}
 	writeListPool.Put(v)
 }
 
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:     {Keys: make([][]byte, 0, 512), Vals: make([][]byte, 0, 512)},
-			kv.Code:           {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			CodeSizeTable:     {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.IncarnationMap: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.PlainState:     {Keys: make([][]byte, 0, 4*4096), Vals: make([][]byte, 0, 4*4096)},
+			kv.Code:           {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
+			CodeSizeTable:     {Keys: make([][]byte, 0, 1024), Vals: make([][]byte, 0, 1024)},
+			kv.IncarnationMap: {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
 		}
 	},
 }
@@ -873,6 +886,18 @@ func newReadList() map[string]*exec22.KvList {
 func returnReadList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
+	}
+	if len(v[kv.PlainState].Keys) > 4*4096 {
+		log.Warn("need increase returnReadList kv.PlainState", "len", len(v[kv.PlainState].Keys))
+	}
+	if len(v[kv.Code].Keys) > 256 {
+		log.Warn("need increase returnReadList kv.Code", "len", len(v[kv.Code].Keys))
+	}
+	if len(v[CodeSizeTable].Keys) > 1024 {
+		log.Warn("need increase returnReadList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
+	}
+	if len(v[kv.IncarnationMap].Keys) > 128 {
+		log.Warn("need increase returnReadList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
 	}
 	readListPool.Put(v)
 }
