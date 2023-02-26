@@ -71,6 +71,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
+	// if we've pruned this history away for this block then just return early
+	// to save any red herring errors
+	err = api.BaseAPI.checkPruneHistory(tx, block.NumberU64())
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
 	if config.BorTraceEnabled == nil {
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
@@ -178,6 +186,14 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
+
+	// check pruning to ensure we have history at this block level
+	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
+
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
@@ -251,6 +267,11 @@ func (api *PrivateDebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallA
 	blockNumber, hash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, dbtx, api.filters)
 	if err != nil {
 		return fmt.Errorf("get block number: %v", err)
+	}
+
+	err = api.BaseAPI.checkPruneHistory(dbtx, blockNumber)
+	if err != nil {
+		return err
 	}
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(dbtx), chainConfig.ChainName)
@@ -335,6 +356,11 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
+		return err
+	}
+
+	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
+	if err != nil {
 		return err
 	}
 

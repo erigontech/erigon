@@ -3,6 +3,7 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -27,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -109,8 +112,7 @@ type BaseAPI struct {
 	_genesis     *types.Block
 	_genesisLock sync.RWMutex
 
-	_historyV3     *bool
-	_historyV3Lock sync.RWMutex
+	_historyV3 atomic.Pointer[bool]
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
@@ -118,6 +120,8 @@ type BaseAPI struct {
 	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
+
+	_pruneMode atomic.Pointer[prune.Mode]
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
@@ -204,10 +208,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 }
 
 func (api *BaseAPI) historyV3(tx kv.Tx) bool {
-	api._historyV3Lock.RLock()
-	historyV3 := api._historyV3
-	api._historyV3Lock.RUnlock()
-
+	historyV3 := api._historyV3.Load()
 	if historyV3 != nil {
 		return *historyV3
 	}
@@ -216,9 +217,7 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 		log.Warn("HisoryV3Enabled: read", "err", err)
 		return false
 	}
-	api._historyV3Lock.Lock()
-	api._historyV3 = &enabled
-	api._historyV3Lock.Unlock()
+	api._historyV3.Store(&enabled)
 	return enabled
 }
 
@@ -267,6 +266,50 @@ func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.
 		return nil, err
 	}
 	return api._blockReader.Header(context.Background(), tx, h, n)
+}
+
+// checks the pruning state to see if we would hold information about this
+// block in state history or not.  Some strange issues arise getting account
+// history for blocks that have been pruned away giving nonce too low errors
+// etc. as red herrings
+func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
+	p, err := api.pruneMode(tx)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		// no prune info found
+		return nil
+	}
+	if p.History.Enabled() {
+		latest, err := api.blockByRPCNumber(rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return err
+		}
+		prunedTo := p.History.PruneTo(latest.Number().Uint64())
+		if block < prunedTo {
+			return fmt.Errorf("history has been pruned for this block")
+		}
+	}
+
+	return nil
+}
+
+func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
+	p := api._pruneMode.Load()
+
+	if p != nil {
+		return p, nil
+	}
+
+	mode, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	api._pruneMode.Store(&mode)
+
+	return p, nil
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
