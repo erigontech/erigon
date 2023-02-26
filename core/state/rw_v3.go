@@ -832,13 +832,16 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 	return binary.BigEndian.Uint64(enc), nil
 }
 
+var ii int
 var writeListPool = sync.Pool{
 	New: func() any {
+		ii++
+		log.Warn("new", "i", ii)
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
-			kv.Code:              {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
-			kv.PlainContractCode: {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
-			kv.IncarnationMap:    {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
+			kv.PlainState:        {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.Code:              {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.PlainContractCode: {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.IncarnationMap:    {Keys: [][]byte{}, Vals: [][]byte{}},
 		}
 	},
 }
@@ -860,10 +863,10 @@ func returnWriteList(v map[string]*exec22.KvList) {
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:     {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
-			kv.Code:           {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
-			CodeSizeTable:     {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
-			kv.IncarnationMap: {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
+			kv.PlainState:     {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.Code:           {Keys: [][]byte{}, Vals: [][]byte{}},
+			CodeSizeTable:     {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.IncarnationMap: {Keys: [][]byte{}, Vals: [][]byte{}},
 		}
 	},
 }
