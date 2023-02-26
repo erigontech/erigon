@@ -198,9 +198,9 @@ func (ch balanceChange) dirtied() *libcommon.Address {
 
 func (ch balanceIncrease) revert(s *IntraBlockState) {
 	if bi, ok := s.balanceInc[*ch.account]; ok {
-		bi.Increase.Sub(&bi.Increase, &ch.increase)
-		bi.Count--
-		if bi.Count == 0 {
+		bi.increase.Sub(&bi.increase, &ch.increase)
+		bi.count--
+		if bi.count == 0 {
 			delete(s.balanceInc, *ch.account)
 		}
 	}
@@ -215,7 +215,7 @@ func (ch balanceIncreaseTransfer) dirtied() *libcommon.Address {
 }
 
 func (ch balanceIncreaseTransfer) revert(s *IntraBlockState) {
-	ch.bi.Transferred = false
+	ch.bi.transferred = false
 }
 func (ch nonceChange) revert(s *IntraBlockState) {
 	s.getStateObject(*ch.account).setNonce(ch.prev)

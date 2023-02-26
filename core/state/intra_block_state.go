@@ -33,8 +33,6 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const ResetMapsByClean = true
-
 type revision struct {
 	id           int
 	journalIndex int
@@ -46,9 +44,9 @@ var SystemAddress = libcommon.HexToAddress("0xffffffffffffffffffffffffffffffffff
 // BalanceIncrease represents the increase of balance of an account that did not require
 // reading the account first
 type BalanceIncrease struct {
-	Increase    uint256.Int
-	Transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
-	Count       int  // Number of increases - this needs tracking for proper reversion
+	increase    uint256.Int
+	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
+	count       int  // Number of increases - this needs tracking for proper reversion
 }
 
 // IntraBlockState is responsible for caching and managing state changes
@@ -120,23 +118,15 @@ func (sdb *IntraBlockState) Error() error {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	if ResetMapsByClean {
-		maps.Clear(sdb.nilAccounts)
-		maps.Clear(sdb.stateObjects)
-		maps.Clear(sdb.stateObjectsDirty)
-		maps.Clear(sdb.logs)
-		maps.Clear(sdb.balanceInc)
-	} else {
-		sdb.nilAccounts = make(map[libcommon.Address]struct{})
-		sdb.stateObjects = make(map[libcommon.Address]*stateObject)
-		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
-		sdb.logs = make(map[libcommon.Hash][]*types.Log)
-		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease)
-	}
+	maps.Clear(sdb.nilAccounts)
+	maps.Clear(sdb.stateObjects)
+	maps.Clear(sdb.stateObjectsDirty)
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
+	maps.Clear(sdb.logs)
 	sdb.logSize = 0
+	maps.Clear(sdb.balanceInc)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -317,8 +307,8 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 			bi = &BalanceIncrease{}
 			sdb.balanceInc[addr] = bi
 		}
-		bi.Increase.Add(&bi.Increase, amount)
-		bi.Count++
+		bi.increase.Add(&bi.increase, amount)
+		bi.count++
 		return
 	}
 
@@ -427,7 +417,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
 			return sdb.createObject(addr, nil)
 		}
 		return nil
@@ -439,7 +429,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
 			return sdb.createObject(addr, nil)
 		}
 		return nil
@@ -452,9 +442,9 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 }
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
-	if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
-		object.data.Balance.Add(&object.data.Balance, &bi.Increase)
-		bi.Transferred = true
+	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+		object.data.Balance.Add(&object.data.Balance, &bi.increase)
+		bi.transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
 	sdb.stateObjects[addr] = object
@@ -616,7 +606,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
-		if !bi.Transferred {
+		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
 	}
@@ -665,7 +655,7 @@ func (sdb *IntraBlockState) SoftFinalise() {
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
-		if !bi.Transferred {
+		if !bi.transferred {
 			sdb.getStateObject(addr)
 		}
 	}
@@ -675,8 +665,8 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
 	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
-		if !bi.Transferred {
-			s[addr] = bi.Increase
+		if !bi.transferred {
+			s[addr] = bi.increase
 		}
 	}
 	return s
@@ -775,23 +765,10 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot lib
 
 // AddressInAccessList returns true if the given address is in the access list.
 func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
-	_, ok := sdb.accessList.addresses[addr]
-	return ok
+	return sdb.accessList.ContainsAddress(addr)
 }
 
 // SlotInAccessList returns true if the given (address, slot)-tuple is in the access list.
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
-	al := sdb.accessList
-	idx, ok := al.addresses[addr]
-	if !ok {
-		// no such address (and hence zero slots)
-		return false, false
-	}
-	if idx == -1 {
-		// address yes, but no slots
-		return true, false
-	}
-	_, slotPresent = al.slots[idx][slot]
-	return true, slotPresent
-	//return sdb.accessList.Contains(addr, slot)
+	return sdb.accessList.Contains(addr, slot)
 }
