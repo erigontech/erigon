@@ -33,7 +33,7 @@ import (
 	"golang.org/x/exp/maps"
 )
 
-const ResetMapsByClean = true
+const ResetMapsByClean = false
 
 type revision struct {
 	id           int
