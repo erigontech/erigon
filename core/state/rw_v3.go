@@ -609,15 +609,17 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	maps.Clear(w.accountPrevs)
-	maps.Clear(w.accountDels)
-	maps.Clear(w.storagePrevs)
-	maps.Clear(w.codePrevs)
-
-	//w.accountPrevs = map[string][]byte{}
-	//w.accountDels = map[string]*accounts.Account{}
-	//w.storagePrevs = map[string][]byte{}
-	//w.codePrevs = map[string]uint64{}
+	if ResetMapsByClean {
+		maps.Clear(w.accountPrevs)
+		maps.Clear(w.accountDels)
+		maps.Clear(w.storagePrevs)
+		maps.Clear(w.codePrevs)
+	} else {
+		w.accountPrevs = map[string][]byte{}
+		w.accountDels = map[string]*accounts.Account{}
+		w.storagePrevs = map[string][]byte{}
+		w.codePrevs = map[string]uint64{}
+	}
 }
 
 func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
@@ -625,8 +627,11 @@ func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 }
 
 func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	//return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
-	return maps.Clone(w.accountPrevs), maps.Clone(w.accountDels), maps.Clone(w.storagePrevs), maps.Clone(w.codePrevs)
+	if ResetMapsByClean {
+		return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
+	} else {
+		return maps.Clone(w.accountPrevs), maps.Clone(w.accountDels), maps.Clone(w.storagePrevs), maps.Clone(w.codePrevs)
+	}
 }
 
 func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
@@ -835,12 +840,6 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 var writeListPool = &sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {},
-			kv.Code:              {},
-			kv.PlainContractCode: {},
-			kv.IncarnationMap:    {},
-		}
-		return map[string]*exec22.KvList{
 			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
 			kv.Code:              {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
 			kv.PlainContractCode: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
@@ -865,12 +864,6 @@ func returnWriteList(v map[string]*exec22.KvList) {
 
 var readListPool = &sync.Pool{
 	New: func() any {
-		return map[string]*exec22.KvList{
-			kv.PlainState:     {},
-			kv.Code:           {},
-			CodeSizeTable:     {},
-			kv.IncarnationMap: {},
-		}
 		return map[string]*exec22.KvList{
 			kv.PlainState:     {Keys: make([][]byte, 0, 512), Vals: make([][]byte, 0, 512)},
 			kv.Code:           {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
