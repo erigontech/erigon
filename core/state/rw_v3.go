@@ -850,7 +850,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
-	if len(v[kv.PlainState].Keys) > 1024 {
+	if len(v[kv.PlainState].Keys) > 2048 {
 		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
 	if len(v[kv.Code].Keys) > 64 {
