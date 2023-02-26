@@ -37,7 +37,7 @@ func (al *accessList) Reset() {
 	if ResetMapsByClean {
 		maps.Clear(al.addresses)
 	} else {
-		al.addresses = make(map[libcommon.Address]int, 16)
+		al.addresses = make(map[libcommon.Address]int)
 	}
 	for i := range al.slots {
 		al.slots[i] = nil
