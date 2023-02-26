@@ -46,7 +46,7 @@ func newJournal() *journal {
 	}
 }
 func (j *journal) reset() {
-	j.dirties = make(map[libcommon.Address]int)
+	j.dirties = make(map[libcommon.Address]int, 16)
 	//maps.Clear(j.dirties)
 	j.entries = j.entries[:0]
 }
