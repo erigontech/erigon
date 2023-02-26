@@ -849,6 +849,21 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
+	if len(v[kv.PlainState].Keys) > 128 {
+		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
+	}
+	if len(v[kv.Code].Keys) > 16 {
+		log.Warn("need increase returnWriteList kv.Code", "len", len(v[kv.Code].Keys))
+	}
+	if len(v[CodeSizeTable].Keys) > 16 {
+		log.Warn("need increase returnWriteList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
+	}
+	if len(v[kv.PlainContractCode].Keys) > 16 {
+		log.Warn("need increase returnWriteList kv.PlainContractCode", "len", len(v[kv.PlainContractCode].Keys))
+	}
+	if len(v[kv.IncarnationMap].Keys) > 16 {
+		log.Warn("need increase returnWriteList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
+	}
 	writeListPool.Put(v)
 }
 
@@ -873,6 +888,18 @@ func newReadList() map[string]*exec22.KvList {
 func returnReadList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
+	}
+	if len(v[kv.PlainState].Keys) > 512 {
+		log.Warn("need increase returnReadList kv.PlainState", "len", len(v[kv.PlainState].Keys))
+	}
+	if len(v[kv.Code].Keys) > 16 {
+		log.Warn("need increase returnReadList kv.Code", "len", len(v[kv.Code].Keys))
+	}
+	if len(v[CodeSizeTable].Keys) > 16 {
+		log.Warn("need increase returnReadList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
+	}
+	if len(v[kv.IncarnationMap].Keys) > 16 {
+		log.Warn("need increase returnReadList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
 	}
 	readListPool.Put(v)
 }
