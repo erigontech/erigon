@@ -74,3 +74,10 @@ func (r *IndexReader) Lookup2(key1, key2 []byte) uint64 {
 func (r *IndexReader) Empty() bool {
 	return r.index.Empty()
 }
+
+func (r *IndexReader) Close() {
+	if r == nil || r.index == nil {
+		return
+	}
+	r.index.readers.Put(r)
+}

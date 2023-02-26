@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -59,6 +60,8 @@ type Index struct {
 	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
 	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
 	enums              bool
+
+	readers *sync.Pool
 }
 
 func MustOpen(indexFile string) *Index {
@@ -152,6 +155,12 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	idx.grData = p[:l]
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
+
+	idx.readers = &sync.Pool{
+		New: func() interface{} {
+			return NewIndexReader(idx)
+		},
+	}
 	return idx, nil
 }
 
@@ -341,4 +350,8 @@ func (idx *Index) EnableMadvNormal() *Index {
 func (idx *Index) EnableWillNeed() *Index {
 	_ = mmap.MadviseWillNeed(idx.mmapHandle1)
 	return idx
+}
+
+func (idx *Index) GetReaderFromPool() *IndexReader {
+	return idx.readers.Get().(*IndexReader)
 }

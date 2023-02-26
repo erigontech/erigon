@@ -550,6 +550,10 @@ func (ic *InvertedIndexContext) Close() {
 		}
 	}
 
+	for _, r := range ic.readers {
+		r.Close()
+	}
+
 	ic.loc.Close()
 }
 
@@ -584,6 +588,9 @@ func (it *InvertedIterator) Close() {
 		it.cursor.Close()
 	}
 	bitmapdb.ReturnToPool64(it.bm)
+	for _, item := range it.stack {
+		item.reader.Close()
+	}
 }
 
 func (it *InvertedIterator) advanceInFiles() {
@@ -824,7 +831,7 @@ func (ic *InvertedIndexContext) statelessIdxReader(i int) *recsplit.IndexReader 
 	}
 	r := ic.readers[i]
 	if r == nil {
-		r = recsplit.NewIndexReader(ic.files[i].src.index)
+		r = ic.files[i].src.index.GetReaderFromPool()
 		ic.readers[i] = r
 	}
 	return r
@@ -872,7 +879,7 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum in
 			}
 			it.stack = append(it.stack, ic.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
-			it.stack[len(it.stack)-1].reader = recsplit.NewIndexReader(it.stack[len(it.stack)-1].src.index)
+			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
 			it.hasNextInFiles = true
 		}
 		it.hasNextInDb = len(it.stack) == 0 || endTxNum < 0 || it.stack[0].endTxNum < uint64(endTxNum)
@@ -888,7 +895,7 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum in
 
 			it.stack = append(it.stack, ic.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
-			it.stack[len(it.stack)-1].reader = recsplit.NewIndexReader(it.stack[len(it.stack)-1].src.index)
+			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()
 			it.hasNextInFiles = true
 		}
 		it.hasNextInDb = len(it.stack) == 0 || startTxNum < 0 || it.stack[len(it.stack)-1].endTxNum < uint64(startTxNum)
