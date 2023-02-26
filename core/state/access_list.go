@@ -18,6 +18,7 @@ package state
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"golang.org/x/exp/maps"
 )
 
 type accessList struct {
@@ -30,6 +31,18 @@ func newAccessList() *accessList {
 	return &accessList{
 		addresses: make(map[libcommon.Address]int),
 	}
+}
+
+func (al *accessList) Reset() {
+	if ResetMapsByClean {
+		maps.Clear(al.addresses)
+	} else {
+		al.addresses = make(map[libcommon.Address]int, 16)
+	}
+	for i := range al.slots {
+		al.slots[i] = nil
+	}
+	al.slots = al.slots[:0]
 }
 
 // Copy creates an independent copy of an accessList.

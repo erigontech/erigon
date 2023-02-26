@@ -33,6 +33,8 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+const ResetMapsByClean = true
+
 type revision struct {
 	id           int
 	journalIndex int
@@ -118,15 +120,23 @@ func (sdb *IntraBlockState) Error() error {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
-	maps.Clear(sdb.nilAccounts)
-	maps.Clear(sdb.stateObjects)
-	maps.Clear(sdb.stateObjectsDirty)
+	if ResetMapsByClean {
+		maps.Clear(sdb.nilAccounts)
+		maps.Clear(sdb.stateObjects)
+		maps.Clear(sdb.stateObjectsDirty)
+		maps.Clear(sdb.logs)
+		maps.Clear(sdb.balanceInc)
+	} else {
+		sdb.nilAccounts = make(map[libcommon.Address]struct{}, 16)
+		sdb.stateObjects = make(map[libcommon.Address]*stateObject, 16)
+		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{}, 16)
+		sdb.logs = make(map[libcommon.Hash][]*types.Log, 16)
+		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease, 16)
+	}
 	sdb.thash = libcommon.Hash{}
 	sdb.bhash = libcommon.Hash{}
 	sdb.txIndex = 0
-	maps.Clear(sdb.logs)
 	sdb.logSize = 0
-	maps.Clear(sdb.balanceInc)
 }
 
 func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
@@ -702,7 +712,7 @@ func (sdb *IntraBlockState) Prepare(thash, bhash libcommon.Hash, ti int) {
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
-	sdb.accessList = newAccessList()
+	sdb.accessList.Reset()
 }
 
 // no not lock
