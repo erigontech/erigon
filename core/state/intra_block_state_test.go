@@ -34,9 +34,44 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/core/types"
+	"golang.org/x/exp/maps"
 )
+
+func BenchmarkName(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
+		m := map[libcommon.Address]int{}
+		for i := 0; i < 10_000; i++ {
+			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
+			m[addr] = i
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			m2 := maps.Clone(m)
+			b.StartTimer()
+			maps.Clear(m2)
+			for i, j := range m {
+				m2[i] = j
+			}
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		m := map[libcommon.Address]int{}
+		for i := 0; i < 10_000; i++ {
+			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
+			m[addr] = i
+		}
+		b.StopTimer()
+
+		for i := 0; i < b.N; i++ {
+			m2 := map[libcommon.Address]int{}
+			for i, j := range m {
+				m2[i] = j
+			}
+		}
+	})
+}
 
 func TestSnapshotRandom(t *testing.T) {
 	config := &quick.Config{MaxCount: 1000}
