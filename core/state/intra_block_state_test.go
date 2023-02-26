@@ -38,6 +38,24 @@ import (
 	"golang.org/x/exp/maps"
 )
 
+func a1(m2, m map[libcommon.Address]int) {
+	maps.Clear(m2)
+	for a, j := range m {
+		m2[a] = j
+	}
+}
+func a2(m map[libcommon.Address]int) {
+	m2 := map[libcommon.Address]int{}
+	for a, j := range m {
+		m2[a] = j
+	}
+}
+func a3(m map[libcommon.Address]int) {
+	m2 := make(map[libcommon.Address]int, 1024)
+	for a, j := range m {
+		m2[a] = j
+	}
+}
 func BenchmarkName(b *testing.B) {
 	b.Run("1", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
@@ -48,10 +66,7 @@ func BenchmarkName(b *testing.B) {
 		m2 := maps.Clone(m)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			maps.Clear(m2)
-			for a, j := range m {
-				m2[a] = j
-			}
+			a1(m2, m)
 		}
 	})
 	b.Run("2", func(b *testing.B) {
@@ -62,10 +77,7 @@ func BenchmarkName(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			m2 := map[libcommon.Address]int{}
-			for a, j := range m {
-				m2[a] = j
-			}
+			a2(m)
 		}
 	})
 	b.Run("3", func(b *testing.B) {
@@ -76,10 +88,7 @@ func BenchmarkName(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			m2 := make(map[libcommon.Address]int, 1024)
-			for a, j := range m {
-				m2[a] = j
-			}
+			a3(m)
 		}
 	})
 }
