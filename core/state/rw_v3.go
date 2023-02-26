@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
+	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -610,10 +611,10 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	w.accountPrevs = map[string][]byte{}
-	w.accountDels = map[string]*accounts.Account{}
-	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string]uint64{}
+	maps.Clear(w.accountPrevs)
+	maps.Clear(w.accountDels)
+	maps.Clear(w.storagePrevs)
+	maps.Clear(w.codePrevs)
 }
 
 func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
@@ -621,7 +622,7 @@ func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 }
 
 func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
+	return maps.Clone(w.accountPrevs), maps.Clone(w.accountDels), maps.Clone(w.storagePrevs), maps.Clone(w.codePrevs)
 }
 
 func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
