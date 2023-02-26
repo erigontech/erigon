@@ -662,8 +662,14 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 	return sdb.MakeWriteSet(chainRules, stateWriter)
 }
 
-func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]*BalanceIncrease {
-	return sdb.balanceInc
+func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
+	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
+	for addr, bi := range sdb.balanceInc {
+		if !bi.transferred {
+			s[addr] = bi.increase
+		}
+	}
+	return s
 }
 
 func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter StateWriter) error {
