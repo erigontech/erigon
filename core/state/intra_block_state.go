@@ -717,7 +717,7 @@ func (sdb *IntraBlockState) Prepare(thash, bhash libcommon.Hash, ti int) {
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal.reset()
+	sdb.journal = newJournal()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }

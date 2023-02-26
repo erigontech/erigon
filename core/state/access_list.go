@@ -25,6 +25,28 @@ type accessList struct {
 	slots     []map[libcommon.Hash]struct{}
 }
 
+// ContainsAddress returns true if the address is in the access list.
+func (al *accessList) ContainsAddress(address libcommon.Address) bool {
+	_, ok := al.addresses[address]
+	return ok
+}
+
+// Contains checks if a slot within an account is present in the access list, returning
+// separate flags for the presence of the account and the slot respectively.
+func (al *accessList) Contains(address libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
+	idx, ok := al.addresses[address]
+	if !ok {
+		// no such address (and hence zero slots)
+		return false, false
+	}
+	if idx == -1 {
+		// address yes, but no slots
+		return true, false
+	}
+	_, slotPresent = al.slots[idx][slot]
+	return true, slotPresent
+}
+
 // newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
@@ -82,4 +104,33 @@ func (al *accessList) AddSlot(address libcommon.Address, slot libcommon.Hash) (a
 	}
 	// No changes required
 	return false, false
+}
+
+// DeleteSlot removes an (address, slot)-tuple from the access list.
+// This operation needs to be performed in the same order as the addition happened.
+// This method is meant to be used  by the journal, which maintains ordering of
+// operations.
+func (al *accessList) DeleteSlot(address libcommon.Address, slot libcommon.Hash) {
+	idx, addrOk := al.addresses[address]
+	// There are two ways this can fail
+	if !addrOk {
+		panic("reverting slot change, address not present in list")
+	}
+	slotmap := al.slots[idx]
+	delete(slotmap, slot)
+	// If that was the last (first) slot, remove it
+	// Since additions and rollbacks are always performed in order,
+	// we can delete the item without worrying about screwing up later indices
+	if len(slotmap) == 0 {
+		al.slots = al.slots[:idx]
+		al.addresses[address] = -1
+	}
+}
+
+// DeleteAddress removes an address from the access list. This operation
+// needs to be performed in the same order as the addition happened.
+// This method is meant to be used  by the journal, which maintains ordering of
+// operations.
+func (al *accessList) DeleteAddress(address libcommon.Address) {
+	delete(al.addresses, address)
 }
