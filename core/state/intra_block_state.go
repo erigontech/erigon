@@ -712,7 +712,7 @@ func (sdb *IntraBlockState) Prepare(thash, bhash libcommon.Hash, ti int) {
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
-	sdb.accessList.Reset()
+	sdb.accessList = newAccessList()
 }
 
 // no not lock
