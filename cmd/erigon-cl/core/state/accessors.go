@@ -325,7 +325,7 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 		justifiedCheckpoint = b.previousJustifiedCheckpoint
 	}
 	// Matching roots
-	if *data.Source != *justifiedCheckpoint {
+	if !data.Source.Equal(justifiedCheckpoint) {
 		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := b.GetBlockRoot(data.Target.Epoch)
@@ -411,7 +411,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64) {
 	eligibleValidators = make([]uint64, 0, len(b.validators))
 	previousEpoch := b.PreviousEpoch()
-	// TODO(Giulio2002): Proper caching
+
 	for i, validator := range b.validators {
 		if validator.Active(previousEpoch) || (validator.Slashed && previousEpoch+1 < validator.WithdrawableEpoch) {
 			eligibleValidators = append(eligibleValidators, uint64(i))

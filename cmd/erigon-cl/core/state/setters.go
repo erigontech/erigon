@@ -62,8 +62,8 @@ func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) er
 		return InvalidValidatorIndex
 	}
 	b.validators[index] = validator
+	b.touchedLeaves[ValidatorsLeafIndex] = true
 	// change in validator set means cache purging
-	b.activeValidatorsCache.Purge()
 	b.totalActiveBalanceCache = nil
 	return nil
 }
