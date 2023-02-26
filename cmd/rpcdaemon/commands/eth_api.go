@@ -10,17 +10,16 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -34,6 +33,7 @@ import (
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -108,11 +108,10 @@ type BaseAPI struct {
 	stateCache   kvcache.Cache                         // thread-safe
 	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
 	filters      *rpchelper.Filters
-	_chainConfig *chain.Config
-	_genesis     *types.Block
-	_genesisLock sync.RWMutex
-
-	_historyV3 atomic.Pointer[bool]
+	_chainConfig atomic.Pointer[chain.Config]
+	_genesis     atomic.Pointer[types.Block]
+	_historyV3   atomic.Pointer[bool]
+	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
@@ -120,8 +119,6 @@ type BaseAPI struct {
 	_engine      consensus.EngineReader
 
 	evmCallTimeout time.Duration
-
-	_pruneMode atomic.Pointer[prune.Mode]
 }
 
 func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, agg *libstate.AggregatorV3, singleNodeMode bool, evmCallTimeout time.Duration, engine consensus.EngineReader) *BaseAPI {
@@ -222,13 +219,11 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Block, error) {
-	api._genesisLock.RLock()
-	cc, genesisBlock := api._chainConfig, api._genesis
-	api._genesisLock.RUnlock()
-
-	if cc != nil {
+	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
+	if cc != nil && genesisBlock != nil {
 		return cc, genesisBlock, nil
 	}
+
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
@@ -238,10 +233,8 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return nil, nil, err
 	}
 	if cc != nil && genesisBlock != nil {
-		api._genesisLock.Lock()
-		api._genesis = genesisBlock
-		api._chainConfig = cc
-		api._genesisLock.Unlock()
+		api._genesis.Store(genesisBlock)
+		api._chainConfig.Store(cc)
 	}
 	return cc, genesisBlock, nil
 }
@@ -297,7 +290,6 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
 	p := api._pruneMode.Load()
-
 	if p != nil {
 		return p, nil
 	}
