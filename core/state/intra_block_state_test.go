@@ -49,9 +49,9 @@ func BenchmarkName(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			maps.Clear(m2)
-			//for a, j := range m {
-			//	m2[a] = j
-			//}
+			for a, j := range m {
+				m2[a] = j
+			}
 		}
 	})
 	b.Run("2", func(b *testing.B) {
