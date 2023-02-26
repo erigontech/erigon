@@ -144,7 +144,7 @@ func (so *stateObject) touch() {
 	if so.address == ripemd {
 		// Explicitly put it in the dirty-cache, which is otherwise generated from
 		// flattened journals.
-		so.db.journal.dirty(so.address)
+		so.db.journal.dirties[so.address]++
 	}
 }
 
