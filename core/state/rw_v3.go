@@ -855,9 +855,6 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if len(v[kv.Code].Keys) > 16 {
 		log.Warn("need increase returnWriteList kv.Code", "len", len(v[kv.Code].Keys))
 	}
-	if len(v[CodeSizeTable].Keys) > 16 {
-		log.Warn("need increase returnWriteList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
-	}
 	if len(v[kv.PlainContractCode].Keys) > 16 {
 		log.Warn("need increase returnWriteList kv.PlainContractCode", "len", len(v[kv.PlainContractCode].Keys))
 	}
