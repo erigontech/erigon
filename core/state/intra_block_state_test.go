@@ -51,7 +51,7 @@ func a2(m map[libcommon.Address]int) {
 	}
 }
 func a3(m map[libcommon.Address]int) {
-	m2 := make(map[libcommon.Address]int, 10_000)
+	m2 := make(map[libcommon.Address]int, 100)
 	for a, j := range m {
 		m2[a] = j
 	}
@@ -59,7 +59,7 @@ func a3(m map[libcommon.Address]int) {
 func BenchmarkName(b *testing.B) {
 	b.Run("1", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 10_000; i++ {
+		for i := 0; i < 100; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
@@ -71,7 +71,7 @@ func BenchmarkName(b *testing.B) {
 	})
 	b.Run("2", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 10_000; i++ {
+		for i := 0; i < 100; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
@@ -82,7 +82,7 @@ func BenchmarkName(b *testing.B) {
 	})
 	b.Run("3", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 10_000; i++ {
+		for i := 0; i < 100; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
