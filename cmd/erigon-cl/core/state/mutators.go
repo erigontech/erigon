@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -37,11 +38,7 @@ func (b *BeaconState) GetValidatorChurnLimit() uint64 {
 }
 
 func (b *BeaconState) InitiateValidatorExit(index uint64) error {
-	validator, err := b.ValidatorAt(int(index))
-	if err != nil {
-		return err
-	}
-	if validator.ExitEpoch != b.beaconConfig.FarFutureEpoch {
+	if b.validators[index].ExitEpoch != b.beaconConfig.FarFutureEpoch {
 		return nil
 	}
 
@@ -63,33 +60,35 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 		exitQueueEpoch += 1
 	}
 
-	validator.ExitEpoch = exitQueueEpoch
+	b.validators[index].ExitEpoch = exitQueueEpoch
 	var overflow bool
-	if validator.WithdrawableEpoch, overflow = math.SafeAdd(validator.ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
+	if b.validators[index].WithdrawableEpoch, overflow = math.SafeAdd(b.validators[index].ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
 		return fmt.Errorf("withdrawable epoch is too big")
 	}
-
-	return b.SetValidatorAt(int(index), &validator)
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	return nil
 }
 
-func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error {
+func (b *BeaconState) getSlashingProposerReward(whistleBlowerReward uint64) uint64 {
+	if b.version == clparams.Phase0Version {
+		return whistleBlowerReward / b.beaconConfig.ProposerRewardQuotient
+	}
+	return whistleBlowerReward * b.beaconConfig.ProposerWeight / b.beaconConfig.WeightDenominator
+}
+
+func (b *BeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error {
 	epoch := b.Epoch()
 	if err := b.InitiateValidatorExit(slashedInd); err != nil {
 		return err
 	}
-	newValidator := b.validators[slashedInd]
-	newValidator.Slashed = true
-	withdrawEpoch := epoch + b.beaconConfig.EpochsPerSlashingsVector
-	if newValidator.WithdrawableEpoch < withdrawEpoch {
-		newValidator.WithdrawableEpoch = withdrawEpoch
-	}
-	if err := b.SetValidatorAt(int(slashedInd), newValidator); err != nil {
-		return err
-	}
-	segmentIndex := int(epoch % b.beaconConfig.EpochsPerSlashingsVector)
-	currentSlashing := b.SlashingSegmentAt(segmentIndex)
-	b.SetSlashingSegmentAt(segmentIndex, currentSlashing+newValidator.EffectiveBalance)
-	if err := b.DecreaseBalance(slashedInd, newValidator.EffectiveBalance/b.beaconConfig.MinSlashingPenaltyQuotient); err != nil {
+	// Change the validator to be slashed
+	b.validators[slashedInd].Slashed = true
+	b.validators[slashedInd].WithdrawableEpoch = utils.Max64(b.validators[slashedInd].WithdrawableEpoch, epoch+b.beaconConfig.EpochsPerSlashingsVector)
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	// Update slashings vector
+	b.slashings[epoch%b.beaconConfig.EpochsPerSlashingsVector] += b.validators[slashedInd].EffectiveBalance
+	b.touchedLeaves[SlashingsLeafIndex] = true
+	if err := b.DecreaseBalance(slashedInd, b.validators[slashedInd].EffectiveBalance/b.beaconConfig.GetMinSlashingPenaltyQuotient(b.version)); err != nil {
 		return err
 	}
 
@@ -97,13 +96,15 @@ func (b *BeaconState) SlashValidator(slashedInd, whistleblowerInd uint64) error 
 	if err != nil {
 		return fmt.Errorf("unable to get beacon proposer index: %v", err)
 	}
-	if whistleblowerInd == 0 {
-		whistleblowerInd = proposerInd
+	if whistleblowerInd == nil {
+		whistleblowerInd = new(uint64)
+		*whistleblowerInd = proposerInd
 	}
-	whistleBlowerReward := newValidator.EffectiveBalance / b.beaconConfig.WhistleBlowerRewardQuotient
-	proposerReward := whistleBlowerReward / b.beaconConfig.ProposerRewardQuotient
+
+	whistleBlowerReward := b.validators[slashedInd].EffectiveBalance / b.beaconConfig.WhistleBlowerRewardQuotient
+	proposerReward := b.getSlashingProposerReward(whistleBlowerReward)
 	if err := b.IncreaseBalance(proposerInd, proposerReward); err != nil {
 		return err
 	}
-	return b.IncreaseBalance(whistleblowerInd, whistleBlowerReward)
+	return b.IncreaseBalance(*whistleblowerInd, whistleBlowerReward-proposerReward)
 }

@@ -243,7 +243,7 @@ func TestProcessSlots(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			tc.prevState.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
 			s := New(tc.prevState, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.processSlots(tc.startSlot + tc.numSlots)
+			err := s.ProcessSlots(tc.startSlot + tc.numSlots)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

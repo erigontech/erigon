@@ -13,6 +13,10 @@ type Checkpoint struct {
 	Root  libcommon.Hash
 }
 
+func (c *Checkpoint) Equal(other *Checkpoint) bool {
+	return c.Epoch == other.Epoch && c.Root == other.Root
+}
+
 func (c *Checkpoint) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(ssz_utils.Uint64SSZ(c.Epoch), c.Root[:]...)...), nil
 }
