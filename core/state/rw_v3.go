@@ -832,16 +832,19 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 	return binary.BigEndian.Uint64(enc), nil
 }
 
-var ii int
-var writeListPool = sync.Pool{
+var writeListPool = &sync.Pool{
 	New: func() any {
-		ii++
-		log.Warn("new", "i", ii)
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {Keys: [][]byte{}, Vals: [][]byte{}},
-			kv.Code:              {Keys: [][]byte{}, Vals: [][]byte{}},
-			kv.PlainContractCode: {Keys: [][]byte{}, Vals: [][]byte{}},
-			kv.IncarnationMap:    {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.PlainContractCode: {},
+			kv.IncarnationMap:    {},
+		}
+		return map[string]*exec22.KvList{
+			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
+			kv.Code:              {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.PlainContractCode: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.IncarnationMap:    {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
 		}
 	},
 }
@@ -860,13 +863,19 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	writeListPool.Put(v)
 }
 
-var readListPool = sync.Pool{
+var readListPool = &sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:     {Keys: [][]byte{}, Vals: [][]byte{}},
-			kv.Code:           {Keys: [][]byte{}, Vals: [][]byte{}},
-			CodeSizeTable:     {Keys: [][]byte{}, Vals: [][]byte{}},
-			kv.IncarnationMap: {Keys: [][]byte{}, Vals: [][]byte{}},
+			kv.PlainState:     {},
+			kv.Code:           {},
+			CodeSizeTable:     {},
+			kv.IncarnationMap: {},
+		}
+		return map[string]*exec22.KvList{
+			kv.PlainState:     {Keys: make([][]byte, 0, 512), Vals: make([][]byte, 0, 512)},
+			kv.Code:           {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			CodeSizeTable:     {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.IncarnationMap: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
 		}
 	},
 }
