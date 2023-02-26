@@ -832,8 +832,8 @@ var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
-			kv.Code:              {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.PlainContractCode: {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
+			kv.Code:              {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
+			kv.PlainContractCode: {Keys: make([][]byte, 0, 256), Vals: make([][]byte, 0, 256)},
 			kv.IncarnationMap:    {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 		}
 	},
@@ -853,10 +853,10 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if len(v[kv.PlainState].Keys) > 4096 {
 		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
-	if len(v[kv.Code].Keys) > 128 {
+	if len(v[kv.Code].Keys) > 256 {
 		log.Warn("need increase returnWriteList kv.Code", "len", len(v[kv.Code].Keys))
 	}
-	if len(v[kv.PlainContractCode].Keys) > 128 {
+	if len(v[kv.PlainContractCode].Keys) > 256 {
 		log.Warn("need increase returnWriteList kv.PlainContractCode", "len", len(v[kv.PlainContractCode].Keys))
 	}
 	if len(v[kv.IncarnationMap].Keys) > 64 {
