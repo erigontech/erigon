@@ -673,7 +673,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
@@ -798,7 +798,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address.Bytes())
+		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address[:])
 		r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
 	}
 	size := len(enc)
@@ -809,16 +809,17 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 }
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
+	addrBytes := address[:]
+	enc := r.rs.Get(kv.IncarnationMap, addrBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.IncarnationMap, address.Bytes())
+		enc, err = r.tx.GetOne(kv.IncarnationMap, addrBytes)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
+		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, addrBytes)
 		r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
 	}
 	if len(enc) == 0 {
