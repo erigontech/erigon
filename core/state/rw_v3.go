@@ -850,7 +850,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
-	if len(v[kv.PlainState].Keys) > 1024 {
+	if len(v[kv.PlainState].Keys) > 4096 {
 		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
 	if len(v[kv.Code].Keys) > 64 {
@@ -868,10 +868,10 @@ func returnWriteList(v map[string]*exec22.KvList) {
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:     {Keys: make([][]byte, 0, 1024), Vals: make([][]byte, 0, 1024)},
+			kv.PlainState:     {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
 			kv.Code:           {Keys: make([][]byte, 0, 32), Vals: make([][]byte, 0, 32)},
-			CodeSizeTable:     {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.IncarnationMap: {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
+			CodeSizeTable:     {Keys: make([][]byte, 0, 1024), Vals: make([][]byte, 0, 1024)},
+			kv.IncarnationMap: {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
 		}
 	},
 }
@@ -887,16 +887,16 @@ func returnReadList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
-	if len(v[kv.PlainState].Keys) > 1024 {
+	if len(v[kv.PlainState].Keys) > 4096 {
 		log.Warn("need increase returnReadList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
 	if len(v[kv.Code].Keys) > 32 {
 		log.Warn("need increase returnReadList kv.Code", "len", len(v[kv.Code].Keys))
 	}
-	if len(v[CodeSizeTable].Keys) > 128 {
+	if len(v[CodeSizeTable].Keys) > 1024 {
 		log.Warn("need increase returnReadList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
 	}
-	if len(v[kv.IncarnationMap].Keys) > 64 {
+	if len(v[kv.IncarnationMap].Keys) > 128 {
 		log.Warn("need increase returnReadList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
 	}
 	readListPool.Put(v)
