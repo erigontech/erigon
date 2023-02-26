@@ -833,7 +833,7 @@ var writeListPool = sync.Pool{
 			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
 			kv.Code:              {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 			kv.PlainContractCode: {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
-			kv.IncarnationMap:    {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.IncarnationMap:    {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 		}
 	},
 }
