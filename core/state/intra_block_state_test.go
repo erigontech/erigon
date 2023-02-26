@@ -51,7 +51,7 @@ func a2(m map[libcommon.Address]int) {
 	}
 }
 func a3(m map[libcommon.Address]int) {
-	m2 := make(map[libcommon.Address]int, 1024)
+	m2 := make(map[libcommon.Address]int, 10_000)
 	for a, j := range m {
 		m2[a] = j
 	}
