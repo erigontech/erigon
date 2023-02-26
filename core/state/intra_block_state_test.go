@@ -49,8 +49,8 @@ func BenchmarkName(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			maps.Clear(m2)
-			for i, j := range m {
-				m2[i] = j
+			for a, j := range m {
+				m2[a] = j
 			}
 		}
 	})
@@ -64,8 +64,8 @@ func BenchmarkName(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			m2 := map[libcommon.Address]int{}
-			for i, j := range m {
-				m2[i] = j
+			for a, j := range m {
+				m2[a] = j
 			}
 		}
 	})
