@@ -831,8 +831,8 @@ var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.Code:              {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.PlainContractCode: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.Code:              {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
+			kv.PlainContractCode: {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 			kv.IncarnationMap:    {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
 		}
 	},
