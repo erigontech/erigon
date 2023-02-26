@@ -360,7 +360,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 			// Need to convert before balance increase
 			enc0 = accounts.SerialiseV3(&a)
 		}
-		a.Balance.Add(&a.Balance, &increase.increase)
+		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
 			enc1 = []byte{}
