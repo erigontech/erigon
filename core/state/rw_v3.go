@@ -609,17 +609,11 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	if ResetMapsByClean {
-		maps.Clear(w.accountPrevs)
-		maps.Clear(w.accountDels)
-		maps.Clear(w.storagePrevs)
-		maps.Clear(w.codePrevs)
-	} else {
-		w.accountPrevs = map[string][]byte{}
-		w.accountDels = map[string]*accounts.Account{}
-		w.storagePrevs = map[string][]byte{}
-		w.codePrevs = map[string]uint64{}
-	}
+	maps.Clear(w.accountPrevs)
+	maps.Clear(w.accountDels)
+	maps.Clear(w.storagePrevs)
+	maps.Clear(w.codePrevs)
+
 }
 
 func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
@@ -627,11 +621,7 @@ func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 }
 
 func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
-	if ResetMapsByClean {
-		return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
-	} else {
-		return maps.Clone(w.accountPrevs), maps.Clone(w.accountDels), maps.Clone(w.storagePrevs), maps.Clone(w.codePrevs)
-	}
+	return maps.Clone(w.accountPrevs), maps.Clone(w.accountDels), maps.Clone(w.storagePrevs), maps.Clone(w.codePrevs)
 }
 
 func (w *StateWriterV3) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
