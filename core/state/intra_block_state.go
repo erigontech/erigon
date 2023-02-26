@@ -702,12 +702,12 @@ func (sdb *IntraBlockState) Prepare(thash, bhash libcommon.Hash, ti int) {
 	sdb.thash = thash
 	sdb.bhash = bhash
 	sdb.txIndex = ti
-	sdb.accessList = newAccessList()
+	sdb.accessList.reset()
 }
 
 // no not lock
 func (sdb *IntraBlockState) clearJournalAndRefund() {
-	sdb.journal = newJournal()
+	sdb.journal.reset()
 	sdb.validRevisions = sdb.validRevisions[:0]
 	sdb.refund = 0
 }
