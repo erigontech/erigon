@@ -45,11 +45,9 @@ func BenchmarkName(b *testing.B) {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
+		m2 := maps.Clone(m)
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			b.StopTimer()
-			m2 := maps.Clone(m)
-			b.StartTimer()
 			maps.Clear(m2)
 			for i, j := range m {
 				m2[i] = j
