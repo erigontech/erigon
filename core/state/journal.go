@@ -19,7 +19,6 @@ package state
 import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"golang.org/x/exp/maps"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -43,16 +42,8 @@ type journal struct {
 // newJournal create a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[libcommon.Address]int, 16),
+		dirties: make(map[libcommon.Address]int),
 	}
-}
-func (j *journal) reset() {
-	if ResetMapsByClean {
-		maps.Clear(j.dirties)
-	} else {
-		j.dirties = make(map[libcommon.Address]int)
-	}
-	j.entries = j.entries[:0]
 }
 
 // append inserts a new modification entry to the end of the change journal.
@@ -78,6 +69,13 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		}
 	}
 	j.entries = j.entries[:snapshot]
+}
+
+// dirty explicitly sets an address to dirty, even if the change entries would
+// otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
+// precompile consensus exception.
+func (j *journal) dirty(addr libcommon.Address) {
+	j.dirties[addr]++
 }
 
 // length returns the current number of entries in the journal.
