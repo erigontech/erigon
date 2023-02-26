@@ -852,13 +852,13 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if len(v[kv.PlainState].Keys) > 128 {
 		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
-	if len(v[kv.Code].Keys) > 16 {
+	if len(v[kv.Code].Keys) > 64 {
 		log.Warn("need increase returnWriteList kv.Code", "len", len(v[kv.Code].Keys))
 	}
-	if len(v[kv.PlainContractCode].Keys) > 16 {
+	if len(v[kv.PlainContractCode].Keys) > 64 {
 		log.Warn("need increase returnWriteList kv.PlainContractCode", "len", len(v[kv.PlainContractCode].Keys))
 	}
-	if len(v[kv.IncarnationMap].Keys) > 16 {
+	if len(v[kv.IncarnationMap].Keys) > 64 {
 		log.Warn("need increase returnWriteList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
 	}
 	writeListPool.Put(v)
