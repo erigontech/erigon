@@ -831,7 +831,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {Keys: make([][]byte, 0, 2048), Vals: make([][]byte, 0, 2048)},
+			kv.PlainState:        {Keys: make([][]byte, 0, 4096), Vals: make([][]byte, 0, 4096)},
 			kv.Code:              {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
 			kv.PlainContractCode: {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
 			kv.IncarnationMap:    {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
@@ -850,7 +850,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
-	if len(v[kv.PlainState].Keys) > 2048 {
+	if len(v[kv.PlainState].Keys) > 4096 {
 		log.Warn("need increase returnWriteList kv.PlainState", "len", len(v[kv.PlainState].Keys))
 	}
 	if len(v[kv.Code].Keys) > 128 {
