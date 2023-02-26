@@ -41,7 +41,7 @@ import (
 func BenchmarkName(b *testing.B) {
 	b.Run("1", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 1_000; i++ {
+		for i := 0; i < 10_000; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
@@ -56,7 +56,7 @@ func BenchmarkName(b *testing.B) {
 	})
 	b.Run("2", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 1_000; i++ {
+		for i := 0; i < 10_000; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
@@ -70,7 +70,7 @@ func BenchmarkName(b *testing.B) {
 	})
 	b.Run("3", func(b *testing.B) {
 		m := map[libcommon.Address]int{}
-		for i := 0; i < 1_000; i++ {
+		for i := 0; i < 10_000; i++ {
 			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
 			m[addr] = i
 		}
