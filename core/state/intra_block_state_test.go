@@ -34,6 +34,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"golang.org/x/exp/maps"
 )
@@ -89,6 +90,52 @@ func BenchmarkName(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			a3(m)
+		}
+	})
+}
+
+func BenchmarkName2(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
+		m := make(map[libcommon.Address]*BalanceIncrease)
+		addr := libcommon.Address{}
+		amount := u256.Num1
+		for i := 0; i < b.N; i++ {
+			bi, ok := m[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				m[addr] = bi
+			}
+			bi.Increase.Add(&bi.Increase, amount)
+			bi.Count++
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		m := make(map[libcommon.Address]*BalanceIncrease)
+		addr := libcommon.Address{}
+		amount := u256.Num1
+		for i := 0; i < b.N; i++ {
+			bi, ok := m[addr]
+			if !ok {
+				bi = &BalanceIncrease{}
+				m[addr] = bi
+			}
+			bi.Increase.Add(&bi.Increase, amount)
+			bi.Count++
+		}
+	})
+	b.Run("3", func(b *testing.B) {
+		m := make(map[libcommon.Address]int)
+		mm := []BalanceIncrease{}
+		addr := libcommon.Address{}
+		amount := u256.Num1
+		for i := 0; i < b.N; i++ {
+			_, ok := m[addr]
+			if !ok {
+				m[addr] = len(mm)
+				mm = append(mm, BalanceIncrease{})
+			}
+			ii := mm[m[addr]].Increase
+			mm[m[addr]].Increase.Add(&ii, amount)
 		}
 	})
 }

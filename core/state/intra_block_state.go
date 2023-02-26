@@ -43,6 +43,14 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
+// BalanceIncrease represents the increase of balance of an account that did not require
+// reading the account first
+type BalanceIncrease struct {
+	Increase    uint256.Int
+	Transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
+	Count       int  // Number of increases - this needs tracking for proper reversion
+}
+
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!
@@ -117,18 +125,12 @@ func (sdb *IntraBlockState) Reset() {
 		maps.Clear(sdb.stateObjects)
 		maps.Clear(sdb.stateObjectsDirty)
 		maps.Clear(sdb.logs)
-		for k, item := range sdb.balanceInc {
-			ReturnBalanceIncreaseToPool(item)
-			delete(sdb.balanceInc, k)
-		}
+		maps.Clear(sdb.balanceInc)
 	} else {
 		sdb.nilAccounts = make(map[libcommon.Address]struct{}, 16)
 		sdb.stateObjects = make(map[libcommon.Address]*stateObject, 16)
 		sdb.stateObjectsDirty = make(map[libcommon.Address]struct{}, 16)
 		sdb.logs = make(map[libcommon.Hash][]*types.Log, 16)
-		for _, item := range sdb.balanceInc {
-			ReturnBalanceIncreaseToPool(item)
-		}
 		sdb.balanceInc = make(map[libcommon.Address]*BalanceIncrease, 16)
 	}
 	sdb.thash = libcommon.Hash{}
@@ -312,7 +314,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		})
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
-			bi = NewBalanceIncrease()
+			bi = &BalanceIncrease{}
 			sdb.balanceInc[addr] = bi
 		}
 		bi.Increase.Add(&bi.Increase, amount)
