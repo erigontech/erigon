@@ -3,9 +3,9 @@ package exec22
 import (
 	"bytes"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/state"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -34,7 +34,7 @@ type TxTask struct {
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
 
-	BalanceIncreaseSet map[libcommon.Address]uint256.Int
+	BalanceIncreaseSet map[libcommon.Address]*state.BalanceIncrease
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList
 	AccountPrevs       map[string][]byte

@@ -342,9 +342,12 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	for addr := range txTask.BalanceIncreaseSet {
+	for addr, increase := range txTask.BalanceIncreaseSet {
+		if increase.transferred {
+			continue
+		}
+
 		addrBytes := addr.Bytes()
-		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addrBytes)
 		if enc0 == nil {
 			var err error
@@ -361,7 +364,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 			// Need to convert before balance increase
 			enc0 = accounts.SerialiseV3(&a)
 		}
-		a.Balance.Add(&a.Balance, &increase)
+		a.Balance.Add(&a.Balance, &increase.increase)
 		var enc1 []byte
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
 			enc1 = []byte{}
