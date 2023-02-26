@@ -76,7 +76,7 @@ func BenchmarkName(b *testing.B) {
 		}
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			m2 := make(map[libcommon.Address]int, 128)
+			m2 := make(map[libcommon.Address]int, 1024)
 			for a, j := range m {
 				m2[a] = j
 			}
