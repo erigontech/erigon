@@ -43,14 +43,6 @@ type revision struct {
 // SystemAddress - sender address for internal state updates.
 var SystemAddress = libcommon.HexToAddress("0xfffffffffffffffffffffffffffffffffffffffe")
 
-// BalanceIncrease represents the increase of balance of an account that did not require
-// reading the account first
-type BalanceIncrease struct {
-	increase    uint256.Int
-	transferred bool // Set to true when the corresponding stateObject is created and balance increase is transferred to the stateObject
-	count       int  // Number of increases - this needs tracking for proper reversion
-}
-
 // IntraBlockState is responsible for caching and managing state changes
 // that occur during block's execution.
 // NOT THREAD SAFE!
@@ -125,6 +117,9 @@ func (sdb *IntraBlockState) Reset() {
 		maps.Clear(sdb.stateObjects)
 		maps.Clear(sdb.stateObjectsDirty)
 		maps.Clear(sdb.logs)
+		for _, item := range sdb.balanceInc {
+			ReturnBalanceIncreaseToPool(item)
+		}
 		maps.Clear(sdb.balanceInc)
 	} else {
 		sdb.nilAccounts = make(map[libcommon.Address]struct{}, 16)
@@ -314,11 +309,11 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 		})
 		bi, ok := sdb.balanceInc[addr]
 		if !ok {
-			bi = &BalanceIncrease{}
+			bi = NewBalanceIncrease()
 			sdb.balanceInc[addr] = bi
 		}
-		bi.increase.Add(&bi.increase, amount)
-		bi.count++
+		bi.Increase.Add(&bi.Increase, amount)
+		bi.Count++
 		return
 	}
 
@@ -427,7 +422,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
 			return sdb.createObject(addr, nil)
 		}
 		return nil
@@ -439,7 +434,7 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 	}
 	if account == nil {
 		sdb.nilAccounts[addr] = struct{}{}
-		if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
+		if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
 			return sdb.createObject(addr, nil)
 		}
 		return nil
@@ -452,9 +447,9 @@ func (sdb *IntraBlockState) getStateObject(addr libcommon.Address) (stateObject 
 }
 
 func (sdb *IntraBlockState) setStateObject(addr libcommon.Address, object *stateObject) {
-	if bi, ok := sdb.balanceInc[addr]; ok && !bi.transferred {
-		object.data.Balance.Add(&object.data.Balance, &bi.increase)
-		bi.transferred = true
+	if bi, ok := sdb.balanceInc[addr]; ok && !bi.Transferred {
+		object.data.Balance.Add(&object.data.Balance, &bi.Increase)
+		bi.Transferred = true
 		sdb.journal.append(balanceIncreaseTransfer{bi: bi})
 	}
 	sdb.stateObjects[addr] = object
@@ -616,7 +611,7 @@ func printAccount(EIP161Enabled bool, addr libcommon.Address, stateObject *state
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
+		if !bi.Transferred {
 			sdb.getStateObject(addr)
 		}
 	}
@@ -665,7 +660,7 @@ func (sdb *IntraBlockState) SoftFinalise() {
 // and clears the journal as well as the refunds.
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
+		if !bi.Transferred {
 			sdb.getStateObject(addr)
 		}
 	}
@@ -675,8 +670,8 @@ func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter Sta
 func (sdb *IntraBlockState) BalanceIncreaseSet() map[libcommon.Address]uint256.Int {
 	s := make(map[libcommon.Address]uint256.Int, len(sdb.balanceInc))
 	for addr, bi := range sdb.balanceInc {
-		if !bi.transferred {
-			s[addr] = bi.increase
+		if !bi.Transferred {
+			s[addr] = bi.Increase
 		}
 	}
 	return s
