@@ -870,7 +870,7 @@ var readListPool = sync.Pool{
 			kv.PlainState:     {Keys: make([][]byte, 0, 512), Vals: make([][]byte, 0, 512)},
 			kv.Code:           {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
 			CodeSizeTable:     {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.IncarnationMap: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.IncarnationMap: {Keys: make([][]byte, 0, 64), Vals: make([][]byte, 0, 64)},
 		}
 	},
 }
@@ -895,7 +895,7 @@ func returnReadList(v map[string]*exec22.KvList) {
 	if len(v[CodeSizeTable].Keys) > 128 {
 		log.Warn("need increase returnReadList kv.CodeSizeTable", "len", len(v[CodeSizeTable].Keys))
 	}
-	if len(v[kv.IncarnationMap].Keys) > 16 {
+	if len(v[kv.IncarnationMap].Keys) > 64 {
 		log.Warn("need increase returnReadList kv.IncarnationMap", "len", len(v[kv.IncarnationMap].Keys))
 	}
 	readListPool.Put(v)
