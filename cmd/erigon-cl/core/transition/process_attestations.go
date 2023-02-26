@@ -94,13 +94,13 @@ type verifyAttestationWorkersResult struct {
 	err     error
 }
 
-func verifyAttestationWorker(state *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
+func (s *StateTransistor) verifyAttestationWorker(state *state.BeaconState, attestation *cltypes.Attestation, attestingIndicies []uint64, resultCh chan verifyAttestationWorkersResult) {
 	indexedAttestation, err := state.GetIndexedAttestation(attestation, attestingIndicies)
 	if err != nil {
 		resultCh <- verifyAttestationWorkersResult{err: err}
 		return
 	}
-	success, err := isValidIndexedAttestation(state, indexedAttestation)
+	success, err := s.isValidIndexedAttestation(indexedAttestation)
 	resultCh <- verifyAttestationWorkersResult{success: success, err: err}
 }
 
@@ -111,7 +111,7 @@ func (s *StateTransistor) verifyAttestations(attestations []*cltypes.Attestation
 	resultCh := make(chan verifyAttestationWorkersResult, len(attestations))
 
 	for i, attestation := range attestations {
-		go verifyAttestationWorker(s.state, attestation, attestingIndicies[i], resultCh)
+		go s.verifyAttestationWorker(s.state, attestation, attestingIndicies[i], resultCh)
 	}
 	for i := 0; i < len(attestations); i++ {
 		result := <-resultCh

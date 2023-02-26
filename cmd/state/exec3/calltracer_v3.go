@@ -23,15 +23,13 @@ func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
-func (ct *CallTracer) captureStartOrEnter(from, to libcommon.Address) {
+func (ct *CallTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 	ct.froms[from] = struct{}{}
 	ct.tos[to] = struct{}{}
 }
-func (ct *CallTracer) CaptureStart(env vm.VMInterface, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.captureStartOrEnter(from, to)
-}
 func (ct *CallTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	ct.captureStartOrEnter(from, to)
+	ct.froms[from] = struct{}{}
+	ct.tos[to] = struct{}{}
 }
 func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
 }
