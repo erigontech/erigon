@@ -766,10 +766,23 @@ func (sdb *IntraBlockState) AddSlotToAccessList(addr libcommon.Address, slot lib
 
 // AddressInAccessList returns true if the given address is in the access list.
 func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
-	return sdb.accessList.ContainsAddress(addr)
+	_, ok := sdb.accessList.addresses[addr]
+	return ok
 }
 
 // SlotInAccessList returns true if the given (address, slot)-tuple is in the access list.
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
-	return sdb.accessList.Contains(addr, slot)
+	al := sdb.accessList
+	idx, ok := al.addresses[addr]
+	if !ok {
+		// no such address (and hence zero slots)
+		return false, false
+	}
+	if idx == -1 {
+		// address yes, but no slots
+		return true, false
+	}
+	_, slotPresent = al.slots[idx][slot]
+	return true, slotPresent
+	//return sdb.accessList.Contains(addr, slot)
 }
