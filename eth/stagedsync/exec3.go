@@ -394,7 +394,7 @@ func ExecV3(ctx context.Context,
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
 
-					Drain: // Drain results channel because read sets do not carry over
+					DrainLoop: // Drain results channel because read sets do not carry over
 						for {
 							select {
 							case txTask, ok := <-resultCh:
@@ -403,7 +403,7 @@ func ExecV3(ctx context.Context,
 								}
 								rs.AddWork(txTask)
 							default:
-								break Drain
+								break DrainLoop
 							}
 						}
 
