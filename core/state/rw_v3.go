@@ -18,14 +18,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
-
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+	atomic2 "go.uber.org/atomic"
 )
 
 const CodeSizeTable = "CodeSize"
@@ -48,20 +47,20 @@ func NewStateV3() *StateV3 {
 	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree2.Map[string, []byte]{},
-		txsDone:      atomic2.NewUint64(0),
+		changes: map[string]*btree2.Map[string, []byte]{
+			kv.PlainState:        btree2.NewMap[string, []byte](128),
+			kv.Code:              btree2.NewMap[string, []byte](128),
+			kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
+			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
+		},
+		txsDone: atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
 func (rs *StateV3) put(table string, key, val []byte) {
-	t, ok := rs.changes[table]
-	if !ok {
-		t = btree2.NewMap[string, []byte](128)
-		rs.changes[table] = t
-	}
-	old, ok := t.Set(string(key), val)
+	old, ok := rs.changes[table].Set(string(key), val)
 	if ok {
 		rs.sizeEstimate += len(val) - len(old)
 	} else {
@@ -76,15 +75,9 @@ func (rs *StateV3) Get(table string, key []byte) []byte {
 	return v
 }
 
-func (rs *StateV3) get(table string, key []byte) []byte {
-	t, ok := rs.changes[table]
-	if !ok {
-		return nil
-	}
-	if i, ok := t.Get(*(*string)(unsafe.Pointer(&key))); ok {
-		return i
-	}
-	return nil
+func (rs *StateV3) get(table string, key []byte) (v []byte) {
+	v, _ = rs.changes[table].Get(*(*string)(unsafe.Pointer(&key)))
+	return v
 }
 
 func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
@@ -343,9 +336,9 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	for addr := range txTask.BalanceIncreaseSet {
+	for addr, increase := range txTask.BalanceIncreaseSet {
+		increase := increase
 		addrBytes := addr.Bytes()
-		increase := txTask.BalanceIncreaseSet[addr]
 		enc0 := rs.get(kv.PlainState, addrBytes)
 		if enc0 == nil {
 			var err error
@@ -675,7 +668,7 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
+	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
@@ -800,7 +793,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address.Bytes())
+		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address[:])
 		r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
 	}
 	size := len(enc)
@@ -811,16 +804,17 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 }
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
-	enc := r.rs.Get(kv.IncarnationMap, address.Bytes())
+	addrBytes := address[:]
+	enc := r.rs.Get(kv.IncarnationMap, addrBytes)
 	if enc == nil {
 		var err error
-		enc, err = r.tx.GetOne(kv.IncarnationMap, address.Bytes())
+		enc, err = r.tx.GetOne(kv.IncarnationMap, addrBytes)
 		if err != nil {
 			return 0, err
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, address.Bytes())
+		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, addrBytes)
 		r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
 	}
 	if len(enc) == 0 {
@@ -832,10 +826,10 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:        {Keys: make([][]byte, 0, 128), Vals: make([][]byte, 0, 128)},
-			kv.Code:              {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.PlainContractCode: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.IncarnationMap:    {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.PlainContractCode: {},
+			kv.IncarnationMap:    {},
 		}
 	},
 }
@@ -857,10 +851,10 @@ func returnWriteList(v map[string]*exec22.KvList) {
 var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
-			kv.PlainState:     {Keys: make([][]byte, 0, 512), Vals: make([][]byte, 0, 512)},
-			kv.Code:           {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			CodeSizeTable:     {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
-			kv.IncarnationMap: {Keys: make([][]byte, 0, 16), Vals: make([][]byte, 0, 16)},
+			kv.PlainState:     {},
+			kv.Code:           {},
+			CodeSizeTable:     {},
+			kv.IncarnationMap: {},
 		}
 	},
 }
