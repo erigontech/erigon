@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -121,6 +122,8 @@ var cmdStageExec = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
+
+		defer func(t time.Time) { log.Info("total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageExec(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
