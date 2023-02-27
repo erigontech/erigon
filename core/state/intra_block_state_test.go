@@ -35,63 +35,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"golang.org/x/exp/maps"
 )
-
-func a1(m2, m map[libcommon.Address]int) {
-	maps.Clear(m2)
-	for a, j := range m {
-		m2[a] = j
-	}
-}
-func a2(m map[libcommon.Address]int) {
-	m2 := map[libcommon.Address]int{}
-	for a, j := range m {
-		m2[a] = j
-	}
-}
-func a3(m map[libcommon.Address]int) {
-	m2 := make(map[libcommon.Address]int, 100)
-	for a, j := range m {
-		m2[a] = j
-	}
-}
-func BenchmarkName(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		m := map[libcommon.Address]int{}
-		for i := 0; i < 100; i++ {
-			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
-			m[addr] = i
-		}
-		m2 := maps.Clone(m)
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			a1(m2, m)
-		}
-	})
-	b.Run("2", func(b *testing.B) {
-		m := map[libcommon.Address]int{}
-		for i := 0; i < 100; i++ {
-			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
-			m[addr] = i
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			a2(m)
-		}
-	})
-	b.Run("3", func(b *testing.B) {
-		m := map[libcommon.Address]int{}
-		for i := 0; i < 100; i++ {
-			addr := libcommon.HexToAddress(fmt.Sprintf("%x", i))
-			m[addr] = i
-		}
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			a3(m)
-		}
-	})
-}
 
 func TestSnapshotRandom(t *testing.T) {
 	config := &quick.Config{MaxCount: 1000}
