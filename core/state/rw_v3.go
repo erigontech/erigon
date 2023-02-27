@@ -42,7 +42,8 @@ type StateV3 struct {
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
 
-	accountApplyBuffer []byte
+	// buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	applyPrevAccountBuf []byte
 }
 
 func NewStateV3() *StateV3 {
@@ -57,7 +58,7 @@ func NewStateV3() *StateV3 {
 		},
 		txsDone: atomic2.NewUint64(0),
 
-		accountApplyBuffer: make([]byte, 128),
+		applyPrevAccountBuf: make([]byte, 128),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -242,7 +243,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := rs.accountApplyBuffer[:accounts.SerialiseV3Len(original)]
+			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
 			accounts.SerialiseV3To(original, prev)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
@@ -359,7 +360,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			prev := rs.accountApplyBuffer[:accounts.SerialiseV3Len(&a)]
+			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(&a)]
 			accounts.SerialiseV3To(&a, prev)
 		}
 		a.Balance.Add(&a.Balance, &increase)
