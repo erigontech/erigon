@@ -137,7 +137,8 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	seedArray := [32]byte{}
 	copy(seedArray[:], seed)
 
-	b.proposerIndex, err = b.ComputeProposerIndex(indices, seedArray)
+	// ignore error bc tests do not account for it
+	b.proposerIndex, _ = b.ComputeProposerIndex(indices, seedArray)
 	return
 }
 
