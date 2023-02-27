@@ -467,11 +467,17 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	return nil
 }
 
-func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
-	h.walLock.RLock() // read-lock for reading fielw `w` and writing into it, write-lock for setting new `w`
-	err = h.wal.addPrevValue(key1, key2, original)
+// read-lock for reading fielw `w` and writing into it, write-lock for setting new `w`
+func (h *History) WalRLock() {
+	h.walLock.RLock()
+	h.InvertedIndex.WalRLock()
+}
+func (h *History) WalRUnlock() {
 	h.walLock.RUnlock()
-	return err
+	h.InvertedIndex.WalRUnlock()
+}
+func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
+	return h.wal.addPrevValue(key1, key2, original)
 }
 
 func (h *History) DiscardHistory() {

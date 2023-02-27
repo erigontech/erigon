@@ -389,15 +389,15 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
 }
 
-func (ii *InvertedIndex) add(key, indexKey []byte) (err error) {
-	ii.walLock.RLock()
-	err = ii.wal.add(key, indexKey)
-	ii.walLock.RUnlock()
-	return err
-}
+func (ii *InvertedIndex) WalRLock()   { ii.walLock.RLock() }
+func (ii *InvertedIndex) WalRUnlock() { ii.walLock.RUnlock() }
 
+// Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (ii *InvertedIndex) Add(key []byte) error {
-	return ii.add(key, key)
+	return ii.wal.add(key, key)
+}
+func (ii *InvertedIndex) add(key, indexKey []byte) error {
+	return ii.wal.add(key, indexKey)
 }
 
 func (ii *InvertedIndex) DiscardHistory(tmpdir string) {

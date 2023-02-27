@@ -1172,26 +1172,37 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 	}()
 }
 
+func (a *AggregatorV3) BatchHistoryWriteStart() *AggregatorV3 {
+	a.accounts.WalRLock()
+	a.storage.WalRLock()
+	a.code.WalRLock()
+	a.logAddrs.WalRLock()
+	a.logTopics.WalRLock()
+	a.tracesFrom.WalRLock()
+	a.tracesTo.WalRLock()
+	return a
+}
+func (a *AggregatorV3) BatchHistoryWriteEnd() {
+	a.accounts.WalRUnlock()
+	a.storage.WalRUnlock()
+	a.code.WalRUnlock()
+	a.logAddrs.WalRUnlock()
+	a.logTopics.WalRUnlock()
+	a.tracesFrom.WalRUnlock()
+	a.tracesTo.WalRUnlock()
+}
+
 func (a *AggregatorV3) AddAccountPrev(addr []byte, prev []byte) error {
-	if err := a.accounts.AddPrevValue(addr, nil, prev); err != nil {
-		return err
-	}
-	return nil
+	return a.accounts.AddPrevValue(addr, nil, prev)
 }
 
 func (a *AggregatorV3) AddStoragePrev(addr []byte, loc []byte, prev []byte) error {
-	if err := a.storage.AddPrevValue(addr, loc, prev); err != nil {
-		return err
-	}
-	return nil
+	return a.storage.AddPrevValue(addr, loc, prev)
 }
 
 // AddCodePrev - addr+inc => code
 func (a *AggregatorV3) AddCodePrev(addr []byte, prev []byte) error {
-	if err := a.code.AddPrevValue(addr, nil, prev); err != nil {
-		return err
-	}
-	return nil
+	return a.code.AddPrevValue(addr, nil, prev)
 }
 
 func (a *AggregatorV3) AddTraceFrom(addr []byte) error {
