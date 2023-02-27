@@ -54,14 +54,6 @@ func newAccessList() *accessList {
 	}
 }
 
-func (al *accessList) reset() {
-	al.addresses = make(map[libcommon.Address]int)
-	//for i := range al.slots {
-	//	al.slots[i] = nil
-	//}
-	al.slots = al.slots[:0]
-}
-
 // Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := newAccessList()
