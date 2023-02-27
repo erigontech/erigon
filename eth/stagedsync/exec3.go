@@ -232,13 +232,6 @@ func ExecV3(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				if txTask.BlockNum > lastBlockNum {
-					if lastBlockNum > 0 {
-						core.BlockExecutionTimer.UpdateDuration(t)
-					}
-					lastBlockNum = txTask.BlockNum
-					t = time.Now()
-				}
 				var processedTxNum, conflicts, processedBlockNum uint64
 				if err := func() error {
 					rwsLock.Lock()
@@ -254,8 +247,13 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 				repeatCount.Add(conflicts)
-				if processedBlockNum > 0 {
+				if processedBlockNum > lastBlockNum {
 					outputBlockNum.Set(processedBlockNum)
+					if lastBlockNum > 0 {
+						core.BlockExecutionTimer.UpdateDuration(t)
+					}
+					lastBlockNum = processedBlockNum
+					t = time.Now()
 				}
 				if processedTxNum > 0 {
 					outputTxNum.Store(processedTxNum)
