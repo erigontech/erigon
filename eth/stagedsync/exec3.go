@@ -248,10 +248,6 @@ func ExecV3(ctx context.Context,
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			default:
-			}
-
-			select {
 			case txTask, ok := <-resultCh:
 				if !ok {
 					return nil
@@ -260,7 +256,7 @@ func ExecV3(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				resultsSize.Add(int64(added))
+				resultsSize.Add(added)
 			}
 
 			var processedTxNum, conflicts, processedBlockNum uint64
