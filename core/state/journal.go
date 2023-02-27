@@ -281,7 +281,7 @@ func (ch accessListAddAccountChange) revert(s *IntraBlockState) {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	delete(s.accessList.addresses, *ch.address)
+	s.accessList.DeleteAddress(*ch.address)
 }
 
 func (ch accessListAddAccountChange) dirtied() *libcommon.Address {
@@ -289,21 +289,7 @@ func (ch accessListAddAccountChange) dirtied() *libcommon.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *IntraBlockState) {
-	al := s.accessList
-	idx, addrOk := al.addresses[*ch.address]
-	// There are two ways this can fail
-	if !addrOk {
-		panic("reverting slot change, address not present in list")
-	}
-	slotmap := al.slots[idx]
-	delete(slotmap, *ch.slot)
-	// If that was the last (first) slot, remove it
-	// Since additions and rollbacks are always performed in order,
-	// we can delete the item without worrying about screwing up later indices
-	if len(slotmap) == 0 {
-		al.slots = al.slots[:idx]
-		al.addresses[*ch.address] = -1
-	}
+	s.accessList.DeleteSlot(*ch.address, *ch.slot)
 }
 
 func (ch accessListAddSlotChange) dirtied() *libcommon.Address {
