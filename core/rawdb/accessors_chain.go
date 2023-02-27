@@ -22,10 +22,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"math"
 	"math/big"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 
 	"github.com/gballet/go-verkle"
 	common2 "github.com/ledgerwatch/erigon-lib/common"

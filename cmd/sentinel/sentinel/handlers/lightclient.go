@@ -44,7 +44,7 @@ func (c *ConsensusHandlers) lightClientFinalityUpdateHandler(stream network.Stre
 	}
 	defer tx.Rollback()
 	update, err := rawdb.ReadLightClientFinalityUpdate(tx)
-	if err != nil {
+	if err != nil || update == nil {
 		stream.Close()
 		return
 	}
@@ -74,7 +74,7 @@ func (c *ConsensusHandlers) lightClientOptimisticUpdateHandler(stream network.St
 	}
 	defer tx.Rollback()
 	update, err := rawdb.ReadLightClientOptimisticUpdate(tx)
-	if err != nil {
+	if err != nil || update == nil {
 		stream.Close()
 		return
 	}
