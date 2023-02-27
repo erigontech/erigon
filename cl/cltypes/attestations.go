@@ -452,6 +452,11 @@ type AttestationData struct {
 	Target          *Checkpoint
 }
 
+func (a *AttestationData) Equal(other *AttestationData) bool {
+	return a.Slot == other.Slot && a.Index == other.Index && a.BeaconBlockHash == other.BeaconBlockHash &&
+		a.Source.Equal(other.Source) && a.Target.Equal(other.Target)
+}
+
 // EncodeSSZ ssz marshals the AttestationData object
 func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
