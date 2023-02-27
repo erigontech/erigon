@@ -122,6 +122,10 @@ func (b *BeaconState) CurrentJustifiedCheckpoint() *cltypes.Checkpoint {
 	return b.currentJustifiedCheckpoint
 }
 
+func (b *BeaconState) InactivityScores() []uint64 {
+	return b.inactivityScores
+}
+
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
 	if len(b.inactivityScores) <= index {
 		return 0, InvalidValidatorIndex

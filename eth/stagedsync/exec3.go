@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -88,7 +87,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inpu
 		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
-		"inBlk", atomic.LoadUint64(&inputBlockNum),
+		"inBlk", inputBlockNum,
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
@@ -184,7 +183,8 @@ func ExecV3(ctx context.Context,
 	}
 	agg.SetTxNum(inputTxNum)
 
-	var inputBlockNum, outputBlockNum = atomic2.NewUint64(0), atomic2.NewUint64(0)
+	var outputBlockNum = syncMetrics[stages.Execution]
+	var inputBlockNum = atomic2.NewUint64(0)
 	var count uint64
 	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var resultsSize = atomic2.NewInt64(0)
@@ -268,18 +268,23 @@ func ExecV3(ctx context.Context,
 				rwsLock.Unlock()
 			}
 
+			var conflicts, processedBlockNum uint64
 			if err := func() error {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, notifyReceived, applyWorker); err != nil {
+				var err error
+				conflicts, processedBlockNum, err = processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, resultsSize, notifyReceived, applyWorker)
+				if err != nil {
 					return err
 				}
 				return nil
 			}(); err != nil {
 				return err
 			}
-
-			syncMetrics[stages.Execution].Set(outputBlockNum.Load())
+			repeatCount.Add(conflicts)
+			if processedBlockNum > 0 {
+				outputBlockNum.Set(processedBlockNum)
+			}
 		}
 		return nil
 	}
@@ -327,7 +332,7 @@ func ExecV3(ctx context.Context,
 					rwsLock.Unlock()
 
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						// too much steps in db will slow-down everything: flush and prune
@@ -374,10 +379,14 @@ func ExecV3(ctx context.Context,
 								}
 							}
 							applyWorker.ResetTx(tx)
-							if err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, outputBlockNum, repeatCount, resultsSize, func() {}, applyWorker); err != nil {
+							conflicts, processedBlockNum, err := processResultQueue(rws, outputTxNum, rs, agg, tx, triggerCount, resultsSize, func() {}, applyWorker)
+							if err != nil {
 								return err
 							}
-							syncMetrics[stages.Execution].Set(outputBlockNum.Load())
+							repeatCount.Add(conflicts)
+							if processedBlockNum > 0 {
+								outputBlockNum.Set(processedBlockNum)
+							}
 							if rws.Len() == 0 {
 								break
 							}
@@ -418,7 +427,7 @@ func ExecV3(ctx context.Context,
 						}
 						t3 = time.Since(tt)
 
-						if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+						if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 							return err
 						}
 
@@ -456,7 +465,7 @@ func ExecV3(ctx context.Context,
 			if err = agg.Flush(ctx, tx); err != nil {
 				return err
 			}
-			if err = execStage.Update(tx, outputBlockNum.Load()); err != nil {
+			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 				return err
 			}
 			//if err = execStage.Update(tx, stageProgress); err != nil {
@@ -574,14 +583,10 @@ Loop:
 				}
 			}()
 		}
+
 		rules := chainConfig.Rules(blockNum, b.Time())
 		var gasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
 
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &exec22.TxTask{
@@ -664,7 +669,7 @@ Loop:
 				}
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Inc()
-				outputBlockNum.Store(txTask.BlockNum)
+
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
@@ -674,12 +679,12 @@ Loop:
 		}
 
 		if !parallel {
-			syncMetrics[stages.Execution].Set(blockNum)
+			outputBlockNum.Set(blockNum)
 
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Load(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -700,7 +705,7 @@ Loop:
 					}
 					t3 = time.Since(tt)
 
-					if err = execStage.Update(applyTx, outputBlockNum.Load()); err != nil {
+					if err = execStage.Update(applyTx, outputBlockNum.Get()); err != nil {
 						return err
 					}
 
@@ -717,6 +722,11 @@ Loop:
 
 		if blockSnapshots.Cfg().Produce {
 			agg.BuildFilesInBackground()
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 	}
 
@@ -768,43 +778,41 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount, outputBlockNum, repeatCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) error {
-	var txTask *exec22.TxTask
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNum *atomic2.Uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount *atomic2.Uint64, resultsSize *atomic2.Int64, onSuccess func(), applyWorker *exec3.Worker) (conflicts, processedBlockNum uint64, err error) {
+	var i int
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum.Load() {
-		txTask = heap.Pop(rws).(*exec22.TxTask)
+		txTask := heap.Pop(rws).(*exec22.TxTask)
 		resultsSize.Add(-txTask.ResultsSize)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
-			repeatCount.Inc()
+			conflicts++
 
-			//rs.AddWork(txTask)
-			//repeatCount.Inc()
-			//continue
+			if i > 0 {
+				//send to re-exex
+				rs.AddWork(txTask)
+				continue
+			}
 
-			// immediately retry once
+			// resolve first conflict right here: it's faster and conflict-free
 			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
-				return txTask.Error
-				//log.Info("second fail", "blk", txTask.BlockNum, "txn", txTask.BlockNum)
-				//rs.AddWork(txTask)
-				//continue
+				return conflicts, processedBlockNum, txTask.Error
 			}
+			i++
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
-			return fmt.Errorf("StateV3.Apply: %w", err)
+			return conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 		outputTxNum.Inc()
 		onSuccess()
 		if err := rs.ApplyHistory(txTask, agg); err != nil {
-			return fmt.Errorf("StateV3.Apply: %w", err)
+			return conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		processedBlockNum = txTask.BlockNum
 	}
-	if txTask != nil {
-		outputBlockNum.Store(txTask.BlockNum)
-	}
-	return nil
+	return conflicts, processedBlockNum, nil
 }
 
 func reconstituteStep(last bool,
@@ -993,7 +1001,7 @@ func reconstituteStep(last bool,
 		}
 	}()
 
-	var inputTxNum uint64 = startTxNum
+	var inputTxNum = startTxNum
 	var b *types.Block
 	var txKey [8]byte
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
@@ -1075,6 +1083,11 @@ func reconstituteStep(last bool,
 
 		core.BlockExecutionTimer.UpdateDuration(t)
 		syncMetrics[stages.Execution].Set(bn)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	close(workCh)
 	wg.Wait()

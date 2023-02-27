@@ -24,14 +24,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -53,7 +50,6 @@ type Config struct {
 	State     *state.IntraBlockState
 	r         state.StateReader
 	w         state.StateWriter
-	kv        kv.Has
 	GetHashFn func(n uint64) libcommon.Hash
 }
 
@@ -112,7 +108,7 @@ func setDefaults(cfg *Config) {
 //
 // Execute sets up an in-memory, temporary, environment for the execution of
 // the given code. It makes sure that it's restored to its original state afterwards.
-func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.IntraBlockState, error) {
+func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBlockState, error) {
 	if cfg == nil {
 		cfg = new(Config)
 	}
@@ -123,7 +119,6 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.In
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
-		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (
@@ -162,7 +157,6 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 		defer db.Close()
 		cfg.r = state.NewDbStateReader(db)
 		cfg.w = state.NewDbStateWriter(db, 0)
-		cfg.kv = db
 		cfg.State = state.New(cfg.r)
 	}
 	var (

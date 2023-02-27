@@ -18,104 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-// BlockReader can read blocks from db and snapshots
-type BlockReader struct {
-}
-
-func NewBlockReader() *BlockReader {
-	return &BlockReader{}
-}
-
-func (back *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeight uint64) (libcommon.Hash, error) {
-	return rawdb.ReadCanonicalHash(tx, blockHeight)
-}
-
-func (back *BlockReader) Snapshots() *RoSnapshots { return nil }
-
-func (back *BlockReader) Header(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (*types.Header, error) {
-	h := rawdb.ReadHeader(tx, hash, blockHeight)
-	return h, nil
-}
-
-func (back *BlockReader) Body(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
-	body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
-	return body, txAmount, nil
-}
-
-func (back *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (body *types.Body, err error) {
-	return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
-}
-
-func (back *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
-	body, _, err := back.Body(ctx, tx, hash, blockHeight)
-	if err != nil {
-		return nil, err
-	}
-	bodyRlp, err = rlp.EncodeToBytes(body)
-	if err != nil {
-		return nil, err
-	}
-	return bodyRlp, nil
-}
-
-func (back *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (*types.Header, error) {
-	h := rawdb.ReadHeaderByNumber(tx, blockHeight)
-	return h, nil
-}
-
-func (back *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash libcommon.Hash) (*types.Header, error) {
-	return rawdb.ReadHeaderByHash(tx, hash)
-}
-
-func (back *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash libcommon.Hash, blockHeight uint64) (block *types.Block, senders []libcommon.Address, err error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	if err != nil {
-		return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
-	}
-	if canonicalHash == hash {
-		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
-		if err != nil {
-			return nil, nil, err
-		}
-		return block, senders, nil
-	}
-
-	return rawdb.NonCanonicalBlockWithSenders(tx, hash, blockHeight)
-}
-
-func (back *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash libcommon.Hash) (uint64, bool, error) {
-	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
-	if err != nil {
-		return 0, false, err
-	}
-	if n == nil {
-		return 0, false, nil
-	}
-	return *n, true, nil
-}
-func (back *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	var k [8 + 32]byte
-	binary.BigEndian.PutUint64(k[:], blockNum)
-	copy(k[8:], canonicalHash[:])
-	b, err := rawdb.ReadBodyForStorageByKey(tx, k[:])
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-
-	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
-	if err != nil {
-		return nil, err
-	}
-	return txn, nil
-}
-
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
 }
@@ -252,11 +154,12 @@ func (back *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash l
 
 // BlockReaderWithSnapshots can read blocks from db and snapshots
 type BlockReaderWithSnapshots struct {
-	sn *RoSnapshots
+	sn             *RoSnapshots
+	TransactionsV3 bool
 }
 
-func NewBlockReaderWithSnapshots(snapshots *RoSnapshots) *BlockReaderWithSnapshots {
-	return &BlockReaderWithSnapshots{sn: snapshots}
+func NewBlockReaderWithSnapshots(snapshots *RoSnapshots, transactionsV3 bool) *BlockReaderWithSnapshots {
+	return &BlockReaderWithSnapshots{sn: snapshots, TransactionsV3: transactionsV3}
 }
 
 func (back *BlockReaderWithSnapshots) Snapshots() *RoSnapshots { return back.sn }
@@ -763,7 +666,7 @@ func (back *BlockReaderWithSnapshots) TxnByIdxInBlock(ctx context.Context, tx kv
 		return nil, nil
 	}
 
-	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i))
+	txn, err = rawdb.CanonicalTxnByID(tx, b.BaseTxId+1+uint64(i), canonicalHash, back.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}

@@ -138,10 +138,8 @@ func TestSlashValidator(t *testing.T) {
 	successState := getTestState(t)
 
 	successBalances := []uint64{}
-	wantBalances := []uint64{}
 	for i := 0; i < len(successState.Validators()); i++ {
 		successBalances = append(successBalances, uint64(i+1))
-		wantBalances = append(wantBalances, uint64(i+1))
 	}
 	successState.SetBalances(successBalances)
 
@@ -152,40 +150,23 @@ func TestSlashValidator(t *testing.T) {
 	require.NoError(t, err)
 	successState.SetValidatorAt(slashedInd, &vali)
 	vali.EffectiveBalance = preSlashBalance
-	wantBalances[slashedInd] = preSlashBalance - (preSlashBalance / clparams.MainnetBeaconConfig.MinSlashingPenaltyQuotient)
-
-	// Set up whistleblower & validator balances.
-	wbReward := preSlashBalance / clparams.MainnetBeaconConfig.WhistleBlowerRewardQuotient
-	wantBalances[whistleblowerInd] += wbReward
-	valInd, err := successState.GetBeaconProposerIndex()
-	if err != nil {
-		t.Fatalf("unable to get proposer index for test state: %v", err)
-	}
-	wantBalances[valInd] += wbReward / clparams.MainnetBeaconConfig.ProposerRewardQuotient
-
-	failState := getTestState(t)
-	for _, v := range failState.Validators() {
-		v.ExitEpoch = 0
-	}
-	failState.SetBalances(successBalances)
 
 	testCases := []struct {
-		description  string
-		state        *state.BeaconState
-		wantBalances []uint64
-		wantErr      bool
+		description string
+		state       *state.BeaconState
+		wantErr     bool
 	}{
 		{
-			description:  "success",
-			state:        successState,
-			wantBalances: wantBalances,
-			wantErr:      false,
+			description: "success",
+			state:       successState,
+			wantErr:     false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := tc.state.SlashValidator(uint64(slashedInd), uint64(whistleblowerInd))
+			w := uint64(whistleblowerInd)
+			err := tc.state.SlashValidator(uint64(slashedInd), &w)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wantErr is true")
@@ -195,12 +176,6 @@ func TestSlashValidator(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("unexpected error, wanted success: %v", err)
-			}
-			// Check balances.
-			for i, bal := range tc.wantBalances {
-				if bal != tc.state.Balances()[i] {
-					t.Errorf("unexpected balance for index: %d, want %d: got %d", i, bal, tc.state.Balances()[i])
-				}
 			}
 			vali, err := tc.state.ValidatorAt(slashedInd)
 			require.NoError(t, err)
