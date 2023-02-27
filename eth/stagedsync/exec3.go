@@ -62,7 +62,7 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultsSize uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -87,6 +87,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, queueSize, doneCount, outp
 		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
 		"idxStepsInDB", fmt.Sprintf("%.2f", idxStepsAmountInDB),
+		"inBlk", inputBlockNum,
 		"step", fmt.Sprintf("%.1f", float64(outTxNum)/float64(ethconfig.HistoryV3AggregationStep)),
 		"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 	)
@@ -183,6 +184,7 @@ func ExecV3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	var outputBlockNum = syncMetrics[stages.Execution]
+	var inputBlockNum = atomic2.NewUint64(0)
 	var count uint64
 	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
 	var resultsSize = atomic2.NewInt64(0)
@@ -252,7 +254,9 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 				repeatCount.Add(conflicts)
-				outputBlockNum.Set(processedBlockNum)
+				if processedBlockNum > 0 {
+					outputBlockNum.Set(processedBlockNum)
+				}
 			}
 		}
 		return nil
@@ -301,7 +305,7 @@ func ExecV3(ctx context.Context,
 					rwsLock.Unlock()
 
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						// too much steps in db will slow-down everything: flush and prune
@@ -353,7 +357,9 @@ func ExecV3(ctx context.Context,
 								return err
 							}
 							repeatCount.Add(conflicts)
-							outputBlockNum.Set(processedBlockNum)
+							if processedBlockNum > 0 {
+								outputBlockNum.Set(processedBlockNum)
+							}
 							if rws.Len() == 0 {
 								break
 							}
@@ -501,6 +507,7 @@ func ExecV3(ctx context.Context,
 	var err error
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
+		inputBlockNum.Store(blockNum)
 		b, err = blockWithSenders(chainDb, applyTx, blockReader, blockNum)
 		if err != nil {
 			return err
@@ -650,7 +657,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, rws.Len(), uint64(queueSize), count, outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -967,7 +974,7 @@ func reconstituteStep(last bool,
 		}
 	}()
 
-	var inputTxNum uint64 = startTxNum
+	var inputTxNum = startTxNum
 	var b *types.Block
 	var txKey [8]byte
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header) {
