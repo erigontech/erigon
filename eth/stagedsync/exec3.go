@@ -223,6 +223,27 @@ func ExecV3(ctx context.Context,
 		notifyReceived := func() { rwsReceiveCond.Signal() }
 		var t time.Time
 		var lastBlockNum uint64
+		drainF := func(txTask *exec22.TxTask) (ok bool) {
+			rwsLock.Lock()
+			defer rwsLock.Unlock()
+			resultsSize.Add(txTask.ResultsSize)
+			heap.Push(rws, txTask)
+		Drain:
+			for {
+				select {
+				case txTask, ok := <-resultCh:
+					if !ok {
+						return false
+					}
+					resultsSize.Add(txTask.ResultsSize)
+					heap.Push(rws, txTask)
+				default: // we are inside mutex section, can't block here
+					break Drain
+				}
+			}
+			return true
+		}
+
 		for outputTxNum.Load() < maxTxNum {
 			select {
 			case <-ctx.Done():
@@ -235,23 +256,9 @@ func ExecV3(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				rwsLock.Lock()
-				resultsSize.Add(txTask.ResultsSize)
-				heap.Push(rws, txTask)
-			Drain:
-				for {
-					select {
-					case txTask, ok := <-resultCh:
-						if !ok {
-							break Drain
-						}
-						resultsSize.Add(txTask.ResultsSize)
-						heap.Push(rws, txTask)
-					default:
-						break Drain
-					}
+				if ok := drainF(txTask); !ok {
+					return nil
 				}
-				rwsLock.Unlock()
 			}
 
 			var processedTxNum, conflicts, processedBlockNum uint64
