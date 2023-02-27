@@ -232,19 +232,14 @@ func ExecV3(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				var processedResultSize int64
-				var processedTxNum, conflicts, processedBlockNum uint64
-				if err := func() error {
+				processedResultSize, processedTxNum, conflicts, processedBlockNum, err := func() (processedResultSize int64, processedTxNum, conflicts, processedBlockNum uint64, err error) {
 					rwsLock.Lock()
 					defer rwsLock.Unlock()
 					resultsSize.Add(txTask.ResultsSize)
 					heap.Push(rws, txTask)
-					processedResultSize, processedTxNum, conflicts, processedBlockNum, err = processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, triggerCount, notifyReceived, applyWorker)
-					if err != nil {
-						return err
-					}
-					return nil
-				}(); err != nil {
+					return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, triggerCount, notifyReceived, applyWorker)
+				}()
+				if err != nil {
 					return err
 				}
 				resultsSize.Add(-processedResultSize)
