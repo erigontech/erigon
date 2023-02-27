@@ -393,9 +393,9 @@ func ExecV3(ctx context.Context,
 						rwsReceiveCond.Signal()
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
-						// Drain results channel because read sets do not carry over
-						var drained bool
-						for !drained {
+
+					Drain: // Drain results channel because read sets do not carry over
+						for {
 							select {
 							case txTask, ok := <-resultCh:
 								if !ok {
@@ -403,7 +403,7 @@ func ExecV3(ctx context.Context,
 								}
 								rs.AddWork(txTask)
 							default:
-								drained = true
+								break Drain
 							}
 						}
 
