@@ -260,15 +260,11 @@ func ExecV3(ctx context.Context,
 			}
 
 			var processedTxNum, conflicts, processedBlockNum uint64
-			if err := func() error {
+			if err := func() (err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				var err error
 				processedTxNum, conflicts, processedBlockNum, err = processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, triggerCount, resultsSize, notifyReceived, applyWorker)
-				if err != nil {
-					return err
-				}
-				return nil
+				return err
 			}(); err != nil {
 				return err
 			}
