@@ -315,7 +315,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			}
 		}
 		var codePrev []byte
-		if codeHash == nil {
+		if codeHash != nil {
 			codePrev = rs.get(kv.Code, codeHash)
 			if codePrev == nil {
 				var err error
