@@ -825,7 +825,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 	return binary.BigEndian.Uint64(enc), nil
 }
 
-var writeListPool = &sync.Pool{
+var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
@@ -850,7 +850,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 	writeListPool.Put(v)
 }
 
-var readListPool = &sync.Pool{
+var readListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:     {},
