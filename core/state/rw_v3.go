@@ -42,8 +42,7 @@ type StateV3 struct {
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
 
-	// buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
-	applyPrevAccountBuf []byte
+	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
 func NewStateV3() *StateV3 {
