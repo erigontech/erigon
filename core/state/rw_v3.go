@@ -343,6 +343,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	defer rs.lock.Unlock()
 
 	for addr, increase := range txTask.BalanceIncreaseSet {
+		increase := increase
 		addrBytes := addr.Bytes()
 		enc0 := rs.get(kv.PlainState, addrBytes)
 		if enc0 == nil {
