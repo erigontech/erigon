@@ -387,8 +387,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 }
 
 func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
-	agg.WalRLock()
-	defer agg.WalRUnlock()
+	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
 	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
@@ -409,9 +408,7 @@ func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV
 	if dbg.DiscardHistory() {
 		return nil
 	}
-
-	agg.WalRLock()
-	defer agg.WalRUnlock()
+	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	for addrS, enc0 := range txTask.AccountPrevs {
 		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
