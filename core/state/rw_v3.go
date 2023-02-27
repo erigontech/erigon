@@ -47,20 +47,20 @@ func NewStateV3() *StateV3 {
 	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes:      map[string]*btree2.Map[string, []byte]{},
-		txsDone:      atomic2.NewUint64(0),
+		changes: map[string]*btree2.Map[string, []byte]{
+			kv.PlainState:        btree2.NewMap[string, []byte](128),
+			kv.Code:              btree2.NewMap[string, []byte](128),
+			kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
+			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
+		},
+		txsDone: atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
 func (rs *StateV3) put(table string, key, val []byte) {
-	t, ok := rs.changes[table]
-	if !ok {
-		t = btree2.NewMap[string, []byte](128)
-		rs.changes[table] = t
-	}
-	old, ok := t.Set(string(key), val)
+	old, ok := rs.changes[table].Set(string(key), val)
 	if ok {
 		rs.sizeEstimate += len(val) - len(old)
 	} else {
@@ -75,15 +75,9 @@ func (rs *StateV3) Get(table string, key []byte) []byte {
 	return v
 }
 
-func (rs *StateV3) get(table string, key []byte) []byte {
-	t, ok := rs.changes[table]
-	if !ok {
-		return nil
-	}
-	if i, ok := t.Get(*(*string)(unsafe.Pointer(&key))); ok {
-		return i
-	}
-	return nil
+func (rs *StateV3) get(table string, key []byte) (v []byte) {
+	v, _ = rs.changes[table].Get(*(*string)(unsafe.Pointer(&key)))
+	return v
 }
 
 func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
