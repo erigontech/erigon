@@ -755,7 +755,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	peerIDStr := hex.EncodeToString(peerID[:])
 
 	if !cs.logPeerInfo {
-		log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr)
+		log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr)
 		return nil
 	}
 
@@ -774,7 +774,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 		}
 	}
 
-	log.Trace(fmt.Sprintf("Sentry peer did %s", eventID), "peer", peerIDStr,
+	log.Trace("[p2p] Sentry peer did", "eventID", eventID, "peer", peerIDStr,
 		"nodeURL", nodeURL, "clientID", clientID, "capabilities", capabilities)
 	return nil
 }

@@ -52,7 +52,7 @@ type ReconState struct {
 	lock         sync.RWMutex
 	changes      map[string]*btree2.BTreeG[reconPair] // table => [] (txNum; key1; key2; val)
 	hints        map[string]*btree2.PathHint
-	sizeEstimate uint64
+	sizeEstimate int
 }
 
 func NewReconState(workCh chan *exec22.TxTask) *ReconState {
@@ -91,9 +91,9 @@ func (rs *ReconState) Put(table string, key1, key2, val []byte, txNum uint64) {
 	}
 	item := reconPair{key1: key1, key2: key2, val: val, txNum: txNum}
 	old, ok := t.SetHint(item, rs.hints[table])
-	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2)) + uint64(len(val))
+	rs.sizeEstimate += len(key1) + len(key2) + len(val)
 	if ok {
-		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
+		rs.sizeEstimate -= len(old.key1) + len(old.key2) + len(old.val)
 	}
 }
 
@@ -108,9 +108,9 @@ func (rs *ReconState) Delete(table string, key1, key2 []byte, txNum uint64) {
 	}
 	item := reconPair{key1: key1, key2: key2, val: nil, txNum: txNum}
 	old, ok := t.SetHint(item, rs.hints[table])
-	rs.sizeEstimate += btreeOverhead + uint64(len(key1)) + uint64(len(key2))
+	rs.sizeEstimate += len(key1) + len(key2)
 	if ok {
-		rs.sizeEstimate -= btreeOverhead + uint64(len(old.key1)) + uint64(len(old.key2)) + uint64(len(old.val))
+		rs.sizeEstimate -= len(old.key1) + len(old.key2) + len(old.val)
 	}
 }
 
@@ -265,5 +265,5 @@ func (rs *ReconnWork) QueueLen() int {
 func (rs *ReconState) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	return rs.sizeEstimate
+	return uint64(rs.sizeEstimate)
 }

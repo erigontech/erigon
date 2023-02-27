@@ -57,9 +57,7 @@ func TestActiveValidatorIndices(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, set, []uint64{1})
 	// Check if balances are retrieved correctly
-	totalBalance, err := testState.GetTotalActiveBalance()
-	require.NoError(t, err)
-	require.Equal(t, totalBalance, uint64(2e9))
+	require.Equal(t, testState.GetTotalActiveBalance(), uint64(2e9))
 }
 
 func TestGetBlockRoot(t *testing.T) {
@@ -201,12 +199,6 @@ func TestComputeProposerIndex(t *testing.T) {
 			indices:     []uint64{5, 6, 7, 8, 9},
 			seed:        seed,
 			expected:    7,
-		},
-		{
-			description: "zero_active_indices",
-			indices:     []uint64{},
-			seed:        seed,
-			wantErr:     true,
 		},
 		{
 			description: "active_index_out_of_range",

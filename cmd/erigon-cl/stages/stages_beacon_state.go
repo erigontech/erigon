@@ -112,8 +112,6 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 			return err
 		}
 	}
-	latestBlockHeader.Slot = endSlot
-	cfg.state.SetLatestBlockHeader(latestBlockHeader)
 
 	log.Info(fmt.Sprintf("[%s] Finished transitioning state", s.LogPrefix()), "from", fromSlot, "to", endSlot)
 	if !useExternalTx {

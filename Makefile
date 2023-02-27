@@ -28,7 +28,7 @@ CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can htt
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb,disable_libutp
+BUILD_TAGS = nosqlite,noboltdb
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false
@@ -214,7 +214,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.19.1
+GOLANG_CROSS_VERSION  ?= v1.19.5
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -228,8 +228,8 @@ release-dry-run: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate --skip-publish
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate --skip-publish
 
 .PHONY: release
 release: git-submodules
@@ -243,8 +243,8 @@ release: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--rm-dist --skip-validate
+		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--clean --skip-validate
 
 	@docker image push --all-tags thorax/erigon
 	@docker image push --all-tags ghcr.io/ledgerwatch/erigon

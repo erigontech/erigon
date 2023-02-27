@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 )
 
 func TestDefaults(t *testing.T) {
@@ -118,7 +118,7 @@ func TestCall(t *testing.T) {
 		byte(vm.RETURN),
 	})
 
-	ret, _, err := Call(address, nil, &Config{State: state, kv: tx})
+	ret, _, err := Call(address, nil, &Config{State: state})
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -151,13 +151,21 @@ func BenchmarkCall(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
+	cfg := &Config{}
+	db := olddb.NewObjectDatabase(memdb.New(""))
+	defer db.Close()
+	cfg.r = state.NewDbStateReader(db)
+	cfg.w = state.NewDbStateWriter(db, 0)
+	cfg.State = state.New(cfg.r)
 
+	cfg.State = state.New(cfg.r)
+	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			_, _, _ = Execute(code, cpurchase, nil, 0)
-			_, _, _ = Execute(code, creceived, nil, 0)
-			_, _, _ = Execute(code, refund, nil, 0)
+			_, _, _ = Execute(code, cpurchase, cfg, 0)
+			_, _, _ = Execute(code, creceived, cfg, 0)
+			_, _, _ = Execute(code, refund, cfg, 0)
 		}
 	}
 }

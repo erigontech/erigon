@@ -1,8 +1,6 @@
 package transition
 
 import (
-	"fmt"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
@@ -79,26 +77,21 @@ func (s *StateTransistor) processJustificationBitsAndFinalityAltair() error {
 	if currentEpoch <= s.beaconConfig.GenesisEpoch+1 {
 		return nil
 	}
-	previousIndices, err := s.state.GetUnslashedParticipatingIndices(int(s.beaconConfig.TimelyTargetFlagIndex), previousEpoch)
-	if err != nil {
-		return err
+	previousParticipation, currentParticipation := s.state.PreviousEpochParticipation(), s.state.CurrentEpochParticipation()
+	var previousTargetBalance, currentTargetBalance uint64
+	for i, validator := range s.state.Validators() {
+		if validator.Slashed {
+			continue
+		}
+		if validator.Active(previousEpoch) &&
+			previousParticipation[i].HasFlag(int(s.beaconConfig.TimelyTargetFlagIndex)) {
+			previousTargetBalance += validator.EffectiveBalance
+		}
+		if validator.Active(currentEpoch) &&
+			currentParticipation[i].HasFlag(int(s.beaconConfig.TimelyTargetFlagIndex)) {
+			currentTargetBalance += validator.EffectiveBalance
+		}
 	}
-	currentIndices, err := s.state.GetUnslashedParticipatingIndices(int(s.beaconConfig.TimelyTargetFlagIndex), currentEpoch)
-	if err != nil {
-		return err
-	}
-	totalActiveBalance, err := s.state.GetTotalActiveBalance()
-	if err != nil {
-		return err
-	}
-	fmt.Println(totalActiveBalance > 1000000000)
-	previousTargetBalance, err := s.state.GetTotalBalance(previousIndices)
-	if err != nil {
-		return err
-	}
-	currentTargetBalance, err := s.state.GetTotalBalance(currentIndices)
-	if err != nil {
-		return err
-	}
-	return s.weighJustificationAndFinalization(totalActiveBalance, previousTargetBalance, currentTargetBalance)
+
+	return s.weighJustificationAndFinalization(s.state.GetTotalActiveBalance(), previousTargetBalance, currentTargetBalance)
 }

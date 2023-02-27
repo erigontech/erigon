@@ -1,10 +1,10 @@
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -50,7 +50,10 @@ func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts
 }
 
 func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
-	enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, append(address.Bytes(), hexutility.EncodeTs(incarnation)...), key.Bytes(), hr.txNum)
+	acc := make([]byte, 20+8)
+	copy(acc, address.Bytes())
+	binary.BigEndian.PutUint64(acc[20:], incarnation)
+	enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, acc, key.Bytes(), hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
