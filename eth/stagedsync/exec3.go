@@ -642,8 +642,9 @@ Loop:
 			inputTxNum++
 		}
 
-		//outputBlockNum.Set(blockNum)
 		if !parallel {
+			outputBlockNum.Set(blockNum)
+
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
