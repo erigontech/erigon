@@ -9,22 +9,36 @@ import (
 )
 
 type CallTracer struct {
-	froms map[libcommon.Address]struct{}
-	tos   map[libcommon.Address]struct{}
+	froms    map[libcommon.Address]struct{}
+	tos      map[libcommon.Address]struct{}
+	zerocopy bool
 }
 
-func NewCallTracer() *CallTracer {
+func NewCallTracer(zerocopy bool) *CallTracer {
 	return &CallTracer{
-		froms: map[libcommon.Address]struct{}{},
-		tos:   map[libcommon.Address]struct{}{},
+		froms:    map[libcommon.Address]struct{}{},
+		tos:      map[libcommon.Address]struct{}{},
+		zerocopy: zerocopy,
 	}
 }
 func (ct *CallTracer) Reset() {
 	maps.Clear(ct.froms)
 	maps.Clear(ct.tos)
 }
-func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return maps.Clone(ct.froms) }
-func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return maps.Clone(ct.tos) }
+func (ct *CallTracer) Froms() map[libcommon.Address]struct{} {
+	if ct.zerocopy {
+		return ct.froms
+	} else {
+		return maps.Clone(ct.froms)
+	}
+}
+func (ct *CallTracer) Tos() map[libcommon.Address]struct{} {
+	if ct.zerocopy {
+		return ct.froms
+	} else {
+		return maps.Clone(ct.froms)
+	}
+}
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
