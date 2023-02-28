@@ -3,6 +3,7 @@ package exec3
 import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -19,11 +20,11 @@ func NewCallTracer() *CallTracer {
 	}
 }
 func (ct *CallTracer) Reset() {
-	ct.froms = map[libcommon.Address]struct{}{}
-	ct.tos = map[libcommon.Address]struct{}{}
+	maps.Clear(ct.froms)
+	maps.Clear(ct.tos)
 }
-func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return ct.froms }
-func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
+func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return maps.Clone(ct.froms) }
+func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return maps.Clone(ct.tos) }
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
 func (ct *CallTracer) CaptureTxEnd(restGas uint64)    {}
