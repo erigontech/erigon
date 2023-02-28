@@ -601,9 +601,7 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 		rs:           rs,
 		writeLists:   newWriteList(),
 		accountPrevs: map[string][]byte{},
-		accountDels:  map[string]*accounts.Account{},
 		storagePrevs: map[string][]byte{},
-		codePrevs:    map[string]uint64{},
 	}
 }
 
@@ -614,9 +612,9 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = map[string][]byte{}
-	w.accountDels = map[string]*accounts.Account{}
+	w.accountDels = nil
 	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string]uint64{}
+	w.codePrevs = nil
 }
 
 func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
@@ -651,6 +649,10 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(addressBytes, incarnation))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHashBytes)
 	}
+
+	if w.codePrevs == nil {
+		w.codePrevs = map[string]uint64{}
+	}
 	w.codePrevs[string(addressBytes)] = incarnation
 	return nil
 }
@@ -666,6 +668,9 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
 	if original.Initialised {
+		if w.accountDels == nil {
+			w.accountDels = map[string]*accounts.Account{}
+		}
 		w.accountDels[string(addressBytes)] = original
 	}
 	return nil
