@@ -29,6 +29,30 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 )
 
+var aaa, bbb int
+
+func aa() {
+	defer func() { aaa++ }()
+}
+func incB() {
+	bbb++
+}
+func bb() {
+	defer incB()
+}
+func BenchmarkName(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			aa()
+		}
+	})
+	b.Run("b", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			bb()
+		}
+	})
+}
+
 // precompiledTest defines the input/output pairs for precompiled contract tests.
 type precompiledTest struct {
 	Input, Expected string

@@ -160,6 +160,8 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	}
 }
 
+func (in *EVMInterpreter) decrementDepth() { in.depth-- }
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -169,7 +171,7 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
 	// Increment the call depth which is restricted to 1024
 	in.depth++
-	defer func() { in.depth-- }()
+	defer in.decrementDepth()
 
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This makes also sure that the readOnly flag isn't removed for child calls.
@@ -212,17 +214,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
 
-	if in.cfg.Debug {
-		defer func() {
-			if err != nil {
-				if !logged {
-					in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-				} else {
-					in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
-				}
-			}
-		}()
-	}
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -298,6 +289,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
+	if in.cfg.Debug && err != nil {
+		if !logged {
+			in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+		} else {
+			in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, err)
+		}
+	}
 	return res, err
 }
 
@@ -306,14 +304,15 @@ func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
 
+func (vm *VM) disableReadonly() { vm.readOnly = false }
+func (vm *VM) noop()            {}
+
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {
 		vm.readOnly = true
-		return func() {
-			vm.readOnly = false
-		}
+		return vm.disableReadonly
 	}
-	return func() {}
+	return vm.noop
 }
 
 func (vm *VM) getReadonly() bool {
