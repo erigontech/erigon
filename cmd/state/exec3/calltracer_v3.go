@@ -28,16 +28,14 @@ func (ct *CallTracer) Reset() {
 func (ct *CallTracer) Froms() map[libcommon.Address]struct{} {
 	if ct.zerocopy {
 		return ct.froms
-	} else {
-		return maps.Clone(ct.froms)
 	}
+	return maps.Clone(ct.froms)
 }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{} {
 	if ct.zerocopy {
 		return ct.tos
-	} else {
-		return maps.Clone(ct.tos)
 	}
+	return maps.Clone(ct.tos)
 }
 
 func (ct *CallTracer) CaptureTxStart(gasLimit uint64) {}
