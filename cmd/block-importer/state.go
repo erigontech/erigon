@@ -175,7 +175,7 @@ func (state *State) BlockNum() uint64 {
 // Returns the max ETH balance to init a owner account
 func maxBalance() *big.Int {
 	var bytes [32]uint8
-	for i, _ := range bytes {
+	for i := range bytes {
 		bytes[i] = 255
 	}
 
