@@ -3,7 +3,6 @@ package exec3
 import (
 	"context"
 	"math/big"
-	"sort"
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -252,11 +251,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			}
 		}
 		txTask.ResultsSize = int64(size)
-		if rw.background {
-			for _, set := range txTask.WriteLists {
-				sort.Sort(set)
-			}
-		}
+		//if rw.background {
+		//	for _, set := range txTask.WriteLists {
+		//		sort.Sort(set)
+		//	}
+		//}
 	}
 }
 
