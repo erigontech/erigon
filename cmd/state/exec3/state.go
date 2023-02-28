@@ -53,8 +53,6 @@ type Worker struct {
 }
 
 func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
-	zeroCopyCallTracer := !background
-
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
