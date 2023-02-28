@@ -20,13 +20,19 @@ func NewCallTracer(zerocopy bool) *CallTracer {
 	}
 }
 func (ct *CallTracer) Reset() {
-	ct.froms = map[libcommon.Address]struct{}{}
-	ct.tos = map[libcommon.Address]struct{}{}
+	ct.froms = nil
+	ct.tos = nil
 }
 func (ct *CallTracer) Froms() map[libcommon.Address]struct{} {
+	if ct.froms == nil {
+		ct.froms = map[libcommon.Address]struct{}{}
+	}
 	return ct.froms
 }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{} {
+	if ct.tos == nil {
+		ct.tos = map[libcommon.Address]struct{}{}
+	}
 	return ct.tos
 }
 
