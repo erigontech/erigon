@@ -24,6 +24,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -87,6 +88,10 @@ func (obj *Withdrawal) EncodeSSZ() []byte {
 	return buf
 }
 
+func (obj *Withdrawal) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return obj.DecodeSSZ(buf)
+}
+
 func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
@@ -141,6 +146,10 @@ func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
+}
+
+func (*Withdrawal) Clone() clonable.Clonable {
+	return &Withdrawal{}
 }
 
 // field type overrides for gencodec
