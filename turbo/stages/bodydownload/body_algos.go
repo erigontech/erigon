@@ -21,6 +21,7 @@ import (
 )
 
 const BlockBufferSize = 128
+const MaxOutstandingBodyRequests = 64
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
@@ -75,7 +76,11 @@ func (bd *BodyDownload) RequestMoreBodies(tx kv.RwTx, blockReader services.FullB
 	blockNums := make([]uint64, 0, BlockBufferSize)
 	hashes := make([]libcommon.Hash, 0, BlockBufferSize)
 
-	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < bd.maxProgress; blockNum++ {
+	maxBlockNum := bd.maxProgress
+	if maxBlockNum-bd.requestedLow > BlockBufferSize*MaxOutstandingBodyRequests {
+		maxBlockNum = bd.requestedLow + BlockBufferSize*MaxOutstandingBodyRequests
+	}
+	for blockNum := bd.requestedLow; len(blockNums) < BlockBufferSize && blockNum < maxBlockNum; blockNum++ {
 		if bd.delivered.Contains(blockNum) {
 			// Already delivered, no need to request
 			continue
