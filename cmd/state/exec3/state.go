@@ -70,7 +70,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		callTracer:  NewCallTracer(),
+		callTracer:  NewCallTracer(!background),
 		taskGasPool: new(core.GasPool),
 	}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {

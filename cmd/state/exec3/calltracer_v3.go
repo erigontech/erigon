@@ -34,9 +34,9 @@ func (ct *CallTracer) Froms() map[libcommon.Address]struct{} {
 }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{} {
 	if ct.zerocopy {
-		return ct.froms
+		return ct.tos
 	} else {
-		return maps.Clone(ct.froms)
+		return maps.Clone(ct.tos)
 	}
 }
 
