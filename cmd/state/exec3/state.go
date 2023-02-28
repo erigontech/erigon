@@ -217,8 +217,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
-			txTask.TraceFroms = rw.callTracer.froms
-			txTask.TraceTos = rw.callTracer.tos
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
 		}
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
