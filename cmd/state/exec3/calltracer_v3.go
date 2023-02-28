@@ -18,6 +18,10 @@ func NewCallTracer() *CallTracer {
 		tos:   map[libcommon.Address]struct{}{},
 	}
 }
+func (ct *CallTracer) Reset() {
+	ct.froms = map[libcommon.Address]struct{}{}
+	ct.tos = map[libcommon.Address]struct{}{}
+}
 func (ct *CallTracer) Froms() map[libcommon.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[libcommon.Address]struct{}   { return ct.tos }
 
