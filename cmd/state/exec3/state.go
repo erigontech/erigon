@@ -251,11 +251,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			}
 		}
 		txTask.ResultsSize = int64(size)
-		//if rw.background {
-		//	for _, set := range txTask.WriteLists {
-		//		sort.Sort(set)
-		//	}
-		//}
 	}
 }
 
