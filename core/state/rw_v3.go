@@ -601,7 +601,6 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 		rs:           rs,
 		writeLists:   newWriteList(),
 		accountPrevs: map[string][]byte{},
-		storagePrevs: map[string][]byte{},
 	}
 }
 
@@ -613,7 +612,7 @@ func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
 	w.accountPrevs = map[string][]byte{}
 	w.accountDels = nil
-	w.storagePrevs = map[string][]byte{}
+	w.storagePrevs = nil
 	w.codePrevs = nil
 }
 
@@ -684,6 +683,9 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+	if w.storagePrevs == nil {
+		w.storagePrevs = map[string][]byte{}
+	}
 	w.storagePrevs[string(composite)] = original.Bytes()
 	return nil
 }
