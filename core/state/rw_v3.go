@@ -598,9 +598,8 @@ type StateWriterV3 struct {
 
 func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 	return &StateWriterV3{
-		rs:           rs,
-		writeLists:   newWriteList(),
-		accountPrevs: map[string][]byte{},
+		rs:         rs,
+		writeLists: newWriteList(),
 	}
 }
 
@@ -610,7 +609,7 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	w.accountPrevs = map[string][]byte{}
+	w.accountPrevs = nil
 	w.accountDels = nil
 	w.storagePrevs = nil
 	w.codePrevs = nil
@@ -634,6 +633,9 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	var prev []byte
 	if original.Initialised {
 		prev = accounts.SerialiseV3(original)
+	}
+	if w.accountPrevs == nil {
+		w.accountPrevs = map[string][]byte{}
 	}
 	w.accountPrevs[string(addressBytes)] = prev
 	return nil
