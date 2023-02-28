@@ -14,14 +14,11 @@ type CallTracer struct {
 
 func NewCallTracer(zerocopy bool) *CallTracer {
 	return &CallTracer{
-		froms:    map[libcommon.Address]struct{}{},
-		tos:      map[libcommon.Address]struct{}{},
 		zerocopy: zerocopy,
 	}
 }
 func (ct *CallTracer) Reset() {
-	ct.froms = nil
-	ct.tos = nil
+	ct.froms, ct.tos = nil, nil
 }
 func (ct *CallTracer) Froms() map[libcommon.Address]struct{} {
 	return ct.froms
