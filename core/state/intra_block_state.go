@@ -139,6 +139,9 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 }
 
 func (sdb *IntraBlockState) GetLogs(hash libcommon.Hash) []*types.Log {
+	if sdb.logs == nil {
+		return nil
+	}
 	return sdb.logs[hash]
 }
 
