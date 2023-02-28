@@ -7,6 +7,7 @@ import (
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -127,6 +128,8 @@ func APIList(db kv.RoDB, borDb kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.
 				Service:   OtterscanAPI(otsImpl),
 				Version:   "1.0",
 			})
+		case "clique":
+			list = append(list, clique.NewCliqueAPI(db, engine))
 		}
 	}
 
