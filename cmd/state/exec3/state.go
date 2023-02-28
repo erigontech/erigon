@@ -191,7 +191,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		txHash := txTask.Tx.Hash()
 		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
 		ct := NewCallTracer()
-		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		vmConfig := vm.Config{Debug: false, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
