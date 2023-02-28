@@ -169,6 +169,11 @@ func (in *EVMInterpreter) decrementDepth() { in.depth-- }
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
+	// Don't bother with the execution if there's no code.
+	if len(contract.Code) == 0 {
+		return nil, nil
+	}
+
 	// Increment the call depth which is restricted to 1024
 	in.depth++
 	defer in.decrementDepth()
@@ -181,11 +186,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Reset the previous call's return data. It's unimportant to preserve the old buffer
 	// as every returning call will return new data anyway.
 	in.returnData = nil
-
-	// Don't bother with the execution if there's no code.
-	if len(contract.Code) == 0 {
-		return nil, nil
-	}
 
 	var (
 		op          OpCode        // current opcode
