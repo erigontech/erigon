@@ -61,8 +61,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriter22(rs),
-		stateReader: state.NewStateReader22(rs),
+		stateWriter: state.NewStateWriterV3(rs),
+		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
 		ctx:      ctx,

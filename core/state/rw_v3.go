@@ -596,7 +596,7 @@ type StateWriterV3 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriter22(rs *StateV3) *StateWriterV3 {
+func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 	return &StateWriterV3{
 		rs:           rs,
 		writeLists:   newWriteList(),
@@ -698,7 +698,7 @@ type StateReaderV3 struct {
 	readLists       map[string]*exec22.KvList
 }
 
-func NewStateReader22(rs *StateV3) *StateReaderV3 {
+func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
 		rs:        rs,
 		readLists: newReadList(),
