@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"runtime"
 	"time"
@@ -22,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
-const requestLoopCutOff int = 1
+const requestLoopCutOff int = 5
 
 type BodiesCfg struct {
 	db              kv.RwDB
@@ -154,6 +155,15 @@ func BodiesForward(
 			d3 += time.Since(start)
 		}
 
+		if req != nil {
+			deliveryCount, _ := cfg.bd.DeliveryCounts()
+			peerHex := hex.EncodeToString(peer[:])
+			log.Info("BodyRequest", "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
+				"peer", peerHex[0:8], "deliveryCount", deliveryCount,
+				"nextProcessingCount", cfg.bd.NextProcessingCount(),
+			)
+		}
+
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
 		// having some time out so requesting again and cycling like that forever.  We'll cap it
 		// and break the loop so we can see if there are any records to actually process further down
@@ -279,6 +289,7 @@ func BodiesForward(
 				noProgressCount = 0 // Reset, there was progress
 			}
 			logDownloadingBodies(logPrefix, bodyProgress, headerProgress-requestedLow, totalDelivered, prevDeliveredCount, deliveredCount, prevWastedCount, wastedCount, cfg.bd.BodyCacheSize())
+			cfg.bd.PrintProgressBitmap()
 			prevProgress = bodyProgress
 			prevDeliveredCount = deliveredCount
 			prevWastedCount = wastedCount

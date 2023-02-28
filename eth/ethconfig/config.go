@@ -74,7 +74,7 @@ var Defaults = Config{
 		ExecWorkerCount:            2,
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
-		BodyDownloadTimeoutSeconds: 30,
+		BodyDownloadTimeoutSeconds: 20,
 	},
 	Ethash: ethash.Config{
 		CachesInMem:      2,

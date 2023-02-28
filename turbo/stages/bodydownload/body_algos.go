@@ -23,6 +23,27 @@ import (
 const BlockBufferSize = 128
 const MaxOutstandingBodyRequests = 64
 
+func (bd *BodyDownload) PrintProgressBitmap() {
+	curr := bd.requestedLow
+	limit := bd.delivered.Maximum()
+	pos := 0
+	var buf bytes.Buffer
+	for curr <= limit {
+		if pos%64 == 0 {
+			buf.WriteString("\n")
+		}
+
+		if bd.delivered.Contains(curr) {
+			buf.WriteString("*")
+		} else {
+			buf.WriteString(".")
+		}
+		pos++
+		curr++
+	}
+	fmt.Println(buf.String())
+}
+
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
