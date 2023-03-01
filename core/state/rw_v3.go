@@ -41,8 +41,6 @@ type StateV3 struct {
 	sizeEstimate int
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
-
-	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
 func NewStateV3() *StateV3 {
@@ -56,8 +54,6 @@ func NewStateV3() *StateV3 {
 			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
 		},
 		txsDone: atomic2.NewUint64(0),
-
-		applyPrevAccountBuf: make([]byte, 128),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -242,8 +238,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
-			accounts.SerialiseV3To(original, prev)
+			prev := accounts.SerialiseV3(original)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
@@ -341,7 +336,6 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	var a accounts.Account
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
@@ -353,14 +347,13 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 				return err
 			}
 		}
-		a.Reset()
+		var a accounts.Account
 		if err := a.DecodeForStorage(enc0); err != nil {
 			return err
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(&a)]
-			accounts.SerialiseV3To(&a, prev)
+			enc0 = accounts.SerialiseV3(&a)
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
