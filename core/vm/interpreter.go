@@ -316,9 +316,11 @@ func (vm *VM) noop()            {}
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {
 		vm.readOnly = true
-		return vm.disableReadonly
+		return func() {
+			vm.readOnly = false
+		}
 	}
-	return vm.noop
+	return func() {}
 }
 
 func (vm *VM) getReadonly() bool {

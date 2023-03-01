@@ -338,12 +338,20 @@ func (c *codeAndHash) Hash() libcommon.Hash {
 func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
+	var gasConsumption uint64
 	depth := evm.interpreter.Depth()
+
 	if evm.config.Debug {
 		if depth == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
+			}()
 		} else {
 			evm.config.Tracer.CaptureEnter(typ, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			defer func() {
+				evm.config.Tracer.CaptureExit(ret, gasConsumption, err)
+			}()
 		}
 	}
 
