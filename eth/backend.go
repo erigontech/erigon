@@ -579,7 +579,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		lc, err := lightclient.NewLightClient(ctx, memdb.New(tmpdir), genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
+		lc, err := lightclient.NewLightClient(ctx, memdb.New(tmpdir), genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, true)
 		if err != nil {
 			return nil, err
 		}

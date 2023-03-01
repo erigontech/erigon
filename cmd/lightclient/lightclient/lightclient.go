@@ -92,10 +92,11 @@ func (l *LightClient) Start() {
 		return
 	}
 	defer tx.Rollback()
-	logPeers := time.NewTicker(time.Minute)
+	logPeers := time.NewTicker(30 * time.Second)
 
 	updateStatusSentinel := time.NewTicker(2 * time.Minute)
 	go l.chainTip.StartLoop()
+	var numUpdates int64
 	for {
 		start := time.Now()
 		var (
@@ -142,6 +143,7 @@ func (l *LightClient) Start() {
 			}
 		}
 
+		numUpdates += int64(len(updates))
 		// Push updates
 		for _, update := range updates {
 			err := l.processLightClientUpdate(update)
@@ -218,7 +220,7 @@ func (l *LightClient) Start() {
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
-			log.Info("[LightClient] P2P", "peers", peers)
+			log.Info("[LightClient] P2P", "peers", peers, "highestSeen", l.highestSeen, "numUpdates", numUpdates)
 		case <-updateStatusSentinel.C:
 			if err := l.updateStatus(); err != nil {
 				if errors.Is(err, context.Canceled) {
