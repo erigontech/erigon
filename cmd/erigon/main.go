@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -32,6 +33,15 @@ func main() {
 		log.Error("catch panic", "err", panicResult, "stack", dbg.Stack())
 		os.Exit(1)
 	}()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c)
+	go func() {
+		for s := range c {
+			log.Warn("Got signal", "signal", s.String())
+		}
+	}()
+	log.Info("Signal listener is up")
 
 	app := erigonapp.MakeApp(runErigon, erigoncli.DefaultFlags)
 	if err := app.Run(os.Args); err != nil {
