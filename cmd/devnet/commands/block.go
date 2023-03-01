@@ -75,7 +75,7 @@ func callSendTxWithDynamicFee(toAddr, fromAddr string) ([]*libcommon.Hash, error
 		fmt.Printf("failed SendManyTransactions(higherThanBaseFeeTxs): %s\n", err)
 		return nil, err
 	}
-	
+
 	services.CheckTxPoolContent(2, 0)
 
 	hashmap := make(map[libcommon.Hash]bool)
