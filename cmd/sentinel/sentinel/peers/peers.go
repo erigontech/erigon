@@ -49,7 +49,7 @@ type Peers struct {
 }
 
 func New(host host.Host) *Peers {
-	badPeers, err := lru2.New[peer.ID, struct{}](maxBadPeers)
+	badPeers, err := lru2.New[peer.ID, int](maxBadPeers)
 	if err != nil {
 		panic(err)
 	}
