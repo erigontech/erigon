@@ -113,8 +113,7 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *
 
 	r := bytes.NewReader(data)
 	var forkDigest [4]byte
-	// TODO(issues/5884): assert the fork digest matches the expectation for
-	// a specific configuration.
+
 	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
@@ -129,14 +128,14 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	pos := 4 + bytesCount
-	if encodedLn != uint64(objSize) || len(list) != int(count) {
+	if len(list) != int(count) {
 		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
 	}
 
 	sr := snappy.NewReader(r)
 	for i := 0; i < int(count); i++ {
 		var n int
-		raw := make([]byte, objSize)
+		raw := make([]byte, encodedLn)
 		if n, err = sr.Read(raw); err != nil {
 			return fmt.Errorf("readPacket: %w", err)
 		}

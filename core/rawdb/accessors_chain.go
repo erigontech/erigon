@@ -770,7 +770,11 @@ func MakeBodiesCanonical(tx kv.RwTx, from uint64, ctx context.Context, logPrefix
 		if err := rlp.DecodeBytes(data, bodyForStorage); err != nil {
 			return err
 		}
-		newBaseId, err := tx.IncrementSequence(kv.EthTx, uint64(bodyForStorage.TxAmount))
+		ethTx := kv.EthTx
+		if transactionsV3 {
+			ethTx = kv.EthTxV3
+		}
+		newBaseId, err := tx.IncrementSequence(ethTx, uint64(bodyForStorage.TxAmount))
 		if err != nil {
 			return err
 		}
