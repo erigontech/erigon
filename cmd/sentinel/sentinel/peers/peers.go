@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,26 +40,26 @@ type Peer struct {
 }
 
 type Peers struct {
-	badPeers   *lru.Cache // Keep track of bad peers
-	penalties  *lru.Cache // Keep track on how many penalties a peer accumulated, PeerId => penalties
-	peerRecord *lru.Cache // Keep track of our peer statuses
+	badPeers   *lru2.Cache[peer.ID, int]  // Keep track of bad peers
+	penalties  *lru2.Cache[peer.ID, int]  // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	peerRecord *lru2.Cache[peer.ID, Peer] // Keep track of our peer statuses
 	host       host.Host
 
 	mu sync.Mutex
 }
 
 func New(host host.Host) *Peers {
-	badPeers, err := lru.New(maxBadPeers)
+	badPeers, err := lru2.New[peer.ID, int](maxBadPeers)
 	if err != nil {
 		panic(err)
 	}
 
-	penalties, err := lru.New(maxBadPeers)
+	penalties, err := lru2.New[peer.ID, int](maxBadPeers)
 	if err != nil {
 		panic(err)
 	}
 
-	peerRecord, err := lru.New(maxPeerRecordSize)
+	peerRecord, err := lru2.New[peer.ID, Peer](maxPeerRecordSize)
 	if err != nil {
 		panic(err)
 	}
@@ -76,12 +76,12 @@ func (p *Peers) IsBadPeer(pid peer.ID) bool {
 }
 
 func (p *Peers) Penalize(pid peer.ID) {
-	penaltyInterface, has := p.penalties.Get(pid)
+	penalties, has := p.penalties.Get(pid)
 	if !has {
 		p.penalties.Add(pid, 1)
 		return
 	}
-	penalties := penaltyInterface.(int) + 1
+	penalties++
 
 	p.penalties.Add(pid, penalties)
 	// Drop peer and delete the map element.
@@ -92,11 +92,11 @@ func (p *Peers) Penalize(pid peer.ID) {
 }
 
 func (p *Peers) Forgive(pid peer.ID) {
-	penaltyInterface, has := p.penalties.Get(pid)
+	penalties, has := p.penalties.Get(pid)
 	if !has {
 		return
 	}
-	penalties := penaltyInterface.(int) - 1
+	penalties--
 	if penalties < 0 {
 		penalties = 0
 	}
@@ -105,7 +105,7 @@ func (p *Peers) Forgive(pid peer.ID) {
 
 func (p *Peers) BanBadPeer(pid peer.ID) {
 	p.DisconnectPeer(pid)
-	p.badPeers.Add(pid, []byte{0})
+	p.badPeers.Add(pid, 1)
 	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", pid)
 }
 
@@ -130,7 +130,7 @@ func (p *Peers) IsPeerAvaiable(pid peer.ID) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	peer, ok := p.peerRecord.Get(pid)
-	return !ok || (!peer.(Peer).busy && time.Since(peer.(Peer).lastQueried) >= reqRetryTime)
+	return !ok || (!peer.busy && time.Since(peer.lastQueried) >= reqRetryTime)
 }
 
 // PeerFinishRequest signals that the peer is done doing a request.
