@@ -40,9 +40,9 @@ type Peer struct {
 }
 
 type Peers struct {
-	badPeers   *lru2.Cache[peer.ID, struct{}] // Keep track of bad peers
-	penalties  *lru2.Cache[peer.ID, int]      // Keep track on how many penalties a peer accumulated, PeerId => penalties
-	peerRecord *lru2.Cache[peer.ID, Peer]     // Keep track of our peer statuses
+	badPeers   *lru2.Cache[peer.ID, int]  // Keep track of bad peers
+	penalties  *lru2.Cache[peer.ID, int]  // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	peerRecord *lru2.Cache[peer.ID, Peer] // Keep track of our peer statuses
 	host       host.Host
 
 	mu sync.Mutex
@@ -105,7 +105,7 @@ func (p *Peers) Forgive(pid peer.ID) {
 
 func (p *Peers) BanBadPeer(pid peer.ID) {
 	p.DisconnectPeer(pid)
-	p.badPeers.Add(pid, struct{}{})
+	p.badPeers.Add(pid, 1)
 	log.Debug("[Sentinel Peers] bad peers has been banned", "peer-id", pid)
 }
 
