@@ -90,15 +90,20 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	if err := tx.ForEach(kv.BlockBody, hexutility.EncodeTs(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
+	ethtx := kv.EthTx
+	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
+	if transactionV3 {
+		ethtx = kv.EthTxV3
+	}
 
 	if err := clearTables(context.Background(), db, tx,
 		kv.NonCanonicalTxs,
-		kv.EthTx,
+		ethtx,
 		kv.MaxTxNum,
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, ethtx, 0); err != nil {
 		return err
 	}
 	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {

@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
@@ -105,7 +105,12 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		if err := tx.ClearBucket(kv.BlockBody); err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.EthTx); err != nil {
+		ethTx := kv.EthTx
+		transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
+		if transactionsV3 {
+			ethTx = kv.EthTxV3
+		}
+		if err := tx.ClearBucket(ethTx); err != nil {
 			return err
 		}
 		if err := tx.ClearBucket(kv.Sequence); err != nil {
