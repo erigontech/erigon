@@ -45,6 +45,9 @@ type Worker struct {
 	isPoSA   bool
 	posa     consensus.PoSA
 
+	callTracer  *CallTracer
+	taskGasPool *core.GasPool
+
 	evm *vm.EVM
 	ibs *state.IntraBlockState
 }
@@ -56,8 +59,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriter22(rs),
-		stateReader: state.NewStateReader22(rs),
+		stateWriter: state.NewStateWriterV3(rs),
+		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
 		ctx:      ctx,
@@ -66,7 +69,9 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		resultCh: resultCh,
 		engine:   engine,
 
-		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		callTracer:  NewCallTracer(),
+		taskGasPool: new(core.GasPool),
 	}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
@@ -189,9 +194,9 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			}
 		}
 		txHash := txTask.Tx.Hash()
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		ct := NewCallTracer()
-		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		rw.taskGasPool.Reset(txTask.Tx.GetGas())
+		rw.callTracer.Reset()
+		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
@@ -203,7 +208,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm
 
-		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
@@ -212,8 +217,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
-			txTask.TraceFroms = ct.froms
-			txTask.TraceTos = ct.tos
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
 		}
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
