@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -72,7 +71,6 @@ type InvertedIndex struct {
 	txNum      uint64
 	txNumBytes [8]byte
 	wal        *invertedIndexWAL
-	walLock    sync.RWMutex
 }
 
 func NewInvertedIndex(
@@ -389,9 +387,6 @@ func (ii *InvertedIndex) SetTxNum(txNum uint64) {
 	binary.BigEndian.PutUint64(ii.txNumBytes[:], ii.txNum)
 }
 
-func (ii *InvertedIndex) WalRLock()   { ii.walLock.RLock() }
-func (ii *InvertedIndex) WalRUnlock() { ii.walLock.RUnlock() }
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
 func (ii *InvertedIndex) Add(key []byte) error {
 	return ii.wal.add(key, key)
@@ -401,25 +396,17 @@ func (ii *InvertedIndex) add(key, indexKey []byte) error {
 }
 
 func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
-	ii.walLock.Lock()
-	defer ii.walLock.Unlock()
 	ii.wal = ii.newWriter(tmpdir, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
-	ii.walLock.Lock()
-	defer ii.walLock.Unlock()
 	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRam > 0, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
-	ii.walLock.Lock()
-	defer ii.walLock.Unlock()
 	ii.wal.close()
 	ii.wal = nil
 }
 
 func (ii *InvertedIndex) Rotate() *invertedIndexWAL {
-	ii.walLock.Lock()
-	defer ii.walLock.Unlock()
 	if ii.wal != nil {
 		ii.wal.index, ii.wal.indexFlushing = ii.wal.indexFlushing, ii.wal.index
 		ii.wal.indexKeys, ii.wal.indexKeysFlushing = ii.wal.indexKeysFlushing, ii.wal.indexKeys

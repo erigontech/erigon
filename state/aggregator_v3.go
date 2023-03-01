@@ -72,6 +72,7 @@ type AggregatorV3 struct {
 	wg                    sync.WaitGroup
 
 	onFreeze OnFreezeFunc
+	walLock  sync.RWMutex
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
@@ -683,6 +684,20 @@ func (a *AggregatorV3) DiscardHistory() *AggregatorV3 {
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
 func (a *AggregatorV3) StartWrites() *AggregatorV3 {
+	a.walLock.Lock()
+	defer a.walLock.Unlock()
+	a.accounts.StartWrites()
+	a.storage.StartWrites()
+	a.code.StartWrites()
+	a.logAddrs.StartWrites()
+	a.logTopics.StartWrites()
+	a.tracesFrom.StartWrites()
+	a.tracesTo.StartWrites()
+	return a
+}
+func (a *AggregatorV3) StartUnbufferedWrites() *AggregatorV3 {
+	a.walLock.Lock()
+	defer a.walLock.Unlock()
 	a.accounts.StartWrites()
 	a.storage.StartWrites()
 	a.code.StartWrites()
@@ -693,6 +708,8 @@ func (a *AggregatorV3) StartWrites() *AggregatorV3 {
 	return a
 }
 func (a *AggregatorV3) FinishWrites() {
+	a.walLock.Lock()
+	defer a.walLock.Unlock()
 	a.accounts.FinishWrites()
 	a.storage.FinishWrites()
 	a.code.FinishWrites()
@@ -707,6 +724,7 @@ type flusher interface {
 }
 
 func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
+	a.walLock.Lock()
 	flushers := []flusher{
 		a.accounts.Rotate(),
 		a.storage.Rotate(),
@@ -716,6 +734,7 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 		a.tracesFrom.Rotate(),
 		a.tracesTo.Rotate(),
 	}
+	a.walLock.Unlock()
 	defer func(t time.Time) { log.Debug("[snapshots] history flush", "took", time.Since(t)) }(time.Now())
 	for _, f := range flushers {
 		if err := f.Flush(ctx, tx); err != nil {
@@ -1173,23 +1192,11 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 }
 
 func (a *AggregatorV3) BatchHistoryWriteStart() *AggregatorV3 {
-	a.accounts.WalRLock()
-	a.storage.WalRLock()
-	a.code.WalRLock()
-	a.logAddrs.WalRLock()
-	a.logTopics.WalRLock()
-	a.tracesFrom.WalRLock()
-	a.tracesTo.WalRLock()
+	a.walLock.RLock()
 	return a
 }
 func (a *AggregatorV3) BatchHistoryWriteEnd() {
-	a.accounts.WalRUnlock()
-	a.storage.WalRUnlock()
-	a.code.WalRUnlock()
-	a.logAddrs.WalRUnlock()
-	a.logTopics.WalRUnlock()
-	a.tracesFrom.WalRUnlock()
-	a.tracesTo.WalRUnlock()
+	a.walLock.RUnlock()
 }
 
 func (a *AggregatorV3) AddAccountPrev(addr []byte, prev []byte) error {

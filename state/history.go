@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -66,8 +65,7 @@ type History struct {
 	compressVals            bool
 	integrityFileExtensions []string
 
-	wal     *historyWAL
-	walLock sync.RWMutex
+	wal *historyWAL
 }
 
 func NewHistory(
@@ -467,42 +465,25 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	return nil
 }
 
-// read-lock for reading fielw `w` and writing into it, write-lock for setting new `w`
-func (h *History) WalRLock() {
-	h.walLock.RLock()
-	h.InvertedIndex.WalRLock()
-}
-func (h *History) WalRUnlock() {
-	h.walLock.RUnlock()
-	h.InvertedIndex.WalRUnlock()
-}
 func (h *History) AddPrevValue(key1, key2, original []byte) (err error) {
 	return h.wal.addPrevValue(key1, key2, original)
 }
 
 func (h *History) DiscardHistory() {
 	h.InvertedIndex.StartWrites()
-	h.walLock.Lock()
-	defer h.walLock.Unlock()
 	h.wal = h.newWriter(h.tmpdir, false, true)
 }
 func (h *History) StartWrites() {
 	h.InvertedIndex.StartWrites()
-	h.walLock.Lock()
-	defer h.walLock.Unlock()
 	h.wal = h.newWriter(h.tmpdir, true, false)
 }
 func (h *History) FinishWrites() {
 	h.InvertedIndex.FinishWrites()
-	h.walLock.Lock()
-	defer h.walLock.Unlock()
 	h.wal.close()
 	h.wal = nil
 }
 
 func (h *History) Rotate() historyFlusher {
-	h.walLock.Lock()
-	defer h.walLock.Unlock()
 	if h.wal != nil {
 		h.wal.historyValsFlushing, h.wal.historyVals = h.wal.historyVals, h.wal.historyValsFlushing
 		h.wal.autoIncrementFlush = h.wal.autoIncrement
