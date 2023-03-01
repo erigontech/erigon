@@ -84,6 +84,7 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 
 		c.currBlock = block.Block
 		c.lastReceivedSlot = block.Block.Slot
+		log.Info("[ChainTipSubscriber] Got new SignedBeaconBlock", "slot", block.Block.Slot)
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
 		if err := finalityUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {

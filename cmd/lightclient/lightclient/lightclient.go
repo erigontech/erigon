@@ -220,7 +220,8 @@ func (l *LightClient) Start() {
 				log.Warn("could not read peers", "err", err)
 				continue
 			}
-			log.Info("[LightClient] P2P", "peers", peers, "highestSeen", l.highestSeen, "numUpdates", numUpdates)
+			log.Info("[LightClient] P2P", "peers", peers, "highestSeen", l.highestSeen, "highestValidated", l.highestValidated,
+				"numUpdates", numUpdates)
 		case <-updateStatusSentinel.C:
 			if err := l.updateStatus(); err != nil {
 				if errors.Is(err, context.Canceled) {
@@ -243,6 +244,7 @@ func (l *LightClient) importBlockIfPossible() {
 	}
 	// Skip if we are too far ahead without validating
 	if curr.Slot > l.highestValidated+maxChainExtension {
+		log.Info("Skipping block import", "slot", curr.Slot, "highestValidated", l.highestValidated, "maxChainExtension", maxChainExtension)
 		return
 	}
 	currentRoot, err := curr.HashSSZ()
@@ -264,10 +266,11 @@ func (l *LightClient) importBlockIfPossible() {
 
 	eth1Number := curr.Body.ExecutionPayload.NumberU64()
 	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
+		log.Info("Skipping block import", "eth1Number", eth1Number, "highestSeen", l.highestSeen, "safetyRange", safetyRange)
 		return
 	}
 	if l.verbose {
-		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.NumberU64())
+		log.Info("Processed block", "slot", curr.Slot, "eth1Number", curr.Body.ExecutionPayload.NumberU64())
 	}
 
 	// If all of the above is gud then do the push
