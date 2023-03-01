@@ -421,6 +421,7 @@ $Erigon.BuildFlags += " -ldflags ""-X $($Erigon.Package)/params.GitCommit=$($Eri
 
 $Erigon.BinPath    = [string](Join-Path $MyContext.StartDir "\build\bin")
 $env:GO111MODULE = "on"
+$env:CGO_CFLAGS = "-g -O2 -D__BLST_PORTABLE__"
 
 New-Item -Path $Erigon.BinPath -ItemType Directory -Force | Out-Null
 if(!$?) {
@@ -485,6 +486,7 @@ if ($BuildTarget -eq "db-tools") {
     -D MDBX_WITHOUT_MSVC_CRT:BOOOL=OFF `
     -D MDBX_BUILD_TIMESTAMP=unknown `
     -D MDBX_FORCE_ASSERTIONS:INT=0
+    -D __BLST_PORTABLE__
     if($LASTEXITCODE) {
         Write-Host "An error has occurred while configuring MDBX"
         exit $LASTEXITCODE
