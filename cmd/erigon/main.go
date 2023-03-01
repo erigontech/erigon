@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
@@ -38,6 +39,9 @@ func main() {
 	signal.Notify(c)
 	go func() {
 		for s := range c {
+			if s == syscall.SIGPIPE || s == syscall.SIGURG {
+				continue
+			}
 			log.Warn("Got signal", "signal", s.String())
 		}
 	}()
