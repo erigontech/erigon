@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/anacrolix/log"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/commitment"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -39,6 +39,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -392,7 +394,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	ww.w.SetTxNum(txNum)
-	ww.w.SetBlockNum(block.NumberU64())
+
 	rw.blockNum = block.NumberU64()
 	ww.blockNum = block.NumberU64()
 
@@ -686,3 +688,35 @@ func (ww *WriterWrapper23) WriteAccountStorage(address libcommon.Address, incarn
 func (ww *WriterWrapper23) CreateContract(address libcommon.Address) error {
 	return nil
 }
+
+func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots) (engine consensus.Engine) {
+	l := log.New()
+	config := ethconfig.Defaults
+
+	var consensusConfig interface{}
+
+	if cc.Clique != nil {
+		consensusConfig = params.CliqueSnapshot
+	} else if cc.Aura != nil {
+		config.Aura.Etherbase = config.Miner.Etherbase
+		consensusConfig = &config.Aura
+	} else if cc.Parlia != nil {
+		consensusConfig = &config.Parlia
+	} else if cc.Bor != nil {
+		consensusConfig = &config.Bor
+	} else {
+		consensusConfig = &config.Ethash
+	}
+	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
+}
+
