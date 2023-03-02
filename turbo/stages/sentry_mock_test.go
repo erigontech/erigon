@@ -1,7 +1,6 @@
 package stages_test
 
 import (
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -678,6 +677,8 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 }
 
 func TestPOSWrontTrieRootReorgs(t *testing.T) {
+	//defer log.Root().SetHandler(log.Root().GetHandler())
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	require := require.New(t)
 	m := stages.MockWithZeroTTD(t, true)
 
@@ -719,17 +720,14 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	}, false /* intermediateHashes */)
 	require.NoError(err)
 
-	fmt.Printf("%d %d %d\n", chain1.Length(), chain2.Length(), chain3.Length())
-
+	//------------------------------------------
 	m.SendPayloadRequest(chain0.TopBlock)
 	initialCycle := false
 	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
-
 	payloadStatus0 := m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus0.Status)
-
 	forkChoiceMessage := engineapi.ForkChoiceMessage{
 		HeadBlockHash:      chain0.TopBlock.Hash(),
 		SafeBlockHash:      chain0.TopBlock.Hash(),
@@ -740,8 +738,77 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	require.NoError(err)
 	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
 	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
-
 	payloadStatus0 = m.ReceivePayloadStatus()
 	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
 	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	m.SendPayloadRequest(chain1.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus1 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus1.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain1.TopBlock.Hash(),
+		SafeBlockHash:      chain1.TopBlock.Hash(),
+		FinalizedBlockHash: chain1.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain1.TopBlock.Hash(), headBlockHash)
+	payloadStatus1 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus1.Status)
+	assert.Equal(t, chain1.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	m.SendPayloadRequest(chain2.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus2 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus2.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain2.TopBlock.Hash(),
+		SafeBlockHash:      chain2.TopBlock.Hash(),
+		FinalizedBlockHash: chain2.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain2.TopBlock.Hash(), headBlockHash)
+	payloadStatus2 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus2.Status)
+	assert.Equal(t, chain2.TopBlock.Hash(), headBlockHash)
+
+	//------------------------------------------
+	preTop3 := chain3.Blocks[chain3.Length()-2]
+	m.SendPayloadRequest(preTop3)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus3 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus3.Status)
+	m.SendPayloadRequest(chain3.TopBlock)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	payloadStatus3 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus3.Status)
+	forkChoiceMessage = engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain3.TopBlock.Hash(),
+		SafeBlockHash:      chain3.TopBlock.Hash(),
+		FinalizedBlockHash: chain3.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain3.TopBlock.Hash(), headBlockHash)
+	payloadStatus3 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus3.Status)
+	assert.Equal(t, chain3.TopBlock.Hash(), headBlockHash)
 }
