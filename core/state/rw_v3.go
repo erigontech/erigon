@@ -28,6 +28,7 @@ import (
 )
 
 const CodeSizeTable = "CodeSize"
+const StorageTable = "Storage"
 
 type StateV3 struct {
 	lock         sync.RWMutex
@@ -37,22 +38,34 @@ type StateV3 struct {
 	triggerLock  sync.Mutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
-	changes      map[string]*btree2.Map[string, []byte]
+	//changes      map[string]*btree2.Map[string, []byte]
 	sizeEstimate int
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
+
+	chCode         map[string][]byte
+	chAccs         map[string][]byte
+	chStorage      *btree2.Map[string, []byte]
+	chIncs         map[string][]byte
+	chContractCode map[string][]byte
 }
 
 func NewStateV3() *StateV3 {
 	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		changes: map[string]*btree2.Map[string, []byte]{
-			kv.PlainState:        btree2.NewMap[string, []byte](128),
-			kv.Code:              btree2.NewMap[string, []byte](128),
-			kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
-			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
-		},
+		//changes: map[string]*btree2.Map[string, []byte]{
+		//	kv.PlainState:        btree2.NewMap[string, []byte](128),
+		//	kv.Code:              btree2.NewMap[string, []byte](128),
+		//	kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
+		//	kv.PlainContractCode: btree2.NewMap[string, []byte](128),
+		//},
+		chCode:         map[string][]byte{},
+		chAccs:         map[string][]byte{},
+		chStorage:      btree2.NewMap[string, []byte](128),
+		chIncs:         map[string][]byte{},
+		chContractCode: map[string][]byte{},
+
 		txsDone: atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
@@ -60,20 +73,30 @@ func NewStateV3() *StateV3 {
 }
 
 func (rs *StateV3) put(table string, key, val []byte) {
-	old, ok := rs.changes[table].Set(string(key), val)
-	if ok {
-		rs.sizeEstimate += len(val) - len(old)
-	} else {
-		rs.sizeEstimate += len(key) + len(val)
-	}
+	rs.puts(table, string(key), val)
 }
 
 func (rs *StateV3) puts(table string, key string, val []byte) {
-	old, ok := rs.changes[table].Set(key, val)
-	if ok {
-		rs.sizeEstimate += len(val) - len(old)
-	} else {
-		rs.sizeEstimate += len(key) + len(val)
+	switch table {
+	case kv.PlainState:
+		if len(key) == 20 {
+			rs.chAccs[key] = val
+		} else {
+			old, ok := rs.chStorage.Set(key, val)
+			if ok {
+				rs.sizeEstimate += len(val) - len(old)
+			} else {
+				rs.sizeEstimate += len(key) + len(val)
+			}
+		}
+	case kv.Code:
+		rs.chCode[key] = val
+	case kv.IncarnationMap:
+		rs.chIncs[key] = val
+	case kv.PlainContractCode:
+		rs.chContractCode[key] = val
+	default:
+		panic(table)
 	}
 }
 
@@ -85,46 +108,107 @@ func (rs *StateV3) Get(table string, key []byte) []byte {
 }
 
 func (rs *StateV3) get(table string, key []byte) (v []byte) {
-	v, _ = rs.changes[table].Get(*(*string)(unsafe.Pointer(&key)))
+	keyS := *(*string)(unsafe.Pointer(&key))
+	switch table {
+	case kv.PlainState:
+		if len(key) == 20 {
+			v, _ = rs.chAccs[keyS]
+		} else {
+			v, _ = rs.chStorage.Get(keyS)
+		}
+	case kv.Code:
+		v, _ = rs.chCode[keyS]
+	case kv.IncarnationMap:
+		v, _ = rs.chIncs[keyS]
+	case kv.PlainContractCode:
+		v, _ = rs.chContractCode[keyS]
+	default:
+		panic(table)
+	}
 	return v
+}
+
+func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
+	c, err := rwTx.RwCursor(table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	for k, v := range m {
+		if len(v) == 0 {
+			if err = c.Delete([]byte(k)); err != nil {
+				return err
+			}
+		} else {
+			if err = c.Put([]byte(k), v); err != nil {
+				return err
+			}
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(k)[:4]))
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
+}
+func (rs *StateV3) flushBtree(ctx context.Context, rwTx kv.RwTx, table string, m *btree2.Map[string, []byte], logPrefix string, logEvery *time.Ticker) error {
+	c, err := rwTx.RwCursor(table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	iter := m.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		if len(iter.Value()) == 0 {
+			if err = c.Delete([]byte(iter.Key())); err != nil {
+				return err
+			}
+		} else {
+			if err = c.Put([]byte(iter.Key()), iter.Value()); err != nil {
+				return err
+			}
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
 }
 
 func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for table, t := range rs.changes {
-		c, err := rwTx.RwCursor(table)
-		if err != nil {
-			return err
-		}
 
-		iter := t.Iter()
-		for ok := iter.First(); ok; ok = iter.Next() {
-			if len(iter.Value()) == 0 {
-				if err = c.Delete([]byte(iter.Key())); err != nil {
-					return err
-				}
-				//fmt.Printf("Flush [%x]=>\n", item.key)
-			} else {
-				if err = c.Put([]byte(iter.Key()), iter.Value()); err != nil {
-					return err
-				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
-			}
-
-			select {
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		if err != nil {
-			return err
-		}
-		t.Clear()
+	if err := rs.flushMap(ctx, rwTx, kv.PlainState, rs.chAccs, logPrefix, logEvery); err != nil {
+		return err
 	}
+	rs.chAccs = map[string][]byte{}
+	if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chStorage.Clear()
+	if err := rs.flushMap(ctx, rwTx, kv.Code, rs.chCode, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chCode = map[string][]byte{}
+	if err := rs.flushMap(ctx, rwTx, kv.PlainContractCode, rs.chContractCode, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chContractCode = map[string][]byte{}
+	if err := rs.flushMap(ctx, rwTx, kv.IncarnationMap, rs.chIncs, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chIncs = map[string][]byte{}
+
 	rs.sizeEstimate = 0
 	return nil
 }
@@ -241,7 +325,6 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 		}
 		defer cursor.Close()
 		addr1 := make([]byte, 20+8)
-		psChanges := rs.changes[kv.PlainState]
 		for addrS, original := range txTask.AccountDels {
 			addr := []byte(addrS)
 			copy(addr1, addr)
@@ -273,28 +356,26 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			if !bytes.HasPrefix(k, addr1) {
 				k = nil
 			}
-			if psChanges != nil {
-				//TODO: try full-scan, then can replace btree by map
-				iter := psChanges.Iter()
-				for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
-					key := []byte(iter.Key())
-					if !bytes.HasPrefix(key, addr1) {
-						break
-					}
-					for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
-						if !bytes.Equal(k, key) {
-							// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-							if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-								return e
-							}
+			//TODO: try full-scan, then can replace btree by map
+			iter := rs.chStorage.Iter()
+			for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
+				key := []byte(iter.Key())
+				if !bytes.HasPrefix(key, addr1) {
+					break
+				}
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+							return e
 						}
 					}
-					if e != nil {
-						return e
-					}
-					if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
-						break
-					}
+				}
+				if e != nil {
+					return e
+				}
+				if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
+					break
 				}
 			}
 			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
@@ -555,31 +636,59 @@ func (rs *StateV3) SizeEstimate() uint64 {
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
-	var t *btree2.Map[string, []byte]
-
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	//fmt.Printf("ValidReads\n")
 	for table, list := range readLists {
-		//fmt.Printf("Table %s\n", table)
-		var ok bool
-		if table == CodeSizeTable {
-			t, ok = rs.changes[kv.Code]
-		} else {
-			t, ok = rs.changes[table]
+		switch table {
+		case kv.PlainState:
+			if !rs.readsValidMap(table, list, rs.chAccs) {
+				return false
+			}
+		case CodeSizeTable:
+			if !rs.readsValidMap(table, list, rs.chCode) {
+				return false
+			}
+		case StorageTable:
+			if !rs.readsValidBtree(table, list, rs.chStorage) {
+				return false
+			}
+		case kv.Code:
+			if !rs.readsValidMap(table, list, rs.chCode) {
+				return false
+			}
+		case kv.IncarnationMap:
+			if !rs.readsValidMap(table, list, rs.chIncs) {
+				return false
+			}
 		}
-		if !ok {
-			continue
-		}
-		for i, key := range list.Keys {
-			if val, ok := t.Get(key); ok {
-				if table == CodeSizeTable {
-					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
-						return false
-					}
-				} else if !bytes.Equal(list.Vals[i], val) {
+	}
+	return true
+}
+
+func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
+	for i, key := range list.Keys {
+		if val, ok := m[key]; ok {
+			if table == CodeSizeTable {
+				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 					return false
 				}
+			} else if !bytes.Equal(list.Vals[i], val) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
+	for i, key := range list.Keys {
+		if val, ok := m.Get(key); ok {
+			if table == CodeSizeTable {
+				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
+					return false
+				}
+			} else if !bytes.Equal(list.Vals[i], val) {
+				return false
 			}
 		}
 	}
@@ -761,8 +870,8 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, string(composite))
-		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+		r.readLists[StorageTable].Keys = append(r.readLists[StorageTable].Keys, string(composite))
+		r.readLists[StorageTable].Vals = append(r.readLists[StorageTable].Vals, enc)
 	}
 	if r.trace {
 		if enc == nil {
@@ -871,6 +980,7 @@ var readListPool = sync.Pool{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
+			StorageTable:      {},
 			kv.IncarnationMap: {},
 		}
 	},
