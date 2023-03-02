@@ -14,8 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
+	"github.com/anacrolix/log"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/spf13/cobra"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -50,15 +52,28 @@ func init() {
 	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
-	erigon4Cmd.Flags().Int64Var(&aggregateStep, "step-size", ethconfig.HistoryV3AggregationStep, "aggregation step size")
 	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
+	erigon4Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
+	erigon4Cmd.Flags().IntVar(&height, "height", 32, "amount of steps in biggest file")
+	erigon4Cmd.Flags().Uint64Var(&stepSize, "step-size", ethconfig.HistoryV3AggregationStep, "amount of tx in one step")
+
 	rootCmd.AddCommand(erigon4Cmd)
 }
 
 var (
-	commitmentsMode string // flag --commitments.mode [direct|update]
-	startTxNumFrom  uint64 // flag --tx
-	aggregateStep   int64  // flag --step-size
+	startTxNumFrom      uint64                           // flag --tx
+	commitmentsMode     string                           // flag --commitments.mode [direct|update]
+	logInterval         = 30 * time.Second               // time period to print aggregation stat to log
+	dirtySpaceThreshold = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
+	commitmentFrequency int                              // How many blocks to skip between calculating commitment
+	commitments         bool
+	commitmentTrie      string
+
+	height   int
+	stepSize uint64
+
+	blockExecutionTimer       = metrics.GetOrCreateSummary("chain_execution_seconds")
+	blockRootMismatchExpected bool // if trie variant is not hex, we could not have another rootHash with to verify it
 )
 
 var erigon4Cmd = &cobra.Command{
@@ -117,7 +132,28 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err
 	}
 
-	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, uint64(aggregateStep))
+	var trieVariant commitment.TrieVariant
+	switch commitmentTrie {
+	case "bin":
+		trieVariant = commitment.VariantBinPatriciaTrie
+		blockRootMismatchExpected = true
+	case "hex":
+		fallthrough
+	default:
+		trieVariant = commitment.VariantHexPatriciaTrie
+	}
+
+	var mode libstate.CommitmentMode
+	switch commitmentsMode {
+	case "update":
+		mode = libstate.CommitmentModeUpdate
+	default:
+		mode = libstate.CommitmentModeDirect
+	}
+
+	logger.Info("aggregator commitment trie", "variant", trieVariant, "mode", mode.String())
+
+	agg, err3 := libstate.NewAggregator(aggPath, dirs.Tmp, stepSize, mode, trieVariant)
 	if err3 != nil {
 		return fmt.Errorf("create aggregator: %w", err3)
 	}
@@ -127,20 +163,12 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	defer agg.Close()
 
-	var mode libstate.CommitmentMode
-	switch commitmentsMode {
-	case "update":
-		mode = libstate.CommitmentModeUpdate
-	default:
-		mode = libstate.CommitmentModeDirect
-	}
-	agg.SetCommitmentMode(mode)
-
 	startTxNum := agg.EndTxNumMinimax()
 	fmt.Printf("Max txNum in files: %d\n", startTxNum)
 
 	agg.SetTx(rwTx)
-	defer agg.StartWrites().FinishWrites()
+	agg.StartWrites()
+	defer agg.FinishWrites()
 
 	latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
@@ -160,7 +188,6 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		if err != nil {
 			return err
 		}
-		agg.SetTx(rwTx)
 		agg.SetTxNum(0)
 		if err = genesisIbs.CommitBlock(&chain2.Rules{}, &WriterWrapper23{w: agg}); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
@@ -186,9 +213,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		blockNum uint64
 		trace    bool
 		vmConfig vm.Config
-		started  = time.Now()
-
 		txNum uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
+		started = time.Now()
 	)
 
 	logEvery := time.NewTicker(logInterval)
@@ -254,7 +280,6 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 		readWrapper.ac.Close()
 		agg.SetTx(rwTx)
-
 		readWrapper.roTx = rwTx
 		readWrapper.ac = agg.MakeContext()
 		return nil
@@ -289,6 +314,10 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		select {
 		case interrupt = <-interruptCh:
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+			if err := agg.Flush(ctx); err != nil {
+				log.Error("aggregator flush", "err", err)
+			}
+
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
 			if err := commitFn(txNum); err != nil {
 				log.Error("db commit", "err", err)
