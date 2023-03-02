@@ -1,6 +1,7 @@
 package stages_test
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -674,4 +675,73 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 	bad, lastValidHash := m.HeaderDownload().IsBadHeaderPoS(invalidTip.Hash())
 	assert.True(t, bad)
 	assert.Equal(t, lastValidHash, lastValidHeader.Hash())
+}
+
+func TestPOSWrontTrieRootReorgs(t *testing.T) {
+	require := require.New(t)
+	m := stages.MockWithZeroTTD(t, true)
+
+	// One empty block
+	chain0, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
+		gen.SetCoinbase(libcommon.Address{1})
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// One empty block, one block with transaction for 10k wei
+	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
+		gen.SetCoinbase(libcommon.Address{1})
+		if i == 1 {
+			// In block 1, addr1 sends addr2 10_000 wei.
+			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas,
+				uint256.NewInt(1_000_000_000), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			require.NoError(err)
+			gen.AddTx(tx)
+		}
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// One empty block, one block with transaction for 20k wei
+	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
+		gen.SetCoinbase(libcommon.Address{1})
+		if i == 1 {
+			// In block 1, addr1 sends addr2 20_000 wei.
+			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(20_000), params.TxGas,
+				uint256.NewInt(1_000_000_000), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			require.NoError(err)
+			gen.AddTx(tx)
+		}
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	// 3 empty blocks
+	chain3, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *core.BlockGen) {
+		gen.SetCoinbase(libcommon.Address{1})
+	}, false /* intermediateHashes */)
+	require.NoError(err)
+
+	fmt.Printf("%d %d %d\n", chain1.Length(), chain2.Length(), chain3.Length())
+
+	m.SendPayloadRequest(chain0.TopBlock)
+	initialCycle := false
+	headBlockHash, err := stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+
+	payloadStatus0 := m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_ACCEPTED, payloadStatus0.Status)
+
+	forkChoiceMessage := engineapi.ForkChoiceMessage{
+		HeadBlockHash:      chain0.TopBlock.Hash(),
+		SafeBlockHash:      chain0.TopBlock.Hash(),
+		FinalizedBlockHash: chain0.TopBlock.Hash(),
+	}
+	m.SendForkChoiceRequest(&forkChoiceMessage)
+	headBlockHash, err = stages.StageLoopStep(m.Ctx, m.ChainConfig, m.DB, m.Sync, m.Notifications, initialCycle, m.UpdateHead)
+	require.NoError(err)
+	stages.SendPayloadStatus(m.HeaderDownload(), headBlockHash, err)
+	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
+
+	payloadStatus0 = m.ReceivePayloadStatus()
+	assert.Equal(t, remote.EngineStatus_VALID, payloadStatus0.Status)
+	assert.Equal(t, chain0.TopBlock.Hash(), headBlockHash)
 }
