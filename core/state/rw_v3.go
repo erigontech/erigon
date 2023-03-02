@@ -333,7 +333,7 @@ func (rs *StateV3) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -441,7 +441,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 	return nil
 }
 
-func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -493,10 +493,10 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
+	if err := rs.writeStateHistory(roTx, txTask, agg); err != nil {
 		return err
 	}
-	if err := rs.appplyState(roTx, txTask, agg); err != nil {
+	if err := rs.applyState(roTx, txTask, agg); err != nil {
 		return err
 	}
 
