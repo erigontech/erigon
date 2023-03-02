@@ -165,11 +165,13 @@ func (evm *EVM) Interpreter() Interpreter {
 }
 
 func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error) {
-	if evm.config.NoRecursion && evm.interpreter.Depth() > 0 {
+	depth := evm.interpreter.Depth()
+
+	if evm.config.NoRecursion && depth > 0 {
 		return nil, gas, nil
 	}
 	// Fail if we're trying to execute above the call depth limit
-	if evm.interpreter.Depth() > int(params.CallCreateDepth) {
+	if depth > int(params.CallCreateDepth) {
 		return nil, gas, ErrDepth
 	}
 	if typ == CALL || typ == CALLCODE {
@@ -197,7 +199,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 						v = nil
 					}
 					// Calling a non existing account, don't do anything, but ping the tracer
-					if evm.interpreter.Depth() == 0 {
+					if depth == 0 {
 						evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
 						evm.config.Tracer.CaptureEnd(ret, 0, nil)
 					} else {
@@ -217,21 +219,16 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// future scenarios
 		evm.intraBlockState.AddBalance(addr, u256.Num0)
 	}
+	var startGas = gas
 	if evm.config.Debug {
 		v := value
 		if typ == STATICCALL {
 			v = nil
 		}
-		if evm.interpreter.Depth() == 0 {
+		if depth == 0 {
 			evm.config.Tracer.CaptureStart(evm, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-			defer func(startGas uint64) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
-			}(gas)
 		} else {
 			evm.config.Tracer.CaptureEnter(typ, caller.Address(), addr, isPrecompile, false /* create */, input, gas, v, code)
-			defer func(startGas uint64) { // Lazy evaluation of the parameters
-				evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
-			}(gas)
 		}
 	}
 
@@ -277,6 +274,14 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// TODO: consider clearing up unused snapshots:
 		//} else {
 		//	evm.StateDB.DiscardSnapshot(snapshot)
+	}
+
+	if evm.config.Debug {
+		if depth == 0 {
+			evm.config.Tracer.CaptureEnd(ret, startGas-gas, err)
+		} else {
+			evm.config.Tracer.CaptureExit(ret, startGas-gas, err)
+		}
 	}
 	return ret, gas, err
 }
@@ -392,7 +397,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
-	if evm.config.NoRecursion && evm.interpreter.Depth() > 0 {
+	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil
 	}
 
@@ -434,9 +439,13 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		}
 	}
 
-	// calculate gasConsumption for deferred captures
-	gasConsumption = gas - contract.Gas
-
+	if evm.config.Debug {
+		if depth == 0 {
+			evm.config.Tracer.CaptureEnd(ret, gas-contract.Gas, err)
+		} else {
+			evm.config.Tracer.CaptureExit(ret, gas-contract.Gas, err)
+		}
+	}
 	return ret, address, contract.Gas, err
 }
 
