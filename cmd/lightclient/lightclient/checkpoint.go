@@ -45,10 +45,10 @@ func (l *LightClient) BootstrapCheckpoint(ctx context.Context, finalized [32]byt
 		if err != nil {
 			log.Debug("[lightclient] SendLightClientBootstrapReqV1", "err", err)
 		}
-		time.Sleep(2 * time.Second)
 		b, err = l.rpc.SendLightClientBootstrapReqV1(finalized)
 	}
 
+	doneLogCh <- struct{}{}
 	s, err := NewLightClientStore(finalized, b)
 	if err != nil {
 		log.Warn("[Checkpoint Sync] could not create/validate store", "err", err)

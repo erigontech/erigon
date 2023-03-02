@@ -43,6 +43,7 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
 		BlockHash:     gointerfaces.ConvertHashToH256(header.BlockHashCL),
 		Transactions:  body.Transactions,
+		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(body.Withdrawals),
 	}
 	if body.Withdrawals != nil {
 		res.Version = 2
