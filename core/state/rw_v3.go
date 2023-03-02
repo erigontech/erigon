@@ -882,7 +882,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc := r.rs.Get(kv.PlainState, composite)
+	enc := r.rs.Get(StorageTable, composite)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, composite)
