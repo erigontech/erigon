@@ -44,7 +44,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	maps.Clear(bd.deliveriesH)
 	maps.Clear(bd.requests)
 	maps.Clear(bd.peerMap)
-	//bd.ClearBodyCache()
+	bd.ClearBodyCache()
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {
