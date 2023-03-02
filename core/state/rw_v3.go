@@ -697,11 +697,7 @@ func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string
 func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
 	for i, key := range list.Keys {
 		if val, ok := m.Get(key); ok {
-			if table == CodeSizeTable {
-				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
-					return false
-				}
-			} else if !bytes.Equal(list.Vals[i], val) {
+			if !bytes.Equal(list.Vals[i], val) {
 				return false
 			}
 		}
