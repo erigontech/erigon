@@ -28,6 +28,31 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
+func BenchmarkName1(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
+		rl := newReadList()
+		for i := 0; i < b.N; i++ {
+			rl[kv.PlainState].Keys = append(rl[kv.PlainState].Keys, "")
+			rl[kv.PlainState].Vals = append(rl[kv.PlainState].Vals, []byte{})
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		rl := newReadList()
+		for i := 0; i < b.N; i++ {
+			l := rl[kv.PlainState]
+			l.Keys = append(l.Keys, "")
+			l.Vals = append(l.Vals, []byte{})
+			rl[kv.PlainState] = l
+		}
+	})
+}
+func TestA(t *testing.T) {
+	var a []int
+	_ = append(a, 1)
+	_ = append(a, 2)
+	fmt.Printf("a: %d\n", a)
+}
+
 func TestMutationDeleteTimestamp(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)
 
