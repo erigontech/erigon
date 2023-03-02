@@ -75,36 +75,35 @@ func (rs *StateV3) puts(table string, key string, val []byte) {
 	switch table {
 	case kv.PlainState:
 		if len(key) == 20 {
-			if old, ok := rs.chAccs[key]; !ok {
+			if old, ok := rs.chAccs[key]; ok {
 				rs.sizeEstimate += len(val) - len(old)
 			} else {
 				rs.sizeEstimate += len(key) + len(val)
 			}
 			rs.chAccs[key] = val
 		} else {
-			old, ok := rs.chStorage.Set(key, val)
-			if ok {
+			if old, ok := rs.chStorage.Set(key, val); ok {
 				rs.sizeEstimate += len(val) - len(old)
 			} else {
 				rs.sizeEstimate += len(key) + len(val)
 			}
 		}
 	case kv.Code:
-		if old, ok := rs.chCode[key]; !ok {
+		if old, ok := rs.chCode[key]; ok {
 			rs.sizeEstimate += len(val) - len(old)
 		} else {
 			rs.sizeEstimate += len(key) + len(val)
 		}
 		rs.chCode[key] = val
 	case kv.IncarnationMap:
-		if old, ok := rs.chIncs[key]; !ok {
+		if old, ok := rs.chIncs[key]; ok {
 			rs.sizeEstimate += len(val) - len(old)
 		} else {
 			rs.sizeEstimate += len(key) + len(val)
 		}
 		rs.chIncs[key] = val
 	case kv.PlainContractCode:
-		if old, ok := rs.chContractCode[key]; !ok {
+		if old, ok := rs.chContractCode[key]; ok {
 			rs.sizeEstimate += len(val) - len(old)
 		} else {
 			rs.sizeEstimate += len(key) + len(val)
