@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
@@ -240,7 +239,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
+	//transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
+	transactionsV3 := false
 	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 
