@@ -296,6 +296,10 @@ type Validator struct {
 	WithdrawableEpoch          uint64
 }
 
+func (v *Validator) IsSlashable(epoch uint64) bool {
+	return !v.Slashed && (v.ActivationEpoch <= epoch) && (epoch < v.WithdrawableEpoch)
+}
+
 func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, v.PublicKey[:]...)

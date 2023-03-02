@@ -44,7 +44,7 @@ const (
 	VersionLength  int           = 4
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 1 * time.Second
-	RespTimeout    time.Duration = 15 * time.Second
+	RespTimeout    time.Duration = 1 * time.Second
 )
 
 var (
@@ -767,6 +767,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x90000070
 	cfg.BellatrixForkEpoch = 100
 	cfg.BellatrixForkVersion = 0x90000071
+	cfg.CapellaForkEpoch = 56832
+	cfg.CapellaForkVersion = 0x90000072
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -846,6 +848,32 @@ func chiadoConfig() BeaconChainConfig {
 	return cfg
 }
 
+func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version:
+		return b.MinSlashingPenaltyQuotient
+	case AltairVersion:
+		return b.MinSlashingPenaltyQuotientAltair
+	case BellatrixVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
+	default:
+		panic("not implemented")
+	}
+}
+
+func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
+	switch version {
+	case Phase0Version:
+		return b.InactivityPenaltyQuotient
+	case AltairVersion:
+		return b.InactivityPenaltyQuotientAltair
+	case BellatrixVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	default:
+		panic("not implemented")
+	}
+}
+
 // Beacon configs
 var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChainConfig{
 	MainnetNetwork: mainnetConfig(),
@@ -903,4 +931,10 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 // 10200 is Chiado Testnet
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111 || id == 100 || id == 10200
+}
+
+// Subset of supported networks where embedded CL is stable enough
+// (sufficient number of light-client peers) as to be enabled by default
+func EmbeddedEnabledByDefault(id uint64) bool {
+	return id == 1 || id == 5 || id == 11155111
 }

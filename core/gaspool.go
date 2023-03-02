@@ -27,6 +27,10 @@ type GasPool struct {
 	gas, dataGas uint64
 }
 
+func (gp *GasPool) Reset(amount uint64) {
+	gp.gas = amount
+}
+
 // AddGas makes gas available for execution.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	if gp.gas > math.MaxUint64-amount {

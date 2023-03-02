@@ -1,13 +1,11 @@
 package exec22
 
 import (
-	"bytes"
 	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -81,7 +79,8 @@ func (h *TxTaskQueue) Pop() interface{} {
 
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
-	Keys, Vals [][]byte
+	Keys []string
+	Vals [][]byte
 }
 
 func (l KvList) Len() int {
@@ -89,7 +88,7 @@ func (l KvList) Len() int {
 }
 
 func (l KvList) Less(i, j int) bool {
-	return bytes.Compare(l.Keys[i], l.Keys[j]) < 0
+	return l.Keys[i] < l.Keys[j]
 }
 
 func (l *KvList) Swap(i, j int) {

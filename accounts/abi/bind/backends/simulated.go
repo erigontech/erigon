@@ -134,7 +134,7 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, co
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
 func (b *SimulatedBackend) Agg() *state2.AggregatorV3 { return b.m.HistoryV3Components() }
 func (b *SimulatedBackend) BlockReader() *snapshotsync.BlockReaderWithSnapshots {
-	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots)
+	return snapshotsync.NewBlockReaderWithSnapshots(b.m.BlockSnapshots, b.m.TransactionsV3)
 }
 func (b *SimulatedBackend) HistoryV3() bool          { return b.m.HistoryV3 }
 func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }

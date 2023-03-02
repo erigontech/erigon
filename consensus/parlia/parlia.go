@@ -1267,19 +1267,9 @@ func (p *Parlia) systemCall(from, contract libcommon.Address, data []byte, ibs *
 	)
 	vmConfig := vm.Config{NoReceipts: true}
 
-	var excessDataGas *big.Int
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(p.snapshots)
-	dbrw, _ := p.chainDb.BeginRw(context.Background())
-	ph, err := blockReader.HeaderByHash(nil, dbrw, header.ParentHash)
-	if err != nil {
-		// TODO log, panic or return?
-	}
-	if ph != nil {
-		excessDataGas = ph.ExcessDataGas
-	}
-
 	// Create a new context to be used in the EVM environment
-	blockContext := core.NewEVMBlockContext(header, excessDataGas, core.GetHashFn(header, nil), p, &from)
+	// TODO(eip-4844): Confirm it's OK to pass nil for excessDataGas here.
+	blockContext := core.NewEVMBlockContext(header, nil, core.GetHashFn(header, nil), p, &from)
 	evm := vm.NewEVM(blockContext, core.NewEVMTxContext(msg), ibs, chainConfig, vmConfig)
 	ret, leftOverGas, err := evm.Call(
 		vm.AccountRef(msg.From()),

@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -358,12 +357,7 @@ func NewDefaultStages(ctx context.Context,
 	engine consensus.Engine,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
 
 	// During Import we don't want other services like header requests, body requests etc. to be running.
@@ -411,6 +405,7 @@ func NewDefaultStages(ctx context.Context,
 			snapshots,
 			blockReader,
 			cfg.HistoryV3,
+			cfg.TransactionsV3,
 		),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
 		stagedsync.StageExecuteBlocksCfg(
@@ -443,12 +438,7 @@ func NewDefaultStages(ctx context.Context,
 }
 
 func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) (*stagedsync.Sync, error) {
-	var blockReader services.FullBlockReader
-	if cfg.Snapshot.Enabled {
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(snapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
-	}
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
 
 	return stagedsync.New(
 		stagedsync.StateStages(ctx,
@@ -467,7 +457,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 				dirs.Tmp,
 				nil, nil,
 			),
-			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3),
+			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, snapshots, blockReader, cfg.HistoryV3, cfg.TransactionsV3),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, nil, controlServer.Hd),
 			stagedsync.StageExecuteBlocksCfg(

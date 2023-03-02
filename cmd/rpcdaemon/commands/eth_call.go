@@ -310,7 +310,7 @@ func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
 	var block *types.Block
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			block = it.(*types.Block)
+			block = it
 		}
 	}
 	return block

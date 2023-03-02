@@ -134,10 +134,14 @@ func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *s
 		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
 			return nil, nil, err
 		}
-	}
-	for _, w := range withdrawals {
-		amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
-		state.AddBalance(w.Address, amountInWei)
+		if err := auraEngine.ExecuteSystemWithdrawals(withdrawals, syscall); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		for _, w := range withdrawals {
+			amountInWei := new(uint256.Int).Mul(uint256.NewInt(w.Amount), uint256.NewInt(params.GWei))
+			state.AddBalance(w.Address, amountInWei)
+		}
 	}
 	return txs, r, nil
 }

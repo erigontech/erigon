@@ -30,7 +30,7 @@ import (
 func TestGetLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	agg := m.HistoryV3Components()
 	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	{
@@ -63,7 +63,7 @@ func TestGetLogs(t *testing.T) {
 func TestErigonGetLatestLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
@@ -98,7 +98,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
@@ -190,7 +190,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 

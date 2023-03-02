@@ -3,8 +3,8 @@ package stages
 import (
 	"context"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
@@ -54,7 +54,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		defer tx.Rollback()
 	}
 	// Initialize the transistor
-	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, false)
+	stateTransistor := transition.New(cfg.state, cfg.beaconCfg, cfg.genesisCfg, true)
 
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {
@@ -105,15 +105,18 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		if err := tx.ClearBucket(kv.BlockBody); err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.EthTx); err != nil {
+		ethTx := kv.EthTx
+		transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
+		if transactionsV3 {
+			ethTx = kv.EthTxV3
+		}
+		if err := tx.ClearBucket(ethTx); err != nil {
 			return err
 		}
 		if err := tx.ClearBucket(kv.Sequence); err != nil {
 			return err
 		}
 	}
-	latestBlockHeader.Slot = endSlot
-	cfg.state.SetLatestBlockHeader(latestBlockHeader)
 
 	log.Info(fmt.Sprintf("[%s] Finished transitioning state", s.LogPrefix()), "from", fromSlot, "to", endSlot)
 	if !useExternalTx {

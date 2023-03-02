@@ -22,6 +22,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
@@ -29,7 +30,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/erigon/turbo/services"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -225,19 +225,13 @@ func Erigon2(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 	}()
 
-	var blockReader services.FullBlockReader
-	var allSnapshots *snapshotsync.RoSnapshots
-	useSnapshots := ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && snapshotsCli
-	if useSnapshots {
-		allSnapshots = snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
-		defer allSnapshots.Close()
-		if err := allSnapshots.ReopenWithDB(db); err != nil {
-			return fmt.Errorf("reopen snapshot segments: %w", err)
-		}
-		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-	} else {
-		blockReader = snapshotsync.NewBlockReader()
+	allSnapshots := snapshotsync.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"))
+	defer allSnapshots.Close()
+	if err := allSnapshots.ReopenWithDB(db); err != nil {
+		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
+	transactionsV3 := kvcfg.TransactionsV3.FromDB(db)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
 	engine := initConsensusEngine(chainConfig, allSnapshots)
 
 	for !interrupt {
