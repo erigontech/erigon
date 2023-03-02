@@ -1,7 +1,7 @@
 fetch("./data.json")
   .then((response) => response.json())
   .then((data) => {
-    const osList = ["linux", "darwin", "windows"];
+    const osList = ["linux", "darwin", "windows", "docker"];
     const releases = data.releases;
 
     const osData = osList.map((os) => {
@@ -72,11 +72,17 @@ fetch("./data.json")
       const html = os.stable.map((release, index) => {
         eventIdsToAdd.push(`${release.version}-${os.os}`);
           let cls = "panel";
-          if (index == 0) {
+          if (index === 0) {
               cls += " panel-active";
           }
+
+          let als = "accordion";
+            if (index === 0) {
+                als += " accordion-active";
+            }
+
         return `
-          <button id="${release.version}-${os.os}" class="accordion">
+          <button id="${release.version}-${os.os}" class="${als}">
             ${
               os.os !== "macOS"
                 ? os.os.charAt(0).toUpperCase() + os.os.slice(1)
@@ -99,6 +105,16 @@ fetch("./data.json")
                   </tr>
                 </thead>
                 <tbody>
+                ${
+                    release.binaries.length === 0
+                    ? `
+                        <tr class="table-row">
+                            <td class="table-col" style="padding-left:18px;">No binaries available</td>
+                        </tr>
+                    `
+                    : ""
+                }
+                
                 ${release.binaries
                   .map((binary) => {
                     // create horizontal html table in the return
@@ -106,7 +122,7 @@ fetch("./data.json")
                       <tr class="table-row">
                         <td class="table-col" style="padding-left:18px;">${binary.name}</td>
                         <td class="table-col">${binary.arch}</td>
-                        <td class="table-col"><a href="${binary.file}">${binary.file_name}</a></td>
+                        <td class="table-col"><a href="${binary.file}" target="_blank">${binary.file_name}</a></td>
                         <td class="table-col">${binary.checksum}</td>
                         <td class="table-col">${binary.tag}</td>
                       </tr>
@@ -140,7 +156,7 @@ fetch("./data.json")
       const accordion = document.getElementById(accordionId);
 
       if (accordion.classList.contains("accordion-active")) {
-        //accordion.classList.remove("accordion-active");
+        accordion.classList.remove("accordion-active");
       } else {
         accordion.classList.add("accordion-active");
       }

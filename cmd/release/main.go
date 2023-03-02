@@ -52,6 +52,37 @@ type GithubRelease struct {
 	Assets      []GithubReleaseAsset `json:"assets"`
 }
 
+type DockerImage struct {
+	Creator int `json:"creator"`
+	Id      int `json:"id"`
+	Images  []struct {
+		Architecture string      `json:"architecture"`
+		Features     string      `json:"features"`
+		Variant      interface{} `json:"variant"`
+		Digest       string      `json:"digest"`
+		Os           string      `json:"os"`
+		OsFeatures   string      `json:"os_features"`
+		OsVersion    interface{} `json:"os_version"`
+		Size         int         `json:"size"`
+		Status       string      `json:"status"`
+		LastPulled   time.Time   `json:"last_pulled"`
+		LastPushed   time.Time   `json:"last_pushed"`
+	} `json:"images"`
+	LastUpdated         time.Time `json:"last_updated"`
+	LastUpdater         int       `json:"last_updater"`
+	LastUpdaterUsername string    `json:"last_updater_username"`
+	Name                string    `json:"name"`
+	Repository          int       `json:"repository"`
+	FullSize            int       `json:"full_size"`
+	V2                  bool      `json:"v2"`
+	TagStatus           string    `json:"tag_status"`
+	TagLastPulled       time.Time `json:"tag_last_pulled"`
+	TagLastPushed       time.Time `json:"tag_last_pushed"`
+	MediaType           string    `json:"media_type"`
+	ContentType         string    `json:"content_type"`
+	Digest              string    `json:"digest"`
+}
+
 var githubToken string
 var releasesCount int
 
@@ -105,7 +136,6 @@ func main() {
 	allReleases := append(stable, rc...)
 
 	for _, ghRelease := range allReleases {
-
 		checksums := map[string]string{}
 
 		// get checksums first
@@ -146,10 +176,86 @@ func main() {
 				continue
 			}
 		}
+
+		v := strings.TrimPrefix(ghRelease.TagName, "v")
+
+		// add docker images
+		repositories, err := getDockerImages("https://hub.docker.com/v2/repositories/thorax/erigon/tags", v)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+		for _, repo := range repositories {
+			file := fmt.Sprintf("https://hub.docker.com/r/thorax/erigon/tags?page=1&ordering=last_updated&name=%s", repo.Name)
+			binary := Binary{
+				Name:     repo.Name,
+				File:     file,
+				FileName: fmt.Sprintf("%s (%s, %s)", repo.Name, repo.Images[0].Os, repo.Images[0].Architecture),
+				OS:       "docker",
+				Arch:     repo.Images[0].Architecture,
+				SigFile:  "",
+				Checksum: repo.Images[0].Digest,
+				Commit:   "",
+				Version:  v,
+				Tag:      ghRelease.TagName,
+				Release:  ghRelease.Name,
+			}
+
+			releases, err = addCurrentBinary(releases, binary)
+			if err != nil {
+				fmt.Println(err)
+				continue
+			}
+		}
 	}
+
+	// sort releases descending by version
+	sort.Slice(releases.Releases, func(i, j int) bool {
+		return releases.Releases[i].Version > releases.Releases[j].Version
+	})
 
 	// write releases back to disk
 	err = writeJsonFile(releases)
+}
+
+func getDockerImages(url string, search string) ([]DockerImage, error) {
+	var images []DockerImage
+
+	for {
+		// Make GET request to DockerHub API
+		resp, err := http.Get(url)
+		if err != nil {
+			return nil, err
+		}
+
+		// Decode JSON response
+		var data struct {
+			Results []DockerImage `json:"results"`
+			Next    string        `json:"next"`
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+			return nil, err
+		}
+		resp.Body.Close()
+
+		// Append images with matching prefix to results
+		for _, image := range data.Results {
+			if strings.Contains(image.Name, search) {
+				images = append(images, image)
+			}
+		}
+
+		// Stop if there are no more pages to retrieve
+		if data.Next == "" {
+			break
+		}
+
+		// Update URL to retrieve next page
+		url = data.Next
+	}
+
+	return images, nil
 }
 
 func getReleases(token string, releasesUrl string, count int) ([]GithubRelease, error) {
