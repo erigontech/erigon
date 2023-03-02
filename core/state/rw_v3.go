@@ -974,6 +974,7 @@ var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
+			StorageTable:         {},
 			kv.Code:              {},
 			kv.PlainContractCode: {},
 			kv.IncarnationMap:    {},
