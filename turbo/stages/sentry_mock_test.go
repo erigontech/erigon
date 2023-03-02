@@ -678,7 +678,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 
 func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	//defer log.Root().SetHandler(log.Root().GetHandler())
-	//ßlog.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
+	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	require := require.New(t)
 	m := stages.MockWithZeroTTDGnosis(t, true)
 
