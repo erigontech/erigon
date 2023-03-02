@@ -215,8 +215,8 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		blockNum uint64
 		trace    bool
 		vmConfig vm.Config
-		txNum uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
-		started = time.Now()
+		txNum    uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
+		started         = time.Now()
 	)
 
 	logEvery := time.NewTicker(logInterval)
@@ -719,4 +719,3 @@ func bytesToUint64(buf []byte) (x uint64) {
 	}
 	return
 }
-
