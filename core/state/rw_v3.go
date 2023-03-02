@@ -38,35 +38,26 @@ type StateV3 struct {
 	triggerLock  sync.Mutex
 	queue        exec22.TxTaskQueue
 	queueLock    sync.Mutex
-	//changes      map[string]*btree2.Map[string, []byte]
+	changes      map[string]map[string][]byte
 	sizeEstimate int
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
 
-	chCode         map[string][]byte
-	chAccs         map[string][]byte
-	chStorage      *btree2.Map[string, []byte]
-	chIncs         map[string][]byte
-	chContractCode map[string][]byte
+	chStorage *btree2.Map[string, []byte]
 }
 
 func NewStateV3() *StateV3 {
 	rs := &StateV3{
 		triggers:     map[uint64]*exec22.TxTask{},
 		senderTxNums: map[common.Address]uint64{},
-		//changes: map[string]*btree2.Map[string, []byte]{
-		//	kv.PlainState:        btree2.NewMap[string, []byte](128),
-		//	kv.Code:              btree2.NewMap[string, []byte](128),
-		//	kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
-		//	kv.PlainContractCode: btree2.NewMap[string, []byte](128),
-		//},
-		chCode:         map[string][]byte{},
-		chAccs:         map[string][]byte{},
-		chStorage:      btree2.NewMap[string, []byte](128),
-		chIncs:         map[string][]byte{},
-		chContractCode: map[string][]byte{},
-
-		txsDone: atomic2.NewUint64(0),
+		changes: map[string]map[string][]byte{
+			kv.PlainState:        {},
+			kv.Code:              {},
+			kv.IncarnationMap:    {},
+			kv.PlainContractCode: {},
+		},
+		chStorage: btree2.NewMap[string, []byte](128),
+		txsDone:   atomic2.NewUint64(0),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -78,25 +69,15 @@ func (rs *StateV3) put(table string, key, val []byte) {
 
 func (rs *StateV3) puts(table string, key string, val []byte) {
 	switch table {
-	case kv.PlainState:
-		if len(key) == 20 {
-			rs.chAccs[key] = val
+	case StorageTable:
+		old, ok := rs.chStorage.Set(key, val)
+		if ok {
+			rs.sizeEstimate += len(val) - len(old)
 		} else {
-			old, ok := rs.chStorage.Set(key, val)
-			if ok {
-				rs.sizeEstimate += len(val) - len(old)
-			} else {
-				rs.sizeEstimate += len(key) + len(val)
-			}
+			rs.sizeEstimate += len(key) + len(val)
 		}
-	case kv.Code:
-		rs.chCode[key] = val
-	case kv.IncarnationMap:
-		rs.chIncs[key] = val
-	case kv.PlainContractCode:
-		rs.chContractCode[key] = val
 	default:
-		panic(table)
+		rs.changes[table][key] = val
 	}
 }
 
@@ -110,20 +91,10 @@ func (rs *StateV3) Get(table string, key []byte) []byte {
 func (rs *StateV3) get(table string, key []byte) (v []byte) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	switch table {
-	case kv.PlainState:
-		if len(key) == 20 {
-			v, _ = rs.chAccs[keyS]
-		} else {
-			v, _ = rs.chStorage.Get(keyS)
-		}
-	case kv.Code:
-		v, _ = rs.chCode[keyS]
-	case kv.IncarnationMap:
-		v, _ = rs.chIncs[keyS]
-	case kv.PlainContractCode:
-		v, _ = rs.chContractCode[keyS]
+	case StorageTable:
+		v, _ = rs.chStorage.Get(keyS)
 	default:
-		panic(table)
+		v, _ = rs.changes[table][keyS]
 	}
 	return v
 }
@@ -188,26 +159,20 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	if err := rs.flushMap(ctx, rwTx, kv.PlainState, rs.chAccs, logPrefix, logEvery); err != nil {
-		return err
+	for table, changes := range rs.changes {
+		switch table {
+		case StorageTable:
+			if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
+				return err
+			}
+			rs.chStorage.Clear()
+		default:
+			if err := rs.flushMap(ctx, rwTx, table, changes, logPrefix, logEvery); err != nil {
+				return err
+			}
+			rs.changes[table] = map[string][]byte{}
+		}
 	}
-	rs.chAccs = map[string][]byte{}
-	if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chStorage.Clear()
-	if err := rs.flushMap(ctx, rwTx, kv.Code, rs.chCode, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chCode = map[string][]byte{}
-	if err := rs.flushMap(ctx, rwTx, kv.PlainContractCode, rs.chContractCode, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chContractCode = map[string][]byte{}
-	if err := rs.flushMap(ctx, rwTx, kv.IncarnationMap, rs.chIncs, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chIncs = map[string][]byte{}
 
 	rs.sizeEstimate = 0
 	return nil
@@ -640,24 +605,12 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	defer rs.lock.RUnlock()
 	for table, list := range readLists {
 		switch table {
-		case kv.PlainState:
-			if !rs.readsValidMap(table, list, rs.chAccs) {
-				return false
-			}
-		case CodeSizeTable:
-			if !rs.readsValidMap(table, list, rs.chCode) {
-				return false
-			}
 		case StorageTable:
 			if !rs.readsValidBtree(table, list, rs.chStorage) {
 				return false
 			}
-		case kv.Code:
-			if !rs.readsValidMap(table, list, rs.chCode) {
-				return false
-			}
-		case kv.IncarnationMap:
-			if !rs.readsValidMap(table, list, rs.chIncs) {
+		default:
+			if !rs.readsValidMap(table, list, rs.changes[table]) {
 				return false
 			}
 		}
@@ -792,8 +745,8 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	}
 	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	cmpositeS := string(composite)
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, cmpositeS)
-	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
+	w.writeLists[StorageTable].Keys = append(w.writeLists[StorageTable].Keys, cmpositeS)
+	w.writeLists[StorageTable].Vals = append(w.writeLists[StorageTable].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	if w.storagePrevs == nil {
 		w.storagePrevs = map[string][]byte{}
@@ -861,7 +814,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc := r.rs.Get(kv.PlainState, composite)
+	enc := r.rs.Get(StorageTable, composite)
 	if enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, composite)
@@ -953,6 +906,7 @@ var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
+			StorageTable:         {},
 			kv.Code:              {},
 			kv.PlainContractCode: {},
 			kv.IncarnationMap:    {},
