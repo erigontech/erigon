@@ -31,35 +31,30 @@ const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
 type StateV3 struct {
-	lock         sync.RWMutex
-	receiveWork  *sync.Cond
-	triggers     map[uint64]*exec22.TxTask
-	senderTxNums map[common.Address]uint64
-	triggerLock  sync.Mutex
-	queue        exec22.TxTaskQueue
-	queueLock    sync.Mutex
-	//changes      map[string]*btree2.Map[string, []byte]
-	sizeEstimate int
-	txsDone      *atomic2.Uint64
-	finished     atomic2.Bool
-
+	lock           sync.RWMutex
+	sizeEstimate   int
 	chCode         map[string][]byte
 	chAccs         map[string][]byte
 	chStorage      *btree2.Map[string, []byte]
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
+
+	receiveWork  *sync.Cond
+	triggers     map[uint64]*exec22.TxTask
+	senderTxNums map[common.Address]uint64
+	triggerLock  sync.Mutex
+
+	queue     exec22.TxTaskQueue
+	queueLock sync.Mutex
+
+	txsDone  *atomic2.Uint64
+	finished atomic2.Bool
 }
 
 func NewStateV3() *StateV3 {
 	rs := &StateV3{
-		triggers:     map[uint64]*exec22.TxTask{},
-		senderTxNums: map[common.Address]uint64{},
-		//changes: map[string]*btree2.Map[string, []byte]{
-		//	kv.PlainState:        btree2.NewMap[string, []byte](128),
-		//	kv.Code:              btree2.NewMap[string, []byte](128),
-		//	kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
-		//	kv.PlainContractCode: btree2.NewMap[string, []byte](128),
-		//},
+		triggers:       map[uint64]*exec22.TxTask{},
+		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
 		chAccs:         map[string][]byte{},
 		chStorage:      btree2.NewMap[string, []byte](128),
