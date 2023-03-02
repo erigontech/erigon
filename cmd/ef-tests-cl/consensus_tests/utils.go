@@ -1,4 +1,4 @@
-package main
+package consensustests
 
 import (
 	"fmt"
@@ -10,19 +10,19 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-func decodeStateFromFile(filepath string) (*state.BeaconState, error) {
+func decodeStateFromFile(context testContext, filepath string) (*state.BeaconState, error) {
 	sszSnappy, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, err
 	}
 	testState := state.New(&clparams.MainnetBeaconConfig)
-	if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappy, int(testVersion)); err != nil {
+	if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappy, int(context.version)); err != nil {
 		return nil, err
 	}
 	return testState, nil
 }
 
-func testBlocks() ([]*cltypes.SignedBeaconBlock, error) {
+func testBlocks(context testContext) ([]*cltypes.SignedBeaconBlock, error) {
 	i := 0
 	blocks := []*cltypes.SignedBeaconBlock{}
 	var err error
@@ -33,7 +33,7 @@ func testBlocks() ([]*cltypes.SignedBeaconBlock, error) {
 			break
 		}
 		blk := &cltypes.SignedBeaconBlock{}
-		if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(testVersion)); err != nil {
+		if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(context.version)); err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, blk)

@@ -1,4 +1,4 @@
-package main
+package consensustests
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 )
 
 func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFunc {
-	return func() (err error) {
+	return func(context testContext) (err error) {
 		defer func() {
 			// recover from panic if one occured. Set err to nil otherwise.
 			if recovered := recover(); recovered != nil {
@@ -21,12 +21,12 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 			return err
 		}
 		// Read post and
-		testState, err := decodeStateFromFile("pre.ssz_snappy")
+		testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
 		if err != nil {
 			return err
 		}
 		var isErrExpected bool
-		expectedState, err := decodeStateFromFile("post.ssz_snappy")
+		expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 		if os.IsNotExist(err) {
 			isErrExpected = true
 		} else {
