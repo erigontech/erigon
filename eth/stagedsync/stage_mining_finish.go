@@ -61,12 +61,14 @@ func SpawnMiningFinishStage(s *StageState, tx kv.RwTx, cfg MiningFinishCfg, quit
 		return nil
 	}
 
-	// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
 	// Tests may set pre-calculated nonce
-	// if block.NonceU64() != 0 {
-	// 	cfg.miningState.MiningResultCh <- block
-	// 	return nil
-	// }
+	if block.NonceU64() != 0 {
+		// Note: To propose a new signer for Clique consensus, the block nonce should be set to 0xFFFFFFFFFFFFFFFF.
+		if cfg.engine.Type() != chain.CliqueConsensus {
+			cfg.miningState.MiningResultCh <- block
+			return nil
+		}
+	}
 
 	cfg.miningState.PendingResultCh <- block
 
