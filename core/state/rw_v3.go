@@ -49,10 +49,13 @@ type StateV3 struct {
 
 	txsDone  *atomic2.Uint64
 	finished atomic2.Bool
+
+	tmpdir string
 }
 
-func NewStateV3() *StateV3 {
+func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
+		tmpdir:         tmpdir,
 		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
@@ -143,29 +146,26 @@ func (rs *StateV3) get(table string, key []byte) (v []byte) {
 }
 
 func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
-	c, err := rwTx.RwCursor(table)
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	for k, v := range m {
-		if len(v) == 0 {
-			if err = c.Delete([]byte(k)); err != nil {
-				return err
-			}
-		} else {
-			if err = c.Put([]byte(k), v); err != nil {
-				return err
-			}
-		}
+	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
 
-		select {
-		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(k)[:4]))
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	var count int
+	total := len(m)
+	for k, v := range m {
+		if err := collector.Collect([]byte(k), v); err != nil {
+			return err
 		}
+		count++
+		select {
+		default:
+		case <-logEvery.C:
+			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
+			log.Info("Write to db", "progress", progress, "current table", table)
+			rwTx.CollectMetrics()
+		}
+	}
+	if err := collector.Load(rwTx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
 	}
 	return nil
 }
