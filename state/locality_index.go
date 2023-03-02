@@ -66,17 +66,16 @@ func NewLocalityIndex(
 	return li, nil
 }
 func (li *LocalityIndex) closeWhatNotInList(fNames []string) {
-	if li == nil || li.file == nil || li.file.decompressor == nil {
+	if li == nil || li.bm == nil {
 		return
 	}
 
 	for _, protectName := range fNames {
-		if li.file.decompressor.FileName() == protectName {
-			continue
+		if li.bm.FileName() == protectName {
+			return
 		}
-		li.closeFiles()
-		break
 	}
+	li.closeFiles()
 }
 
 func (li *LocalityIndex) OpenList(fNames []string) error {
