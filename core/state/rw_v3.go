@@ -680,14 +680,21 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 }
 
 func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
-	for i, key := range list.Keys {
-		if val, ok := m[key]; ok {
-			if table == CodeSizeTable {
+	switch table {
+	case CodeSizeTable:
+		for i, key := range list.Keys {
+			if val, ok := m[key]; ok {
 				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 					return false
 				}
-			} else if !bytes.Equal(list.Vals[i], val) {
-				return false
+			}
+		}
+	default:
+		for i, key := range list.Keys {
+			if val, ok := m[key]; ok {
+				if !bytes.Equal(list.Vals[i], val) {
+					return false
+				}
 			}
 		}
 	}
