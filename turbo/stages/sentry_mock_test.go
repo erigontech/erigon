@@ -685,14 +685,12 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	// One empty block
 	chain0, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-		//gen.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
 
 	// One empty block, one block with transaction for 10k wei
 	chain1, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-		//gen.SetCoinbase(libcommon.Address{1})
 		if i == 1 {
 			// In block 1, addr1 sends addr2 10_000 wei.
 			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(10_000), params.TxGas,
@@ -706,7 +704,6 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	// One empty block, one block with transaction for 20k wei
 	chain2, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-		//gen.SetCoinbase(libcommon.Address{1})
 		if i == 1 {
 			// In block 1, addr1 sends addr2 20_000 wei.
 			tx, err := types.SignTx(types.NewTransaction(gen.TxNonce(m.Address), libcommon.Address{1}, uint256.NewInt(20_000), params.TxGas,
@@ -720,7 +717,6 @@ func TestPOSWrontTrieRootReorgs(t *testing.T) {
 	// 3 empty blocks
 	chain3, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, gen *core.BlockGen) {
 		gen.SetDifficulty(big.NewInt(0))
-		//gen.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)
 	require.NoError(err)
 
