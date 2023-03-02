@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -18,28 +19,31 @@ type BlockSource interface {
 type HttpBlockSource struct {
 	client http.Client
 	url    string
-	logger types.Log
 }
 
-func NewHttpBlockSource(host string) HttpBlockSource {
-	url := host + "/ic_getBlocks"
-
+func NewHttpBlockSource(url string) HttpBlockSource {
 	return HttpBlockSource{
 		client: http.Client{},
 		url:    url,
 	}
 }
 
-type blockRequestArgs struct {
-	from uint64
+type jsonRequest struct {
+	Jsonrpc string
+	Method  string
+	Params  []string
 }
 
-const pollInterval time.Duration = time.Second
+func makeBlockRequest(fromBlock uint64) jsonRequest {
+	return jsonRequest{
+		Jsonrpc: "2.0",
+		Method:  "ic_getBlocks",
+		Params:  []string{fmt.Sprintf("%x", fromBlock)},
+	}
+}
 
 func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block, error) {
-	args := blockRequestArgs{
-		from: fromBlock,
-	}
+	args := makeBlockRequest(fromBlock)
 
 	requestBody, err := json.Marshal(args)
 	if err != nil {
@@ -53,7 +57,7 @@ func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 
 	defer resp.Body.Close()
 
-	stream := rlp.NewStream(resp.Body, 4*1024*1024)
+	stream := rlp.NewStream(resp.Body, 0)
 	blocksNum, err := stream.List()
 	if err != nil {
 		return nil, err
@@ -67,4 +71,83 @@ func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 	}
 
 	return result, nil
+}
+
+type intervalBlockSourceDecorator struct {
+	decoree      BlockSource
+	pollInterval time.Duration
+	terminated   chan struct{}
+}
+
+func WithPollInterval(decoree BlockSource, pollInterval time.Duration, terminated chan struct{}) BlockSource {
+	return &intervalBlockSourceDecorator{
+		decoree:      decoree,
+		pollInterval: pollInterval,
+		terminated:   terminated,
+	}
+}
+
+func (decorator *intervalBlockSourceDecorator) PollBlocks(fromBlock uint64) ([]types.Block, error) {
+	for {
+		select {
+		case <-decorator.terminated:
+			{
+				return nil, nil
+			}
+		default:
+			{
+				blocks, err := decorator.decoree.PollBlocks(fromBlock)
+				if err != nil {
+					return nil, err
+				}
+
+				if len(blocks) > 0 {
+					return blocks, nil
+				}
+
+				time.Sleep(decorator.pollInterval)
+			}
+		}
+	}
+}
+
+type retryBlockSourceDecorator struct {
+	decoree       BlockSource
+	retryCount    uint64
+	retryInterval time.Duration
+	terminated    chan struct{}
+}
+
+func WithRetries(decoree BlockSource, retryCount uint64, retryInterval time.Duration, terminated chan struct{}) BlockSource {
+	return &retryBlockSourceDecorator{
+		decoree:       decoree,
+		retryCount:    retryCount,
+		retryInterval: retryInterval,
+		terminated:    terminated,
+	}
+}
+
+func (decorator *retryBlockSourceDecorator) PollBlocks(fromBlock uint64) ([]types.Block, error) {
+	var err error
+	var blocks []types.Block
+	for i := 0; i < int(decorator.retryCount); i += 1 {
+		select {
+		case <-decorator.terminated:
+			{
+				return nil, nil
+			}
+		default:
+			{
+
+				blocks, err = decorator.decoree.PollBlocks(fromBlock)
+				if err == nil {
+					return blocks, nil
+				}
+
+				time.Sleep(decorator.retryInterval)
+			}
+		}
+	}
+
+	return nil, err
 }

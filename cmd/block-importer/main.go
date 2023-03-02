@@ -2,47 +2,32 @@ package main
 
 import (
 	"os"
-
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/davecgh/go-spew/spew"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
-	logger := newLogger()
+	settings := Settings{
+		DBPath:        "./db",
+		LogPrefix:     "",
+		Terminated:    make(chan struct{}),
+		RetryCount:    100,
+		RetryInterval: time.Second,
+		PollInterval:  time.Second,
+	}
 
-	db, err := NewDB("./db", logger)
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		close(settings.Terminated)
+	}()
+
+	blockSource := NewHttpBlockSource("localhost:8000")
+	err := RunImport(&settings, &blockSource)
+
 	if err != nil {
 		panic(err)
 	}
-
-	state, err := NewState(db)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, path := range os.Args[1:] {
-		file, err := os.Open(path)
-		if err != nil {
-			panic(err)
-		}
-
-		var block types.Block
-		if err = block.DecodeRLP(rlp.NewStream(file, 0)); err != nil {
-			panic(err)
-		}
-
-		spew.Dump(block)
-
-		if err := state.ProcessBlock(block); err != nil {
-			panic(err)
-		}
-	}
-}
-
-func newLogger() log.Logger {
-	return logging.GetLogger("")
 }
