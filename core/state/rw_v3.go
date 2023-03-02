@@ -50,7 +50,9 @@ type StateV3 struct {
 	txsDone  *atomic2.Uint64
 	finished atomic2.Bool
 
-	tmpdir string
+	tmpdir              string
+	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
 func NewStateV3(tmpdir string) *StateV3 {
@@ -65,6 +67,9 @@ func NewStateV3(tmpdir string) *StateV3 {
 		chContractCode: map[string][]byte{},
 
 		txsDone: atomic2.NewUint64(0),
+
+		applyPrevAccountBuf: make([]byte, 256),
+		addrIncBuf:          make([]byte, 20+8),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -129,16 +134,16 @@ func (rs *StateV3) get(table string, key []byte) (v []byte) {
 	switch table {
 	case kv.PlainState:
 		if len(key) == 20 {
-			v, _ = rs.chAccs[keyS]
+			v = rs.chAccs[keyS]
 		} else {
 			v, _ = rs.chStorage.Get(keyS)
 		}
 	case kv.Code:
-		v, _ = rs.chCode[keyS]
+		v = rs.chCode[keyS]
 	case kv.IncarnationMap:
-		v, _ = rs.chIncs[keyS]
+		v = rs.chIncs[keyS]
 	case kv.PlainContractCode:
-		v, _ = rs.chContractCode[keyS]
+		v = rs.chContractCode[keyS]
 	default:
 		panic(table)
 	}
@@ -338,13 +343,14 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			return err
 		}
 		defer cursor.Close()
-		addr1 := make([]byte, 20+8)
+		addr1 := rs.addrIncBuf
 		for addrS, original := range txTask.AccountDels {
 			addr := []byte(addrS)
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := accounts.SerialiseV3(original)
+			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
+			accounts.SerialiseV3To(original, prev)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
@@ -403,7 +409,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 		}
 	}
 
-	k := make([]byte, 20+8)
+	k := rs.addrIncBuf
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
 		copy(k, addr)
@@ -646,7 +652,7 @@ func (rs *StateV3) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	r := rs.sizeEstimate
 	rs.lock.RUnlock()
-	return uint64(r)
+	return uint64(r) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
