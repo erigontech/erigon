@@ -81,21 +81,19 @@ func (rs *StateV3) put(table string, key, val []byte) {
 
 func (rs *StateV3) puts(table string, key string, val []byte) {
 	switch table {
-	case kv.PlainState:
-		if len(key) == 20 {
-			if old, ok := rs.chAccs[key]; ok {
-				rs.sizeEstimate += len(val) - len(old)
-			} else {
-				rs.sizeEstimate += len(key) + len(val)
-			}
-			rs.chAccs[key] = val
+	case StorageTable:
+		if old, ok := rs.chStorage.Set(key, val); ok {
+			rs.sizeEstimate += len(val) - len(old)
 		} else {
-			if old, ok := rs.chStorage.Set(key, val); ok {
-				rs.sizeEstimate += len(val) - len(old)
-			} else {
-				rs.sizeEstimate += len(key) + len(val)
-			}
+			rs.sizeEstimate += len(key) + len(val)
 		}
+	case kv.PlainState:
+		if old, ok := rs.chAccs[key]; ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+		rs.chAccs[key] = val
 	case kv.Code:
 		if old, ok := rs.chCode[key]; ok {
 			rs.sizeEstimate += len(val) - len(old)
@@ -815,8 +813,8 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	}
 	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	cmpositeS := string(composite)
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, cmpositeS)
-	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
+	w.writeLists[StorageTable].Keys = append(w.writeLists[StorageTable].Keys, cmpositeS)
+	w.writeLists[StorageTable].Vals = append(w.writeLists[StorageTable].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	if w.storagePrevs == nil {
 		w.storagePrevs = map[string][]byte{}
