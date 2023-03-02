@@ -130,12 +130,10 @@ func (rs *StateV3) Get(table string, key []byte) []byte {
 func (rs *StateV3) get(table string, key []byte) (v []byte) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	switch table {
+	case StorageTable:
+		v, _ = rs.chStorage.Get(keyS)
 	case kv.PlainState:
-		if len(key) == 20 {
-			v = rs.chAccs[keyS]
-		} else {
-			v, _ = rs.chStorage.Get(keyS)
-		}
+		v = rs.chAccs[keyS]
 	case kv.Code:
 		v = rs.chCode[keyS]
 	case kv.IncarnationMap:
