@@ -33,8 +33,9 @@ services:
     profiles:
       - first
     image: thorax/erigon:$ERIGON_TAG
-    entrypoint: |
-      rpcdaemon --private.api.addr=erigon:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --graphql --log.dir.path=/logs/node1
+    entrypoint: rpcdaemon
+    command: |
+      --private.api.addr=erigon:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --graphql --log.dir.path=/logs/node1
     volumes:
       - ./logdir:/logs
     user: ${DOCKER_UID}:${DOCKER_GID}
@@ -44,8 +45,9 @@ services:
     profiles:
       - second
     image: thorax/erigon:$ERIGON_TAG
-    entrypoint: |
-      rpcdaemon --private.api.addr=erigon-node2:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --log.dir.path=/logs/node2
+    entrypoint: rpcdaemon
+    command: |
+      --private.api.addr=erigon-node2:9090 --http.api=admin,eth,erigon,web3,net,debug,trace,txpool,parity --http.addr=0.0.0.0 --http.vhosts=* --http.corsdomain=* --http.port=8545 --log.dir.path=/logs/node2
     volumes:
       - ./logdir:/logs
     user: ${DOCKER_UID}:${DOCKER_GID}
@@ -56,8 +58,9 @@ services:
     image: thorax/automated-testing
     volumes:
       - ./results:/erigon-automated-testing/results
-    entrypoint: |
-      pytest -m smoke_test --quiet --junitxml="./results/result.xml" --url="http://rpcdaemon:8545" --tb=line
+    entrypoint: pytest
+    command: |
+      -m smoke_test --quiet --junitxml="./results/result.xml" --url="http://rpcdaemon:8545" --tb=line
 
 volumes:
   datadir:
