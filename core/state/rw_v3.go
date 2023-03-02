@@ -77,6 +77,15 @@ func (rs *StateV3) puts(table string, key string, val []byte) {
 			rs.sizeEstimate += len(key) + len(val)
 		}
 	default:
+		/*
+			if _, ok = m.puts[table][stringKey]; !ok {
+				m.size += len(v) - len(m.puts[table][stringKey])
+				m.puts[table][stringKey] = v
+				return nil
+			}
+			m.puts[table][stringKey] = v
+			m.size += len(k) + len(v)
+		*/
 		rs.changes[table][key] = val
 	}
 }
@@ -636,11 +645,7 @@ func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string
 func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
 	for i, key := range list.Keys {
 		if val, ok := m.Get(key); ok {
-			if table == CodeSizeTable {
-				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
-					return false
-				}
-			} else if !bytes.Equal(list.Vals[i], val) {
+			if !bytes.Equal(list.Vals[i], val) {
 				return false
 			}
 		}
