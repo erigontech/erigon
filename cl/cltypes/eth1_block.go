@@ -54,9 +54,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	}
 	b.Header = new(types.Header)
 
-	pos := b.Header.DecodeHeaderMetadataForSSZ(buf)
-	// Compute block SSZ offsets.
-	extraDataOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
+	pos, extraDataOffset := b.Header.DecodeHeaderMetadataForSSZ(buf)
 	transactionsOffset := ssz_utils.DecodeOffset(buf[pos:])
 	pos += 4
 	var withdrawalOffset *uint32
@@ -132,21 +130,15 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	b.Header.TxHash = types.DeriveSha(types.BinaryTransactions(b.Body.Transactions))
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
-		withdrawalsCount := (uint32(len(buf)) - *withdrawalOffset) / 44
-		if withdrawalsCount > 16 {
-			return fmt.Errorf("Decode(SSZ): Withdrawals field length should be less or equal to 16, got %d", withdrawalsCount)
+		b.Body.Withdrawals, err = ssz_utils.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
+		if err != nil {
+			return err
 		}
-		b.Body.Withdrawals = make([]*types.Withdrawal, withdrawalsCount)
-		for i := range b.Body.Withdrawals {
-			b.Body.Withdrawals[i] = new(types.Withdrawal)
-			b.Body.Withdrawals[i].DecodeSSZ(buf[(*withdrawalOffset)+uint32(i)*44:])
-		}
-		// Cache withdrawal root.
-		b.Header.WithdrawalsHash = new(libcommon.Hash)
 		withdrawalRoot, err := b.Withdrawals().HashSSZ(16)
 		if err != nil {
 			return err
 		}
+		b.Header.WithdrawalsHash = new(libcommon.Hash)
 		*b.Header.WithdrawalsHash = withdrawalRoot
 	}
 	return nil

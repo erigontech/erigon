@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -37,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
-	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -47,7 +45,6 @@ type Node struct {
 	log           log.Logger
 	dirLock       *flock.Flock  // prevents concurrent use of instance directory
 	stop          chan struct{} // Channel to wait for termination notifications
-	server        *p2p.Server   // Currently running P2P networking layer
 	startStopLock sync.Mutex    // Start/Stop are protected by an additional lock
 	state         int           // Tracks state of node lifecycle
 
@@ -95,9 +92,6 @@ func New(conf *nodecfg.Config) (*Node, error) {
 	}
 
 	return node, nil
-}
-
-func (n *Node) SetP2PListenFunc(listenFunc func(network, addr string) (net.Listener, error)) {
 }
 
 // Start starts all registered lifecycles, RPC services and p2p networking.
@@ -280,16 +274,6 @@ func (n *Node) RegisterLifecycle(lifecycle Lifecycle) {
 	n.lifecycles = append(n.lifecycles, lifecycle)
 }
 
-// RegisterProtocols adds backend's protocols to the node's p2p server.
-func (n *Node) RegisterProtocols(protocols []p2p.Protocol) {
-	n.lock.Lock()
-	defer n.lock.Unlock()
-
-	if n.state != initializingState {
-		panic("can't register protocols on running/stopped node")
-	}
-}
-
 // Config returns the configuration of node.
 func (n *Node) Config() *nodecfg.Config {
 	return n.config
@@ -312,7 +296,7 @@ func OpenDatabase(config *nodecfg.Config, logger log.Logger, label kv.Label) (kv
 	}
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New()
+		db = memdb.New("")
 		return db, nil
 	}
 

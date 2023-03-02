@@ -29,6 +29,32 @@ func GetBlockByNumber(reqId int, blockNum uint64, withTxs bool) (rpctest.EthBloc
 	return b, nil
 }
 
+func GetBlockByNumberDetails(reqId int, blockNum string, withTxs bool) (map[string]interface{}, error) {
+	reqGen := initialiseRequestGenerator(reqId)
+	var b struct {
+		rpctest.CommonResponse
+		Result interface{} `json:"result"`
+	}
+
+	req := reqGen.GetBlockByNumberI(blockNum, withTxs)
+
+	res := reqGen.Erigon(models.ETHGetBlockByNumber, req, &b)
+	if res.Err != nil {
+		return nil, fmt.Errorf("error getting block by number: %v", res.Err)
+	}
+
+	if b.Error != nil {
+		return nil, fmt.Errorf("error populating response object: %v", b.Error)
+	}
+
+	m, ok := b.Result.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("cannot convert type")
+	}
+
+	return m, nil
+}
+
 func GetTransactionCount(reqId int, address libcommon.Address, blockNum models.BlockNumber) (rpctest.EthGetTransactionCount, error) {
 	reqGen := initialiseRequestGenerator(reqId)
 	var b rpctest.EthGetTransactionCount

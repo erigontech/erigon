@@ -73,5 +73,8 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
 		cfg.NetworkCfg.BootNodes = strings.Split(ctx.String(flags.BootnodesFlag.Name), ",")
 	}
+	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
+		cfg.NetworkCfg.StaticPeers = strings.Split(ctx.String(flags.SentinelStaticPeersFlag.Name), ",")
+	}
 	return cfg, nil
 }

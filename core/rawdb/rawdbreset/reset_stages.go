@@ -26,7 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
+func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
 	// don't reset senders here
 	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
@@ -50,7 +50,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string) error {
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir); err != nil {
 		return err
 	}
 	return nil
@@ -90,15 +90,20 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	if err := tx.ForEach(kv.BlockBody, hexutility.EncodeTs(2), func(k, _ []byte) error { return tx.Delete(kv.BlockBody, k) }); err != nil {
 		return err
 	}
+	ethtx := kv.EthTx
+	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
+	if transactionV3 {
+		ethtx = kv.EthTxV3
+	}
 
 	if err := clearTables(context.Background(), db, tx,
 		kv.NonCanonicalTxs,
-		kv.EthTx,
+		ethtx,
 		kv.MaxTxNum,
 	); err != nil {
 		return err
 	}
-	if err := rawdb.ResetSequence(tx, kv.EthTx, 0); err != nil {
+	if err := rawdb.ResetSequence(tx, ethtx, 0); err != nil {
 		return err
 	}
 	if err := rawdb.ResetSequence(tx, kv.NonCanonicalTxs, 0); err != nil {
@@ -137,7 +142,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
@@ -162,7 +167,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string) (err error) {
 		}
 		if !historyV3 {
 			genesis := core.DefaultGenesisBlockByChainName(chain)
-			if _, _, err := genesis.WriteGenesisState(tx); err != nil {
+			if _, _, err := genesis.WriteGenesisState(tx, tmpDir); err != nil {
 				return err
 			}
 		}

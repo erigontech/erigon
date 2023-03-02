@@ -17,5 +17,6 @@
   "terminalTotalDifficulty": 17000000000000000,
   "terminalTotalDifficultyPassed": true,
   "mergeNetsplitBlock": 1735371,
+  "shanghaiTime": 1677557088,
   "ethash": {}
 }

@@ -1,6 +1,6 @@
 # Erigon
 
-Erigon is an implementation of Ethereum (execution client), on the efficiency frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.
+Erigon is an implementation of Ethereum (execution client with light client for consensus layer), on the efficiency frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node) by default.
 
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
@@ -538,11 +538,11 @@ node.
 
 #### `RPC` ports
 
-| Port | Protocol |      Purpose      | Expose  |
-|:----:|:--------:|:-----------------:|:-------:|
-| 8545 |   TCP    | HTTP & WebSockets | Private |
+| Port | Protocol |           Purpose           | Expose  |
+|:----:|:--------:|:---------------------------:|:-------:|
+| 8545 |   TCP    | HTTP & WebSockets & GraphQL | Private |
 
-Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket connections are on the same
+Typically, 8545 is exposed only internally for JSON-RPC queries. Both HTTP and WebSocket and GraphQL are on the same
 port.
 
 #### `sentry` ports

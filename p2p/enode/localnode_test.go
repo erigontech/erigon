@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newLocalNodeForTesting() (*LocalNode, *DB) {
-	db, err := OpenDB("")
+func newLocalNodeForTesting(tmpDir string) (*LocalNode, *DB) {
+	db, err := OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -36,7 +36,8 @@ func newLocalNodeForTesting() (*LocalNode, *DB) {
 }
 
 func TestLocalNode(t *testing.T) {
-	ln, db := newLocalNodeForTesting()
+	tmpDir := t.TempDir()
+	ln, db := newLocalNodeForTesting(tmpDir)
 	defer db.Close()
 
 	if ln.Node().ID() != ln.ID() {
@@ -53,7 +54,8 @@ func TestLocalNode(t *testing.T) {
 }
 
 func TestLocalNodeSeqPersist(t *testing.T) {
-	ln, db := newLocalNodeForTesting()
+	tmpDir := t.TempDir()
+	ln, db := newLocalNodeForTesting(tmpDir)
 	defer db.Close()
 
 	if s := ln.Node().Seq(); s != 1 {
@@ -88,7 +90,8 @@ func TestLocalNodeEndpoint(t *testing.T) {
 		predicted = &net.UDPAddr{IP: net.IP{127, 0, 1, 2}, Port: 81}
 		staticIP  = net.IP{127, 0, 1, 2}
 	)
-	ln, db := newLocalNodeForTesting()
+	tmpDir := t.TempDir()
+	ln, db := newLocalNodeForTesting(tmpDir)
 	defer db.Close()
 
 	// Nothing is set initially.

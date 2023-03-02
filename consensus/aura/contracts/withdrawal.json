@@ -1,0 +1,19 @@
+[
+    {
+        "constant": false,
+        "inputs": [
+            {
+                "name": "amounts",
+                "type": "uint64[]"
+            },
+            {
+                "name": "addresses",
+                "type": "address[]"
+            }
+        ],
+        "name": "executeSystemWithdrawals",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+]

@@ -93,12 +93,7 @@ type AuthorityRoundSeal struct {
 }
 
 var genesisTmpDB kv.RwDB
-var genesisDBLock *sync.Mutex
-
-func init() {
-	genesisTmpDB = mdbx.NewMDBX(log.New()).InMem("").MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
-	genesisDBLock = &sync.Mutex{}
-}
+var genesisDBLock sync.Mutex
 
 func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 	m := make(map[common.UnprefixedAddress]GenesisAccount)
@@ -192,17 +187,17 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func CommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*chain.Config, *types.Block, error) {
-	return CommitGenesisBlockWithOverride(db, genesis, nil)
+func CommitGenesisBlock(db kv.RwDB, genesis *Genesis, tmpDir string) (*chain.Config, *types.Block, error) {
+	return CommitGenesisBlockWithOverride(db, genesis, nil, tmpDir)
 }
 
-func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShanghaiTime *big.Int) (*chain.Config, *types.Block, error) {
+func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShanghaiTime *big.Int, tmpDir string) (*chain.Config, *types.Block, error) {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer tx.Rollback()
-	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime)
+	c, b, err := WriteGenesisBlock(tx, genesis, overrideShanghaiTime, tmpDir)
 	if err != nil {
 		return c, b, err
 	}
@@ -213,15 +208,15 @@ func CommitGenesisBlockWithOverride(db kv.RwDB, genesis *Genesis, overrideShangh
 	return c, b, nil
 }
 
-func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis) (*chain.Config, *types.Block) {
-	c, b, err := CommitGenesisBlock(db, genesis)
+func MustCommitGenesisBlock(db kv.RwDB, genesis *Genesis, tmpDir string) (*chain.Config, *types.Block) {
+	c, b, err := CommitGenesisBlock(db, genesis, tmpDir)
 	if err != nil {
 		panic(err)
 	}
 	return c, b
 }
 
-func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.Int) (*chain.Config, *types.Block, error) {
+func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.Int, tmpDir string) (*chain.Config, *types.Block, error) {
 	if genesis != nil && genesis.Config == nil {
 		return params.AllProtocolChanges, nil, ErrGenesisNoConfig
 	}
@@ -245,7 +240,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.I
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := genesis.Write(db)
+		block, _, err1 := genesis.Write(db, tmpDir)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -257,7 +252,7 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.I
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := genesis.ToBlock()
+		block, _, err1 := genesis.ToBlock(tmpDir)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -336,7 +331,7 @@ func sortedAllocKeys(m GenesisAlloc) []string {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) ToBlock(tmpDir string) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
@@ -377,14 +372,18 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 	var statedb *state.IntraBlockState
 	wg := sync.WaitGroup{}
 	wg.Add(1)
+	var err error
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
 		genesisDBLock.Lock()
 		defer genesisDBLock.Unlock()
-		tx, err := genesisTmpDB.BeginRw(context.Background())
-		if err != nil {
-			panic(err)
+		if genesisTmpDB == nil {
+			genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).PageSize(2 * 4096).MustOpen()
+		}
+		var tx kv.RwTx
+		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+			return
 		}
 		defer tx.Rollback()
 		r, w := state.NewDbStateReader(tx), state.NewDbStateWriter(tx, 0)
@@ -421,9 +420,8 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 			}
 
 			if len(account.Constructor) > 0 {
-				_, err := SysCreate(addr, account.Constructor, *g.Config, statedb, head)
-				if err != nil {
-					panic(err)
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
+					return
 				}
 			}
 
@@ -431,23 +429,25 @@ func (g *Genesis) ToBlock() (*types.Block, *state.IntraBlockState, error) {
 				statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 			}
 		}
-		if err := statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
-			panic(err)
+		if err = statedb.FinalizeTx(&chain.Rules{}, w); err != nil {
+			return
 		}
-		root, err = trie.CalcRoot("genesis", tx)
-		if err != nil {
-			panic(err)
+		if root, err = trie.CalcRoot("genesis", tx); err != nil {
+			return
 		}
 	}()
 	wg.Wait()
+	if err != nil {
+		return nil, nil, err
+	}
 
 	head.Root = root
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), statedb, nil
 }
 
-func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := g.ToBlock()
+func (g *Genesis) WriteGenesisState(tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := g.ToBlock(tmpDir)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -480,8 +480,8 @@ func (g *Genesis) WriteGenesisState(tx kv.RwTx) (*types.Block, *state.IntraBlock
 	return block, statedb, nil
 }
 
-func (g *Genesis) MustWrite(tx kv.RwTx, history bool) (*types.Block, *state.IntraBlockState) {
-	b, s, err := g.Write(tx)
+func (g *Genesis) MustWrite(tx kv.RwTx, tmpDir string, history bool) (*types.Block, *state.IntraBlockState) {
+	b, s, err := g.Write(tx, tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -490,8 +490,8 @@ func (g *Genesis) MustWrite(tx kv.RwTx, history bool) (*types.Block, *state.Intr
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := g.WriteGenesisState(tx)
+func (g *Genesis) Write(tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := g.WriteGenesisState(tx, tmpDir)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -553,13 +553,13 @@ func (g *Genesis) Write(tx kv.RwTx) (*types.Block, *state.IntraBlockState, error
 
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
-func (g *Genesis) MustCommit(db kv.RwDB) *types.Block {
+func (g *Genesis) MustCommit(db kv.RwDB, tmpDir string) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _ := g.MustWrite(tx, true)
+	block, _ := g.MustWrite(tx, tmpDir, true)
 	err = tx.Commit()
 	if err != nil {
 		panic(err)
@@ -568,9 +568,9 @@ func (g *Genesis) MustCommit(db kv.RwDB) *types.Block {
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, tmpDir string) *types.Block {
 	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
-	block := g.MustCommit(db)
+	block := g.MustCommit(db, tmpDir)
 	return block
 }
 
@@ -579,14 +579,14 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, tmpDir string) *types.Block {
 	g := Genesis{Config: params.TestChainConfig}
 	allocs := make(map[libcommon.Address]GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = GenesisAccount{Balance: acc.Balance}
 	}
 	g.Alloc = allocs
-	block := g.MustCommit(db)
+	block := g.MustCommit(db, tmpDir)
 	return block
 }
 

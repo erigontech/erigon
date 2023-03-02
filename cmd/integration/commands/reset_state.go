@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -23,7 +25,7 @@ import (
 var cmdResetState = &cobra.Command{
 	Use:   "reset_state",
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
-	RunE: func(cmd *cobra.Command, args []string) error {
+	Run: func(cmd *cobra.Command, args []string) {
 		ctx, _ := common.RootContext()
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
@@ -32,22 +34,28 @@ var cmdResetState = &cobra.Command{
 		defer agg.Close()
 
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
-		err := reset2.ResetState(db, ctx, chain)
+		err := reset2.ResetState(db, ctx, chain, "")
 		if err != nil {
-			log.Error(err.Error())
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
 		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
-			return err
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
 		}
-
-		return nil
 	},
 }
 
@@ -95,7 +103,13 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 
-	s1, err := tx.ReadSequence(kv.EthTx)
+	transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
+	var s1 uint64
+	if transactionsV3 {
+		s1, err = tx.ReadSequence(kv.EthTxV3)
+	} else {
+		s1, err = tx.ReadSequence(kv.EthTx)
+	}
 	if err != nil {
 		return err
 	}

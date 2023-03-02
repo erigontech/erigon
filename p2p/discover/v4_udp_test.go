@@ -79,9 +79,10 @@ func newUDPTestContext(ctx context.Context, t *testing.T) *udpTest {
 		remotekey:  newkey(),
 		remoteaddr: &net.UDPAddr{IP: net.IP{10, 0, 1, 99}, Port: 30303},
 	}
+	tmpDir := t.TempDir()
 
 	var err error
-	test.db, err = enode.OpenDB("")
+	test.db, err = enode.OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
@@ -607,7 +608,8 @@ func startLocalhostV4(ctx context.Context, t *testing.T, cfg Config) *UDPv4 {
 	t.Helper()
 
 	cfg.PrivateKey = newkey()
-	db, err := enode.OpenDB("")
+	tmpDir := t.TempDir()
+	db, err := enode.OpenDB("", tmpDir)
 	if err != nil {
 		panic(err)
 	}
