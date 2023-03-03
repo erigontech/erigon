@@ -575,7 +575,7 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 }
 
 // NOTE: it is skipping extra data
-func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
+func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataOffset int) {
 	h.UncleHash = EmptyUncleHash
 	h.Difficulty = libcommon.Big0
 
@@ -601,7 +601,9 @@ func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
 	h.GasLimit = ssz_utils.UnmarshalUint64SSZ(buf[pos+8:])
 	h.GasUsed = ssz_utils.UnmarshalUint64SSZ(buf[pos+16:])
 	h.Time = ssz_utils.UnmarshalUint64SSZ(buf[pos+24:])
-	pos += 36
+	pos += 32
+	extraDataOffset = int(ssz_utils.DecodeOffset(buf[pos:]))
+	pos += 4
 	// Add Base Fee
 	baseFeeBytes := common.CopyBytes(buf[pos : pos+32])
 	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
@@ -618,7 +620,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	if len(buf) < h.EncodingSizeSSZ(version) {
 		return ssz_utils.ErrLowBufferSize
 	}
-	pos := h.DecodeHeaderMetadataForSSZ(buf)
+	pos, _ := h.DecodeHeaderMetadataForSSZ(buf)
 	copy(h.TxHashSSZ[:], buf[pos:pos+32])
 	pos += len(h.TxHashSSZ)
 

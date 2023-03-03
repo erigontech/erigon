@@ -41,8 +41,6 @@ type StateV3 struct {
 	sizeEstimate int
 	txsDone      *atomic2.Uint64
 	finished     atomic2.Bool
-
-	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
 func NewStateV3() *StateV3 {
@@ -56,8 +54,6 @@ func NewStateV3() *StateV3 {
 			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
 		},
 		txsDone: atomic2.NewUint64(0),
-
-		applyPrevAccountBuf: make([]byte, 128),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
@@ -65,6 +61,15 @@ func NewStateV3() *StateV3 {
 
 func (rs *StateV3) put(table string, key, val []byte) {
 	old, ok := rs.changes[table].Set(string(key), val)
+	if ok {
+		rs.sizeEstimate += len(val) - len(old)
+	} else {
+		rs.sizeEstimate += len(key) + len(val)
+	}
+}
+
+func (rs *StateV3) puts(table string, key string, val []byte) {
+	old, ok := rs.changes[table].Set(key, val)
 	if ok {
 		rs.sizeEstimate += len(val) - len(old)
 	} else {
@@ -242,8 +247,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
-			accounts.SerialiseV3To(original, prev)
+			prev := accounts.SerialiseV3(original)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
@@ -341,7 +345,6 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	var a accounts.Account
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
@@ -353,14 +356,13 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 				return err
 			}
 		}
-		a.Reset()
+		var a accounts.Account
 		if err := a.DecodeForStorage(enc0); err != nil {
 			return err
 		}
 		if len(enc0) > 0 {
 			// Need to convert before balance increase
-			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(&a)]
-			accounts.SerialiseV3To(&a, prev)
+			enc0 = accounts.SerialiseV3(&a)
 		}
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
@@ -379,7 +381,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	if txTask.WriteLists != nil {
 		for table, list := range txTask.WriteLists {
 			for i, key := range list.Keys {
-				rs.put(table, key, list.Vals[i])
+				rs.puts(table, key, list.Vals[i])
 			}
 		}
 	}
@@ -570,9 +572,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 			continue
 		}
 		for i, key := range list.Keys {
-			key := key
-			keyS := *(*string)(unsafe.Pointer(&key))
-			if val, ok := t.Get(keyS); ok {
+			if val, ok := t.Get(key); ok {
 				if table == CodeSizeTable {
 					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 						return false
@@ -596,14 +596,10 @@ type StateWriterV3 struct {
 	codePrevs    map[string]uint64
 }
 
-func NewStateWriter22(rs *StateV3) *StateWriterV3 {
+func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 	return &StateWriterV3{
-		rs:           rs,
-		writeLists:   newWriteList(),
-		accountPrevs: map[string][]byte{},
-		accountDels:  map[string]*accounts.Account{},
-		storagePrevs: map[string][]byte{},
-		codePrevs:    map[string]uint64{},
+		rs:         rs,
+		writeLists: newWriteList(),
 	}
 }
 
@@ -613,10 +609,10 @@ func (w *StateWriterV3) SetTxNum(txNum uint64) {
 
 func (w *StateWriterV3) ResetWriteSet() {
 	w.writeLists = newWriteList()
-	w.accountPrevs = map[string][]byte{}
-	w.accountDels = map[string]*accounts.Account{}
-	w.storagePrevs = map[string][]byte{}
-	w.codePrevs = map[string]uint64{}
+	w.accountPrevs = nil
+	w.accountDels = nil
+	w.storagePrevs = nil
+	w.codePrevs = nil
 }
 
 func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
@@ -632,11 +628,14 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	value := make([]byte, account.EncodingLengthForStorage())
 	account.EncodeForStorage(value)
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, addressBytes)
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 	var prev []byte
 	if original.Initialised {
 		prev = accounts.SerialiseV3(original)
+	}
+	if w.accountPrevs == nil {
+		w.accountPrevs = map[string][]byte{}
 	}
 	w.accountPrevs[string(addressBytes)] = prev
 	return nil
@@ -644,12 +643,16 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 
 func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
 	addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, codeHashBytes)
+	w.writeLists[kv.Code].Keys = append(w.writeLists[kv.Code].Keys, string(codeHashBytes))
 	w.writeLists[kv.Code].Vals = append(w.writeLists[kv.Code].Vals, code)
 	if len(code) > 0 {
 		//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
-		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, dbutils.PlainGenerateStoragePrefix(addressBytes, incarnation))
+		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, string(dbutils.PlainGenerateStoragePrefix(addressBytes, incarnation)))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHashBytes)
+	}
+
+	if w.codePrevs == nil {
+		w.codePrevs = map[string]uint64{}
 	}
 	w.codePrevs[string(addressBytes)] = incarnation
 	return nil
@@ -657,15 +660,18 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 
 func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, addressBytes)
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
-		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, addressBytes)
+		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, string(addressBytes))
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
 	if original.Initialised {
+		if w.accountDels == nil {
+			w.accountDels = map[string]*accounts.Account{}
+		}
 		w.accountDels[string(addressBytes)] = original
 	}
 	return nil
@@ -676,10 +682,14 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 		return nil
 	}
 	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, composite)
+	cmpositeS := string(composite)
+	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, cmpositeS)
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-	w.storagePrevs[string(composite)] = original.Bytes()
+	if w.storagePrevs == nil {
+		w.storagePrevs = map[string][]byte{}
+	}
+	w.storagePrevs[cmpositeS] = original.Bytes()
 	return nil
 }
 
@@ -698,7 +708,7 @@ type StateReaderV3 struct {
 	readLists       map[string]*exec22.KvList
 }
 
-func NewStateReader22(rs *StateV3) *StateReaderV3 {
+func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	return &StateReaderV3{
 		rs:        rs,
 		readLists: newReadList(),
@@ -724,7 +734,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	if !r.discardReadList {
 		// lifecycle of `r.readList` is less than lifecycle of `r.rs` and `r.tx`, also `r.rs` and `r.tx` do store data immutable way
-		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, addr)
+		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, string(addr))
 		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	}
 	if len(enc) == 0 {
@@ -751,7 +761,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, composite)
+		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, string(composite))
 		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	}
 	if r.trace {
@@ -778,7 +788,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, addr)
+		r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, string(addr))
 		r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc)
 	}
 	if r.trace {
@@ -800,7 +810,7 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	var sizebuf [8]byte
 	binary.BigEndian.PutUint64(sizebuf[:], uint64(len(enc)))
 	if !r.discardReadList {
-		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, address[:])
+		r.readLists[CodeSizeTable].Keys = append(r.readLists[CodeSizeTable].Keys, string(address[:]))
 		r.readLists[CodeSizeTable].Vals = append(r.readLists[CodeSizeTable].Vals, sizebuf[:])
 	}
 	size := len(enc)
@@ -821,7 +831,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, addrBytes)
+		r.readLists[kv.IncarnationMap].Keys = append(r.readLists[kv.IncarnationMap].Keys, string(addrBytes))
 		r.readLists[kv.IncarnationMap].Vals = append(r.readLists[kv.IncarnationMap].Vals, enc)
 	}
 	if len(enc) == 0 {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/maps"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -40,9 +41,10 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	bd.delivered.Clear()
 	bd.deliveredCount = 0
 	bd.wastedCount = 0
-	bd.deliveriesH = make(map[uint64]*types.Header)
-	bd.requests = make(map[uint64]*BodyRequest)
-	bd.peerMap = make(map[[64]byte]int)
+	maps.Clear(bd.deliveriesH)
+	maps.Clear(bd.requests)
+	maps.Clear(bd.peerMap)
+	bd.ClearBodyCache()
 	headHeight = bodyProgress
 	headHash, err = rawdb.ReadCanonicalHash(db, headHeight)
 	if err != nil {

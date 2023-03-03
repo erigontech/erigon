@@ -17,7 +17,6 @@ import (
 	"encoding/binary"
 
 	"github.com/golang/snappy"
-	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 )
 
@@ -95,22 +94,6 @@ func DecodeSSZSnappyWithVersion(dst ssz_utils.Unmarshaler, src []byte, version i
 	}
 
 	return nil
-}
-
-func CompressZstd(b []byte) []byte {
-	wr, err := zstd.NewWriter(nil)
-	if err != nil {
-		panic(err)
-	}
-	return wr.EncodeAll(b, nil)
-}
-
-func DecompressZstd(b []byte) ([]byte, error) {
-	r, err := zstd.NewReader(nil)
-	if err != nil {
-		panic(err)
-	}
-	return r.DecodeAll(b, nil)
 }
 
 // Check if it is sorted and check if there are duplicates. O(N) complexity.
