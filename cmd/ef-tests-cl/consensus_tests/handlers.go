@@ -1,15 +1,13 @@
-package main
+package consensustests
 
 import (
 	"fmt"
 	"path"
 )
 
-type testFunc func() error
+type testFunc func(context testContext) error
 
-var (
-	epochProcessingDivision = "epoch_processing"
-)
+var epochProcessingDivision = "epoch_processing"
 
 // Epoch processing cases
 var (
@@ -43,7 +41,7 @@ func placeholderTest() error {
 }
 
 // Following is just a map for all tests to their execution.
-var TestCollection map[string]testFunc = map[string]testFunc{
+var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseEffectiveBalanceUpdates):      effectiveBalancesUpdateTest,
 	path.Join(epochProcessingDivision, caseEth1DataReset):                eth1DataResetTest,
 	path.Join(epochProcessingDivision, caseHistoricalRootsUpdate):        historicalRootsUpdateTest,
