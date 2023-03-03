@@ -228,7 +228,7 @@ func (m *mapmutation) doCommit(tx kv.RwTx) error {
 			select {
 			default:
 			case <-logEvery.C:
-				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, float64(total)/1_000_000)
+				progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, total/1_000_000)
 				log.Info("Write to db", "progress", progress, "current table", table)
 				tx.CollectMetrics()
 			}
