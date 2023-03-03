@@ -389,6 +389,7 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
+// getBitlistLength return the amount of bits in given bitlist.
 func getBitlistLength(b []byte) int {
 	if len(b) == 0 {
 		return 0

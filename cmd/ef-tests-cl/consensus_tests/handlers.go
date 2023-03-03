@@ -27,10 +27,15 @@ var (
 	caseSlashingsReset               = "slashings_reset"
 )
 
-// Attestation cases
-
+// Operations cases
 var (
-	caseAttestation = "attestation"
+	caseAttestation      = "attestation"
+	caseAttesterSlashing = "attester_slashing"
+	caseProposerSlashing = "proposer_slashing"
+	caseBlockHeader      = "block_header"
+	caseDeposit          = "deposit"
+	caseVoluntaryExit    = "voluntary_exit"
+	caseSyncAggregate    = "sync_aggregate"
 )
 
 // transitionCoreTest
@@ -63,6 +68,12 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseSlashings):                    slashingsTest,
 	path.Join(epochProcessingDivision, caseSlashingsReset):               slashingsResetTest,
 	path.Join(operationsDivision, caseAttestation):                       operationAttestationHandler,
+	path.Join(operationsDivision, caseAttesterSlashing):                  operationAttesterSlashingHandler,
+	path.Join(operationsDivision, caseProposerSlashing):                  operationProposerSlashingHandler,
+	path.Join(operationsDivision, caseBlockHeader):                       operationBlockHeaderHandler,
+	path.Join(operationsDivision, caseDeposit):                           operationDepositHandler,
+	path.Join(operationsDivision, caseSyncAggregate):                     operationSyncAggregateHandler,
+	path.Join(operationsDivision, caseVoluntaryExit):                     operationVoluntaryExitHandler,
 	sanityBlocks: testSanityFunction,
 	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,
