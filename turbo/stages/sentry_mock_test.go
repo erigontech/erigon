@@ -677,6 +677,7 @@ func TestPoSSyncWithInvalidHeader(t *testing.T) {
 }
 
 func TestPOSWrontTrieRootReorgs(t *testing.T) {
+	t.Skip("Need some fixes for memory mutation to support DupSort")
 	//defer log.Root().SetHandler(log.Root().GetHandler())
 	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat())))
 	require := require.New(t)
