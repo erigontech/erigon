@@ -38,6 +38,10 @@ func (*SignedAggregateAndProof) Clone() clonable.Clonable {
 	return &SignedAggregateAndProof{}
 }
 
+func (*SyncAggregate) Clone() clonable.Clonable {
+	return &SyncAggregate{}
+}
+
 func (*SignedVoluntaryExit) Clone() clonable.Clonable {
 	return &SignedVoluntaryExit{}
 }
@@ -72,6 +76,10 @@ func (*Deposit) Clone() clonable.Clonable {
 
 func (*LightClientBootstrap) Clone() clonable.Clonable {
 	return &LightClientBootstrap{}
+}
+
+func (*BeaconBlock) Clone() clonable.Clonable {
+	return &BeaconBlock{}
 }
 
 func (*LightClientUpdate) Clone() clonable.Clonable {

@@ -192,10 +192,8 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		signedRoot := utils.Keccak256(depositMessageRoot[:], domain)
 		// Perform BLS verification and if successful noice.
 		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
-		if err != nil {
-			return err
-		}
-		if !valid {
+		// Literally you can input it trash.
+		if !valid || err != nil {
 			return nil
 		}
 		// Append validator
