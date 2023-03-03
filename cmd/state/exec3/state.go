@@ -70,7 +70,8 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		resultCh: resultCh,
 		engine:   engine,
 
-		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		//callTracer:  NewCallTracer(background, agg),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
@@ -178,6 +179,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				//txTask.TraceTos = rw.callTracer.Tos()
 				txTask.TraceTos = map[libcommon.Address]struct{}{}
 				txTask.TraceTos[txTask.Coinbase] = struct{}{}
 				for _, uncle := range txTask.Uncles {
