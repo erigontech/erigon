@@ -817,7 +817,6 @@ Loop:
 			break
 		}
 
-		peer = [64]byte{}
 		sentToPeer = false
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
