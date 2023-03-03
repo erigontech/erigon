@@ -98,6 +98,57 @@ func TestDecompressMatchOK(t *testing.T) {
 	}
 }
 
+func prepareStupidDict(t *testing.T, size int) *Decompressor {
+	t.Helper()
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "compressed2")
+	t.Name()
+	c, err := NewCompressor(context.Background(), t.Name(), file, tmpDir, 1, 2, log.LvlDebug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	for i := 0; i < size; i++ {
+		if err = c.AddWord([]byte(fmt.Sprintf("word-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = c.Compress(); err != nil {
+		t.Fatal(err)
+	}
+	var d *Decompressor
+	if d, err = NewDecompressor(file); err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestDecompressMatchOKCondensed(t *testing.T) {
+	condensePatternTableBitThreshold = 4
+	d := prepareStupidDict(t, 10000)
+	defer func() { condensePatternTableBitThreshold = 9 }()
+	defer d.Close()
+
+	g := d.MakeGetter()
+	i := 0
+	for g.HasNext() {
+		if i%2 != 0 {
+			expected := fmt.Sprintf("word-%d", i)
+			ok, _ := g.Match([]byte(expected))
+			if !ok {
+				t.Errorf("expexted match with %s", expected)
+			}
+		} else {
+			word, _ := g.Next(nil)
+			expected := fmt.Sprintf("word-%d", i)
+			if string(word) != expected {
+				t.Errorf("expected %s, got (hex) %s", expected, word)
+			}
+		}
+		i++
+	}
+}
+
 func TestDecompressMatchNotOK(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()

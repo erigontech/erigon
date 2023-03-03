@@ -25,12 +25,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (d *Domain) endTxNumMinimax() uint64 {
@@ -104,6 +105,26 @@ type DomainRanges struct {
 	index             bool
 }
 
+func (r DomainRanges) String() string {
+	var b strings.Builder
+	if r.values {
+		b.WriteString(fmt.Sprintf("Values: [%d, %d)", r.valuesStartTxNum, r.valuesEndTxNum))
+	}
+	if r.history {
+		if b.Len() > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("History: [%d, %d)", r.historyStartTxNum, r.historyEndTxNum))
+	}
+	if r.index {
+		if b.Len() > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("Index: [%d, %d)", r.indexStartTxNum, r.indexEndTxNum))
+	}
+	return b.String()
+}
+
 func (r DomainRanges) any() bool {
 	return r.values || r.history || r.index
 }
@@ -142,93 +163,6 @@ func (d *Domain) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	return r
 }
 
-// nolint
-type mergedDomainFiles struct {
-	values  *filesItem
-	index   *filesItem
-	history *filesItem
-}
-
-// nolint
-func (m *mergedDomainFiles) Close() {
-	for _, item := range []*filesItem{
-		m.values, m.index, m.history,
-	} {
-		if item != nil {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
-			if item.decompressor != nil {
-				item.index.Close()
-			}
-		}
-	}
-}
-
-// nolint
-type staticFilesInRange struct {
-	valuesFiles  []*filesItem
-	indexFiles   []*filesItem
-	historyFiles []*filesItem
-	startJ       int
-}
-
-// nolint
-func (s *staticFilesInRange) Close() {
-	for _, group := range [][]*filesItem{
-		s.valuesFiles, s.indexFiles, s.historyFiles,
-	} {
-		for _, item := range group {
-			if item != nil {
-				if item.decompressor != nil {
-					item.decompressor.Close()
-				}
-				if item.index != nil {
-					item.index.Close()
-				}
-			}
-		}
-	}
-}
-
-/*
-// nolint
-
-	func (d *Domain) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int) (err error) {
-		closeAll := true
-		for rng := d.findMergeRange(maxSpan, maxTxNum); rng.any(); rng = d.findMergeRange(maxTxNum, maxSpan) {
-			var sfr staticFilesInRange
-			sfr.valuesFiles, sfr.indexFiles, sfr.historyFiles, sfr.startJ = d.staticFilesInRange(rng)
-			defer func() {
-				if closeAll {
-					sfr.Close()
-				}
-			}()
-
-			var mf mergedDomainFiles
-			if mf.values, mf.index, mf.history, err = d.mergeFiles(ctx, sfr.valuesFiles, sfr.indexFiles, sfr.historyFiles, rng, workers); err != nil {
-				return err
-			}
-			defer func() {
-				if closeAll {
-					mf.Close()
-				}
-			}()
-
-			//defer func(t time.Time) { log.Info("[snapshots] merge", "took", time.Since(t)) }(time.Now())
-			d.integrateMergedFiles(sfr.valuesFiles, sfr.indexFiles, sfr.historyFiles, mf.values, mf.index, mf.history)
-
-			if err := d.deleteFiles(sfr.valuesFiles, sfr.indexFiles, sfr.historyFiles); err != nil {
-				return err
-			}
-
-			log.Info(fmt.Sprintf("domain files mergedRange[%d, %d) name=%s span=%d \n", rng.valuesStartTxNum, rng.valuesEndTxNum, d.filenameBase, maxSpan))
-		}
-		closeAll = false
-		return nil
-	}
-*/
-
 // 0-1,1-2,2-3,3-4: allow merge 0-1
 // 0-2,2-3,3-4: allow merge 0-4
 // 0-2,2-4: allow merge 0-4
@@ -266,12 +200,10 @@ func (ii *InvertedIndex) findMergeRange(maxEndTxNum, maxSpan uint64) (bool, uint
 	return minFound, startTxNum, endTxNum
 }
 
-/*
-// nolint
-func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int) (err error) {
+func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan uint64, workers int, ictx *InvertedIndexContext) (err error) {
 	closeAll := true
 	for updated, startTx, endTx := ii.findMergeRange(maxSpan, maxTxNum); updated; updated, startTx, endTx = ii.findMergeRange(maxTxNum, maxSpan) {
-		staticFiles, startJ := ii.staticFilesInRange(startTx, endTx)
+		staticFiles, _ := ii.staticFilesInRange(startTx, endTx, ictx)
 		defer func() {
 			if closeAll {
 				for _, i := range staticFiles {
@@ -280,7 +212,6 @@ func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan 
 				}
 			}
 		}()
-		_ = startJ
 
 		mergedIndex, err := ii.mergeFiles(ctx, staticFiles, startTx, endTx, workers)
 		if err != nil {
@@ -293,19 +224,12 @@ func (ii *InvertedIndex) mergeRangesUpTo(ctx context.Context, maxTxNum, maxSpan 
 			}
 		}()
 
-		//defer func(t time.Time) { log.Info("[snapshots] merge", "took", time.Since(t)) }(time.Now())
 		ii.integrateMergedFiles(staticFiles, mergedIndex)
-
-		if err := ii.deleteFiles(staticFiles); err != nil {
-			return err
-		}
-
-		log.Info(fmt.Sprintf("domain files mergedRange[%d, %d) name=%s span=%d \n", startTx, endTx, ii.filenameBase, maxSpan))
+		ii.cleanFrozenParts(mergedIndex)
 	}
 	closeAll = false
 	return nil
 }
-*/
 
 type HistoryRanges struct {
 	historyStartTxNum uint64
@@ -552,22 +476,22 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		return
 	}
 	var comp *compress.Compressor
-	//var decomp *compress.Decompressor
-	var closeItem = true
+	closeItem := true
+
 	defer func() {
 		if closeItem {
 			if comp != nil {
 				comp.Close()
 			}
-			//if decomp != nil {
-			//	decomp.Close()
-			//}
 			if indexIn != nil {
 				if indexIn.decompressor != nil {
 					indexIn.decompressor.Close()
 				}
 				if indexIn.index != nil {
 					indexIn.index.Close()
+				}
+				if indexIn.bindex != nil {
+					indexIn.bindex.Close()
 				}
 			}
 			if historyIn != nil {
@@ -577,6 +501,9 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 				if historyIn.index != nil {
 					historyIn.index.Close()
 				}
+				if historyIn.bindex != nil {
+					historyIn.bindex.Close()
+				}
 			}
 			if valuesIn != nil {
 				if valuesIn.decompressor != nil {
@@ -584,6 +511,9 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 				}
 				if valuesIn.index != nil {
 					valuesIn.index.Close()
+				}
+				if valuesIn.bindex != nil {
+					valuesIn.bindex.Close()
 				}
 			}
 		}
@@ -656,24 +586,21 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 					heap.Pop(&cp)
 				}
 			}
-			var skip bool
-			if d.prefixLen > 0 {
-				skip = r.valuesStartTxNum == 0 && len(lastVal) == 0 && len(lastKey) != d.prefixLen
-			} else {
-				// For the rest of types, empty value means deletion
-				skip = r.valuesStartTxNum == 0 && len(lastVal) == 0
-			}
-			if !skip {
-				if keyBuf != nil && (d.prefixLen == 0 || len(keyBuf) != d.prefixLen || bytes.HasPrefix(lastKey, keyBuf)) {
+
+			// empty value means deletion
+			deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
+			if !deleted {
+				if keyBuf != nil {
 					if err = comp.AddUncompressedWord(keyBuf); err != nil {
 						return nil, nil, nil, err
 					}
 					keyCount++ // Only counting keys, not values
-					if d.compressVals {
+					switch d.compressVals {
+					case true:
 						if err = comp.AddWord(valBuf); err != nil {
 							return nil, nil, nil, err
 						}
-					} else {
+					default:
 						if err = comp.AddUncompressedWord(valBuf); err != nil {
 							return nil, nil, nil, err
 						}
@@ -713,6 +640,18 @@ func (d *Domain) mergeFiles(ctx context.Context, valuesFiles, indexFiles, histor
 		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, idxPath, d.tmpdir, keyCount, false /* values */); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
+
+		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
+		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+
+		bt, err := OpenBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s btindex2 [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		valuesIn.bindex = bt
 	}
 	closeItem = false
 	d.stats.MergesCount++
@@ -1057,7 +996,7 @@ func (d *Domain) integrateMergedFiles(valuesOuts, indexOuts, historyOuts []*file
 
 		// `kill -9` may leave some garbage
 		// but it still may be useful for merges, until we finish merge frozen file
-		if historyIn.frozen {
+		if historyIn != nil && historyIn.frozen {
 			d.files.Walk(func(items []*filesItem) bool {
 				for _, item := range items {
 					if item.frozen || item.endTxNum > valuesIn.endTxNum {
