@@ -355,7 +355,7 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
 }
 
-func TestProcessAttestation(t *testing.T) {
+func TestProcessAttestationAggBitsInvalid(t *testing.T) {
 	beaconState := state.GetEmptyBeaconState()
 	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
 	for i := 0; i < 64; i++ {
@@ -380,16 +380,5 @@ func TestProcessAttestation(t *testing.T) {
 	}
 	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
 
-	require.NoError(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
-
-	p := beaconState.CurrentEpochParticipation()
-	require.NoError(t, err)
-
-	indices, err := beaconState.GetAttestingIndicies(att.Data, att.AggregationBits)
-	require.NoError(t, err)
-	for _, index := range indices {
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyHeadFlagIndex)))
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelySourceFlagIndex)))
-		require.True(t, p[index].HasFlag(int(clparams.MainnetBeaconConfig.TimelyTargetFlagIndex)))
-	}
+	require.Error(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
 }
