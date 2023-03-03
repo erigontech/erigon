@@ -70,8 +70,7 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		resultCh: resultCh,
 		engine:   engine,
 
-		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
-		//callTracer:  NewCallTracer(background, agg),
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
 		taskGasPool: new(core.GasPool),
 	}
