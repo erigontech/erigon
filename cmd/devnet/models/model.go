@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -39,6 +38,8 @@ const (
 	ConsoleVerbosityArg = "--log.console.verbosity"
 	// LogDirArg is the log.dir.path flag
 	LogDirArg = "--log.dir.path"
+	// TorrentPortArg is the --torrent.port flag argument
+	TorrentPortArg = "--torrent.port"
 	// Mine is the mine flag
 	Mine = "--mine"
 	// NoDiscover is the nodiscover flag
@@ -62,12 +63,14 @@ const (
 	ConsoleVerbosityParam = "0"
 	// LogDirParam is the log directory parameter for logging to disk
 	LogDirParam = "./cmd/devnet/debug_logs"
+	// TorrentPortParam is the port parameter for the second node
+	TorrentPortParam = "42070"
 	// PrivateApiParamMine is the private.api.addr parameter for the mining node
 	PrivateApiParamMine = "localhost:9090"
 	// PrivateApiParamNoMine is the private.api.addr parameter for the non-mining node
 	PrivateApiParamNoMine = "localhost:9091"
 	// HttpApiParam is the http.api default parameter for rpcdaemon
-	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity"
+	HttpApiParam = "admin,eth,erigon,web3,net,debug,trace,txpool,parity,ots"
 
 	// ErigonUrl is the default url for rpc connections
 	ErigonUrl = "http://localhost:8545"
@@ -95,6 +98,8 @@ const (
 	NonContractTx TransactionType = "non-contract"
 	// ContractTx is the transaction type for sending ether
 	ContractTx TransactionType = "contract"
+	// DynamicFee is the transaction type for dynamic fee
+	DynamicFee TransactionType = "dynamic-fee"
 
 	// SolContractMethodSignature is the function signature for the event in the solidity contract definition
 	SolContractMethodSignature = "SubscriptionEvent()"
@@ -107,12 +112,17 @@ const (
 	ETHSendRawTransaction RPCMethod = "eth_sendRawTransaction"
 	// ETHGetBlockByNumber represents the eth_getBlockByNumber method
 	ETHGetBlockByNumber RPCMethod = "eth_getBlockByNumber"
+	// ETHGetBlock represents the eth_getBlock method
+	ETHGetBlock RPCMethod = "eth_getBlock"
 	// ETHGetLogs represents the eth_getLogs method
 	ETHGetLogs RPCMethod = "eth_getLogs"
 	// AdminNodeInfo represents the admin_nodeInfo method
 	AdminNodeInfo RPCMethod = "admin_nodeInfo"
 	// TxpoolContent represents the txpool_content method
 	TxpoolContent RPCMethod = "txpool_content"
+
+	// OTSGetBlockDetails represents the ots_getBlockDetails method
+	OTSGetBlockDetails RPCMethod = "ots_getBlockDetails"
 
 	// ETHNewHeads represents the eth_newHeads sub method
 	ETHNewHeads SubMethod = "eth_newHeads"
