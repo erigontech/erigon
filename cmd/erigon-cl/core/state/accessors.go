@@ -127,16 +127,11 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 }
 
 func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
-	if epoch == 0 {
-		epoch = b.Epoch()
-	}
-	var forkVersion [4]byte
 	if epoch < b.fork.Epoch {
-		forkVersion = b.fork.PreviousVersion
-	} else {
-		forkVersion = b.fork.CurrentVersion
+		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
 	}
-	return fork.ComputeDomain(domainType[:], forkVersion, b.genesisValidatorsRoot)
+	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
+
 }
 
 func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
