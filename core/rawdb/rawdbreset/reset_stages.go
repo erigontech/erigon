@@ -91,7 +91,10 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 		return err
 	}
 	ethtx := kv.EthTx
-	transactionV3, _ := kvcfg.TransactionsV3.Enabled(db.(kv.Tx))
+	transactionV3, err := kvcfg.TransactionsV3.Enabled(tx)
+	if err != nil {
+		panic(err)
+	}
 	if transactionV3 {
 		ethtx = kv.EthTxV3
 	}
