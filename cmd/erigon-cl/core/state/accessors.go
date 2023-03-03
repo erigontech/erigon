@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -388,10 +389,32 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
+func getBitlistLength(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	// The most significant bit is present in the last byte in the array.
+	last := b[len(b)-1]
+
+	// Determine the position of the most significant bit.
+	msb := bits.Len8(last)
+	if msb == 0 {
+		return 0
+	}
+
+	// The absolute position of the most significant bit will be the number of
+	// bits in the preceding bytes plus the position of the most significant
+	// bit. Subtract this value by 1 to determine the length of the bitlist.
+	return 8*(len(b)-1) + msb - 1
+}
+
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
+	}
+	if getBitlistLength(aggregationBits) != len(committee) {
+		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits")
 	}
 	attestingIndices := []uint64{}
 	for i, member := range committee {

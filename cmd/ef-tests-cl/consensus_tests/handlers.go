@@ -7,7 +7,10 @@ import (
 
 type testFunc func(context testContext) error
 
-var epochProcessingDivision = "epoch_processing"
+var (
+	operationsDivision      = "operations"
+	epochProcessingDivision = "epoch_processing"
+)
 
 // Epoch processing cases
 var (
@@ -22,6 +25,12 @@ var (
 	caseRewardsAndPenalties          = "rewards_and_penalties"
 	caseSlashings                    = "slashings"
 	caseSlashingsReset               = "slashings_reset"
+)
+
+// Attestation cases
+
+var (
+	caseAttestation = "attestation"
 )
 
 // transitionCoreTest
@@ -53,6 +62,7 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseRewardsAndPenalties):          rewardsAndPenaltiesTest,
 	path.Join(epochProcessingDivision, caseSlashings):                    slashingsTest,
 	path.Join(epochProcessingDivision, caseSlashingsReset):               slashingsResetTest,
+	path.Join(operationsDivision, caseAttestation):                       operationAttestationHandler,
 	sanityBlocks: testSanityFunction,
 	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,
