@@ -134,23 +134,7 @@ func TestLifecycleRegistry_Successful(t *testing.T) {
 // Tests whether a service's protocols can be registered properly on the node's p2p server.
 func TestRegisterProtocols(t *testing.T) {
 	t.Skip("adjust to p2p sentry")
-	stack, err := New(testNodeConfig(t))
-	if err != nil {
-		t.Fatalf("failed to create protocol stack: %v", err)
-	}
-	defer stack.Close()
-
-	fs, err := NewFullService(stack)
-	if err != nil {
-		t.Fatalf("could not create full service: %v", err)
-	}
-
-	for _, protocol := range fs.Protocols() {
-		if !containsProtocol(stack.server.Protocols, protocol) {
-			t.Fatalf("protocol %v was not successfully registered", protocol)
-		}
-	}
-
+	// TODO
 }
 
 // This test checks that open databases are closed with node.
@@ -404,9 +388,6 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 		delete(started, id)
 		delete(stopped, id)
 	}
-
-	stack.server = &p2p.Server{}
-	stack.server.PrivateKey = testNodeKey
 }
 
 func containsProtocol(stackProtocols []p2p.Protocol, protocol p2p.Protocol) bool {

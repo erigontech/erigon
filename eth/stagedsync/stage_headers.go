@@ -158,16 +158,15 @@ func HeadersPOS(
 	useExternalTx bool,
 	preProgress uint64,
 ) error {
-	/*
-		if initialCycle {
-			// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead
-			if execProgress, err := stages.GetStageProgress(tx, stages.Execution); err != nil {
-				return err
-			} else if s.BlockNumber >= execProgress {
-				return nil
-			}
+	if initialCycle {
+		// Let execution and other stages to finish before waiting for CL, but only if other stages aren't ahead.
+		// Specifically, this allows to execute snapshot blocks before waiting for CL.
+		if execProgress, err := s.ExecutionAt(tx); err != nil {
+			return err
+		} else if s.BlockNumber >= execProgress {
+			return nil
 		}
-	*/
+	}
 
 	cfg.hd.SetPOSSync(true)
 	syncing := cfg.hd.PosStatus() != headerdownload.Idle

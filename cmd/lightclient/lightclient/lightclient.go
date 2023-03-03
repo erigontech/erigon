@@ -94,7 +94,6 @@ func (l *LightClient) Start() {
 	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
 
-	updateStatusSentinel := time.NewTicker(2 * time.Minute)
 	go l.chainTip.StartLoop()
 	for {
 		start := time.Now()
@@ -219,14 +218,6 @@ func (l *LightClient) Start() {
 				continue
 			}
 			log.Info("[LightClient] P2P", "peers", peers)
-		case <-updateStatusSentinel.C:
-			if err := l.updateStatus(); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				log.Error("Could not update sentinel status", "err", err)
-				return
-			}
 		case <-l.ctx.Done():
 			return
 		}
@@ -274,16 +265,4 @@ func (l *LightClient) importBlockIfPossible() {
 	} else {
 		l.highestSeen = eth1Number
 	}
-}
-
-func (l *LightClient) updateStatus() error {
-	finalizedRoot, err := l.store.finalizedHeader.HashSSZ()
-	if err != nil {
-		return err
-	}
-	headRoot, err := l.store.optimisticHeader.HashSSZ()
-	if err != nil {
-		return err
-	}
-	return l.rpc.SetStatus(finalizedRoot, l.store.finalizedHeader.Slot/32, headRoot, l.store.optimisticHeader.Slot)
 }
