@@ -790,6 +790,8 @@ func goerliConfig() BeaconChainConfig {
 	cfg.ShardingForkVersion = 0x40001020
 	cfg.BellatrixForkEpoch = 112260
 	cfg.BellatrixForkVersion = 0x02001020
+	cfg.CapellaForkEpoch = 162304
+	cfg.CapellaForkVersion = 0x03001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
