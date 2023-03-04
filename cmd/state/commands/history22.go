@@ -12,6 +12,7 @@ import (
 	"time"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -31,6 +32,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+)
+
+var (
+	blockTo    int
+	traceBlock int
 )
 
 func init() {
@@ -72,7 +78,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadirCli, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep, libstate.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
