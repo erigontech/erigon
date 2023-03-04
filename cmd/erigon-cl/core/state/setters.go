@@ -59,7 +59,7 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 
 func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
 	if index >= len(b.validators) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 	b.validators[index] = validator
 	b.touchedLeaves[ValidatorsLeafIndex] = true

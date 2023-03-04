@@ -265,7 +265,7 @@ func (b *BeaconState) BaseRewardPerIncrement() uint64 {
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
 	if index >= uint64(len(b.validators)) {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
 }
