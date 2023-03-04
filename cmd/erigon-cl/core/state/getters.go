@@ -12,7 +12,7 @@ import (
 
 var (
 	// Error for missing validator
-	InvalidValidatorIndex = errors.New("invalid validator index")
+	ErrInvalidValidatorIndex = errors.New("invalid validator index")
 )
 
 // Just a bunch of simple getters.
@@ -74,7 +74,7 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 
 func (b *BeaconState) ValidatorAt(index int) (cltypes.Validator, error) {
 	if index >= len(b.validators) {
-		return cltypes.Validator{}, InvalidValidatorIndex
+		return cltypes.Validator{}, ErrInvalidValidatorIndex
 	}
 	return *b.validators[index], nil
 }
@@ -85,7 +85,7 @@ func (b *BeaconState) Balances() []uint64 {
 
 func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	if index >= len(b.balances) {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return b.balances[index], nil
 }
@@ -128,7 +128,7 @@ func (b *BeaconState) InactivityScores() []uint64 {
 
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
 	if len(b.inactivityScores) <= index {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return b.inactivityScores[index], nil
 }
