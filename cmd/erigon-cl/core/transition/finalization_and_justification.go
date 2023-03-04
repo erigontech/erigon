@@ -3,39 +3,41 @@ package transition
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // weighJustificationAndFinalization checks justification and finality of epochs and adds records to the state as needed.
-func (s *StateTransistor) weighJustificationAndFinalization(totalActiveBalance, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
-	currentEpoch := s.state.Epoch()
-	previousEpoch := s.state.PreviousEpoch()
-	oldPreviousJustifiedCheckpoint := s.state.PreviousJustifiedCheckpoint()
-	oldCurrentJustifiedCheckpoint := s.state.CurrentJustifiedCheckpoint()
-	justificationBits := s.state.JustificationBits()
+func weighJustificationAndFinalization(state *state.BeaconState, previousEpochTargetBalance, currentEpochTargetBalance uint64) error {
+	totalActiveBalance := state.GetTotalActiveBalance()
+	currentEpoch := state.Epoch()
+	previousEpoch := state.PreviousEpoch()
+	oldPreviousJustifiedCheckpoint := state.PreviousJustifiedCheckpoint()
+	oldCurrentJustifiedCheckpoint := state.CurrentJustifiedCheckpoint()
+	justificationBits := state.JustificationBits()
 	// Process justification
-	s.state.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint)
+	state.SetPreviousJustifiedCheckpoint(oldCurrentJustifiedCheckpoint)
 	// Discard oldest bit
 	copy(justificationBits[1:], justificationBits[:3])
 	// Turn off current justification bit
 	justificationBits[0] = false
 	// Update justified checkpoint if super majority is reached on previous epoch
 	if previousEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := s.state.GetBlockRoot(previousEpoch)
+		checkPointRoot, err := state.GetBlockRoot(previousEpoch)
 		if err != nil {
 			return err
 		}
-		s.state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
+		state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
 			Epoch: previousEpoch,
 			Root:  checkPointRoot,
 		})
 		justificationBits[1] = true
 	}
 	if currentEpochTargetBalance*3 >= totalActiveBalance*2 {
-		checkPointRoot, err := s.state.GetBlockRoot(currentEpoch)
+		checkPointRoot, err := state.GetBlockRoot(currentEpoch)
 		if err != nil {
 			return err
 		}
-		s.state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
+		state.SetCurrentJustifiedCheckpoint(&cltypes.Checkpoint{
 			Epoch: currentEpoch,
 			Root:  checkPointRoot,
 		})
@@ -46,52 +48,53 @@ func (s *StateTransistor) weighJustificationAndFinalization(totalActiveBalance, 
 	// The 2nd/3rd most recent epochs are justified, the 2nd using the 3rd as source
 	if (justificationBits.CheckRange(1, 4) && oldPreviousJustifiedCheckpoint.Epoch+3 == currentEpoch) ||
 		(justificationBits.CheckRange(1, 3) && oldPreviousJustifiedCheckpoint.Epoch+2 == currentEpoch) {
-		s.state.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
+		state.SetFinalizedCheckpoint(oldPreviousJustifiedCheckpoint)
 	}
 	// The 1st/2nd/3rd most recent epochs are justified, the 1st using the 3rd as source
 	// The 1st/2nd most recent epochs are justified, the 1st using the 2nd as source
 	if (justificationBits.CheckRange(0, 3) && oldCurrentJustifiedCheckpoint.Epoch+2 == currentEpoch) ||
 		(justificationBits.CheckRange(0, 2) && oldCurrentJustifiedCheckpoint.Epoch+1 == currentEpoch) {
-		s.state.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
+		state.SetFinalizedCheckpoint(oldCurrentJustifiedCheckpoint)
 	}
 	// Write justification bits
-	s.state.SetJustificationBits(justificationBits)
+	state.SetJustificationBits(justificationBits)
 	return nil
 }
 
-func (s *StateTransistor) ProcessJustificationBitsAndFinality() error {
-	if s.state.Version() == clparams.Phase0Version {
-		return s.processJustificationBitsAndFinalityPreAltair()
+func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
+	if state.Version() == clparams.Phase0Version {
+		return processJustificationBitsAndFinalityPreAltair(state)
 	}
-	return s.processJustificationBitsAndFinalityAltair()
+	return processJustificationBitsAndFinalityAltair(state)
 }
 
-func (s *StateTransistor) processJustificationBitsAndFinalityPreAltair() error {
+func processJustificationBitsAndFinalityPreAltair(state *state.BeaconState) error {
 	panic("NOT IMPLEMENTED. STOOOOOP")
 }
 
-func (s *StateTransistor) processJustificationBitsAndFinalityAltair() error {
-	currentEpoch := s.state.Epoch()
-	previousEpoch := s.state.PreviousEpoch()
+func processJustificationBitsAndFinalityAltair(state *state.BeaconState) error {
+	currentEpoch := state.Epoch()
+	previousEpoch := state.PreviousEpoch()
+	beaconConfig := state.BeaconConfig()
 	// Skip for first 2 epochs
-	if currentEpoch <= s.beaconConfig.GenesisEpoch+1 {
+	if currentEpoch <= beaconConfig.GenesisEpoch+1 {
 		return nil
 	}
-	previousParticipation, currentParticipation := s.state.PreviousEpochParticipation(), s.state.CurrentEpochParticipation()
+	previousParticipation, currentParticipation := state.PreviousEpochParticipation(), state.CurrentEpochParticipation()
 	var previousTargetBalance, currentTargetBalance uint64
-	for i, validator := range s.state.Validators() {
+	for i, validator := range state.Validators() {
 		if validator.Slashed {
 			continue
 		}
 		if validator.Active(previousEpoch) &&
-			previousParticipation[i].HasFlag(int(s.beaconConfig.TimelyTargetFlagIndex)) {
+			previousParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 			previousTargetBalance += validator.EffectiveBalance
 		}
 		if validator.Active(currentEpoch) &&
-			currentParticipation[i].HasFlag(int(s.beaconConfig.TimelyTargetFlagIndex)) {
+			currentParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
 			currentTargetBalance += validator.EffectiveBalance
 		}
 	}
 
-	return s.weighJustificationAndFinalization(s.state.GetTotalActiveBalance(), previousTargetBalance, currentTargetBalance)
+	return weighJustificationAndFinalization(state, previousTargetBalance, currentTargetBalance)
 }

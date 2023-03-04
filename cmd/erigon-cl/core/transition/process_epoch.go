@@ -2,45 +2,46 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // ProcessEpoch process epoch transition.
-func (s *StateTransistor) ProcessEpoch() error {
-	if err := s.ProcessJustificationBitsAndFinality(); err != nil {
+func ProcessEpoch(state *state.BeaconState) error {
+	if err := ProcessJustificationBitsAndFinality(state); err != nil {
 		return err
 	}
-	if s.state.Version() >= clparams.AltairVersion {
-		if err := s.ProcessInactivityScores(); err != nil {
+	if state.Version() >= clparams.AltairVersion {
+		if err := ProcessInactivityScores(state); err != nil {
 			return err
 		}
 	}
-	if err := s.ProcessRewardsAndPenalties(); err != nil {
+	if err := ProcessRewardsAndPenalties(state); err != nil {
 		return err
 	}
-	if err := s.ProcessRegistryUpdates(); err != nil {
+	if err := ProcessRegistryUpdates(state); err != nil {
 		return err
 	}
-	if err := s.ProcessSlashings(); err != nil {
+	if err := ProcessSlashings(state); err != nil {
 		return err
 	}
-	s.ProcessEth1DataReset()
-	if err := s.ProcessEffectiveBalanceUpdates(); err != nil {
+	ProcessEth1DataReset(state)
+	if err := ProcessEffectiveBalanceUpdates(state); err != nil {
 		return err
 	}
-	s.ProcessSlashingsReset()
-	s.ProcessRandaoMixesReset()
-	if err := s.ProcessHistoricalRootsUpdate(); err != nil {
+	ProcessSlashingsReset(state)
+	ProcessRandaoMixesReset(state)
+	if err := ProcessHistoricalRootsUpdate(state); err != nil {
 		return err
 	}
-	if s.state.Version() == clparams.Phase0Version {
-		if err := s.ProcessParticipationRecordUpdates(); err != nil {
+	if state.Version() == clparams.Phase0Version {
+		if err := ProcessParticipationRecordUpdates(state); err != nil {
 			return err
 		}
 	}
 
-	if s.state.Version() >= clparams.AltairVersion {
-		s.ProcessParticipationFlagUpdates()
-		if err := s.ProcessSyncCommitteeUpdate(); err != nil {
+	if state.Version() >= clparams.AltairVersion {
+		ProcessParticipationFlagUpdates(state)
+		if err := ProcessSyncCommitteeUpdate(state); err != nil {
 			return err
 		}
 	}
@@ -74,6 +75,6 @@ func (s *StateTransistor) ProcessEpoch() error {
 	*/
 }
 
-func (s *StateTransistor) ProcessParticipationRecordUpdates() error {
+func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 	panic("not implemented")
 }

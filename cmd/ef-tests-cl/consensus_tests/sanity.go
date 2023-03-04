@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -26,9 +25,8 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 	for _, block := range blocks {
-		err = transistor.TransitionState(block)
+		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
 		}
@@ -67,8 +65,7 @@ func testSanityFunctionSlot(context testContext) error {
 		return err
 	}
 
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := transistor.ProcessSlots(expectedState.Slot()); err != nil {
+	if err := transition.ProcessSlots(testState, expectedState.Slot()); err != nil {
 		return err
 	}
 
