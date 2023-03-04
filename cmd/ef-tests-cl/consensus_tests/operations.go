@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
@@ -33,8 +32,7 @@ func operationAttestationHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(att, context.version, attestationFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessAttestations([]*cltypes.Attestation{att}); err != nil {
+	if err := transition.ProcessAttestations(preState, []*cltypes.Attestation{att}, true); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -71,8 +69,7 @@ func operationAttesterSlashingHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(att, context.version, attesterSlashingFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessAttesterSlashing(att); err != nil {
+	if err := transition.ProcessAttesterSlashing(preState, att); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -109,8 +106,7 @@ func operationProposerSlashingHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(att, context.version, proposerSlashingFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessProposerSlashing(att); err != nil {
+	if err := transition.ProcessProposerSlashing(preState, att); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -147,8 +143,7 @@ func operationBlockHeaderHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(block, context.version, blockFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessBlockHeader(block); err != nil {
+	if err := transition.ProcessBlockHeader(preState, block, true); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -185,8 +180,7 @@ func operationDepositHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(deposit, context.version, depositFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessDeposit(deposit); err != nil {
+	if err := transition.ProcessDeposit(preState, deposit, true); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -223,8 +217,7 @@ func operationSyncAggregateHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(agg, context.version, syncAggregateFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessSyncAggregate(agg); err != nil {
+	if err := transition.ProcessSyncAggregate(preState, agg, true); err != nil {
 		if expectedError {
 			return nil
 		}
@@ -261,8 +254,7 @@ func operationVoluntaryExitHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(vo, context.version, voluntaryExitFileName); err != nil {
 		return err
 	}
-	trans := transition.New(preState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := trans.ProcessVoluntaryExit(vo); err != nil {
+	if err := transition.ProcessVoluntaryExit(preState, vo, true); err != nil {
 		if expectedError {
 			return nil
 		}

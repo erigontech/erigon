@@ -170,8 +170,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessProposerSlashing(tc.slashing)
+			err := ProcessProposerSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -282,8 +281,7 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessAttesterSlashing(tc.slashing)
+			err := ProcessAttesterSlashing(tc.state, tc.slashing)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("unexpected success, want error")
@@ -330,8 +328,7 @@ func TestProcessDeposit(t *testing.T) {
 		WithdrawalCredentials: [32]byte{1, 2, 3},
 	}, 0)
 	testState.SetEth1Data(eth1Data)
-	s := New(testState, &clparams.MainnetBeaconConfig, nil, true)
-	require.NoError(t, s.ProcessDeposit(deposit))
+	require.NoError(t, ProcessDeposit(testState, deposit, false))
 	require.Equal(t, deposit.Data.Amount, testState.Balances()[1])
 }
 
@@ -348,9 +345,8 @@ func TestProcessVoluntaryExits(t *testing.T) {
 		ActivationEpoch: 0,
 	}, 0)
 	state.SetSlot((clparams.MainnetBeaconConfig.SlotsPerEpoch * 5) + (clparams.MainnetBeaconConfig.SlotsPerEpoch * clparams.MainnetBeaconConfig.ShardCommitteePeriod))
-	transitioner := New(state, &clparams.MainnetBeaconConfig, nil, true)
 
-	require.NoError(t, transitioner.ProcessVoluntaryExit(exit), "Could not process exits")
+	require.NoError(t, ProcessVoluntaryExit(state, exit, false), "Could not process exits")
 	newRegistry := state.Validators()
 	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
 }
@@ -378,7 +374,5 @@ func TestProcessAttestationAggBitsInvalid(t *testing.T) {
 		},
 		AggregationBits: aggBits,
 	}
-	s := New(beaconState, &clparams.MainnetBeaconConfig, nil, true)
-
-	require.Error(t, s.ProcessAttestations([]*cltypes.Attestation{att}))
+	require.Error(t, ProcessAttestations(beaconState, []*cltypes.Attestation{att}, false))
 }

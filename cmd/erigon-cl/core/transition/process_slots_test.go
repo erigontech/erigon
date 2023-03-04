@@ -13,13 +13,11 @@ import (
 )
 
 var (
-	testBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerHistoricalRoot: 8192,
-	}
-	stateHash0 = "0617561534e6a3ff7fed7f007ae993035b81110f7b7def36e14ff8cbb8034581"
-	blockHash0 = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
-	stateHash1 = "22765160fa57d0be679cdd8c91296f607a056d92c4d30642f06354c8f203abeb"
-	blockHash1 = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
+	testBeaconConfig = clparams.MainnetBeaconConfig
+	stateHash0       = "0617561534e6a3ff7fed7f007ae993035b81110f7b7def36e14ff8cbb8034581"
+	blockHash0       = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
+	stateHash1       = "22765160fa57d0be679cdd8c91296f607a056d92c4d30642f06354c8f203abeb"
+	blockHash1       = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
 
 	stateHash42 = "76d8678d22ed0aa246d128440c6107d5561dcf88ec4472124ad42c72b71cda45"
 	blockHash42 = "3ff92b54cba8067044f6b6ca0a69c7a6344154de2a38742e7a89b1057877fffa"
@@ -161,8 +159,7 @@ func TestTransitionSlot(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil, false)
-			err := s.transitionSlot()
+			err := transitionSlot(tc.prevState)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -242,8 +239,7 @@ func TestProcessSlots(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			tc.prevState.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
-			s := New(tc.prevState, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessSlots(tc.startSlot + tc.numSlots)
+			err := ProcessSlots(tc.prevState, tc.startSlot+tc.numSlots)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
