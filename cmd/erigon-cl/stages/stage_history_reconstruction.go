@@ -77,6 +77,8 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	defer attestationsCollector.Close()
 	executionPayloadsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer executionPayloadsCollector.Close()
+	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer rootToSlotCollector.Close()
 
 	log.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", destinationSlot)
 	// Setup slot and block root
@@ -99,8 +101,25 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		if err != nil {
 			return false, err
 		}
-		if err := beaconBlocksCollector.Collect(rawdb.EncodeNumber(slot), encodedBeaconBlock); err != nil {
+		blockRoot, err := blk.Block.HashSSZ()
+		if err != nil {
 			return false, err
+		}
+		slotBytes := rawdb.EncodeNumber(slot)
+		if err := beaconBlocksCollector.Collect(slotBytes, encodedBeaconBlock); err != nil {
+			return false, err
+		}
+		// Collect hashes
+		if err := rootToSlotCollector.Collect(blockRoot[:], slotBytes); err != nil {
+			return false, err
+		}
+		if err := rootToSlotCollector.Collect(blk.Block.StateRoot[:], slotBytes); err != nil {
+			return false, err
+		}
+		if blk.Block.Version() >= clparams.BellatrixVersion {
+			if err := rootToSlotCollector.Collect(blk.Block.Body.ExecutionPayload.Header.BlockHashCL[:], slotBytes); err != nil {
+				return false, err
+			}
 		}
 		// Collect Execution Payloads
 		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
@@ -162,6 +181,9 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		return err
 	}
 	if err := beaconBlocksCollector.Load(tx, kv.BeaconBlocks, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
+		return err
+	}
+	if err := rootToSlotCollector.Load(tx, kv.RootSlotIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
