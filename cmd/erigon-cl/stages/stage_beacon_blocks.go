@@ -57,7 +57,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		progress = cfg.state.LatestBlockHeader().Slot
 		lastRoot, err = cfg.state.BlockRoot()
 	} else {
-		_, _, _, lastRoot, err = rawdb.ReadBeaconBlockForStorage(tx, progress)
+		lastRoot, err = rawdb.ReadFinalizedBlockRoot(tx, progress)
 	}
 	if err != nil {
 		return err
@@ -122,6 +122,15 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 		for _, block := range newBlocks {
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
+				return
+			}
+			var currentRoot libcommon.Hash
+			currentRoot, err = block.Block.HashSSZ()
+			if err != nil {
+				return
+			}
+			// Assume all of them are finalized
+			if err = rawdb.WriteFinalizedBlockRoot(tx, block.Block.Slot, currentRoot); err != nil {
 				return
 			}
 			if cfg.executionClient != nil && block.Version() >= clparams.BellatrixVersion {

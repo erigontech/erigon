@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -64,13 +65,17 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 
 	fromSlot := latestBlockHeader.Slot
 	for slot := fromSlot + 1; slot <= endSlot; slot++ {
-		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, slot)
+		finalizedRoot, err := rawdb.ReadFinalizedBlockRoot(tx, slot)
 		if err != nil {
 			return err
 		}
-		// Missed proposal are absent slot
-		if block == nil {
+		// Slot had a missing proposal in this case.
+		if finalizedRoot == (libcommon.Hash{}) {
 			continue
+		}
+		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, finalizedRoot, slot)
+		if err != nil {
+			return err
 		}
 		// TODO: Pass this to state transition with the state
 		if cfg.executionClient != nil {
@@ -88,7 +93,11 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 	}
 	// If successful update fork choice
 	if cfg.executionClient != nil {
-		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, endSlot)
+		finalizedRoot, err := rawdb.ReadFinalizedBlockRoot(tx, endSlot)
+		if err != nil {
+			return err
+		}
+		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, finalizedRoot, endSlot)
 		if err != nil {
 			return err
 		}
