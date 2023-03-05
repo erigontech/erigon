@@ -110,14 +110,14 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return false, err
 		}
 		// Collect hashes
-		if err := rootToSlotCollector.Collect(blockRoot[:], slotBytes[:]); err != nil {
+		if err := rootToSlotCollector.Collect(blockRoot[:], slotBytes); err != nil {
 			return false, err
 		}
-		if err := rootToSlotCollector.Collect(blk.Block.StateRoot[:], slotBytes[:]); err != nil {
+		if err := rootToSlotCollector.Collect(blk.Block.StateRoot[:], slotBytes); err != nil {
 			return false, err
 		}
 		if blk.Block.Version() >= clparams.BellatrixVersion {
-			if err := rootToSlotCollector.Collect(blk.Block.Body.ExecutionPayload.Header.BlockHashCL[:], slotBytes[:]); err != nil {
+			if err := rootToSlotCollector.Collect(blk.Block.Body.ExecutionPayload.Header.BlockHashCL[:], slotBytes); err != nil {
 				return false, err
 			}
 		}
