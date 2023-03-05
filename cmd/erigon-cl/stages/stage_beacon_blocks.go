@@ -160,6 +160,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	if err := executionPayloadInsertionBatch.Flush(); err != nil {
 		return err
 	}
+
 	log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "count", targetSlot-progress)
 	if err := s.Update(tx, cfg.downloader.GetHighestProcessedSlot()); err != nil {
 		return err

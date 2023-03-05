@@ -6,6 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -147,7 +148,6 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 	var (
 		block     = signedBlock.Block
 		blockBody = block.Body
-		//payload   = blockBody.ExecutionPayload
 	)
 
 	// database key is is [slot + body root]
@@ -156,12 +156,26 @@ func WriteBeaconBlock(tx kv.RwTx, signedBlock *cltypes.SignedBeaconBlock) error 
 	if err != nil {
 		return err
 	}
-	/*if err := WriteExecutionPayload(tx, payload); err != nil {
-		return err
-	}*/
 
 	if err := WriteAttestations(tx, block.Slot, blockBody.Attestations); err != nil {
 		return err
+	}
+	// Write block hashes
+	blockRoot, err := block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	// We write the block indexing
+	if err := tx.Put(kv.RootSlotIndex, blockRoot[:], key); err != nil {
+		return err
+	}
+	if err := tx.Put(kv.RootSlotIndex, block.StateRoot[:], key); err != nil {
+		return err
+	}
+	if block.Version() >= clparams.BellatrixVersion {
+		if err := tx.Put(kv.RootSlotIndex, block.Body.ExecutionPayload.Header.BlockHashCL[:], key); err != nil {
+			return err
+		}
 	}
 	// Finally write the beacon block
 	return tx.Put(kv.BeaconBlocks, key, value)
