@@ -427,13 +427,10 @@ const (
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
-	// [slot] => [attestation list (ssz)]
+	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
-
-	// Erigon-CL indexing
-
-	// [Slot] => [Root (block root/state root/eth1 root)]
-	SlotRootIndex = "SlotRootIndex"
+	// [slot] => [Finalized block root]
+	FinalizedBlockRoots = "FinalizedBlockRoots"
 	// [Root (block root/state root/eth1 root)] => Slot
 	RootSlotIndex = "RootSlotIndex"
 
@@ -589,7 +586,7 @@ var ChaindataTables = []string{
 	// Beacon stuff
 	BeaconState,
 	BeaconBlocks,
-	SlotRootIndex,
+	FinalizedBlockRoots,
 	RootSlotIndex,
 	Attestetations,
 	LightClient,
