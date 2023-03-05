@@ -77,9 +77,13 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	defer attestationsCollector.Close()
 	executionPayloadsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer executionPayloadsCollector.Close()
+	// Indexes collector
 	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer rootToSlotCollector.Close()
-
+	// Lastly finalizations markers collector.
+	finalizationCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer finalizationCollector.Close()
+	// Start the procedure
 	log.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", destinationSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
@@ -116,10 +120,9 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		if err := rootToSlotCollector.Collect(blk.Block.StateRoot[:], slotBytes); err != nil {
 			return false, err
 		}
-		if blk.Block.Version() >= clparams.BellatrixVersion {
-			if err := rootToSlotCollector.Collect(blk.Block.Body.ExecutionPayload.Header.BlockHashCL[:], slotBytes); err != nil {
-				return false, err
-			}
+		// Mark finalization markers.
+		if err := finalizationCollector.Collect(slotBytes, blockRoot[:]); err != nil {
+			return false, err
 		}
 		// Collect Execution Payloads
 		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
@@ -184,6 +187,9 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		return err
 	}
 	if err := rootToSlotCollector.Load(tx, kv.RootSlotIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := finalizationCollector.Load(tx, kv.FinalizedBlockRoots, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
