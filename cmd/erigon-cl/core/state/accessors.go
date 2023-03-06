@@ -534,11 +534,6 @@ func (beaconState *BeaconState) GetExpectedWithdrawals() []*types.Withdrawal {
 			nextWithdrawalIndex++
 		}
 
-		// Check if the maximum number of withdrawals per payload has been reached
-		if len(withdrawals) == int(beaconState.beaconConfig.MaxWithdrawalsPerPayload) {
-			break
-		}
-
 		// Increment the validator index, looping back to 0 if necessary
 		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
 	}
