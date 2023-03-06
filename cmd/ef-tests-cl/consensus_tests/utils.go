@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
@@ -20,6 +21,14 @@ func decodeStateFromFile(context testContext, filepath string) (*state.BeaconSta
 		return nil, err
 	}
 	return testState, nil
+}
+
+func decodeSSZObjectFromFile(obj ssz_utils.Unmarshaler, version clparams.StateVersion, filepath string) error {
+	sszSnappy, err := os.ReadFile(filepath)
+	if err != nil {
+		return err
+	}
+	return utils.DecodeSSZSnappyWithVersion(obj, sszSnappy, int(version))
 }
 
 func testBlocks(context testContext) ([]*cltypes.SignedBeaconBlock, error) {

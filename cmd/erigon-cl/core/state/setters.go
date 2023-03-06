@@ -59,7 +59,7 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 
 func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
 	if index >= len(b.validators) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 	b.validators[index] = validator
 	b.touchedLeaves[ValidatorsLeafIndex] = true
@@ -113,7 +113,7 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 
 func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	if index >= len(b.balances) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 
 	b.touchedLeaves[BalancesLeafIndex] = true
@@ -203,7 +203,7 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
 	if index >= len(b.inactivityScores) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores[index] = score

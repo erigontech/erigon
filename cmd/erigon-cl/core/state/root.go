@@ -10,17 +10,21 @@ import (
 )
 
 func (b *BeaconState) HashSSZ() ([32]byte, error) {
-	if err := b.computeDirtyLeaves(); err != nil {
+	var err error
+	if err = b.computeDirtyLeaves(); err != nil {
 		return [32]byte{}, err
 	}
+
 	// Pad to 32 of length
 	return merkle_tree.MerkleRootFromLeaves(b.leaves[:])
 }
 
+func (b *BeaconState) SetPreviousStateRoot(root libcommon.Hash) {
+	b.previousStateRoot = root
+}
 func (b *BeaconState) computeDirtyLeaves() error {
 	// Update all dirty leafs
 	// ----
-
 	// Field(0): GenesisTime
 	if b.isLeafDirty(GenesisTimeLeafIndex) {
 		b.updateLeaf(GenesisTimeLeafIndex, merkle_tree.Uint64Root(b.genesisTime))
@@ -70,7 +74,6 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(StateRootsLeafIndex, root)
-
 	}
 
 	// Field(7): HistoricalRoots
@@ -121,7 +124,6 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(BalancesLeafIndex, root)
-
 	}
 
 	// Field(13): RandaoMixes
@@ -140,7 +142,6 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(SlashingsLeafIndex, root)
-
 	}
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
@@ -149,7 +150,6 @@ func (b *BeaconState) computeDirtyLeaves() error {
 			return err
 		}
 		b.updateLeaf(PreviousEpochParticipationLeafIndex, root)
-
 	}
 
 	// Field(16): CurrentEpochParticipation
