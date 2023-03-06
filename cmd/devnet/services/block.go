@@ -114,7 +114,7 @@ func signEIP1559TxsLowerThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64, 
 
 		fmt.Printf("LOWER => Nonce for transaction %d is: %v\n", i, transaction.Nonce)
 		fmt.Printf("LOWER => Value for transaction %d is: %v\n", i, transaction.Value)
-		fmt.Printf("LOWER => Value for transaction %d is: %v\n", i, transaction.FeeCap)
+		fmt.Printf("LOWER => FeeCap for transaction %d is: %v\n", i, transaction.FeeCap)
 
 		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
 		if err != nil {
@@ -122,7 +122,6 @@ func signEIP1559TxsLowerThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64, 
 		}
 
 		signedTransactions = append(signedTransactions, &signedTransaction)
-		*nonce++
 	}
 
 	return signedTransactions, nil
@@ -134,7 +133,7 @@ func signEIP1559TxsHigherThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64,
 
 	var (
 		minFeeCap = baseFeePerGas
-		maxFeeCap = (baseFeePerGas - 100_000_000) + 1 // we want the value to be inclusive in the random number generation, hence the addition of 1
+		maxFeeCap = (baseFeePerGas + 100_000_000) + 1 // we want the value to be inclusive in the random number generation, hence the addition of 1
 	)
 
 	for i := 0; i < n; i++ {
@@ -152,7 +151,7 @@ func signEIP1559TxsHigherThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64,
 
 		fmt.Printf("HIGHER => Nonce for transaction %d is: %v\n", i, transaction.Nonce)
 		fmt.Printf("HIGHER => Value for transaction %d is: %v\n", i, transaction.Value)
-		fmt.Printf("HIGHER => Value for transaction %d is: %v\n", i, transaction.FeeCap)
+		fmt.Printf("HIGHER => FeeCap for transaction %d is: %v\n", i, transaction.FeeCap)
 
 		signedTransaction, err := types.SignTx(transaction, *signer, models.DevSignedPrivateKey)
 		if err != nil {

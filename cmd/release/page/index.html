@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="main.js"></script>
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;900&display=swap');
+  </style>
+  <link rel="stylesheet" href="main.css" />
+  <title>Erigon - Downloads</title>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navigation">
+      <div class="container">
+        <a class="logo" href="https://erigon.ch/">
+          <img src="./assets/Erigon_Logotipo_color.svg" alt="Erigon Logo" />
+        </a>
+      </div>
+    </nav>
+
+    <!-- Header -->
+    <div class="container">
+      <header class="header">
+          <a class="header-logo" href="https://erigon.ch/">
+            <img src="./assets/Erigon_cartoon_no_Helmet.svg" alt="Erigon Logo" />
+          </a>
+          <h1 class="header-title">Downloads</h1>
+          <!-- <p>Download the latest version of Erigon</p> -->
+      </header>
+    </div>
+
+    <!-- Main -->
+    <main>
+      <div class="container">
+
+        <!-- Release Candiate -->
+        <h3 class="title">RC</h3>
+
+        <div id="rc-data">
+          <p class="text">
+            All release candiate versions of Erigon are listed below.
+          </p>
+          <div class="tabs">
+            <button class="tablinks tablinks-rc active" onclick="openTab(event, 'rc-linux', 'rc')">Linux</button>
+            <button class="tablinks tablinks-rc" onclick="openTab(event, 'rc-macOS', 'rc')">macOS</button>
+            <button class="tablinks tablinks-rc" onclick="openTab(event, 'rc-windows', 'rc')">Windows</button>
+            <button class="tablinks tablinks-rc" onclick="openTab(event, 'rc-docker', 'rc')">Docker</button>
+          </div>
+          
+          <div id="rc-tab-container"></div>
+        </div>
+
+        <div class="no-data" id="rc-no-data">
+          <p class="text">There are no release candiate versions of Erigon available.</p>
+
+          <hr />
+        </div>
+  
+        <!-- Stable -->
+        <h3 class="title">Stable</h3>
+
+        <div id="stable-data">
+          <p class="text">
+            All stable versions of Erigon are listed below.
+          </p>
+          <div class="tabs">
+            <button class="tablinks tablinks-stable active" onclick="openTab(event, 'linux', 'stable')">Linux</button>
+            <button class="tablinks tablinks-stable" onclick="openTab(event, 'macOS', 'stable')">macOS</button>
+            <button class="tablinks tablinks-stable" onclick="openTab(event, 'windows', 'stable')">Windows</button>
+            <button class="tablinks tablinks-stable" onclick="openTab(event, 'docker', 'stable')">Docker</button>
+          </div>
+          
+          <div id="tab-container"></div>
+        </div>
+
+        <div class="no-data" id="stable-no-data">
+          <p class="text">There are no stable versions of Erigon available.</p>
+        </div>
+ 
+      </div>
+    </main>
+
+    <!-- Footer -->
+    
+    <footer class="footer">
+      <div class="container">
+        <hr />
+        <p>© 2023 - Erigon</p>
+      </div>
+</body>
+
+</html>

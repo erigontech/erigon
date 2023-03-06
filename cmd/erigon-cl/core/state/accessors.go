@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
+	"math/bits"
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -126,16 +127,11 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 }
 
 func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
-	if epoch == 0 {
-		epoch = b.Epoch()
-	}
-	var forkVersion [4]byte
 	if epoch < b.fork.Epoch {
-		forkVersion = b.fork.PreviousVersion
-	} else {
-		forkVersion = b.fork.CurrentVersion
+		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
 	}
-	return fork.ComputeDomain(domainType[:], forkVersion, b.genesisValidatorsRoot)
+	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
+
 }
 
 func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
@@ -269,7 +265,7 @@ func (b *BeaconState) BaseRewardPerIncrement() uint64 {
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
 	if index >= uint64(len(b.validators)) {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
 }
@@ -388,10 +384,33 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
+// getBitlistLength return the amount of bits in given bitlist.
+func getBitlistLength(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	// The most significant bit is present in the last byte in the array.
+	last := b[len(b)-1]
+
+	// Determine the position of the most significant bit.
+	msb := bits.Len8(last)
+	if msb == 0 {
+		return 0
+	}
+
+	// The absolute position of the most significant bit will be the number of
+	// bits in the preceding bytes plus the position of the most significant
+	// bit. Subtract this value by 1 to determine the length of the bitlist.
+	return 8*(len(b)-1) + msb - 1
+}
+
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
+	}
+	if getBitlistLength(aggregationBits) != len(committee) {
+		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits")
 	}
 	attestingIndices := []uint64{}
 	for i, member := range committee {

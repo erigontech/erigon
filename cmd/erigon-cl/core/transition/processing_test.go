@@ -150,8 +150,7 @@ func TestProcessBlockHeader(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, false)
-			err := s.ProcessBlockHeader(tc.block)
+			err := ProcessBlockHeader(tc.state, tc.block, true)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -210,8 +209,7 @@ func TestProcessRandao(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, nil, true)
-			err := s.ProcessRandao(tc.body.RandaoReveal, propInd)
+			err := ProcessRandao(tc.state, tc.body.RandaoReveal, propInd, false)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -280,8 +278,7 @@ func TestProcessEth1Data(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, &clparams.MainnetBeaconConfig, &clparams.GenesisConfig{}, false)
-			err := s.ProcessEth1Data(tc.body.Eth1Data)
+			err := ProcessEth1Data(tc.state, tc.body.Eth1Data)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
