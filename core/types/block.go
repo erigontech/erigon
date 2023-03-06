@@ -97,8 +97,9 @@ type Header struct {
 	AuRaStep uint64
 	AuRaSeal []byte
 
-	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
+	BaseFee           *big.Int        `json:"baseFeePerGas"`   // EIP-1559
+	WithdrawalsHash   *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
+	WithdrawalsHashCL *libcommon.Hash // SSZ encoded field for withdrawals root
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
@@ -625,11 +626,11 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	pos += len(h.TxHashSSZ)
 
 	if version >= clparams.CapellaVersion {
-		h.WithdrawalsHash = new(libcommon.Hash)
-		copy((*h.WithdrawalsHash)[:], buf[pos:])
-		pos += len(h.WithdrawalsHash)
+		h.WithdrawalsHashCL = new(libcommon.Hash)
+		copy((*h.WithdrawalsHashCL)[:], buf[pos:])
+		pos += len(h.WithdrawalsHashCL)
 	} else {
-		h.WithdrawalsHash = nil
+		h.WithdrawalsHashCL = nil
 	}
 	h.Extra = common.CopyBytes(buf[pos:])
 	return nil
@@ -700,8 +701,8 @@ func (h *Header) HashSSZ() ([32]byte, error) {
 		h.BlockHashCL,
 		h.TxHashSSZ,
 	}
-	if h.WithdrawalsHash != nil {
-		leaves = append(leaves, *h.WithdrawalsHash)
+	if h.WithdrawalsHashCL != nil {
+		leaves = append(leaves, *h.WithdrawalsHashCL)
 	}
 	return merkle_tree.ArraysRoot(leaves, 16)
 }

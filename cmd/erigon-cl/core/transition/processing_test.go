@@ -96,7 +96,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	validator, err := badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex))
 	require.NoError(t, err)
 	validator.Slashed = true
-	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), &validator)
+	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), validator)
 
 	testCases := []struct {
 		description string
@@ -173,7 +173,7 @@ func TestProcessRandao(t *testing.T) {
 	validator, err := testStateSuccess.ValidatorAt(int(propInd))
 	require.NoError(t, err)
 	validator.PublicKey = testPublicKeyRandao
-	testStateSuccess.SetValidatorAt(int(propInd), &validator)
+	testStateSuccess.SetValidatorAt(int(propInd), validator)
 	testBlock := getTestBlock(t)
 	testBlock.Body.RandaoReveal = testSignatureRandao
 	testBody := testBlock.Body

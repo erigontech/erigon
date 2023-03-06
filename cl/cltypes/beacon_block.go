@@ -31,6 +31,7 @@ type BeaconBlockForStorage struct {
 	AttesterSlashings []*AttesterSlashing
 	Deposits          []*Deposit
 	VoluntaryExits    []*SignedVoluntaryExit
+	AddressChanges    []*SignedBLSToExecutionChange
 	SyncAggregate     *SyncAggregate
 	// Metadatas
 	Eth1Number    uint64
@@ -434,6 +435,13 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 		}
 		leaves = append(leaves, payloadLeaf)
 	}
+	if b.Version >= clparams.CapellaVersion {
+		blsExecutionLeaf, err := merkle_tree.ListObjectSSZRoot(b.ExecutionChanges, MaxExecutionChanges)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		leaves = append(leaves, blsExecutionLeaf)
+	}
 	if b.Version == clparams.Phase0Version {
 		return merkle_tree.ArraysRoot(leaves, 8)
 	}
@@ -558,6 +566,7 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		Deposits:          b.Block.Body.Deposits,
 		VoluntaryExits:    b.Block.Body.VoluntaryExits,
 		SyncAggregate:     b.Block.Body.SyncAggregate,
+		AddressChanges:    b.Block.Body.ExecutionChanges,
 		Version:           uint8(b.Version()),
 		Eth2BlockRoot:     blockRoot,
 	}
@@ -605,6 +614,7 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 				Deposits:          storageObject.Deposits,
 				VoluntaryExits:    storageObject.VoluntaryExits,
 				SyncAggregate:     storageObject.SyncAggregate,
+				ExecutionChanges:  storageObject.AddressChanges,
 				Version:           clparams.StateVersion(storageObject.Version),
 			},
 		},

@@ -10,41 +10,57 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-// processBlock takes a block and transition said block. Important: it assumes execution payload is correct.
+// processBlock takes a block and transitions the state to the next slot, using the provided execution payload if enabled.
 func processBlock(state *state.BeaconState, signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	block := signedBlock.Block
-	if signedBlock.Version() != state.Version() {
-		return fmt.Errorf("wrong state version for block at slot %d", block.Slot)
+	version := state.Version()
+	// Check the state version is correct.
+	if signedBlock.Version() != version {
+		return fmt.Errorf("processBlock: wrong state version for block at slot %d", block.Slot)
 	}
+
+	// Process the block header.
 	if err := ProcessBlockHeader(state, block, fullValidation); err != nil {
-		return fmt.Errorf("ProcessBlockHeader: %s", err)
+		return fmt.Errorf("processBlock: failed to process block header: %v", err)
 	}
-	if state.Version() >= clparams.BellatrixVersion && executionEnabled(state, block.Body.ExecutionPayload) {
+
+	// Process execution payload if enabled.
+	if version >= clparams.BellatrixVersion && executionEnabled(state, block.Body.ExecutionPayload) {
 		if state.Version() >= clparams.CapellaVersion {
+			// Process withdrawals in the execution payload.
 			if err := ProcessWithdrawals(state, block.Body.ExecutionPayload.Withdrawals(), fullValidation); err != nil {
-				return err
+				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
+
+		// Process the execution payload.
 		if err := ProcessExecutionPayload(state, block.Body.ExecutionPayload); err != nil {
-			return err
+			return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
 		}
 	}
+
+	// Process RANDAO reveal.
 	if err := ProcessRandao(state, block.Body.RandaoReveal, block.ProposerIndex, fullValidation); err != nil {
-		return err
+		return fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
 	}
+
+	// Process Eth1 data.
 	if err := ProcessEth1Data(state, block.Body.Eth1Data); err != nil {
-		return err
+		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
 	}
-	// Do operationns
+
+	// Process block body operations.
 	if err := processOperations(state, block.Body, fullValidation); err != nil {
-		return err
+		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
 	}
-	// Process altair data
-	if state.Version() >= clparams.AltairVersion {
+
+	// Process sync aggregate in case of Altair version.
+	if version >= clparams.AltairVersion {
 		if err := ProcessSyncAggregate(state, block.Body.SyncAggregate, fullValidation); err != nil {
-			return err
+			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
 		}
 	}
+
 	return nil
 }
 
@@ -78,6 +94,13 @@ func processOperations(state *state.BeaconState, blockBody *cltypes.BeaconBody, 
 	for _, exit := range blockBody.VoluntaryExits {
 		if err := ProcessVoluntaryExit(state, exit, fullValidation); err != nil {
 			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
+		}
+	}
+
+	// Process each execution change. this will only have entries after the capella fork.
+	for _, addressChange := range blockBody.ExecutionChanges {
+		if err := ProcessBlsToExecutionChange(state, addressChange, fullValidation); err != nil {
+			return err
 		}
 	}
 	return nil

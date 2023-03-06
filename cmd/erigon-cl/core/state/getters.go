@@ -72,11 +72,11 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
-func (b *BeaconState) ValidatorAt(index int) (cltypes.Validator, error) {
+func (b *BeaconState) ValidatorAt(index int) (*cltypes.Validator, error) {
 	if index >= len(b.validators) {
-		return cltypes.Validator{}, ErrInvalidValidatorIndex
+		return nil, ErrInvalidValidatorIndex
 	}
-	return *b.validators[index], nil
+	return b.validators[index], nil
 }
 
 func (b *BeaconState) Balances() []uint64 {

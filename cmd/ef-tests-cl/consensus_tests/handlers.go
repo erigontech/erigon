@@ -37,6 +37,7 @@ var (
 	caseVoluntaryExit    = "voluntary_exit"
 	caseSyncAggregate    = "sync_aggregate"
 	caseWithdrawal       = "withdrawals"
+	caseBlsChange        = "bls_to_execution_change"
 )
 
 // transitionCoreTest
@@ -76,6 +77,7 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(operationsDivision, caseSyncAggregate):                     operationSyncAggregateHandler,
 	path.Join(operationsDivision, caseVoluntaryExit):                     operationVoluntaryExitHandler,
 	path.Join(operationsDivision, caseWithdrawal):                        operationWithdrawalHandler,
+	path.Join(operationsDivision, caseBlsChange):                         operationSignedBlsChangeHandler,
 	sanityBlocks: testSanityFunction,
 	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,

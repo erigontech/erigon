@@ -142,8 +142,11 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		if err != nil {
 			return err
 		}
+		b.Header.WithdrawalsHashCL = new(libcommon.Hash)
+		*b.Header.WithdrawalsHashCL = withdrawalRoot
+		// Rlp encoded EL withdrawal hash
 		b.Header.WithdrawalsHash = new(libcommon.Hash)
-		*b.Header.WithdrawalsHash = withdrawalRoot
+		*b.Header.WithdrawalsHash = types.DeriveSha(types.Withdrawals(b.Body.Withdrawals))
 	}
 	return nil
 }
@@ -204,12 +207,12 @@ func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
 		return [32]byte{}, err
 	}
 	if version >= clparams.CapellaVersion {
-		b.Header.WithdrawalsHash = new(libcommon.Hash)
-		if *b.Header.WithdrawalsHash, err = types.Withdrawals(b.Body.Withdrawals).HashSSZ(16); err != nil {
+		b.Header.WithdrawalsHashCL = new(libcommon.Hash)
+		if *b.Header.WithdrawalsHashCL, err = types.Withdrawals(b.Body.Withdrawals).HashSSZ(16); err != nil {
 			return [32]byte{}, err
 		}
 	} else {
-		b.Header.WithdrawalsHash = nil
+		b.Header.WithdrawalsHashCL = nil
 	}
 	return b.Header.HashSSZ()
 }

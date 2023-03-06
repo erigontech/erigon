@@ -258,14 +258,14 @@ func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes
 
 // ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
 // and updating the next withdrawal index and validator index.
-func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals, fullValidate bool) error {
+func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals, fullValidation bool) error {
 	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
 	// and the beacon configuration.
 	beaconConfig := state.BeaconConfig()
 	numValidators := uint64(len(state.Validators()))
 
 	// Check if full validation is required and verify expected withdrawals.
-	if fullValidate {
+	if fullValidation {
 		expectedWithdrawals := state.ExpectedWithdrawals()
 		if len(expectedWithdrawals) != len(withdrawals) {
 			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), len(withdrawals))
