@@ -871,7 +871,6 @@ Loop:
 		}
 
 		if headerInserter.BestHeaderChanged() { // We do not break unless there best header changed
-			noProgressCounter = 0
 			wasProgress = true
 			// if this is initial cycle, we want to make sure we insert all known headers (inSync)
 			if inSync {
