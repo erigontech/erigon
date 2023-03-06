@@ -357,7 +357,7 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
 			return ssz_utils.ErrBadOffset
 		}
-		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], b.Version); err != nil {
+		if err := b.ExecutionPayload.DecodeSSZWithVersion(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
 			return err
 		}
 	}

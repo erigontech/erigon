@@ -187,7 +187,7 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 }
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
-	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.touchedLeaves[HistoricalSummariesLeafIndex] = true
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
 

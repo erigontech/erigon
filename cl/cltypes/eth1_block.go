@@ -48,7 +48,11 @@ func (b *Eth1Block) EncodingSizeSSZ(version clparams.StateVersion) (size int) {
 	return
 }
 
-func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
+func (b *Eth1Block) DecodeSSZ(buf []byte) error {
+	panic("stop")
+}
+
+func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	if len(buf) < b.EncodingSizeSSZ(clparams.BellatrixVersion) {
 		return ssz_utils.ErrLowBufferSize
 	}
@@ -58,7 +62,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	transactionsOffset := ssz_utils.DecodeOffset(buf[pos:])
 	pos += 4
 	var withdrawalOffset *uint32
-	if version >= clparams.CapellaVersion {
+	if version >= int(clparams.CapellaVersion) {
 		withdrawalOffset = new(uint32)
 		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos:])
 	}

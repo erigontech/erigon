@@ -493,8 +493,8 @@ func (b *BeaconState) isPartiallyWithdrawableValidator(validator *cltypes.Valida
 		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance && balance > clparams.MainnetBeaconConfig.MaxEffectiveBalance
 }
 
-// GetExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
-func (b *BeaconState) GetExpectedWithdrawals() []*types.Withdrawal {
+// ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
+func (b *BeaconState) ExpectedWithdrawals() []*types.Withdrawal {
 	// Get the current epoch, the next withdrawal index, and the next withdrawal validator index
 	currentEpoch := b.Epoch()
 	nextWithdrawalIndex := b.nextWithdrawalIndex

@@ -36,6 +36,7 @@ var (
 	caseDeposit          = "deposit"
 	caseVoluntaryExit    = "voluntary_exit"
 	caseSyncAggregate    = "sync_aggregate"
+	caseWithdrawal       = "withdrawals"
 )
 
 // transitionCoreTest
@@ -74,6 +75,7 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(operationsDivision, caseDeposit):                           operationDepositHandler,
 	path.Join(operationsDivision, caseSyncAggregate):                     operationSyncAggregateHandler,
 	path.Join(operationsDivision, caseVoluntaryExit):                     operationVoluntaryExitHandler,
+	path.Join(operationsDivision, caseWithdrawal):                        operationWithdrawalHandler,
 	sanityBlocks: testSanityFunction,
 	sanitySlots:  testSanityFunctionSlot,
 	finality:     finalityTestFunction,
