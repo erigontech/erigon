@@ -243,7 +243,7 @@ func ExecV3(ctx context.Context,
 			}
 		}
 
-		for outputTxNum.Load() < maxTxNum {
+		for outputTxNum.Load() <= maxTxNum {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
