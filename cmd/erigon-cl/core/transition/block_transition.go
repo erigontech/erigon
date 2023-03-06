@@ -20,24 +20,29 @@ func processBlock(state *state.BeaconState, signedBlock *cltypes.SignedBeaconBlo
 		return fmt.Errorf("ProcessBlockHeader: %s", err)
 	}
 	if state.Version() >= clparams.BellatrixVersion && executionEnabled(state, block.Body.ExecutionPayload) {
+		if state.Version() >= clparams.CapellaVersion {
+			if err := ProcessWithdrawals(state, block.Body.ExecutionPayload.Withdrawals(), fullValidation); err != nil {
+				return err
+			}
+		}
 		if err := ProcessExecutionPayload(state, block.Body.ExecutionPayload); err != nil {
 			return err
 		}
 	}
 	if err := ProcessRandao(state, block.Body.RandaoReveal, block.ProposerIndex, fullValidation); err != nil {
-		return fmt.Errorf("ProcessRandao: %s", err)
+		return err
 	}
 	if err := ProcessEth1Data(state, block.Body.Eth1Data); err != nil {
-		return fmt.Errorf("ProcessEth1Data: %s", err)
+		return err
 	}
 	// Do operationns
 	if err := processOperations(state, block.Body, fullValidation); err != nil {
-		return fmt.Errorf("processOperations: %s", err)
+		return err
 	}
 	// Process altair data
 	if state.Version() >= clparams.AltairVersion {
 		if err := ProcessSyncAggregate(state, block.Body.SyncAggregate, fullValidation); err != nil {
-			return fmt.Errorf("ProcessSyncAggregate: %s", err)
+			return err
 		}
 	}
 	return nil
