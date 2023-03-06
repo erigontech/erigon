@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strconv"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -35,8 +36,12 @@ func convertDataToStringP(abstractMap map[string]interface{}, field string) *str
 		result = hex.EncodeToString(v.Bytes())
 	case types.BlockNonce:
 		result = "0x" + strconv.FormatInt(int64(v.Uint64()), 16)
+	case []uint8:
+		result = "0x" + hex.EncodeToString(v)
+	case *uint256.Int:
+		result = v.Hex()
 	default:
-		fmt.Println("string", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
+		fmt.Println("unhandled/string", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = "unhandled"
 	}
 	return &result
@@ -63,7 +68,7 @@ func convertDataToIntP(abstractMap map[string]interface{}, field string) *int {
 	case int:
 		result = v
 	default:
-		fmt.Println("int", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
+		fmt.Println("unhandled/int", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 
@@ -92,8 +97,10 @@ func convertDataToUint64P(abstractMap map[string]interface{}, field string) *uin
 		result = v.ToInt().Uint64()
 	case int:
 		result = abstractMap[field].(uint64)
+	case uint64:
+		result = abstractMap[field].(uint64)
 	default:
-		fmt.Println("uint64", field, abstractMap[field], reflect.TypeOf(abstractMap[field]))
+		fmt.Println("unhandled/uint64", reflect.TypeOf(abstractMap[field]), field, abstractMap[field])
 		result = 0
 	}
 

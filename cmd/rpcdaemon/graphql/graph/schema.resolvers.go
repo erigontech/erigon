@@ -98,12 +98,16 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 	for _, transReceipt := range rcp {
 		trans := &model.Transaction{}
 		trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
+		trans.InputData = *convertDataToStringP(transReceipt, "data")
 		trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
+		trans.GasPrice = *convertDataToStringP(transReceipt, "gasPrice")
 		trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
 		trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
 		trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
+		trans.Nonce = *convertDataToUint64P(transReceipt, "nonce")
 		trans.Status = convertDataToUint64P(transReceipt, "status")
 		trans.Type = convertDataToIntP(transReceipt, "type")
+		trans.Value = *convertDataToStringP(transReceipt, "value")
 		trans.Logs = make([]*model.Log, 0)
 
 		trans.From = &model.Account{}
@@ -113,14 +117,6 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		trans.To.Address = strings.ToLower(*convertDataToStringP(transReceipt, "to"))
 
 		block.Transactions = append(block.Transactions, trans)
-
-		/*
-			Missing Transaction fields to fill :
-			- gasPrice
-			- inputData (even if geth often display "0x")
-			- nonce (we get 0, geth displays "0xZZZZZZZ" hex data)
-			- value
-		*/
 	}
 
 	return block, ctx.Err()
