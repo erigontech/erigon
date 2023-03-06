@@ -67,7 +67,8 @@ $(GOBINREL)/moq: | $(GOBINREL)
 	$(GOBUILD) -o "$(GOBIN)/moq" github.com/matryer/moq
 
 mocks: $(GOBINREL)/moq
-	rm gointerfaces/remote/mocks.go
+	rm -f gointerfaces/remote/mocks.go
+	rm -f gointerfaces/sentry/mocks.go
 	PATH="$(GOBIN):$(PATH)" go generate ./...
 
 lint: $(GOBINREL)/golangci-lint

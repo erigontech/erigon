@@ -28,7 +28,6 @@ type SentryClient interface {
 	SetStatus(ctx context.Context, in *StatusData, opts ...grpc.CallOption) (*SetStatusReply, error)
 	PenalizePeer(ctx context.Context, in *PenalizePeerRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
-	PeerUseless(ctx context.Context, in *PeerUselessRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
 	// HandShake - pre-requirement for all Send* methods - returns list of ETH protocol versions,
 	// without knowledge of protocol - impossible encode correct P2P message
 	HandShake(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*HandShakeReply, error)
@@ -78,15 +77,6 @@ func (c *sentryClient) PenalizePeer(ctx context.Context, in *PenalizePeerRequest
 func (c *sentryClient) PeerMinBlock(ctx context.Context, in *PeerMinBlockRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
 	out := new(emptypb.Empty)
 	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerMinBlock", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *sentryClient) PeerUseless(ctx context.Context, in *PeerUselessRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
-	out := new(emptypb.Empty)
-	err := c.cc.Invoke(ctx, "/sentry.Sentry/PeerUseless", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +236,6 @@ type SentryServer interface {
 	SetStatus(context.Context, *StatusData) (*SetStatusReply, error)
 	PenalizePeer(context.Context, *PenalizePeerRequest) (*emptypb.Empty, error)
 	PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error)
-	PeerUseless(context.Context, *PeerUselessRequest) (*emptypb.Empty, error)
 	// HandShake - pre-requirement for all Send* methods - returns list of ETH protocol versions,
 	// without knowledge of protocol - impossible encode correct P2P message
 	HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error)
@@ -280,9 +269,6 @@ func (UnimplementedSentryServer) PenalizePeer(context.Context, *PenalizePeerRequ
 }
 func (UnimplementedSentryServer) PeerMinBlock(context.Context, *PeerMinBlockRequest) (*emptypb.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeerMinBlock not implemented")
-}
-func (UnimplementedSentryServer) PeerUseless(context.Context, *PeerUselessRequest) (*emptypb.Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PeerUseless not implemented")
 }
 func (UnimplementedSentryServer) HandShake(context.Context, *emptypb.Empty) (*HandShakeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandShake not implemented")
@@ -380,24 +366,6 @@ func _Sentry_PeerMinBlock_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SentryServer).PeerMinBlock(ctx, req.(*PeerMinBlockRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _Sentry_PeerUseless_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PeerUselessRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SentryServer).PeerUseless(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/sentry.Sentry/PeerUseless",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SentryServer).PeerUseless(ctx, req.(*PeerUselessRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -624,10 +592,6 @@ var Sentry_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PeerMinBlock",
 			Handler:    _Sentry_PeerMinBlock_Handler,
-		},
-		{
-			MethodName: "PeerUseless",
-			Handler:    _Sentry_PeerUseless_Handler,
 		},
 		{
 			MethodName: "HandShake",
