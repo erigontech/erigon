@@ -313,7 +313,7 @@ func ExecV3(ctx context.Context,
 			defer cancelApplyCtx()
 			applyLoopWg.Add(1)
 			go applyLoop(applyCtx, rwLoopErrCh)
-			for outputTxNum.Load() < maxTxNum {
+			for outputTxNum.Load() <= maxTxNum {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
