@@ -6,8 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-// Prev: 151849172
-// Curr: 5463452
+// Curr: 4358340
 func BenchmarkStateRootNonCached(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		base := state.GetEmptyBeaconState()
@@ -15,8 +14,8 @@ func BenchmarkStateRootNonCached(b *testing.B) {
 	}
 }
 
-// Prev: 13953
-// Curr: 2093
+// Prev: 1400
+// Curr: 139.4
 func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	base := state.GetEmptyBeaconState()

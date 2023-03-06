@@ -25,6 +25,10 @@ import (
 // in a block. The zero value is a pool with zero gas available.
 type GasPool uint64
 
+func (gp *GasPool) Reset(amount uint64) {
+	*gp = GasPool(amount)
+}
+
 // AddGas makes gas available for execution.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	if uint64(*gp) > math.MaxUint64-amount {

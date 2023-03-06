@@ -38,7 +38,7 @@ type MiningState struct {
 	MiningConfig      *params.MiningConfig
 	PendingResultCh   chan *types.Block
 	MiningResultCh    chan *types.Block
-	MiningResultPOSCh chan *types.Block
+	MiningResultPOSCh chan *types.BlockWithReceipts
 	MiningBlock       *MiningBlock
 }
 
@@ -56,7 +56,7 @@ func NewProposingState(cfg *params.MiningConfig) MiningState {
 		MiningConfig:      cfg,
 		PendingResultCh:   make(chan *types.Block, 1),
 		MiningResultCh:    make(chan *types.Block, 1),
-		MiningResultPOSCh: make(chan *types.Block, 1),
+		MiningResultPOSCh: make(chan *types.BlockWithReceipts, 1),
 		MiningBlock:       &MiningBlock{},
 	}
 }

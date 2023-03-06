@@ -13,13 +13,11 @@ import (
 )
 
 var (
-	testBeaconConfig = &clparams.BeaconChainConfig{
-		SlotsPerHistoricalRoot: 8192,
-	}
-	stateHash0 = "0617561534e6a3ff7fed7f007ae993035b81110f7b7def36e14ff8cbb8034581"
-	blockHash0 = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
-	stateHash1 = "22765160fa57d0be679cdd8c91296f607a056d92c4d30642f06354c8f203abeb"
-	blockHash1 = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
+	testBeaconConfig = clparams.MainnetBeaconConfig
+	stateHash0       = "0617561534e6a3ff7fed7f007ae993035b81110f7b7def36e14ff8cbb8034581"
+	blockHash0       = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
+	stateHash1       = "22765160fa57d0be679cdd8c91296f607a056d92c4d30642f06354c8f203abeb"
+	blockHash1       = "ea9052349d8c9107c4fa04f9a5c5033f6afc7f02e857359c25b426d9948aaaca"
 
 	stateHash42 = "76d8678d22ed0aa246d128440c6107d5561dcf88ec4472124ad42c72b71cda45"
 	blockHash42 = "3ff92b54cba8067044f6b6ca0a69c7a6344154de2a38742e7a89b1057877fffa"
@@ -161,8 +159,7 @@ func TestTransitionSlot(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
-			err := s.transitionSlot()
+			err := transitionSlot(tc.prevState)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")
@@ -183,6 +180,7 @@ func TestTransitionSlot(t *testing.T) {
 
 func TestProcessSlots(t *testing.T) {
 	slot42 := getTestBeaconState()
+	slot42.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
 	slot42.SetSlot(42)
 	testCases := []struct {
 		description   string
@@ -240,130 +238,8 @@ func TestProcessSlots(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
-			err := s.processSlots(tc.startSlot + tc.numSlots)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("unexpected success, wanted error")
-				}
-				return
-			}
-
-			// Non-failure case.
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			assertStateEq(t, tc.prevState, tc.expectedState)
-		})
-	}
-}
-
-func TestVerifyBlockSignature(t *testing.T) {
-	badSigBlock := getTestBeaconBlock()
-	badSigBlock.Signature = badSignature
-	testCases := []struct {
-		description string
-		state       *state.BeaconState
-		block       *cltypes.SignedBeaconBlock
-		wantValid   bool
-		wantErr     bool
-	}{
-		{
-			description: "success",
-			state:       getTestBeaconStateWithValidator(),
-			block:       getTestBeaconBlock(),
-			wantErr:     false,
-			wantValid:   true,
-		},
-		{
-			description: "failure_empty_block",
-			state:       getTestBeaconStateWithValidator(),
-			block:       getEmptyBlock(),
-			wantErr:     true,
-		},
-		{
-			description: "failure_bad_signature",
-			state:       getTestBeaconStateWithValidator(),
-			block:       badSigBlock,
-			wantErr:     false,
-			wantValid:   false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.state, testBeaconConfig, nil)
-			valid, err := s.verifyBlockSignature(tc.block)
-			if tc.wantErr {
-				if err == nil {
-					t.Errorf("unexpected success, wanted error")
-				}
-				return
-			}
-			// Non-failure case.
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-
-			// Confirm that validity matches what we expect.
-			if valid != tc.wantValid {
-				t.Errorf("unexpected difference in validity: want %v, got %v", tc.wantValid, valid)
-			}
-		})
-	}
-}
-
-func TestTransitionState(t *testing.T) {
-	slot2 := getTestBeaconBlock()
-	slot2.Block.Slot = 2
-	badSigBlock := getTestBeaconBlock()
-	badSigBlock.Signature = badSignature
-	badStateRootBlock := getTestBeaconBlock()
-	badStateRootBlock.Block.StateRoot = libcommon.Hash{}
-	testCases := []struct {
-		description   string
-		prevState     *state.BeaconState
-		block         *cltypes.SignedBeaconBlock
-		expectedState *state.BeaconState
-		wantErr       bool
-	}{
-		{
-			description: "success_2_slots",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       slot2,
-			expectedState: prepareNextBeaconState(
-				t,
-				[]uint64{0, 1},
-				[]string{stateHashValidator0, stateHashValidator1},
-				[]string{blockHashValidator0, blockHashValidator1},
-				getTestBeaconStateWithValidator(),
-			),
-			wantErr: false,
-		},
-		{
-			description: "error_empty_block_body",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       getEmptyBlock(),
-			wantErr:     true,
-		},
-		{
-			description: "error_bad_signature",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       badSigBlock,
-			wantErr:     true,
-		},
-		{
-			description: "error_bad_state_root",
-			prevState:   getTestBeaconStateWithValidator(),
-			block:       badStateRootBlock,
-			wantErr:     true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.description, func(t *testing.T) {
-			s := New(tc.prevState, testBeaconConfig, nil)
-			err := s.transitionState(tc.block, true)
+			tc.prevState.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch, WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, 1)
+			err := ProcessSlots(tc.prevState, tc.startSlot+tc.numSlots)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wanted error")

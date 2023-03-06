@@ -34,7 +34,6 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -217,7 +216,7 @@ func (test *snapshotTest) String() string {
 
 func (test *snapshotTest) run() bool {
 	// Run all actions and create snapshots.
-	db := memdb.New()
+	db := memdb.New("")
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

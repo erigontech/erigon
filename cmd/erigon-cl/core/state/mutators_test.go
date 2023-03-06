@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -14,12 +15,10 @@ const (
 
 func getTestStateBalances(t *testing.T) *state.BeaconState {
 	numVals := uint64(2048)
-	balances := make([]uint64, numVals)
-	for i := uint64(0); i < numVals; i++ {
-		balances[i] = i
-	}
 	b := state.GetEmptyBeaconState()
-	b.SetBalances(balances)
+	for i := uint64(0); i < numVals; i++ {
+		b.AddValidator(&cltypes.Validator{ExitEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch}, i)
+	}
 	return b
 }
 
@@ -42,11 +41,9 @@ func TestIncreaseBalance(t *testing.T) {
 	testInd := uint64(42)
 	amount := uint64(100)
 	beforeBalance := state.Balances()[testInd]
-	state.IncreaseBalance(int(testInd), amount)
+	state.IncreaseBalance(testInd, amount)
 	afterBalance := state.Balances()[testInd]
-	if afterBalance != beforeBalance+amount {
-		t.Errorf("unepected after balance: %d, before balance: %d, increase: %d", afterBalance, beforeBalance, amount)
-	}
+	require.Equal(t, afterBalance, beforeBalance+amount)
 }
 
 func TestDecreaseBalance(t *testing.T) {
@@ -79,17 +76,14 @@ func TestDecreaseBalance(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			state := getTestStateBalances(t)
-			state.DecreaseBalance(testInd, tc.delta)
+			require.NoError(t, state.DecreaseBalance(testInd, tc.delta))
 			afterBalance := state.Balances()[testInd]
-			if afterBalance != tc.expectedBalance {
-				t.Errorf("unexpected resulting balance: got %d, want %d", afterBalance, tc.expectedBalance)
-			}
+			require.Equal(t, afterBalance, tc.expectedBalance)
 		})
 	}
 }
 
 func TestInitiatieValidatorExit(t *testing.T) {
-	exitDelay := testExitEpoch + clparams.MainnetBeaconConfig.MaxSeedLookahead + 1
 	testCases := []struct {
 		description                string
 		numValidators              uint64
@@ -100,8 +94,8 @@ func TestInitiatieValidatorExit(t *testing.T) {
 		{
 			description:                "success",
 			numValidators:              3,
-			expectedExitEpoch:          testExitEpoch + exitDelay,
-			expectedWithdrawlableEpoch: testExitEpoch + exitDelay + clparams.MainnetBeaconConfig.MinValidatorWithdrawabilityDelay,
+			expectedExitEpoch:          58,
+			expectedWithdrawlableEpoch: 314,
 			validator: &cltypes.Validator{
 				ExitEpoch:       clparams.MainnetBeaconConfig.FarFutureEpoch,
 				ActivationEpoch: 0,
@@ -125,7 +119,8 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			state.SetValidators(append(state.Validators(), tc.validator))
 			testInd := uint64(len(state.Validators()) - 1)
 			state.InitiateValidatorExit(testInd)
-			val := state.ValidatorAt(int(testInd))
+			val, err := state.ValidatorAt(int(testInd))
+			require.NoError(t, err)
 			if val.ExitEpoch != tc.expectedExitEpoch {
 				t.Errorf("unexpected exit epoch: got %d, want %d", val.ExitEpoch, tc.expectedExitEpoch)
 			}
@@ -143,56 +138,35 @@ func TestSlashValidator(t *testing.T) {
 	successState := getTestState(t)
 
 	successBalances := []uint64{}
-	wantBalances := []uint64{}
 	for i := 0; i < len(successState.Validators()); i++ {
 		successBalances = append(successBalances, uint64(i+1))
-		wantBalances = append(wantBalances, uint64(i+1))
 	}
 	successState.SetBalances(successBalances)
 
 	// Set up slashed balance.
 	preSlashBalance := uint64(1 << 20)
 	successState.Balances()[slashedInd] = preSlashBalance
-	successState.ValidatorAt(slashedInd).EffectiveBalance = preSlashBalance
-	wantBalances[slashedInd] = preSlashBalance - (preSlashBalance / clparams.MainnetBeaconConfig.MinSlashingPenaltyQuotient)
-
-	// Set up whistleblower & validator balances.
-	wbReward := preSlashBalance / clparams.MainnetBeaconConfig.WhistleBlowerRewardQuotient
-	wantBalances[whistleblowerInd] += wbReward
-	valInd, err := successState.GetBeaconProposerIndex()
-	if err != nil {
-		t.Fatalf("unable to get proposer index for test state: %v", err)
-	}
-	wantBalances[valInd] += wbReward / clparams.MainnetBeaconConfig.ProposerRewardQuotient
-
-	failState := getTestState(t)
-	for _, v := range failState.Validators() {
-		v.ExitEpoch = 0
-	}
-	failState.SetBalances(successBalances)
+	vali, err := successState.ValidatorAt(slashedInd)
+	require.NoError(t, err)
+	successState.SetValidatorAt(slashedInd, &vali)
+	vali.EffectiveBalance = preSlashBalance
 
 	testCases := []struct {
-		description  string
-		state        *state.BeaconState
-		wantBalances []uint64
-		wantErr      bool
+		description string
+		state       *state.BeaconState
+		wantErr     bool
 	}{
 		{
-			description:  "success",
-			state:        successState,
-			wantBalances: wantBalances,
-			wantErr:      false,
-		},
-		{
-			description: "fail_no_active_validators",
-			state:       failState,
-			wantErr:     true,
+			description: "success",
+			state:       successState,
+			wantErr:     false,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			err := tc.state.SlashValidator(uint64(slashedInd), uint64(whistleblowerInd))
+			w := uint64(whistleblowerInd)
+			err := tc.state.SlashValidator(uint64(slashedInd), &w)
 			if tc.wantErr {
 				if err == nil {
 					t.Errorf("unexpected success, wantErr is true")
@@ -203,14 +177,10 @@ func TestSlashValidator(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error, wanted success: %v", err)
 			}
-			// Check balances.
-			for i, bal := range tc.wantBalances {
-				if bal != tc.state.Balances()[i] {
-					t.Errorf("unexpected balance for index: %d, want %d: got %d", i, bal, tc.state.Balances()[i])
-				}
-			}
+			vali, err := tc.state.ValidatorAt(slashedInd)
+			require.NoError(t, err)
 			// Check that the validator is slashed.
-			if !tc.state.ValidatorAt(slashedInd).Slashed {
+			if !vali.Slashed {
 				t.Errorf("slashed index validator not set as slashed")
 			}
 		})

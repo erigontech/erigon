@@ -575,7 +575,7 @@ func (h *Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 }
 
 // NOTE: it is skipping extra data
-func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
+func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataOffset int) {
 	h.UncleHash = EmptyUncleHash
 	h.Difficulty = libcommon.Big0
 
@@ -601,7 +601,9 @@ func (h *Header) DecodeHeaderMetadataForSSZ(buf []byte) (pos int) {
 	h.GasLimit = ssz_utils.UnmarshalUint64SSZ(buf[pos+8:])
 	h.GasUsed = ssz_utils.UnmarshalUint64SSZ(buf[pos+16:])
 	h.Time = ssz_utils.UnmarshalUint64SSZ(buf[pos+24:])
-	pos += 36
+	pos += 32
+	extraDataOffset = int(ssz_utils.DecodeOffset(buf[pos:]))
+	pos += 4
 	// Add Base Fee
 	baseFeeBytes := common.CopyBytes(buf[pos : pos+32])
 	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
@@ -618,7 +620,7 @@ func (h *Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 	if len(buf) < h.EncodingSizeSSZ(version) {
 		return ssz_utils.ErrLowBufferSize
 	}
-	pos := h.DecodeHeaderMetadataForSSZ(buf)
+	pos, _ := h.DecodeHeaderMetadataForSSZ(buf)
 	copy(h.TxHashSSZ[:], buf[pos:pos+32])
 	pos += len(h.TxHashSSZ)
 
@@ -1451,17 +1453,7 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 	payloadSize++
 	for _, tx := range bb.transactions {
 		txsLen++
-		var txLen int
-		switch t := tx.(type) {
-		case *LegacyTx:
-			txLen = t.EncodingSize()
-		case *AccessListTx:
-			txLen = t.EncodingSize()
-		case *DynamicFeeTransaction:
-			txLen = t.EncodingSize()
-		case *StarknetTransaction:
-			txLen = t.EncodingSize()
-		}
+		txLen := tx.EncodingSize()
 		if txLen >= 56 {
 			txsLen += bitsToBytes(bits.Len(uint(txLen)))
 		}
@@ -1529,23 +1521,8 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range bb.transactions {
-		switch t := tx.(type) {
-		case *LegacyTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *AccessListTx:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *DynamicFeeTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
-		case *StarknetTransaction:
-			if err := t.EncodeRLP(w); err != nil {
-				return err
-			}
+		if err := tx.EncodeRLP(w); err != nil {
+			return err
 		}
 	}
 	// encode Uncles
@@ -1806,4 +1783,9 @@ func DecodeOnlyTxMetadataFromBody(payload []byte) (baseTxId uint64, txAmount uin
 		return baseTxId, txAmount, err
 	}
 	return
+}
+
+type BlockWithReceipts struct {
+	Block    *Block
+	Receipts Receipts
 }

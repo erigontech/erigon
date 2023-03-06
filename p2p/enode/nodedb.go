@@ -83,10 +83,10 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(path string) (*DB, error) {
+func OpenDB(path string, tmpDir string) (*DB, error) {
 	logger := log.New() //TODO: move higher
 	if path == "" {
-		return newMemoryDB(logger)
+		return newMemoryDB(logger, tmpDir)
 	}
 	return newPersistentDB(logger, path)
 }
@@ -99,10 +99,10 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 }
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
-func newMemoryDB(logger log.Logger) (*DB, error) {
+func newMemoryDB(logger log.Logger, tmpDir string) (*DB, error) {
 	db := &DB{quit: make(chan struct{})}
 	var err error
-	db.kv, err = mdbx.NewMDBX(logger).InMem("").Label(kv.SentryDB).WithTableCfg(bucketsConfig).Open()
+	db.kv, err = mdbx.NewMDBX(logger).InMem(tmpDir).Label(kv.SentryDB).WithTableCfg(bucketsConfig).Open()
 	if err != nil {
 		return nil, err
 	}

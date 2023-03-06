@@ -30,7 +30,7 @@ import (
 func TestGetLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	agg := m.HistoryV3Components()
 	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
 	{
@@ -40,45 +40,30 @@ func TestGetLogs(t *testing.T) {
 		assert.NoError(err)
 		assert.Equal(uint64(10), logs[0].BlockNumber)
 
-		//filer by wrong address
+		// filter by wrong address
 		logs, err = ethApi.GetLogs(context.Background(), filters.FilterCriteria{
+			FromBlock: big.NewInt(10),
+			ToBlock:   big.NewInt(10),
 			Addresses: common.Addresses{libcommon.Address{}},
 		})
 		assert.NoError(err)
 		assert.Equal(0, len(logs))
 
-		//filer by wrong address
+		// filter by wrong address
 		logs, err = ethApi.GetLogs(m.Ctx, filters.FilterCriteria{
-			Topics: [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
+			FromBlock: big.NewInt(10),
+			ToBlock:   big.NewInt(10),
+			Topics:    [][]libcommon.Hash{{libcommon.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
 		})
 		assert.NoError(err)
 		assert.Equal(1, len(logs))
 	}
-	//
-	//api := NewErigonAPI(baseApi, m.DB, nil)
-	//logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
-	//assert.NoError(err)s
-	//assert.Equal(uint64(10), logs[0].BlockNumber)
-	//
-	////filer by wrong address
-	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
-	//	Addresses: common.Addresses{common.Address{}},
-	//})
-	//assert.NoError(err)
-	//assert.Equal(0, len(logs))
-	//
-	////filer by wrong address
-	//logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{
-	//	Topics: [][]common.Hash{{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")}},
-	//})
-	//assert.NoError(err)
-	//assert.Equal(1, len(logs))
 }
 
 func TestErigonGetLatestLogs(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
@@ -113,7 +98,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	assert := assert.New(t)
 	m, _, _ := rpcdaemontest.CreateTestSentry(t)
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	db := m.DB
 	agg := m.HistoryV3Components()
@@ -205,7 +190,7 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 	// Assemble the test environment
 	m := mockWithGenerator(t, 4, generator)
 	agg := m.HistoryV3Components()
-	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots)
+	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
 

@@ -231,9 +231,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
-	if chainConfig.Bor != nil {
-		response["miner"], _ = ecrecover(b.Header(), chainConfig.Bor)
-	}
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -314,6 +311,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	if blockNr == rpc.PendingBlockNumber {
 		b, err := api.blockByRPCNumber(blockNr, tx)
 		if err != nil {
@@ -325,19 +323,24 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		n := hexutil.Uint(len(b.Transactions()))
 		return &n, nil
 	}
+
 	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHashWithNumber(blockNr), tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
+	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if blockNum > latestBlockNumber {
+		// (Compatibility) Every other node just returns `null` for when the block does not exist.
+		return nil, nil
+	}
+
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	if txAmount == 0 {
-		return nil, nil
-	}
-
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
@@ -350,21 +353,18 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 	defer tx.Rollback()
+
 	blockNum, _, _, err := rpchelper.GetBlockNumber(rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, nil)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)
 		return nil, nil
 	}
+
 	_, txAmount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-
-	if txAmount == 0 {
-		return nil, nil
-	}
-
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil

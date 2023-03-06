@@ -12,6 +12,7 @@ import (
 type HttpCfg struct {
 	Enabled                  bool
 	PrivateApiAddr           string
+	GraphQLEnabled           bool
 	WithDatadir              bool // Erigon's database can be read by separated processes on same machine - in read-only mode - with full support of transactions. It will share same "OS PageCache" with Erigon process.
 	DataDir                  string
 	Dirs                     datadir.Dirs
@@ -52,16 +53,15 @@ type HttpCfg struct {
 	TCPListenAddress string
 	TCPPort          int
 
-	StarknetGRPCAddress string
-	JWTSecretPath       string // Engine API Authentication
-	TraceRequests       bool   // Always trace requests in INFO level
-	HTTPTimeouts        rpccfg.HTTPTimeouts
-	AuthRpcTimeouts     rpccfg.HTTPTimeouts
-	EvmCallTimeout      time.Duration
-	InternalCL          bool
-	LogDirVerbosity     string
-	LogDirPath          string
+	JWTSecretPath   string // Engine API Authentication
+	TraceRequests   bool   // Always trace requests in INFO level
+	HTTPTimeouts    rpccfg.HTTPTimeouts
+	AuthRpcTimeouts rpccfg.HTTPTimeouts
+	EvmCallTimeout  time.Duration
+	InternalCL      bool
+	LogDirVerbosity string
+	LogDirPath      string
 
 	BatchLimit      int // Maximum number of requests in a batch
-	ReturnDataLimit int // Maximum number of bytes retutned from calls (like eth_call)
+	ReturnDataLimit int // Maximum number of bytes returned from calls (like eth_call)
 }

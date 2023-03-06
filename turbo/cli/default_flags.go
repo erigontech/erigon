@@ -49,6 +49,7 @@ var DefaultFlags = []cli.Flag{
 	&BadBlockFlag,
 
 	&utils.HTTPEnabledFlag,
+	&utils.GraphQLEnabledFlag,
 	&utils.HTTPListenAddrFlag,
 	&utils.HTTPPortFlag,
 	&utils.AuthRpcAddr,
@@ -117,6 +118,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MetricsHTTPFlag,
 	&utils.MetricsPortFlag,
 	&utils.HistoryV3Flag,
+	&utils.TransactionV3Flag,
 	&utils.IdentityFlag,
 	&utils.CliqueSnapshotCheckpointIntervalFlag,
 	&utils.CliqueSnapshotInmemorySnapshotsFlag,
@@ -140,6 +142,7 @@ var DefaultFlags = []cli.Flag{
 	&HealthCheckFlag,
 	&utils.HeimdallURLFlag,
 	&utils.WithoutHeimdallFlag,
+	&utils.HeimdallgRPCAddressFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideShanghaiTime,
 
