@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.18
+go 1.20
 
 require (
 	github.com/ledgerwatch/erigon-lib v0.0.0-20230306025804-0b9ca27fb310
