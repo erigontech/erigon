@@ -309,7 +309,7 @@ func ExecV3(ctx context.Context,
 			} else {
 				defer agg.StartWrites().FinishWrites()
 			}
-			stepsInDBAfterCommit = rawdbhelpers.IdxStepsCountV3(applyTx)
+			stepsInDBAfterCommit = rawdbhelpers.IdxStepsCountV3(tx)
 
 			defer applyLoopWg.Wait()
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
