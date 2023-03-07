@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -134,22 +133,14 @@ func GetBool(tx Getter, bucket string, k []byte) (enabled bool, err error) {
 	return bytes2bool(vBytes), nil
 }
 
-func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) (clean func()) {
+func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string, from []byte, amount uint32) {
 	if db == nil {
-		return func() {}
+		return
 	}
 	if ok := progress.CompareAndSwap(false, true); !ok {
-		return func() {}
+		return
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	wg := sync.WaitGroup{}
-	clean = func() {
-		cancel()
-		wg.Wait()
-	}
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		defer progress.Store(false)
 		_ = db.View(ctx, func(tx Tx) error {
 			c, err := tx.Cursor(table)
@@ -172,7 +163,6 @@ func ReadAhead(ctx context.Context, db RoDB, progress *atomic.Bool, table string
 			return nil
 		})
 	}()
-	return clean
 }
 
 // FirstKey - candidate on move to kv.Tx interface

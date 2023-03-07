@@ -80,19 +80,16 @@ type sortableBuffer struct {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	lk, lv := len(k), len(v)
-	if k == nil {
-		lk = -1
-	}
-	if v == nil {
-		lv = -1
-	}
-	b.lens = append(b.lens, lk, lv)
-
 	b.offsets = append(b.offsets, len(b.data))
-	b.data = append(b.data, k...)
+	b.lens = append(b.lens, len(k))
+	if len(k) > 0 {
+		b.data = append(b.data, k...)
+	}
 	b.offsets = append(b.offsets, len(b.data))
-	b.data = append(b.data, v...)
+	b.lens = append(b.lens, len(v))
+	if len(v) > 0 {
+		b.data = append(b.data, v...)
+	}
 }
 
 func (b *sortableBuffer) Size() int {
@@ -124,25 +121,9 @@ func (b *sortableBuffer) Get(i int, keyBuf, valBuf []byte) ([]byte, []byte) {
 	keyLen, valLen := b.lens[i2], b.lens[i2+1]
 	if keyLen > 0 {
 		keyBuf = append(keyBuf, b.data[keyOffset:keyOffset+keyLen]...)
-	} else if keyLen == 0 {
-		if keyBuf != nil {
-			keyBuf = keyBuf[:0]
-		} else {
-			keyBuf = []byte{}
-		}
-	} else {
-		keyBuf = nil
 	}
 	if valLen > 0 {
 		valBuf = append(valBuf, b.data[valOffset:valOffset+valLen]...)
-	} else if valLen == 0 {
-		if valBuf != nil {
-			valBuf = valBuf[:0]
-		} else {
-			valBuf = []byte{}
-		}
-	} else {
-		valBuf = nil
 	}
 	return keyBuf, valBuf
 }
@@ -167,12 +148,9 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	for i, offset := range b.offsets {
 		l := b.lens[i]
-		n := binary.PutVarint(numBuf[:], int64(l))
+		n := binary.PutUvarint(numBuf[:], uint64(l))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
-		}
-		if l <= 0 {
-			continue
 		}
 		if _, err := w.Write(b.data[offset : offset+l]); err != nil {
 			return err
@@ -243,22 +221,14 @@ func (b *appendSortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	entries := b.sortedBuf
 	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
+		n := binary.PutUvarint(numBuf[:], uint64(len(entry.key)))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.key); err != nil {
 			return err
 		}
-		lv := int64(len(entry.key))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
+		n = binary.PutUvarint(numBuf[:], uint64(len(entry.value)))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
@@ -337,22 +307,14 @@ func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	entries := b.sortedBuf
 	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
+		n := binary.PutUvarint(numBuf[:], uint64(len(entry.key)))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}
 		if _, err := w.Write(entry.key); err != nil {
 			return err
 		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
+		n = binary.PutUvarint(numBuf[:], uint64(len(entry.value)))
 		if _, err := w.Write(numBuf[:n]); err != nil {
 			return err
 		}

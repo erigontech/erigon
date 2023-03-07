@@ -103,13 +103,13 @@ func (p *fileDataProvider) String() string {
 }
 
 func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) ([]byte, []byte, error) {
-	n, err := binary.ReadVarint(br)
+	n, err := binary.ReadUvarint(br)
 	if err != nil {
 		return nil, nil, err
 	}
-	if n >= 0 {
+	if n > 0 {
 		// Reallocate the slice or extend it if there is enough capacity
-		if keyBuf == nil || len(keyBuf)+int(n) > cap(keyBuf) {
+		if len(keyBuf)+int(n) > cap(keyBuf) {
 			newKeyBuf := make([]byte, len(keyBuf)+int(n))
 			copy(newKeyBuf, keyBuf)
 			keyBuf = newKeyBuf
@@ -119,15 +119,13 @@ func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) (
 		if _, err = io.ReadFull(r, keyBuf[len(keyBuf)-int(n):]); err != nil {
 			return nil, nil, err
 		}
-	} else {
-		keyBuf = nil
 	}
-	if n, err = binary.ReadVarint(br); err != nil {
+	if n, err = binary.ReadUvarint(br); err != nil {
 		return nil, nil, err
 	}
-	if n >= 0 {
+	if n > 0 {
 		// Reallocate the slice or extend it if there is enough capacity
-		if valBuf == nil || len(valBuf)+int(n) > cap(valBuf) {
+		if len(valBuf)+int(n) > cap(valBuf) {
 			newValBuf := make([]byte, len(valBuf)+int(n))
 			copy(newValBuf, valBuf)
 			valBuf = newValBuf
@@ -137,8 +135,6 @@ func readElementFromDisk(r io.Reader, br io.ByteReader, keyBuf, valBuf []byte) (
 		if _, err = io.ReadFull(r, valBuf[len(valBuf)-int(n):]); err != nil {
 			return nil, nil, err
 		}
-	} else {
-		valBuf = nil
 	}
 	return keyBuf, valBuf, err
 }
