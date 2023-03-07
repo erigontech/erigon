@@ -31,10 +31,12 @@ type Eth1Header struct {
 	version clparams.StateVersion
 }
 
+// NewEth1Header creates new header with given version.
 func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 	return &Eth1Header{version: version}
 }
 
+// Encodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
 func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]byte, error) {
 	buf := dst
 	buf = append(buf, h.ParentHash[:]...)
@@ -55,6 +57,7 @@ func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int)
 	return buf, nil
 }
 
+// EncodeSSZ encodes the header in SSZ format.
 func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	buf = dst
 	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
@@ -77,7 +80,7 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	return
 }
 
-// NOTE: it is skipping extra data
+// Decodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
 func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataOffset int) {
 	copy(h.ParentHash[:], buf)
 	pos = len(h.ParentHash)
@@ -112,8 +115,9 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 	return
 }
 
-func (h *Eth1Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
-	h.version = version
+// DecodeSSZWithVersion decodes given SSZ slice.
+func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
+	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
@@ -121,7 +125,7 @@ func (h *Eth1Header) DecodeSSZ(buf []byte, version clparams.StateVersion) error 
 	copy(h.TransactionsRoot[:], buf[pos:])
 	pos += len(h.TransactionsRoot)
 
-	if version >= clparams.CapellaVersion {
+	if h.version >= clparams.CapellaVersion {
 		copy(h.WithdrawalsRoot[:], buf[pos:])
 		pos += len(h.WithdrawalsRoot)
 	}
@@ -140,6 +144,7 @@ func (h *Eth1Header) EncodingSizeSSZ() int {
 	return size + len(h.Extra)
 }
 
+// HashSSZ encodes the header in SSZ tree format.
 func (h *Eth1Header) HashSSZ() ([32]byte, error) {
 	// Compute coinbase leaf
 	var coinbase32 [32]byte

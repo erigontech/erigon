@@ -368,7 +368,7 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 		return ssz_utils.ErrLowBufferSize
 	}
 	b.latestExecutionPayloadHeader = new(cltypes.Eth1Header)
-	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], b.version); err != nil {
+	if err := b.latestExecutionPayloadHeader.DecodeSSZWithVersion(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {
 		return err
 	}
 	if b.version == clparams.BellatrixVersion {

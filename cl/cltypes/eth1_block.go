@@ -36,10 +36,12 @@ type Eth1Block struct {
 	version clparams.StateVersion
 }
 
+// NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion) *Eth1Block {
 	return &Eth1Block{version: version}
 }
 
+// NewEth1BlockFromHeaderAndBody with given header/body.
 func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *Eth1Block {
 	baseFeeBytes := header.BaseFee.Bytes()
 	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
@@ -73,6 +75,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *E
 	return block
 }
 
+// PayloadHeader returns the equivalent ExecutionPayloadHeader object.
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
 	var transactionsRoot, withdrawalsRoot libcommon.Hash
@@ -106,6 +109,7 @@ func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	}, nil
 }
 
+// Return minimum required buffer length to be an acceptable SSZ encoding.
 func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	size = 508
 	// Field (10) 'ExtraData'
@@ -123,10 +127,12 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 	return
 }
 
+// Need a version
 func (b *Eth1Block) DecodeSSZ(buf []byte) error {
 	panic("stop")
 }
 
+// DecodeSSZWithVersion decodes the block in SSZ format.
 func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
@@ -224,6 +230,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	return nil
 }
 
+// EncodeSSZ encodes the block in SSZ format.
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
@@ -275,54 +282,35 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	return buf, nil
 }
 
+// HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
-	var err error
-	var transactionsRoot, withdrawalsRoot libcommon.Hash
-	if transactionsRoot, err = merkle_tree.TransactionsListRoot(b.Transactions); err != nil {
+	// Get the payload header.
+	header, err := b.PayloadHeader()
+	if err != nil {
 		return [32]byte{}, err
 	}
-	if b.version >= clparams.CapellaVersion {
-		withdrawalsRoot, err = b.Withdrawals.HashSSZ(16)
-		if err != nil {
-			return [32]byte{}, err
-		}
-	}
 
-	header := &Eth1Header{
-		ParentHash:       b.ParentHash,
-		FeeRecipient:     b.FeeRecipient,
-		StateRoot:        b.StateRoot,
-		ReceiptsRoot:     b.ReceiptsRoot,
-		LogsBloom:        b.LogsBloom,
-		PrevRandao:       b.PrevRandao,
-		BlockNumber:      b.BlockNumber,
-		GasLimit:         b.GasLimit,
-		GasUsed:          b.GasUsed,
-		Time:             b.Time,
-		Extra:            b.Extra,
-		BaseFeePerGas:    b.BaseFeePerGas,
-		BlockHash:        b.BlockHash,
-		TransactionsRoot: transactionsRoot,
-		WithdrawalsRoot:  withdrawalsRoot,
-		version:          b.version,
-	}
+	// Calculate the SSZ hash of the header and return it.
 	return header.HashSSZ()
 }
 
-// RlpHeader return the equivalent header with RLP based fields.
+// RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader() (*types.Header, error) {
-	baseFeeBytes := b.BaseFeePerGas[:]
+	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
+	reversedBaseFeePerGas := b.BaseFeePerGas[:]
+	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
+		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
+	}
+	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
 
-	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
-		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
-	}
-	baseFee := new(big.Int).SetBytes(baseFeeBytes)
-	var withdrawalHash *libcommon.Hash
+	// If the block version is Capella or later, calculate the withdrawals hash.
+	var withdrawalsHash *libcommon.Hash
 	if b.version >= clparams.CapellaVersion {
-		withdrawalHash = new(libcommon.Hash)
-		*withdrawalHash = types.DeriveSha(b.Withdrawals)
+		withdrawalsHash = new(libcommon.Hash)
+		*withdrawalsHash = types.DeriveSha(b.Withdrawals)
 	}
-	h := &types.Header{
+
+	header := &types.Header{
 		ParentHash:      b.ParentHash,
 		UncleHash:       types.EmptyUncleHash,
 		Coinbase:        b.FeeRecipient,
@@ -339,14 +327,18 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		MixDigest:       b.PrevRandao,
 		Nonce:           serenity.SerenityNonce,
 		BaseFee:         baseFee,
-		WithdrawalsHash: withdrawalHash,
+		WithdrawalsHash: withdrawalsHash,
 	}
-	if h.Hash() != b.BlockHash {
+
+	// If the header hash does not match the block hash, return an error.
+	if header.Hash() != b.BlockHash {
 		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash")
 	}
-	return h, nil
+
+	return header, nil
 }
 
+// Body returns the equivalent raw body (only eth1 body section).
 func (b *Eth1Block) Body() *types.RawBody {
 	return &types.RawBody{
 		Transactions: b.Transactions,
