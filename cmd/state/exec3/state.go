@@ -178,6 +178,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				//txTask.TraceTos = rw.callTracer.Tos()
 				txTask.TraceTos = map[libcommon.Address]struct{}{}
 				txTask.TraceTos[txTask.Coinbase] = struct{}{}
 				for _, uncle := range txTask.Uncles {
