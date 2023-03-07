@@ -1294,7 +1294,7 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
-func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator) *valset.ValidatorSet {
+func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*valset.Validator) (*valset.ValidatorSet, error) {
 	v := oldValidatorSet
 	oldVals := v.Validators
 
@@ -1318,9 +1318,10 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 
 	if err := v.UpdateWithChangeSet(changes); err != nil {
 		log.Error("Error while updating change set", "error", err)
+		return v, err
 	}
 
-	return v
+	return v, nil
 }
 
 func isSprintStart(number, sprint uint64) bool {

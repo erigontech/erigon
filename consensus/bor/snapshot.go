@@ -168,7 +168,10 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
-			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals)
+			v, err := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals)
+			if err != nil {
+				return nil, err
+			}
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}
