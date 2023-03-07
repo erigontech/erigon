@@ -222,7 +222,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.Version >= clparams.BellatrixVersion {
-		buf, err = b.ExecutionPayload.EncodeSSZ(buf, b.Version)
+		buf, err = b.ExecutionPayload.EncodeSSZ(buf)
 		if err != nil {
 			return nil, err
 		}

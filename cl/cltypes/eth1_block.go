@@ -224,12 +224,12 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	return nil
 }
 
-func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte, error) {
+func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
 	currentOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
 
-	if version >= clparams.CapellaVersion {
+	if b.version >= clparams.CapellaVersion {
 		currentOffset += 4
 	}
 	payloadHeader, err := b.PayloadHeader()
@@ -248,7 +248,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte
 		currentOffset += len(tx) + 4
 	}
 	// Write withdrawals offset if exist
-	if version >= clparams.CapellaVersion {
+	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
 	}
 	// Sanity check for extra data then write it.
@@ -267,12 +267,11 @@ func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte
 		buf = append(buf, tx...)
 	}
 
-	if version >= clparams.CapellaVersion {
-		// Append all withdrawals SSZ
-		for _, withdrawal := range b.Withdrawals {
-			buf = append(buf, withdrawal.EncodeSSZ()...)
-		}
+	// Append all withdrawals SSZ
+	for _, withdrawal := range b.Withdrawals {
+		buf = append(buf, withdrawal.EncodeSSZ()...)
 	}
+
 	return buf, nil
 }
 

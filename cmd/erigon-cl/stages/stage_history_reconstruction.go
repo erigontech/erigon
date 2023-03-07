@@ -134,7 +134,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 				return slot <= destinationSlot, nil
 			}
 			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
-			encodedPayload, err = payload.EncodeSSZ(encodedPayload, blk.Version())
+			encodedPayload, err = payload.EncodeSSZ(encodedPayload)
 			if err != nil {
 				return false, err
 			}
