@@ -173,3 +173,7 @@ type CodeRecord struct {
 	TxNumber    uint64
 	CodeHash    Hash
 }
+
+func FromHex(in string) []byte {
+	return hexutility.MustDecodeHex(in)
+}
