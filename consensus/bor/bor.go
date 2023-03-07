@@ -653,6 +653,7 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	}
 
 	if !snap.ValidatorSet.HasAddress(signer) {
+		log.Error("Unauthorized signer", "number", number, "hash", header.Hash(), "signer", signer, "snap", snap.ValidatorSet)
 		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
 		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
 	}

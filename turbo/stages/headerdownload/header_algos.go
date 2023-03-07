@@ -502,6 +502,12 @@ func (hd *HeaderDownload) VerifyHeader(header *types.Header) error {
 
 type FeedHeaderFunc = func(header *types.Header, headerRaw []byte, hash libcommon.Hash, blockHeight uint64) (td *big.Int, err error)
 
+func (hd *HeaderDownload) InsertQueueSize() int {
+	hd.lock.Lock()
+	defer hd.lock.Unlock()
+	return hd.insertQueue.Len()
+}
+
 func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time) (bool, bool, uint64, uint64, error) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()
@@ -530,7 +536,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 					log.Warn("[downloader] Added future link", "hash", link.hash, "height", link.blockHeight, "timestamp", link.header.Time)
 					return false, false, 0, lastTime, nil // prevent removal of the link from the hd.linkQueue
 				} else {
-					log.Debug("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
+					log.Info("[downloader] Verification failed for header", "hash", link.hash, "height", link.blockHeight, "err", err)
 					hd.moveLinkToQueue(link, NoQueue)
 					delete(hd.links, link.hash)
 					hd.removeUpwards(link)
@@ -539,6 +545,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			}
 		}
 		link.verified = true
+		log.Debug("Got link", "number", link.header.Number, "time", link.header.Time, "hash", link.hash, "verified", link.verified, "highestInDb", hd.highestInDb, "blockHeight", link.blockHeight)
 		// Make sure long insertions do not appear as a stuck stage 1
 		select {
 		case <-logChannel:

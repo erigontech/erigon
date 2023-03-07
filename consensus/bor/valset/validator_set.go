@@ -251,6 +251,11 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 // HasAddress returns true if address given is in the validator set, false -
 // otherwise.
 func (vals *ValidatorSet) HasAddress(address libcommon.Address) bool {
+	if len(vals.validatorsMap) == 0 {
+		// This is a temporary fix to prevent stuck.
+		// I believe this fix is harmless, but it is not clear why validatorsMap is empty.
+		vals.UpdateValidatorMap()
+	}
 	_, ok := vals.validatorsMap[address]
 
 	return ok
@@ -695,14 +700,28 @@ func (vals *ValidatorSet) StringIndented(indent string) string {
 		return false
 	})
 
+	var valMapStrings []string
+	for addr, p := range vals.validatorsMap {
+		valMapStrings = append(valMapStrings, fmt.Sprintf("%v: %v", addr, p))
+	}
+
+	vals.Iterate(func(index int, val *Validator) bool {
+		valStrings = append(valStrings, val.String())
+		return false
+	})
+
 	return fmt.Sprintf(`ValidatorSet{
 %s  Proposer: %v
 %s  Validators:
+%s    %v
+%s  ValidatorMap:
 %s    %v
 %s}`,
 		indent, vals.GetProposer().String(),
 		indent,
 		indent, strings.Join(valStrings, "\n"+indent+"    "),
+		indent,
+		indent, strings.Join(valMapStrings, "\n"+indent+"    "),
 		indent)
 }
 

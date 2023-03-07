@@ -898,7 +898,8 @@ Loop:
 			if noProgressCounter >= 5 {
 				log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
 					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates,
+					"qsize", cfg.hd.InsertQueueSize())
 				cfg.hd.LogAnchorState()
 				if wasProgress {
 					log.Warn("Looks like chain is not progressing, moving to the next stage")
