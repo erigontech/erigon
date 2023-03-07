@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
 	iavl2 "github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	cmn "github.com/tendermint/tendermint/libs/common"
@@ -134,5 +135,16 @@ func DefaultProofRuntime() (prt *merkle.ProofRuntime) {
 	prt.RegisterOpDecoder(iavl2.ProofOpIAVLValue, iavl2.IAVLValueOpDecoder)
 	prt.RegisterOpDecoder(iavl2.ProofOpIAVLAbsence, iavl2.IAVLAbsenceOpDecoder)
 	prt.RegisterOpDecoder(ProofOpMultiStore, MultiStoreProofOpDecoder)
+	return
+}
+
+func Ics23CompatibleProofRuntime() (prt *merkle.ProofRuntime) {
+	prt = merkle.NewProofRuntime()
+	prt.RegisterOpDecoder(merkle.ProofOpSimpleValue, merkle.SimpleValueOpDecoder)
+	prt.RegisterOpDecoder(iavl.ProofOpIAVLValue, iavl.IAVLValueOpDecoder)
+	prt.RegisterOpDecoder(iavl.ProofOpIAVLAbsence, iavl.IAVLAbsenceOpDecoder)
+	prt.RegisterOpDecoder(ProofOpMultiStore, MultiStoreProofOpDecoder)
+	prt.RegisterOpDecoder(ProofOpIAVLCommitment, CommitmentOpDecoder)
+	prt.RegisterOpDecoder(ProofOpSimpleMerkleCommitment, CommitmentOpDecoder)
 	return
 }

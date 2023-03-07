@@ -210,12 +210,17 @@ func DecodeHeader(input []byte) (*Header, error) {
 }
 
 type KeyValueMerkleProof struct {
-	Key       []byte
-	Value     []byte
-	StoreName string
-	AppHash   []byte
-	Proof     *merkle.Proof
-	verifiers []merkle.ProofOpVerifier
+	Key          []byte
+	Value        []byte
+	StoreName    string
+	AppHash      []byte
+	Proof        *merkle.Proof
+	verifiers    []merkle.ProofOpVerifier
+	proofRuntime *merkle.ProofRuntime
+}
+
+func (kvmp *KeyValueMerkleProof) SetProofRuntime(prt *merkle.ProofRuntime) {
+	kvmp.proofRuntime = prt
 }
 
 func (kvmp *KeyValueMerkleProof) SetVerifiers(verifiers []merkle.ProofOpVerifier) {
@@ -223,18 +228,17 @@ func (kvmp *KeyValueMerkleProof) SetVerifiers(verifiers []merkle.ProofOpVerifier
 }
 
 func (kvmp *KeyValueMerkleProof) Validate() bool {
-	prt := DefaultProofRuntime()
 
 	kp := merkle.KeyPath{}
 	kp = kp.AppendKey([]byte(kvmp.StoreName), merkle.KeyEncodingURL)
 	kp = kp.AppendKey(kvmp.Key, merkle.KeyEncodingURL)
 
 	if len(kvmp.Value) == 0 {
-		err := prt.VerifyAbsence(kvmp.Proof, kvmp.AppHash, kp.String(), kvmp.verifiers...)
+		err := kvmp.proofRuntime.VerifyAbsence(kvmp.Proof, kvmp.AppHash, kp.String(), kvmp.verifiers...)
 		return err == nil
 	}
 
-	err := prt.VerifyValue(kvmp.Proof, kvmp.AppHash, kp.String(), kvmp.Value, kvmp.verifiers...)
+	err := kvmp.proofRuntime.VerifyValue(kvmp.Proof, kvmp.AppHash, kp.String(), kvmp.Value, kvmp.verifiers...)
 	return err == nil
 }
 
