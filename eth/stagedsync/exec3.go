@@ -331,8 +331,8 @@ func ExecV3(ctx context.Context,
 						// it means better spend time for pruning, before flushing more data to db
 						// also better do it now - instead of before Commit() - because Commit does block execution
 						stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-						if stepsInDB > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep*2); err != nil { // prune part of retired data, before commit
+						if stepsInDB > 10 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
