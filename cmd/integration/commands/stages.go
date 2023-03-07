@@ -630,6 +630,10 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 	must(sync.SetCurrentStage(stages.Senders))
 
+	if reset {
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
+	}
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -670,10 +674,6 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			}
 		}
 		return nil
-	}
-
-	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
 	}
 
 	s := stage(sync, tx, nil, stages.Senders)
