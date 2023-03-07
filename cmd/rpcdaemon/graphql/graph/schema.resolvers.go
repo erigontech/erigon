@@ -60,67 +60,79 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 		return nil, err
 	}
 
-	absBlk := res["block"]
-	blk := absBlk.(map[string]interface{})
-
 	block := &model.Block{}
-	block.Difficulty = *convertDataToStringP(blk, "difficulty")
-	block.ExtraData = *convertDataToStringP(blk, "extraData")
-	block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
-	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
-	block.Hash = *convertDataToStringP(blk, "hash")
-	block.Miner = &model.Account{}
-	block.Miner.Address = strings.ToLower(*convertDataToStringP(blk, "miner"))
-	block.MixHash = *convertDataToStringP(blk, "mixHash")
-	block.Nonce = *convertDataToStringP(blk, "nonce")
-	block.Number = *convertDataToUint64P(blk, "number")
-	block.Ommers = []*model.Block{}
-	block.Parent = &model.Block{}
-	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
-	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
-	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = *convertDataToUint64P(blk, "timestamp") // int in the schema but Geth displays in HEX !!!
-	block.TransactionCount = convertDataToIntP(blk, "transactionCount")
-	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
-	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
-	block.Transactions = []*model.Transaction{}
+	absBlk := res["block"]
 
-	block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
-	block.OmmerHash = "" // OmmerHash:     gointerfaces.ConvertHashToH256(header.UncleHash),
+	if absBlk != nil {
+		blk := absBlk.(map[string]interface{})
 
-	/*
-		Missing Block fields to fill :
-		- ommerHash
-	*/
+		block.Difficulty = *convertDataToStringP(blk, "difficulty")
+		block.ExtraData = *convertDataToStringP(blk, "extraData")
+		block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
+		block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
+		block.Hash = *convertDataToStringP(blk, "hash")
+		block.Miner = &model.Account{}
+		address := convertDataToStringP(blk, "miner")
+		if address != nil {
+			block.Miner.Address = strings.ToLower(*address)
+		}
+		mixHash := convertDataToStringP(blk, "mixHash")
+		if mixHash != nil {
+			block.MixHash = *mixHash
+		}
+		blockNonce := convertDataToStringP(blk, "nonce")
+		if blockNonce != nil {
+			block.Nonce = *blockNonce
+		}
+		block.Number = *convertDataToUint64P(blk, "number")
+		block.Ommers = []*model.Block{}
+		block.Parent = &model.Block{}
+		block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
+		block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
+		block.StateRoot = *convertDataToStringP(blk, "stateRoot")
+		block.Timestamp = *convertDataToUint64P(blk, "timestamp") // int in the schema but Geth displays in HEX !!!
+		block.TransactionCount = convertDataToIntP(blk, "transactionCount")
+		block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
+		block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
+		block.Transactions = []*model.Transaction{}
 
-	absRcp := res["receipts"]
-	rcp := absRcp.([]map[string]interface{})
-	for _, transReceipt := range rcp {
-		trans := &model.Transaction{}
-		trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
-		trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
-		trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
-		trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-		trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
-		trans.Status = convertDataToUint64P(transReceipt, "status")
-		trans.Type = convertDataToIntP(transReceipt, "type")
-		trans.Logs = make([]*model.Log, 0)
-
-		trans.From = &model.Account{}
-		trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
-
-		trans.To = &model.Account{}
-		trans.To.Address = strings.ToLower(*convertDataToStringP(transReceipt, "to"))
-
-		block.Transactions = append(block.Transactions, trans)
+		block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
+		block.OmmerHash = "" // OmmerHash:     gointerfaces.ConvertHashToH256(header.UncleHash),
 
 		/*
-			Missing Transaction fields to fill :
-			- gasPrice
-			- inputData (even if geth often display "0x")
-			- nonce (we get 0, geth displays "0xZZZZZZZ" hex data)
-			- value
+			Missing Block fields to fill :
+			- ommerHash
 		*/
+
+		absRcp := res["receipts"]
+		rcp := absRcp.([]map[string]interface{})
+		for _, transReceipt := range rcp {
+			trans := &model.Transaction{}
+			trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
+			trans.InputData = *convertDataToStringP(transReceipt, "data")
+			trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
+			trans.GasPrice = *convertDataToStringP(transReceipt, "gasPrice")
+			trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
+			trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
+			trans.Index = convertDataToIntP(transReceipt, "transactionIndex")
+			trans.Nonce = *convertDataToUint64P(transReceipt, "nonce")
+			trans.Status = convertDataToUint64P(transReceipt, "status")
+			trans.Type = convertDataToIntP(transReceipt, "type")
+			trans.Value = *convertDataToStringP(transReceipt, "value")
+			trans.Logs = make([]*model.Log, 0)
+
+			trans.From = &model.Account{}
+			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
+
+			trans.To = &model.Account{}
+			address := convertDataToStringP(transReceipt, "to")
+			// To address could be nil in case of contract creation
+			if address != nil {
+				trans.To.Address = strings.ToLower(*convertDataToStringP(transReceipt, "to"))
+			}
+
+			block.Transactions = append(block.Transactions, trans)
+		}
 	}
 
 	return block, ctx.Err()

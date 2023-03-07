@@ -19,6 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -42,10 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -629,6 +630,10 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 	must(sync.SetCurrentStage(stages.Senders))
 
+	if reset {
+		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
+	}
+
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -669,10 +674,6 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 			}
 		}
 		return nil
-	}
-
-	if reset {
-		return db.Update(ctx, func(tx kv.RwTx) error { return reset2.ResetSenders(ctx, db, tx) })
 	}
 
 	s := stage(sync, tx, nil, stages.Senders)
@@ -1276,6 +1277,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		br,
 		false,
 		nil,
+		ethconfig.Defaults.DropUselessPeers,
 	)
 	if err != nil {
 		panic(err)

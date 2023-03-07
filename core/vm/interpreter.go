@@ -162,6 +162,8 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	}
 }
 
+func (in *EVMInterpreter) decrementDepth() { in.depth-- }
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -169,23 +171,25 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
-	// Increment the call depth which is restricted to 1024
-	in.depth++
-	defer func() { in.depth-- }()
-
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	callback := in.setReadonly(readOnly)
-	defer callback()
-
-	// Reset the previous call's return data. It's unimportant to preserve the old buffer
-	// as every returning call will return new data anyway.
-	in.returnData = nil
-
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
+
+	// Increment the call depth which is restricted to 1024
+	in.depth++
+	defer in.decrementDepth()
+
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	if readOnly && !in.readOnly {
+		in.readOnly = true
+		defer func() { in.readOnly = false }()
+	}
+
+	// Reset the previous call's return data. It's unimportant to preserve the old buffer
+	// as every returning call will return new data anyway.
+	in.returnData = nil
 
 	var (
 		op          OpCode        // current opcode
@@ -307,6 +311,9 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
+
+func (vm *VM) disableReadonly() { vm.readOnly = false }
+func (vm *VM) noop()            {}
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {

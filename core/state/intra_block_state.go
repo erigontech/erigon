@@ -117,6 +117,12 @@ func (sdb *IntraBlockState) Error() error {
 // Reset clears out all ephemeral state objects from the state db, but keeps
 // the underlying state trie to avoid reloading data for the next operations.
 func (sdb *IntraBlockState) Reset() {
+	//if len(sdb.nilAccounts) == 0 || len(sdb.stateObjects) == 0 || len(sdb.stateObjectsDirty) == 0 || len(sdb.balanceInc) == 0 {
+	//	log.Warn("zero", "len(sdb.nilAccounts)", len(sdb.nilAccounts),
+	//		"len(sdb.stateObjects)", len(sdb.stateObjects),
+	//		"len(sdb.stateObjectsDirty)", len(sdb.stateObjectsDirty),
+	//		"len(sdb.balanceInc)", len(sdb.balanceInc))
+	//}
 	sdb.nilAccounts = make(map[libcommon.Address]struct{})
 	sdb.stateObjects = make(map[libcommon.Address]*stateObject)
 	sdb.stateObjectsDirty = make(map[libcommon.Address]struct{})
