@@ -54,4 +54,7 @@ jobs:
           DOCKER_USERNAME: ${{ secrets.DOCKERHUB }}
           DOCKER_PASSWORD: ${{ secrets.DOCKERHUB_KEY }}
 
-
+      - name: Publish downloads
+        run: |
+          cd cmd/release 
+          docker buildx build --push --platform linux/amd64 --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" -t thorax/download:latest .

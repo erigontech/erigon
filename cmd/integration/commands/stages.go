@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -18,6 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -41,10 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 )
 
 var cmdStageSnapshots = &cobra.Command{
@@ -121,6 +123,8 @@ var cmdStageExec = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
 		defer db.Close()
+
+		defer func(t time.Time) { log.Info("total", "took", time.Since(t)) }(time.Now())
 
 		if err := stageExec(db, cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -1273,6 +1277,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		br,
 		false,
 		nil,
+		ethconfig.Defaults.DropUselessPeers,
 	)
 	if err != nil {
 		panic(err)

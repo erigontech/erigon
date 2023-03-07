@@ -119,6 +119,10 @@ func (agg *SyncAggregate) DecodeSSZ(buf []byte) error {
 	return nil
 }
 
+func (agg *SyncAggregate) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return agg.DecodeSSZ(buf)
+}
+
 func (agg *SyncAggregate) EncodingSizeSSZ() int {
 	return 160
 }

@@ -5,24 +5,26 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) error {
+func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	currentBlock := block.Block
-	if err := s.ProcessSlots(currentBlock.Slot); err != nil {
+	if err := ProcessSlots(state, currentBlock.Slot); err != nil {
 		return err
 	}
 	// Write the block root to the cache
-	if !s.noValidate {
-		valid, err := s.verifyBlockSignature(block)
+	if fullValidation {
+		valid, err := verifyBlockSignature(state, block)
 		if err != nil {
 			return fmt.Errorf("error validating block signature: %v", err)
 		}
@@ -31,11 +33,11 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 		}
 	}
 	// Transition block
-	if err := s.processBlock(block); err != nil {
+	if err := processBlock(state, block, fullValidation); err != nil {
 		return err
 	}
-	if !s.noValidate {
-		expectedStateRoot, err := s.state.HashSSZ()
+	if fullValidation {
+		expectedStateRoot, err := state.HashSSZ()
 		if err != nil {
 			return fmt.Errorf("unable to generate state root: %v", err)
 		}
@@ -43,75 +45,73 @@ func (s *StateTransistor) TransitionState(block *cltypes.SignedBeaconBlock) erro
 			return fmt.Errorf("expected state root differs from received state root")
 		}
 	}
-	// Write the block root to the cache
-	s.stateRootsCache.Add(block.Block.Slot, block.Block.StateRoot)
 
+	state.SetPreviousStateRoot(currentBlock.StateRoot)
 	return nil
 }
 
 // transitionSlot is called each time there is a new slot to process
-func (s *StateTransistor) transitionSlot() error {
-	slot := s.state.Slot()
-	var (
-		previousStateRoot libcommon.Hash
-		err               error
-	)
-	if previousStateRootI, ok := s.stateRootsCache.Get(slot); ok {
-		previousStateRoot = previousStateRootI.(libcommon.Hash)
-	} else {
-		previousStateRoot, err = s.state.HashSSZ()
+func transitionSlot(state *state.BeaconState) error {
+	slot := state.Slot()
+	previousStateRoot := state.PreviousStateRoot()
+	var err error
+	if previousStateRoot == (libcommon.Hash{}) {
+		previousStateRoot, err = state.HashSSZ()
 		if err != nil {
 			return err
 		}
 	}
-	s.state.SetStateRootAt(int(slot%s.beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
 
-	latestBlockHeader := s.state.LatestBlockHeader()
+	beaconConfig := state.BeaconConfig()
+
+	state.SetStateRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousStateRoot)
+
+	latestBlockHeader := state.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
 		latestBlockHeader.Root = previousStateRoot
-		s.state.SetLatestBlockHeader(latestBlockHeader)
+		state.SetLatestBlockHeader(latestBlockHeader)
 	}
 
-	previousBlockRoot, err := s.state.LatestBlockHeader().HashSSZ()
+	previousBlockRoot, err := state.LatestBlockHeader().HashSSZ()
 	if err != nil {
 		return err
 	}
-	s.state.SetBlockRootAt(int(slot%s.beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
+	state.SetBlockRootAt(int(slot%beaconConfig.SlotsPerHistoricalRoot), previousBlockRoot)
 	return nil
 }
 
-func (s *StateTransistor) ProcessSlots(slot uint64) error {
-	stateSlot := s.state.Slot()
+func ProcessSlots(state *state.BeaconState, slot uint64) error {
+	stateSlot := state.Slot()
 	if slot <= stateSlot {
 		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
 	}
 	// Process each slot.
 	for i := stateSlot; i < slot; i++ {
-		err := s.transitionSlot()
+		err := transitionSlot(state)
 		if err != nil {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
 		// TODO(Someone): Add epoch transition.
-		if (stateSlot+1)%s.beaconConfig.SlotsPerEpoch == 0 {
+		if (stateSlot+1)%state.BeaconConfig().SlotsPerEpoch == 0 {
 			start := time.Now()
-			if err := s.ProcessEpoch(); err != nil {
+			if err := ProcessEpoch(state); err != nil {
 				return err
 			}
-			log.Info("Processed new epoch successfully", "epoch", s.state.Epoch(), "process_epoch_elpsed", time.Since(start))
+			log.Info("Processed new epoch successfully", "epoch", state.Epoch(), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
-		s.state.SetSlot(stateSlot)
+		state.SetSlot(stateSlot)
 	}
 	return nil
 }
 
-func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock) (bool, error) {
-	proposer, err := s.state.ValidatorAt(int(block.Block.ProposerIndex))
+func verifyBlockSignature(state *state.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
+	proposer, err := state.ValidatorAt(int(block.Block.ProposerIndex))
 	if err != nil {
 		return false, err
 	}
-	domain, err := s.state.GetDomain(s.beaconConfig.DomainBeaconProposer, s.state.Epoch())
+	domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconProposer, state.Epoch())
 	if err != nil {
 		return false, err
 	}
@@ -122,14 +122,15 @@ func (s *StateTransistor) verifyBlockSignature(block *cltypes.SignedBeaconBlock)
 	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
 }
 
-func (s *StateTransistor) ProcessHistoricalRootsUpdate() error {
-	nextEpoch := s.state.Epoch() + 1
-	if nextEpoch%(s.beaconConfig.SlotsPerHistoricalRoot/s.beaconConfig.SlotsPerEpoch) == 0 {
-		var (
-			blockRoots = s.state.BlockRoots()
-			stateRoots = s.state.StateRoots()
-		)
+func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
+	var (
+		nextEpoch    = state.Epoch() + 1
+		beaconConfig = state.BeaconConfig()
+		blockRoots   = state.BlockRoots()
+		stateRoots   = state.StateRoots()
+	)
 
+	if nextEpoch%(beaconConfig.SlotsPerHistoricalRoot/beaconConfig.SlotsPerEpoch) == 0 {
 		// Compute historical root batch.
 		blockRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(blockRoots[:]), state_encoding.BlockRootsLength)
 		if err != nil {
@@ -140,7 +141,7 @@ func (s *StateTransistor) ProcessHistoricalRootsUpdate() error {
 			return err
 		}
 
-		s.state.AddHistoricalRoot(utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:]))
+		state.AddHistoricalRoot(utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:]))
 	}
 	return nil
 }

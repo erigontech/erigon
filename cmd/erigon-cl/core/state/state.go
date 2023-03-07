@@ -67,6 +67,7 @@ type BeaconState struct {
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
+	previousStateRoot           libcommon.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }

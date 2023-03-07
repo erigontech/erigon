@@ -14,8 +14,8 @@ func BenchmarkStateRootNonCached(b *testing.B) {
 	}
 }
 
-// Prev: 13953
-// Curr: 2093
+// Prev: 1400
+// Curr: 139.4
 func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	base := state.GetEmptyBeaconState()

@@ -266,7 +266,8 @@ type MultiClient struct {
 	logPeerInfo                       bool
 	sendHeaderRequestsToMultiplePeers bool
 
-	historyV3 bool
+	historyV3        bool
+	dropUselessPeers bool
 }
 
 func NewMultiClient(
@@ -281,6 +282,7 @@ func NewMultiClient(
 	blockReader services.HeaderAndCanonicalReader,
 	logPeerInfo bool,
 	forkValidator *engineapi.ForkValidator,
+	dropUselessPeers bool,
 ) (*MultiClient, error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 
@@ -311,6 +313,7 @@ func NewMultiClient(
 		forkValidator:                     forkValidator,
 		historyV3:                         historyV3,
 		sendHeaderRequestsToMultiplePeers: chainConfig.TerminalTotalDifficultyPassed,
+		dropUselessPeers:                  dropUselessPeers,
 	}
 	cs.ChainConfig = chainConfig
 	cs.heightForks, cs.timeForks = forkid.GatherForks(cs.ChainConfig)
@@ -392,11 +395,11 @@ func (cs *MultiClient) blockHeaders66(ctx context.Context, in *proto_sentry.Inbo
 }
 
 func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPacket, rlpStream *rlp.Stream, peerID *proto_types.H512, sentry direct.SentryClient) error {
-	if len(pkt) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
+	if cs.dropUselessPeers && len(pkt) == 0 {
+		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId: peerID,
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
 		log.Debug("Requested removal of peer for empty header response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(peerID))[:8])
@@ -556,11 +559,11 @@ func (cs *MultiClient) blockBodies66(ctx context.Context, inreq *proto_sentry.In
 		return fmt.Errorf("decode BlockBodiesPacket66: %w", err)
 	}
 	txs, uncles, withdrawals := request.BlockRawBodiesPacket.Unpack()
-	if len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
-		outreq := proto_sentry.PeerUselessRequest{
+	if cs.dropUselessPeers && len(txs) == 0 && len(uncles) == 0 && len(withdrawals) == 0 {
+		outreq := proto_sentry.PenalizePeerRequest{
 			PeerId: inreq.PeerId,
 		}
-		if _, err := sentry.PeerUseless(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
+		if _, err := sentry.PenalizePeer(ctx, &outreq, &grpc.EmptyCallOption{}); err != nil {
 			return fmt.Errorf("sending peer useless request: %v", err)
 		}
 		log.Debug("Requested removal of peer for empty body response", "peerId", fmt.Sprintf("%x", ConvertH512ToPeerID(inreq.PeerId)))
