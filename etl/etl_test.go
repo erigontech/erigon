@@ -39,6 +39,76 @@ func decodeHex(in string) []byte {
 	return payload
 }
 
+func TestEmptyValueIsNotANil(t *testing.T) {
+	t.Run("sortable", func(t *testing.T) {
+		collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
+		defer collector.Close()
+		require := require.New(t)
+		require.NoError(collector.Collect([]byte{1}, []byte{}))
+		require.NoError(collector.Collect([]byte{2}, nil))
+		require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+			if k[0] == 1 {
+				require.Equal([]byte{}, v)
+			} else {
+				require.Nil(v)
+			}
+			return nil
+		}, TransformArgs{}))
+	})
+	t.Run("append", func(t *testing.T) {
+		// append buffer doesn't support nil values
+		collector := NewCollector(t.Name(), "", NewAppendBuffer(1))
+		defer collector.Close()
+		require := require.New(t)
+		require.NoError(collector.Collect([]byte{1}, []byte{}))
+		require.NoError(collector.Collect([]byte{2}, nil))
+		require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+			require.Nil(v)
+			return nil
+		}, TransformArgs{}))
+	})
+	t.Run("oldest", func(t *testing.T) {
+		collector := NewCollector(t.Name(), "", NewOldestEntryBuffer(1))
+		defer collector.Close()
+		require := require.New(t)
+		require.NoError(collector.Collect([]byte{1}, []byte{}))
+		require.NoError(collector.Collect([]byte{2}, nil))
+		require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
+			if k[0] == 1 {
+				require.Equal([]byte{}, v)
+			} else {
+				require.Nil(v)
+			}
+			return nil
+		}, TransformArgs{}))
+	})
+}
+
+func TestEmptyKeyValue(t *testing.T) {
+	_, tx := memdb.NewTestTx(t)
+	require := require.New(t)
+	table := kv.ChaindataTables[0]
+	collector := NewCollector(t.Name(), "", NewSortableBuffer(1))
+	defer collector.Close()
+	require.NoError(collector.Collect([]byte{2}, []byte{}))
+	require.NoError(collector.Collect([]byte{1}, []byte{1}))
+	require.NoError(collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err := tx.GetOne(table, []byte{2})
+	require.NoError(err)
+	require.Equal([]byte{}, v)
+	v, err = tx.GetOne(table, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
+
+	collector = NewCollector(t.Name(), "", NewSortableBuffer(1))
+	defer collector.Close()
+	require.NoError(collector.Collect([]byte{}, nil))
+	require.NoError(collector.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err = tx.GetOne(table, []byte{})
+	require.NoError(err)
+	require.Nil(v)
+}
+
 func TestWriteAndReadBufferEntry(t *testing.T) {
 	b := NewSortableBuffer(128)
 	buffer := bytes.NewBuffer(make([]byte, 0))
