@@ -226,6 +226,9 @@ func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Contex
 		defer a.wg.Done()
 		defer a.workingOptionalIndices.Store(false)
 		if err := a.BuildOptionalMissedIndices(ctx, workers); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return
+			}
 			log.Warn("merge", "err", err)
 		}
 	}()
@@ -1183,6 +1186,9 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 			defer a.wg.Done()
 			defer a.workingMerge.Store(false)
 			if err := a.MergeLoop(a.ctx, 1); err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
 				log.Warn("merge", "err", err)
 			}
 
