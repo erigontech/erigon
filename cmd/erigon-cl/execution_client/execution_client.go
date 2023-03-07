@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
 // ExecutionClient interfaces with the Erigon-EL component consensus side.
@@ -75,6 +76,7 @@ func (ec *ExecutionClient) InsertBodies(bodies []*types.RawBody, blockHashes []l
 			BlockHash:    gointerfaces.ConvertHashToH256(blockHashes[i]),
 			BlockNumber:  blockNumbers[i],
 			Transactions: body.Transactions,
+			Withdrawals:  privateapi.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
 	}
 	_, err := ec.client.InsertBodies(ec.ctx, &execution.InsertBodiesRequest{Bodies: grpcBodies})
@@ -157,19 +159,9 @@ func (ec *ExecutionClient) ReadBody(number uint64, blockHash libcommon.Hash) (*t
 		}
 		uncles = append(uncles, h)
 	}
-	// Withdrawals processing
-	withdrawals := make([]*types.Withdrawal, 0, len(resp.Body.Withdrawals))
-	for _, withdrawal := range resp.Body.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Index:     withdrawal.Index,
-			Validator: withdrawal.ValidatorIndex,
-			Address:   gointerfaces.ConvertH160toAddress(withdrawal.Address),
-			Amount:    withdrawal.Amount,
-		})
-	}
 	return &types.RawBody{
 		Transactions: resp.Body.Transactions,
 		Uncles:       uncles,
-		Withdrawals:  withdrawals,
+		Withdrawals:  privateapi.ConvertWithdrawalsFromRpc(resp.Body.Withdrawals),
 	}, nil
 }
