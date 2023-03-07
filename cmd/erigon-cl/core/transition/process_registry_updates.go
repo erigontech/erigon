@@ -56,7 +56,7 @@ func ProcessRegistryUpdates(state *state.BeaconState) error {
 			return err
 		}
 		validator.ActivationEpoch = computeActivationExitEpoch(beaconConfig, currentEpoch)
-		if err := state.SetValidatorAt(int(validatorIndex), &validator); err != nil {
+		if err := state.SetValidatorAt(int(validatorIndex), validator); err != nil {
 			return err
 		}
 	}

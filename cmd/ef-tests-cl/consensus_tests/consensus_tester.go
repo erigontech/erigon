@@ -11,7 +11,7 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-var supportedVersions = []string{"altair", "bellatrix"}
+var supportedVersions = []string{"altair", "bellatrix", "capella"}
 
 type ConsensusTester struct {
 	// parameters

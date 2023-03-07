@@ -6,6 +6,10 @@ func (*SignedBeaconBlock) Clone() clonable.Clonable {
 	return &SignedBeaconBlock{}
 }
 
+func (*Eth1Block) Clone() clonable.Clonable {
+	return &Eth1Block{}
+}
+
 func (*BeaconBlocksByRootRequest) Clone() clonable.Clonable {
 	return &BeaconBlocksByRootRequest{}
 }

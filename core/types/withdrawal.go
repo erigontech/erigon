@@ -42,6 +42,11 @@ type Withdrawal struct {
 	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
 }
 
+func (obj *Withdrawal) Equal(other *Withdrawal) bool {
+	return obj.Index == other.Index && obj.Validator == other.Validator &&
+		obj.Address == other.Address && obj.Amount == other.Amount
+}
+
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
 	encodingSize++

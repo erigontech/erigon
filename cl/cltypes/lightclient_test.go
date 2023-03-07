@@ -33,7 +33,7 @@ func TestLightclientBootstrapEncodingDecoding(t *testing.T) {
 	require.NoError(t, lc.DecodeSSZWithVersion(decodedSSZ, int(clparams.CapellaVersion)))
 	// checking fields
 	require.Equal(t, lc.Header.HeaderEth2.BodyRoot, libcommon.HexToHash("0x9eb9f39c2e88739dc4274483d1e9072c3685864d5bcbf2f3c072b97f54536a4e"))
-	require.Equal(t, *lc.Header.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0xd327e2d43fedf327de8f01ab8bbf4fbdbfececc890c5059ad53cfb37264cc03c"))
+	require.Equal(t, lc.Header.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0xd327e2d43fedf327de8f01ab8bbf4fbdbfececc890c5059ad53cfb37264cc03c"))
 	require.Equal(t, lc.Header.ExecutionBranch[0], libcommon.HexToHash("0x4138a3e27e9aea5c1c9eb311a7889bfddeb3d2ad3987943d68ee7cc659b6d947"))
 	require.Equal(t, lc.CurrentSyncCommittee.PubKeys[0][:], common.Hex2Bytes("009c6eacc6e3f29b10763a446fc6a6dfff95b408fb44c92b453e1349572d2b45b77305668349d39360e775752a4faf9a"))
 	require.Equal(t, lc.CurrentSyncCommittee.PubKeys[len(lc.CurrentSyncCommittee.PubKeys)-1][:], common.Hex2Bytes("dce9afb56fe779662a206c7d1503efacaf9d62fe81fa79d1fbfb9fd8ff03f7a11f263be6e4df633094cdfebcbd50112c"))
@@ -52,7 +52,7 @@ func TestLightclientOptimisticEncodingDecoding(t *testing.T) {
 	require.NoError(t, lc.DecodeSSZWithVersion(decodedSSZ, int(clparams.CapellaVersion)))
 	// checking fields
 	require.Equal(t, lc.AttestedHeader.HeaderEth2.BodyRoot, libcommon.HexToHash("0x95e145e5890ccf3bf6c1c3708a51d42d7c602312d0ac2b225a1d54e30649e2f6"))
-	require.Equal(t, *lc.AttestedHeader.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0xdc96edf3b75ae19c608c0d5f821c3e71a577f310bf5da42bf51293394205b282"))
+	require.Equal(t, lc.AttestedHeader.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0xdc96edf3b75ae19c608c0d5f821c3e71a577f310bf5da42bf51293394205b282"))
 	require.Equal(t, lc.AttestedHeader.ExecutionBranch[0], libcommon.HexToHash("0x9e29304aab0d41643d772d076861e0c951c5212f92e2c8b7788ee79c7a03c045"))
 	require.Equal(t, lc.SignatureSlot, uint64(6292665015452153680))
 	require.Equal(t, lc.SyncAggregate.SyncCommiteeSignature[:], common.Hex2Bytes("60ac5c67c7a2f460b665a3a5f618d3b8e2356a2338279e2d24134795398e286ac0299cd6367986266f073c3a6b400f7d62a586e9687e7aace3dede4172677c6af2515338ceb3591a86bdae014c3cc057ffbcc1afe4127e8b55ad508ebcead13a"))
@@ -69,11 +69,11 @@ func TestLightclientFinalityEncodingDecoding(t *testing.T) {
 	require.NoError(t, lc.DecodeSSZWithVersion(decodedSSZ, int(clparams.CapellaVersion)))
 	// checking fields
 	require.Equal(t, lc.AttestedHeader.HeaderEth2.BodyRoot, libcommon.HexToHash("0xcc67d01f9d529e16333170f366defcc0bb8fbd0a9b84bd13d787bbcf86fe3cc5"))
-	require.Equal(t, *lc.AttestedHeader.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0x28ce6c427881a19a7aaf0d2f8255e30376ee19193cd0278244141e1a66f3c45b"))
+	require.Equal(t, lc.AttestedHeader.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0x28ce6c427881a19a7aaf0d2f8255e30376ee19193cd0278244141e1a66f3c45b"))
 	require.Equal(t, lc.AttestedHeader.ExecutionBranch[0], libcommon.HexToHash("0x3e85d631970da85df7a6dab6c62c198d0a291e891d5a897bafc87bcfd2312cf6"))
 	// Finalized header
 	require.Equal(t, lc.FinalizedHeader.HeaderEth2.BodyRoot, libcommon.HexToHash("0xbaa18d70c7a36d7e3af79bf0874b902a173d83daad5c56f83ede72788abda4e8"))
-	require.Equal(t, *lc.FinalizedHeader.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0x778c759c4dc95d80121cc56338c0e8fa657d3a39b6cfa67eec5ec471de48fa7e"))
+	require.Equal(t, lc.FinalizedHeader.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0x778c759c4dc95d80121cc56338c0e8fa657d3a39b6cfa67eec5ec471de48fa7e"))
 	require.Equal(t, lc.FinalizedHeader.ExecutionBranch[0], libcommon.HexToHash("0x103bab66f63d57f6158eef6f18c9ffcc6e9b2e2593731a58001fc991c39ac618"))
 	// Rest
 	require.Equal(t, lc.FinalityBranch[0], libcommon.HexToHash("838ab6e8d817f3d454a69e79a435cca780df0e5b1e62971df7fec176e57f7f37"))
@@ -92,11 +92,11 @@ func TestLightclientUpdateEncodingDecoding(t *testing.T) {
 	require.NoError(t, lc.DecodeSSZWithVersion(decodedSSZ, int(clparams.CapellaVersion)))
 	// checking fields
 	require.Equal(t, lc.AttestedHeader.HeaderEth2.BodyRoot, libcommon.HexToHash("0x49f3c74b8874e1595d74d970886245aff4748a11d499a8e4a9459e76e2c8c42f"))
-	require.Equal(t, *lc.AttestedHeader.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0xab14e4976e1af2983f637d57360f03fafb3d0586be3efe254ba32d612ebf21ea"))
+	require.Equal(t, lc.AttestedHeader.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0xab14e4976e1af2983f637d57360f03fafb3d0586be3efe254ba32d612ebf21ea"))
 	require.Equal(t, lc.AttestedHeader.ExecutionBranch[0], libcommon.HexToHash("0x1b42aa11e8fb2cfe30f4ce521021426eb22824b1f2934e85c134c8d71795faf7"))
 	// Finalized header
 	require.Equal(t, lc.FinalizedHeader.HeaderEth2.BodyRoot, libcommon.HexToHash("0xcb968a1a97415c40e9fffcb2afc34cf97a41f37dabe0a2135f54441652cc9f9d"))
-	require.Equal(t, *lc.FinalizedHeader.HeaderEth1.WithdrawalsHash, libcommon.HexToHash("0xf9c686992daa952349ec70a44bf14238135b25c788f1286d8c5cb7aa8d43b94b"))
+	require.Equal(t, lc.FinalizedHeader.HeaderEth1.WithdrawalsRoot, libcommon.HexToHash("0xf9c686992daa952349ec70a44bf14238135b25c788f1286d8c5cb7aa8d43b94b"))
 	require.Equal(t, lc.FinalizedHeader.ExecutionBranch[0], libcommon.HexToHash("0x0c921fe9c8f7818d508ff6fb77c65ec143f1822ae520a63c4ebf8a80f11d5456"))
 	// Next sync committee
 	require.Equal(t, lc.NextSyncCommitee.PubKeys[0][:], common.Hex2Bytes("29a24e45031507af4f61d534c734042b67ce0e36a549f93e8b72644a4e3874e142a438d4e30eaa53d235125dd1cd7853"))

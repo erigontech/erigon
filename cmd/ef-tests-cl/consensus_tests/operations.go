@@ -16,6 +16,8 @@ const (
 	depositFileName          = "deposit.ssz_snappy"
 	syncAggregateFileName    = "sync_aggregate.ssz_snappy"
 	voluntaryExitFileName    = "voluntary_exit.ssz_snappy"
+	executionPayloadFileName = "execution_payload.ssz_snappy"
+	addressChangeFileName    = "address_change.ssz_snappy"
 )
 
 func operationAttestationHandler(context testContext) error {
@@ -255,6 +257,80 @@ func operationVoluntaryExitHandler(context testContext) error {
 		return err
 	}
 	if err := transition.ProcessVoluntaryExit(preState, vo, true); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return fmt.Errorf("expected error")
+	}
+	root, err := preState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	expectedRoot, err := postState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if root != expectedRoot {
+		return fmt.Errorf("mismatching state roots")
+	}
+	return nil
+}
+
+func operationWithdrawalHandler(context testContext) error {
+	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
+	if err != nil {
+		return err
+	}
+	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	executionPayload := &cltypes.Eth1Block{}
+	if err := decodeSSZObjectFromFile(executionPayload, context.version, executionPayloadFileName); err != nil {
+		return err
+	}
+	if err := transition.ProcessWithdrawals(preState, executionPayload.Withdrawals, true); err != nil {
+		if expectedError {
+			return nil
+		}
+		return err
+	}
+	if expectedError {
+		return fmt.Errorf("expected error")
+	}
+	root, err := preState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	expectedRoot, err := postState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if root != expectedRoot {
+		return fmt.Errorf("mismatching state roots")
+	}
+	return nil
+}
+
+func operationSignedBlsChangeHandler(context testContext) error {
+	preState, err := decodeStateFromFile(context, "pre.ssz_snappy")
+	if err != nil {
+		return err
+	}
+	postState, err := decodeStateFromFile(context, "post.ssz_snappy")
+	expectedError := os.IsNotExist(err)
+	if err != nil && !expectedError {
+		return err
+	}
+	change := &cltypes.SignedBLSToExecutionChange{}
+	if err := decodeSSZObjectFromFile(change, context.version, addressChangeFileName); err != nil {
+		return err
+	}
+	if err := transition.ProcessBlsToExecutionChange(preState, change, true); err != nil {
 		if expectedError {
 			return nil
 		}

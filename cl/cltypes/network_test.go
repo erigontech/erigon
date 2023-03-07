@@ -50,7 +50,7 @@ var testHeader = &cltypes.BeaconBlockHeader{
 }
 
 var testLcHeader = (&cltypes.LightClientHeader{
-	HeaderEth1: getTestEth1Block().Header,
+	HeaderEth1: &cltypes.Eth1Header{},
 	HeaderEth2: testHeader,
 }).WithVersion(clparams.CapellaVersion)
 
