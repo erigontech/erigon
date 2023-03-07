@@ -1,13 +1,11 @@
 package rawdb_test
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,12 +15,7 @@ func TestBytes2(t *testing.T) {
 	require.Equal(t, len, rawdb.LengthFromBytes2(buf))
 }
 
-var emptyBlock = &cltypes.Eth1Block{
-	Header: &types.Header{
-		BaseFee: big.NewInt(0),
-		Number:  big.NewInt(0),
-	},
-}
+var emptyBlock = &cltypes.Eth1Block{}
 
 func TestBeaconBlock(t *testing.T) {
 	_, tx := memdb.NewTestTx(t)

@@ -28,7 +28,7 @@ func processBlock(state *state.BeaconState, signedBlock *cltypes.SignedBeaconBlo
 	if version >= clparams.BellatrixVersion && executionEnabled(state, block.Body.ExecutionPayload) {
 		if state.Version() >= clparams.CapellaVersion {
 			// Process withdrawals in the execution payload.
-			if err := ProcessWithdrawals(state, block.Body.ExecutionPayload.Withdrawals(), fullValidation); err != nil {
+			if err := ProcessWithdrawals(state, block.Body.ExecutionPayload.Withdrawals, fullValidation); err != nil {
 				return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
 			}
 		}
@@ -117,20 +117,24 @@ func maximumDeposits(state *state.BeaconState) (maxDeposits uint64) {
 // ProcessExecutionPayload sets the latest payload header accordinly.
 func ProcessExecutionPayload(state *state.BeaconState, payload *cltypes.Eth1Block) error {
 	if state.IsMergeTransitionComplete() {
-		if payload.Header.ParentHash != state.LatestExecutionPayloadHeader().BlockHashCL {
+		if payload.ParentHash != state.LatestExecutionPayloadHeader().BlockHash {
 			return fmt.Errorf("ProcessExecutionPayload: invalid eth1 chain. mismatching parent")
 		}
 	}
-	if payload.Header.MixDigest != state.GetRandaoMixes(state.Epoch()) {
+	if payload.PrevRandao != state.GetRandaoMixes(state.Epoch()) {
 		return fmt.Errorf("ProcessExecutionPayload: randao mix mismatches with mix digest")
 	}
-	if payload.Header.Time != state.ComputeTimestampAtSlot(state.Slot()) {
+	if payload.Time != state.ComputeTimestampAtSlot(state.Slot()) {
 		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
 	}
-	state.SetLatestExecutionPayloadHeader(payload.Header)
+	payloadHeader, err := payload.PayloadHeader()
+	if err != nil {
+		return err
+	}
+	state.SetLatestExecutionPayloadHeader(payloadHeader)
 	return nil
 }
 
 func executionEnabled(state *state.BeaconState, payload *cltypes.Eth1Block) bool {
-	return (!state.IsMergeTransitionComplete() && payload.Header.Root != libcommon.Hash{}) || state.IsMergeTransitionComplete()
+	return (!state.IsMergeTransitionComplete() && payload.StateRoot != libcommon.Hash{}) || state.IsMergeTransitionComplete()
 }

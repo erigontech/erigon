@@ -293,7 +293,7 @@ func operationWithdrawalHandler(context testContext) error {
 	if err := decodeSSZObjectFromFile(executionPayload, context.version, executionPayloadFileName); err != nil {
 		return err
 	}
-	if err := transition.ProcessWithdrawals(preState, executionPayload.Withdrawals(), true); err != nil {
+	if err := transition.ProcessWithdrawals(preState, executionPayload.Withdrawals, true); err != nil {
 		if expectedError {
 			return nil
 		}

@@ -1,28 +1,17 @@
 package cltypes_test
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
 
 func getTestEth1Block() *cltypes.Eth1Block {
-	var emptyBlock = &cltypes.Eth1Block{
-		Header: &types.Header{
-			BaseFee: big.NewInt(0),
-			Number:  big.NewInt(0),
-		},
-		Body: &types.RawBody{},
-	}
-	emptyBlock.Header.TxHashSSZ, _ = merkle_tree.TransactionsListRoot([][]byte{})
-	emptyBlock.Header.WithdrawalsHash = new(common.Hash)
+	emptyBlock := cltypes.NewEth1Block(clparams.BellatrixVersion)
 	return emptyBlock
 }
 

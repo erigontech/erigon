@@ -89,10 +89,14 @@ func (ec *ExecutionClient) InsertExecutionPayloads(payloads []*cltypes.Eth1Block
 	blockNumbers := make([]uint64, 0, len(payloads))
 
 	for _, payload := range payloads {
-		headers = append(headers, payload.Header)
-		bodies = append(bodies, payload.Body)
-		blockHashes = append(blockHashes, payload.Header.BlockHashCL)
-		blockNumbers = append(blockNumbers, payload.NumberU64())
+		rlpHeader, err := payload.RlpHeader()
+		if err != nil {
+			return err
+		}
+		headers = append(headers, rlpHeader)
+		bodies = append(bodies, payload.Body())
+		blockHashes = append(blockHashes, payload.BlockHash)
+		blockNumbers = append(blockNumbers, payload.BlockNumber)
 	}
 
 	if err := ec.InsertHeaders(headers); err != nil {
@@ -134,10 +138,7 @@ func (ec *ExecutionClient) ReadExecutionPayload(number uint64, blockHash libcomm
 	if err != nil {
 		return nil, err
 	}
-	return &cltypes.Eth1Block{
-		Header: header,
-		Body:   body,
-	}, nil
+	return cltypes.NewEth1BlockFromHeaderAndBody(header, body), nil
 }
 
 func (ec *ExecutionClient) ReadBody(number uint64, blockHash libcommon.Hash) (*types.RawBody, error) {

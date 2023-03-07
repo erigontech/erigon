@@ -157,7 +157,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if b.Version >= clparams.BellatrixVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ(b.Version))
+		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ())
 	}
 	if b.Version >= clparams.CapellaVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
@@ -260,7 +260,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		if b.ExecutionPayload == nil {
 			b.ExecutionPayload = new(Eth1Block)
 		}
-		size += b.ExecutionPayload.EncodingSizeSSZ(b.Version)
+		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
 
 	if b.Version >= clparams.CapellaVersion {
@@ -573,8 +573,8 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 
 	if b.Version() >= clparams.BellatrixVersion {
 		eth1Block := b.Block.Body.ExecutionPayload
-		storageObject.Eth1Number = eth1Block.NumberU64()
-		storageObject.Eth1BlockHash = eth1Block.Header.BlockHashCL
+		storageObject.Eth1Number = eth1Block.BlockNumber
+		storageObject.Eth1BlockHash = eth1Block.BlockHash
 	}
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {

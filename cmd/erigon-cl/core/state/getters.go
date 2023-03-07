@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var (
@@ -145,7 +144,7 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
-func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
+func (b *BeaconState) LatestExecutionPayloadHeader() *cltypes.Eth1Header {
 	return b.latestExecutionPayloadHeader
 }
 

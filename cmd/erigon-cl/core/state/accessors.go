@@ -473,7 +473,7 @@ func (b *BeaconState) ValidatorChurnLimit() uint64 {
 
 // Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
 func (b *BeaconState) IsMergeTransitionComplete() bool {
-	return b.latestExecutionPayloadHeader.Root != libcommon.Hash{}
+	return b.latestExecutionPayloadHeader.StateRoot != libcommon.Hash{}
 }
 
 // Compute the Unix timestamp at the specified slot number.
@@ -490,7 +490,7 @@ func (b *BeaconState) isFullyWithdrawableValidator(validator *cltypes.Validator,
 // Check whether a validator is partially withdrawable.
 func (b *BeaconState) isPartiallyWithdrawableValidator(validator *cltypes.Validator, balance uint64) bool {
 	return validator.WithdrawalCredentials[0] == b.beaconConfig.ETH1AddressWithdrawalPrefixByte &&
-		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance && balance > clparams.MainnetBeaconConfig.MaxEffectiveBalance
+		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance && balance > b.beaconConfig.MaxEffectiveBalance
 }
 
 // ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch

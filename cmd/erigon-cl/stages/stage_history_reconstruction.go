@@ -127,13 +127,13 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		// Collect Execution Payloads
 		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
-			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.Hash()); err != nil {
+			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.BlockHash); err != nil {
 				return false, err
 			}
 			if foundLatestEth1ValidHash {
 				return slot <= destinationSlot, nil
 			}
-			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ(blk.Version()))
+			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
 			encodedPayload, err = payload.EncodeSSZ(encodedPayload, blk.Version())
 			if err != nil {
 				return false, err

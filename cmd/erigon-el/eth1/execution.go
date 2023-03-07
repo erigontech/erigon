@@ -351,7 +351,6 @@ func HeaderRpcToHeader(header *execution.Header) (*types.Header, error) {
 	if blockHash != h.Hash() {
 		return nil, fmt.Errorf("block %d, %x has invalid hash. expected: %x", header.BlockNumber, h.Hash(), blockHash)
 	}
-	h.BlockHashCL = blockHash
 	return h, nil
 }
 
