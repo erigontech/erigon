@@ -279,6 +279,9 @@ func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
 		if err != nil {
 			return err
 		}
+		if latest == nil {
+			return nil
+		}
 		prunedTo := p.History.PruneTo(latest.Number().Uint64())
 		if block < prunedTo {
 			return fmt.Errorf("history has been pruned for this block")
