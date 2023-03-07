@@ -79,7 +79,13 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true))
+
+		transaction := marshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true)
+		transaction["nonce"] = txn.GetNonce()
+		transaction["value"] = txn.GetValue()
+		transaction["data"] = txn.GetData()
+		transaction["gasPrice"] = txn.GetPrice()
+		result = append(result, transaction)
 	}
 
 	response := map[string]interface{}{}
