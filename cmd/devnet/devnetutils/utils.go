@@ -4,16 +4,15 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/big"
-	"os/exec"
-	"strconv"
-	"strings"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
+	"math/big"
+	"os/exec"
+	"strconv"
+	"strings"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations

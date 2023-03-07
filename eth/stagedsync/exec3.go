@@ -26,13 +26,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	atomic2 "go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -1109,10 +1109,8 @@ func reconstituteStep(last bool,
 	plainContractCollector := etl.NewCollector(fmt.Sprintf("%s recon plainContract", s.LogPrefix()), dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer plainContractCollector.Close()
 	var transposedKey []byte
-
 	if err = db.View(ctx, func(roTx kv.Tx) error {
-		clear := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
-		defer clear()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
 			transposedKey = append(transposedKey, k[:8]...)
@@ -1120,8 +1118,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear2 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateD, nil, math.MaxUint32)
-		defer clear2()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateD, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainStateD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)
 			transposedKey = append(transposedKey, k...)
@@ -1129,8 +1126,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear3 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
-		defer clear3()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
 			transposedKey = append(transposedKey, k[:8]...)
@@ -1138,8 +1134,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear4 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeD, nil, math.MaxUint32)
-		defer clear4()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeD, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.CodeD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)
 			transposedKey = append(transposedKey, k...)
@@ -1147,8 +1142,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear5 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
-		defer clear5()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
 			transposedKey = append(transposedKey, k[:8]...)
@@ -1156,8 +1150,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear6 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractD, nil, math.MaxUint32)
-		defer clear6()
+		kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractD, nil, math.MaxUint32)
 		if err = roTx.ForEach(kv.PlainContractD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)
 			transposedKey = append(transposedKey, k...)
