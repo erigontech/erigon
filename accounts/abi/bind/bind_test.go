@@ -1819,9 +1819,6 @@ func TestGolangBindings(t *testing.T) {
 		if err = os.WriteFile(filepath.Join(pkg, strings.ToLower(tt.name)+".go"), []byte(bind), 0600); err != nil {
 			t.Fatalf("test %d: failed to write binding: %v", i, err)
 		}
-		fmt.Printf("----- %s\n", tt.name)
-		fmt.Printf("%s\n", bind)
-		//os.Exit(1)
 		// Generate the test file with the injected test code
 		code := fmt.Sprintf(`
 			package bindtest
