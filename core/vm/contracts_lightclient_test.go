@@ -3,8 +3,9 @@ package vm
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
 
@@ -109,6 +110,43 @@ func TestTmHeaderValidateAndMerkleProofValidate(t *testing.T) {
 	success, err = moranValidateContract.Run(input)
 	require.NoError(t, err)
 	expectedResult = make([]byte, 32)
+	binary.BigEndian.PutUint64(expectedResult[24:], 0x01)
+	require.Equal(t, expectedResult, success)
+}
+
+func TestIcs23Proof(t *testing.T) {
+	appHash, err := hex.DecodeString("ae6d1123fc362b3297bfb19c9f9fabbcbd1e2555b923dead261905b8a2ff6db6")
+	require.NoError(t, err)
+	key, err := hex.DecodeString("77696e64")
+	require.NoError(t, err)
+	value, err := hex.DecodeString("626c6f7773")
+	require.NoError(t, err)
+	proofBytes, err := hex.DecodeString("0a300a0a69637332333a6961766c120477696e641a1c0a1a0a0477696e641205626c6f77731a0b0801180120012a030002040a9d010a0c69637332333a73696d706c6512036962631a87010a84010a036962631220141acb8632cfb808f293f2649cb9aabaca74fc18640900ffd0d48e2994b2a1521a090801180120012a0100222708011201011a205f0ba08283de309300409486e978a3ea59d82bccc838b07c7d39bd87c16a5034222708011201011a20455b81ef5591150bd24d3e57a769f65518b16de93487f0fab02271b3d69e2852")
+	require.NoError(t, err)
+
+	merkleProofInput := make([]byte, 32+32+len(key)+32+len(value)+32+len(proofBytes))
+	copy(merkleProofInput[:32], "ibc")
+	binary.BigEndian.PutUint64(merkleProofInput[32+24:32+32], uint64(len(key)))
+	copy(merkleProofInput[32+32:32+32+len(key)], key)
+
+	binary.BigEndian.PutUint64(merkleProofInput[32+32+len(key)+24:32+32+len(key)+32], uint64(len(value)))
+	copy(merkleProofInput[32+32+len(key)+32:32+32+len(key)+32+len(value)], value)
+
+	copy(merkleProofInput[32+32+len(key)+32+len(value):32+32+len(key)+32+len(value)+32], appHash)
+	copy(merkleProofInput[32+32+len(key)+32+len(value)+32:], proofBytes)
+
+	totalLengthPrefix := make([]byte, 32)
+	binary.BigEndian.PutUint64(totalLengthPrefix[0:8], 0)
+	binary.BigEndian.PutUint64(totalLengthPrefix[8:16], 0)
+	binary.BigEndian.PutUint64(totalLengthPrefix[16:24], 0)
+	binary.BigEndian.PutUint64(totalLengthPrefix[24:], uint64(len(merkleProofInput)))
+
+	input := append(totalLengthPrefix, merkleProofInput...)
+
+	validator := iavlMerkleProofValidateBohr{}
+	success, err := validator.Run(input)
+	require.NoError(t, err)
+	expectedResult := make([]byte, 32)
 	binary.BigEndian.PutUint64(expectedResult[24:], 0x01)
 	require.Equal(t, expectedResult, success)
 }
