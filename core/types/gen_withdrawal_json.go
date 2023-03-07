@@ -5,8 +5,7 @@ package types
 import (
 	"encoding/json"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
 
@@ -15,10 +14,10 @@ var _ = (*withdrawalMarshaling)(nil)
 // MarshalJSON marshals as JSON.
 func (w Withdrawal) MarshalJSON() ([]byte, error) {
 	type Withdrawal struct {
-		Index     hexutil.Uint64    `json:"index"`
-		Validator hexutil.Uint64    `json:"validatorIndex"`
-		Address   libcommon.Address `json:"address"`
-		Amount    hexutil.Uint64    `json:"amount"`
+		Index     hexutil.Uint64 `json:"index"`
+		Validator hexutil.Uint64 `json:"validatorIndex"`
+		Address   common.Address `json:"address"`
+		Amount    hexutil.Uint64 `json:"amount"`
 	}
 	var enc Withdrawal
 	enc.Index = hexutil.Uint64(w.Index)
@@ -31,10 +30,10 @@ func (w Withdrawal) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON unmarshals from JSON.
 func (w *Withdrawal) UnmarshalJSON(input []byte) error {
 	type Withdrawal struct {
-		Index     *hexutil.Uint64    `json:"index"`
-		Validator *hexutil.Uint64    `json:"validatorIndex"`
-		Address   *libcommon.Address `json:"address"`
-		Amount    *hexutil.Uint64    `json:"amount"`
+		Index     *hexutil.Uint64 `json:"index"`
+		Validator *hexutil.Uint64 `json:"validatorIndex"`
+		Address   *common.Address `json:"address"`
+		Amount    *hexutil.Uint64 `json:"amount"`
 	}
 	var dec Withdrawal
 	if err := json.Unmarshal(input, &dec); err != nil {

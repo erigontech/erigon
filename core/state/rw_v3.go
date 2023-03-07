@@ -120,30 +120,30 @@ func (rs *StateV3) puts(table string, key string, val []byte) {
 	}
 }
 
-func (rs *StateV3) Get(table string, key []byte) []byte {
+func (rs *StateV3) Get(table string, key []byte) (v []byte, ok bool) {
 	rs.lock.RLock()
-	v := rs.get(table, key)
+	v, ok = rs.get(table, key)
 	rs.lock.RUnlock()
-	return v
+	return v, ok
 }
 
-func (rs *StateV3) get(table string, key []byte) (v []byte) {
+func (rs *StateV3) get(table string, key []byte) (v []byte, ok bool) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	switch table {
 	case StorageTable:
-		v, _ = rs.chStorage.Get(keyS)
+		v, ok = rs.chStorage.Get(keyS)
 	case kv.PlainState:
-		v = rs.chAccs[keyS]
+		v, ok = rs.chAccs[keyS]
 	case kv.Code:
-		v = rs.chCode[keyS]
+		v, ok = rs.chCode[keyS]
 	case kv.IncarnationMap:
-		v = rs.chIncs[keyS]
+		v, ok = rs.chIncs[keyS]
 	case kv.PlainContractCode:
-		v = rs.chContractCode[keyS]
+		v, ok = rs.chContractCode[keyS]
 	default:
 		panic(table)
 	}
-	return v
+	return v, ok
 }
 
 func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
@@ -351,8 +351,8 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 				return err
 			}
 			codeHashBytes := original.CodeHash.Bytes()
-			codePrev := rs.get(kv.Code, codeHashBytes)
-			if codePrev == nil {
+			codePrev, ok := rs.get(kv.Code, codeHashBytes)
+			if !ok || codePrev == nil {
 				var err error
 				codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
 				if err != nil {
@@ -411,8 +411,8 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 		copy(k, addr)
 		binary.BigEndian.PutUint64(k[20:], incarnation)
 
-		codeHash := rs.get(kv.PlainContractCode, k)
-		if codeHash == nil {
+		codeHash, ok := rs.get(kv.PlainContractCode, k)
+		if !ok || codeHash == nil {
 			var err error
 			codeHash, err = roTx.GetOne(kv.PlainContractCode, k)
 			if err != nil {
@@ -421,8 +421,8 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 		}
 		var codePrev []byte
 		if codeHash != nil {
-			codePrev = rs.get(kv.Code, codeHash)
-			if codePrev == nil {
+			codePrev, ok = rs.get(kv.Code, codeHash)
+			if !ok || codePrev == nil {
 				var err error
 				codePrev, err = roTx.GetOne(kv.Code, codeHash)
 				if err != nil {
@@ -445,8 +445,8 @@ func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0 := rs.get(kv.PlainState, addrBytes)
-		if enc0 == nil {
+		enc0, ok := rs.get(kv.PlainState, addrBytes)
+		if !ok {
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
 			if err != nil {
@@ -464,7 +464,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
-			enc1 = []byte{}
+			enc1 = nil
 		} else {
 			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
@@ -789,7 +789,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
-	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
+	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, nil)
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
@@ -852,8 +852,8 @@ func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newR
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc := r.rs.Get(kv.PlainState, addr)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.PlainState, addr)
+	if !ok {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, addr)
 		if err != nil {
@@ -880,8 +880,8 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc := r.rs.Get(StorageTable, composite)
-	if enc == nil {
+	enc, ok := r.rs.Get(StorageTable, composite)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, composite)
 		if err != nil {
@@ -907,8 +907,8 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	enc := r.rs.Get(kv.Code, codeHashBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
@@ -927,8 +927,8 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	codeHashBytes := codeHash.Bytes()
-	enc := r.rs.Get(kv.Code, codeHashBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
@@ -950,8 +950,8 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	addrBytes := address[:]
-	enc := r.rs.Get(kv.IncarnationMap, addrBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.IncarnationMap, addrBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.IncarnationMap, addrBytes)
 		if err != nil {
