@@ -6,12 +6,14 @@ package graph
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
@@ -119,7 +121,22 @@ func (r *queryResolver) Block(ctx context.Context, number *string, hash *string)
 			trans.Status = convertDataToUint64P(transReceipt, "status")
 			trans.Type = convertDataToIntP(transReceipt, "type")
 			trans.Value = *convertDataToStringP(transReceipt, "value")
+
 			trans.Logs = make([]*model.Log, 0)
+			for _, rlog := range transReceipt["logs"].(types.Logs) {
+				tlog := model.Log{
+					Index: int(rlog.Index),
+					Data:  "0x" + hex.EncodeToString(rlog.Data),
+				}
+				tlog.Account = &model.Account{}
+				tlog.Account.Address = rlog.Address.String()
+
+				for _, rtopic := range rlog.Topics {
+					tlog.Topics = append(tlog.Topics, rtopic.String())
+				}
+
+				trans.Logs = append(trans.Logs, &tlog)
+			}
 
 			trans.From = &model.Account{}
 			trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
