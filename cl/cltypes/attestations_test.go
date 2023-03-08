@@ -8,7 +8,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
+
+	_ "embed"
 )
 
 var testAttData = &cltypes.AttestationData{
@@ -61,4 +64,23 @@ func TestAttestationMarshalUnmarmashal(t *testing.T) {
 	testData2 := &cltypes.Attestation{}
 	require.NoError(t, testData2.DecodeSSZ(marshalled))
 	require.Equal(t, testData2, attestations[0])
+}
+
+//go:embed tests/pending_attestation.ssz_snappy
+var pendingAttestationTest []byte
+
+func TestPendingAttestation(t *testing.T) {
+	att := &cltypes.PendingAttestation{}
+	encodedExpected, err := utils.DecompressSnappy(pendingAttestationTest)
+	require.NoError(t, err)
+
+	require.NoError(t, att.DecodeSSZ(encodedExpected))
+
+	root, err := att.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.HexToHash("6d73ce691559544e2d4ec0071abd7e7a4dbe3a3ede4d7008e0f6db75deb40bde"), libcommon.Hash(root))
+
+	encodedHave, err := att.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Equal(t, encodedExpected, encodedHave)
 }

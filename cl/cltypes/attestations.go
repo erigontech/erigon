@@ -497,7 +497,7 @@ func (a *AttestationData) DecodeSSZ(buf []byte) error {
 
 // EncodingSizeSSZ returns the ssz encoded size in bytes for the AttestationData object
 func (a *AttestationData) EncodingSizeSSZ() int {
-	return 2*common.BlockNumberLength + length.Hash + a.Source.EncodingSizeSSZ() + a.Target.EncodingSizeSSZ()
+	return 2*common.BlockNumberLength + length.Hash + 40 + 40
 }
 
 // HashSSZ ssz hashes the AttestationData object
@@ -517,4 +517,96 @@ func (a *AttestationData) HashSSZ() ([32]byte, error) {
 		sourceRoot,
 		targetRoot,
 	}, 8)
+}
+
+// Pending attestation. (only in Phase0 state)
+type PendingAttestation struct {
+	AggregationBits []byte
+	Data            *AttestationData
+	InclusionDelay  uint64
+	ProposerIndex   uint64
+}
+
+// MarshalSSZTo ssz marshals the Attestation object to a target array
+func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
+	dst = buf
+	dst = append(dst, ssz_utils.OffsetSSZ(148)...)
+	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
+		return
+	}
+	fmt.Println(dst)
+	dst = append(dst, ssz_utils.Uint64SSZ(a.InclusionDelay)...)
+	dst = append(dst, ssz_utils.Uint64SSZ(a.ProposerIndex)...)
+
+	if len(a.AggregationBits) > 2048 {
+		return nil, fmt.Errorf("too many aggregation bits in attestation")
+	}
+	dst = append(dst, a.AggregationBits...)
+
+	return
+}
+
+// DecodeSSZ ssz unmarshals the Attestation object
+func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
+	var err error
+	if len(buf) < a.EncodingSizeSSZ() {
+		return ssz_utils.ErrLowBufferSize
+	}
+
+	tail := buf
+
+	// Field (1) 'Data'
+	if a.Data == nil {
+		a.Data = new(AttestationData)
+	}
+	if err = a.Data.DecodeSSZ(buf[4:132]); err != nil {
+		return err
+	}
+
+	a.InclusionDelay = ssz_utils.UnmarshalUint64SSZ(buf[132:])
+	a.ProposerIndex = ssz_utils.UnmarshalUint64SSZ(buf[140:])
+	// Field (0) 'AggregationBits'
+	{
+		buf = tail[148:]
+		if err = ssz.ValidateBitlist(buf, 2048); err != nil {
+			return err
+		}
+		if cap(a.AggregationBits) == 0 {
+			a.AggregationBits = make([]byte, 0, len(buf))
+		}
+		a.AggregationBits = append(a.AggregationBits, buf...)
+	}
+	return err
+}
+
+func (a *PendingAttestation) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return a.DecodeSSZ(buf)
+}
+
+// EncodingSizeSSZ returns the ssz encoded size in bytes for the Attestation object
+func (a *PendingAttestation) EncodingSizeSSZ() int {
+	return 148 + len(a.AggregationBits)
+}
+
+// HashSSZ ssz hashes the Attestation object
+func (a *PendingAttestation) HashSSZ() ([32]byte, error) {
+	leaves := make([][32]byte, 4)
+	var err error
+	if a.Data == nil {
+		return [32]byte{}, fmt.Errorf("missing attestation data")
+	}
+	leaves[0], err = merkle_tree.BitlistRootWithLimit(a.AggregationBits, 2048)
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	leaves[1], err = a.Data.HashSSZ()
+	if err != nil {
+		return [32]byte{}, err
+	}
+
+	leaves[2] = merkle_tree.Uint64Root(a.InclusionDelay)
+	leaves[3] = merkle_tree.Uint64Root(a.ProposerIndex)
+
+	return merkle_tree.ArraysRoot(leaves, 4)
 }
