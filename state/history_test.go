@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -506,18 +507,28 @@ func TestIterateChanged2(t *testing.T) {
 	roTx, err := db.BeginRo(ctx)
 	require.NoError(t, err)
 	defer roTx.Rollback()
+
+	type testCase struct {
+		k, v  string
+		txNum uint64
+	}
+	testCases := []testCase{
+		{txNum: 0, k: "0100000000000001"},
+		{txNum: 900, k: "0100000000000001", v: "ff00000000000383"},
+		{txNum: 1000, k: "0100000000000001", v: "ff000000000003e7"},
+	}
 	var keys, vals []string
 	t.Run("before merge", func(t *testing.T) {
-		ic := h.MakeContext()
-		defer ic.Close()
+		hc, require := h.MakeContext(), require.New(t)
+		defer hc.Close()
 
-		err := ic.IterateRecentlyChanged(2, 20, roTx, func(k, v []byte) error {
+		err := hc.IterateRecentlyChanged(2, 20, roTx, func(k, v []byte) error {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 			return nil
 		})
-		require.NoError(t, err)
-		require.Equal(t, []string{
+		require.NoError(err)
+		require.Equal([]string{
 			"0100000000000001",
 			"0100000000000002",
 			"0100000000000003",
@@ -537,7 +548,7 @@ func TestIterateChanged2(t *testing.T) {
 			"0100000000000011",
 			"0100000000000012",
 			"0100000000000013"}, keys)
-		require.Equal(t, []string{
+		require.Equal([]string{
 			"ff00000000000001",
 			"",
 			"",
@@ -558,13 +569,13 @@ func TestIterateChanged2(t *testing.T) {
 			"",
 			""}, vals)
 		keys, vals = keys[:0], vals[:0]
-		err = ic.IterateRecentlyChanged(995, 1000, roTx, func(k, v []byte) error {
+		err = hc.IterateRecentlyChanged(995, 1000, roTx, func(k, v []byte) error {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
 			return nil
 		})
-		require.NoError(t, err)
-		require.Equal(t, []string{
+		require.NoError(err)
+		require.Equal([]string{
 			"0100000000000001",
 			"0100000000000002",
 			"0100000000000003",
@@ -576,7 +587,7 @@ func TestIterateChanged2(t *testing.T) {
 			"010000000000001b",
 		}, keys)
 
-		require.Equal(t, []string{
+		require.Equal([]string{
 			"ff000000000003e2",
 			"ff000000000001f1",
 			"ff0000000000014b",
@@ -586,19 +597,38 @@ func TestIterateChanged2(t *testing.T) {
 			"ff0000000000006e",
 			"ff00000000000052",
 			"ff00000000000024"}, vals)
+
+		// single Get test-cases
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
+		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Nil(v)
+		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
+		_ = testCases
 	})
 	t.Run("after merge", func(t *testing.T) {
 		collateAndMergeHistory(t, db, h, txs)
-		ic := h.MakeContext()
-		defer ic.Close()
+		hc, require := h.MakeContext(), require.New(t)
+		defer hc.Close()
 
 		keys = keys[:0]
-		err = ic.IterateRecentlyChanged(2, 20, roTx, func(k, _ []byte) error {
+		err = hc.IterateRecentlyChanged(2, 20, roTx, func(k, _ []byte) error {
 			keys = append(keys, fmt.Sprintf("%x", k))
 			return nil
 		})
-		require.NoError(t, err)
-		require.Equal(t, []string{
+		require.NoError(err)
+		require.Equal([]string{
 			"0100000000000001",
 			"0100000000000002",
 			"0100000000000003",
@@ -618,6 +648,24 @@ func TestIterateChanged2(t *testing.T) {
 			"0100000000000011",
 			"0100000000000012",
 			"0100000000000013"}, keys)
+
+		// single Get test-cases
+		tx, err := db.BeginRo(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		v, ok, err := hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 900, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(hexutility.MustDecodeHex("ff00000000000383"), v)
+		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Nil(v)
+		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
+		require.NoError(err)
+		require.True(ok)
+		require.Equal(hexutility.MustDecodeHex("ff000000000003e7"), v)
 	})
 }
 
