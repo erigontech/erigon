@@ -18,9 +18,11 @@ package downloadercfg
 
 import (
 	"io/ioutil"
+	"net"
 	"runtime"
 	"strings"
 
+	"github.com/anacrolix/dht/v2"
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
@@ -68,7 +70,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(snapDir string, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int) (*Cfg, error) {
+func New(snapDir string, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers []string) (*Cfg, error) {
 	torrentConfig := Default()
 	torrentConfig.ExtendedHandshakeClientVersion = version
 
@@ -94,6 +96,42 @@ func New(snapDir string, version string, verbosity lg.Level, downloadRate, uploa
 	//	torrentConfig.Debug = false
 	torrentConfig.Logger = lg.Default.FilterLevel(verbosity)
 	torrentConfig.Logger.Handlers = []lg.Handler{adapterHandler{}}
+
+	if len(staticPeers) > 0 {
+		torrentConfig.NoDHT = false
+		//defaultNodes := torrentConfig.DhtStartingNodes
+		torrentConfig.DhtStartingNodes = func(network string) dht.StartingNodesGetter {
+			return func() ([]dht.Addr, error) {
+				addrs, err := dht.GlobalBootstrapAddrs(network)
+				if err != nil {
+					return nil, err
+				}
+
+				for _, seed := range staticPeers {
+					if network == "udp" {
+						var addr *net.UDPAddr
+						addr, err := net.ResolveUDPAddr(network, seed+":80")
+						if err != nil {
+							log.Warn("[downloader] Cannot UDP resolve address", "network", network, "addr", seed)
+							continue
+						}
+						addrs = append(addrs, dht.NewAddr(addr))
+					}
+					if network == "tcp" {
+						var addr *net.TCPAddr
+						addr, err := net.ResolveTCPAddr(network, seed+":80")
+						if err != nil {
+							log.Warn("[downloader] Cannot TCP resolve address", "network", network, "addr", seed)
+							continue
+						}
+						addrs = append(addrs, dht.NewAddr(addr))
+					}
+				}
+				return addrs, nil
+			}
+		}
+		//staticPeers
+	}
 
 	return &Cfg{ClientConfig: torrentConfig, DownloadSlots: downloadSlots}, nil
 }
