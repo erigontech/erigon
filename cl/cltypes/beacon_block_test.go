@@ -1,30 +1,14 @@
 package cltypes_test
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
-
-func getTestEth1Block() *cltypes.Eth1Block {
-	var emptyBlock = &cltypes.Eth1Block{
-		Header: &types.Header{
-			BaseFee: big.NewInt(0),
-			Number:  big.NewInt(0),
-		},
-		Body: &types.RawBody{},
-	}
-	emptyBlock.Header.TxHashSSZ, _ = merkle_tree.TransactionsListRoot([][]byte{})
-	emptyBlock.Header.WithdrawalsHash = new(common.Hash)
-	return emptyBlock
-}
 
 func createDepositTest() *cltypes.Deposit {
 	// Make proof
@@ -93,7 +77,7 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 			},
 			Deposits:         []*cltypes.Deposit{createDepositTest(), createDepositTest()},
 			SyncAggregate:    &cltypes.SyncAggregate{},
-			ExecutionPayload: getTestEth1Block(),
+			ExecutionPayload: cltypes.NewEth1Block(clparams.BellatrixVersion),
 			ExecutionChanges: []*cltypes.SignedBLSToExecutionChange{
 				{
 					Message: &cltypes.BLSToExecutionChange{
@@ -108,7 +92,7 @@ var testBeaconBlockVariation = &cltypes.SignedBeaconBlock{
 
 var (
 	// Hashes
-	capellaHash   = common.HexToHash("0x00a1f1a46f4bcdd9030c11c1cf9a8062cd48478620e6fd3bd3a748263a49433f")
+	capellaHash   = common.HexToHash("0xc4892f81461ed3a24db4b44f26a728219faf1f278d8a1c21d774e2efa73cf1a3")
 	bellatrixHash = common.HexToHash("9a5bc717ecaf6a8d6e879478003729b9ce4e71f5c4e9b4bd4dd166780894ee93")
 	altairHash    = common.HexToHash("36aa8fe956265d171b7ad740077ea9579e25ed3b2f7b2010016513e4ac4754cb")
 	phase0Hash    = common.HexToHash("83dd9e30bf61720822be889abf73760a26fb42dc9fb27fa872f845d68af92bc4")
@@ -116,6 +100,7 @@ var (
 
 func TestCapellaBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.CapellaVersion
+	testBeaconBlockVariation.Block.Body.ExecutionPayload = cltypes.NewEth1Block(clparams.CapellaVersion)
 	require.Equal(t, testBeaconBlockVariation.Version(), clparams.CapellaVersion)
 	// Simple unit test: unmarshal + marshal + hashtreeroot
 	hash, err := testBeaconBlockVariation.HashSSZ()
@@ -129,6 +114,7 @@ func TestCapellaBlock(t *testing.T) {
 
 func TestBellatrixBlock(t *testing.T) {
 	testBeaconBlockVariation.Block.Body.Version = clparams.BellatrixVersion
+	testBeaconBlockVariation.Block.Body.ExecutionPayload = cltypes.NewEth1Block(clparams.BellatrixVersion)
 	require.Equal(t, testBeaconBlockVariation.Version(), clparams.BellatrixVersion)
 	// Simple unit test: unmarshal + marshal + hashtreeroot
 	hash, err := testBeaconBlockVariation.HashSSZ()

@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var (
@@ -72,11 +71,11 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
-func (b *BeaconState) ValidatorAt(index int) (cltypes.Validator, error) {
+func (b *BeaconState) ValidatorAt(index int) (*cltypes.Validator, error) {
 	if index >= len(b.validators) {
-		return cltypes.Validator{}, ErrInvalidValidatorIndex
+		return nil, ErrInvalidValidatorIndex
 	}
-	return *b.validators[index], nil
+	return b.validators[index], nil
 }
 
 func (b *BeaconState) Balances() []uint64 {
@@ -145,7 +144,7 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
-func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
+func (b *BeaconState) LatestExecutionPayloadHeader() *cltypes.Eth1Header {
 	return b.latestExecutionPayloadHeader
 }
 

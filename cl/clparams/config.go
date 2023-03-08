@@ -373,11 +373,14 @@ type BeaconChainConfig struct {
 	ProportionalSlashingMultiplier uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER" spec:"true"` // ProportionalSlashingMultiplier is used as a multiplier on slashed penalties.
 
 	// Max operations per block constants.
-	MaxProposerSlashings uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"` // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
-	MaxAttesterSlashings uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"` // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
-	MaxAttestations      uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`       // MaxAttestations defines the maximum allowed attestations in a beacon block.
-	MaxDeposits          uint64 `yaml:"MAX_DEPOSITS" spec:"true"`           // MaxDeposits defines the maximum number of validator deposits in a block.
-	MaxVoluntaryExits    uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`    // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"`               // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
+	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"`               // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
+	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`                     // MaxAttestations defines the maximum allowed attestations in a beacon block.
+	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true"`                         // MaxDeposits defines the maximum number of validator deposits in a block.
+	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`                  // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true"`          // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
+	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true"`         // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
 	DomainBeaconProposer              [4]byte `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
@@ -617,11 +620,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ProportionalSlashingMultiplier: 1,
 
 	// Max operations per block constants.
-	MaxProposerSlashings: 16,
-	MaxAttesterSlashings: 2,
-	MaxAttestations:      128,
-	MaxDeposits:          16,
-	MaxVoluntaryExits:    16,
+	MaxProposerSlashings:             16,
+	MaxAttesterSlashings:             2,
+	MaxAttestations:                  128,
+	MaxDeposits:                      16,
+	MaxVoluntaryExits:                16,
+	MaxWithdrawalsPerPayload:         16,
+	MaxBlsToExecutionChanges:         16,
+	MaxValidatorsPerWithdrawalsSweep: 16384,
 
 	// BLS domain values.
 	DomainBeaconProposer:              utils.Uint32ToBytes4(0x00000000),
@@ -857,6 +863,8 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientAltair
 	case BellatrixVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
+	case CapellaVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
 	}
@@ -869,6 +877,8 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 	case AltairVersion:
 		return b.InactivityPenaltyQuotientAltair
 	case BellatrixVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	case CapellaVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")

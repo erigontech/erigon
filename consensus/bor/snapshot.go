@@ -74,6 +74,8 @@ func loadSnapshot(config *chain.BorConfig, sigcache *lru2.ARCCache[libcommon.Has
 		return nil, err
 	}
 
+	snap.ValidatorSet.UpdateValidatorMap()
+
 	snap.config = config
 	snap.sigcache = sigcache
 

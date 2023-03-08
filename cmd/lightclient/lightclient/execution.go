@@ -12,14 +12,14 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
-func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.ExecutionPayload {
+func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) (*types.ExecutionPayload, error) {
 	var baseFee *uint256.Int
-	var (
-		header = e.Header
-		body   = e.Body
-	)
+	header, err := e.RlpHeader()
+	if err != nil {
+		return nil, err
+	}
 
-	if e.Header.BaseFee != nil {
+	if header.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(header.BaseFee)
 		if overflow {
@@ -41,16 +41,16 @@ func convertLightrpcExecutionPayloadToEthbacked(e *cltypes.Eth1Block) *types.Exe
 		Timestamp:     header.Time,
 		ExtraData:     header.Extra,
 		BaseFeePerGas: gointerfaces.ConvertUint256IntToH256(baseFee),
-		BlockHash:     gointerfaces.ConvertHashToH256(header.BlockHashCL),
-		Transactions:  body.Transactions,
-		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(body.Withdrawals),
+		BlockHash:     gointerfaces.ConvertHashToH256(e.BlockHash),
+		Transactions:  e.Transactions,
+		Withdrawals:   privateapi.ConvertWithdrawalsToRpc(e.Withdrawals),
 	}
-	if body.Withdrawals != nil {
+	if e.Withdrawals != nil {
 		res.Version = 2
-		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(body.Withdrawals)
+		res.Withdrawals = privateapi.ConvertWithdrawalsToRpc(e.Withdrawals)
 	}
 
-	return res
+	return res, nil
 }
 
 func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error {
@@ -68,10 +68,12 @@ func (l *LightClient) processBeaconBlock(beaconBlock *cltypes.BeaconBlock) error
 	// Save as recent
 	l.recentHashesCache.Add(bcRoot, struct{}{})
 
-	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Body.ExecutionPayload.Header.BlockHashCL)
+	payloadHash := gointerfaces.ConvertHashToH256(beaconBlock.Body.ExecutionPayload.BlockHash)
 
-	payload := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
-
+	payload, err := convertLightrpcExecutionPayloadToEthbacked(beaconBlock.Body.ExecutionPayload)
+	if err != nil {
+		return err
+	}
 	if l.execution != nil {
 		_, err = l.execution.EngineNewPayload(l.ctx, payload)
 		if err != nil {

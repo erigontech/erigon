@@ -241,7 +241,7 @@ func (l *LightClient) importBlockIfPossible() {
 	}
 
 	if (curr.Slot+1)%l.beaconConfig.SlotsPerEpoch == 0 {
-		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.BlockHash
 	}
 
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
@@ -251,12 +251,12 @@ func (l *LightClient) importBlockIfPossible() {
 	l.lastEth2ParentRoot = curr.ParentRoot
 	l.highestProcessedRoot = currentRoot
 
-	eth1Number := curr.Body.ExecutionPayload.NumberU64()
+	eth1Number := curr.Body.ExecutionPayload.BlockNumber
 	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
 		return
 	}
 	if l.verbose {
-		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.NumberU64())
+		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
 	}
 
 	// If all of the above is gud then do the push

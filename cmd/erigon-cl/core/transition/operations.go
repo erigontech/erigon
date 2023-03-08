@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func isSlashableAttestationData(d1, d2 *cltypes.AttestationData) bool {
@@ -253,4 +254,50 @@ func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes
 	}
 	// Do the exit (same process in slashing).
 	return state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
+}
+
+// ProcessWithdrawals processes withdrawals by decreasing the balance of each validator
+// and updating the next withdrawal index and validator index.
+func ProcessWithdrawals(state *state.BeaconState, withdrawals types.Withdrawals, fullValidation bool) error {
+	// Get the list of withdrawals, the expected withdrawals (if performing full validation),
+	// and the beacon configuration.
+	beaconConfig := state.BeaconConfig()
+	numValidators := uint64(len(state.Validators()))
+
+	// Check if full validation is required and verify expected withdrawals.
+	if fullValidation {
+		expectedWithdrawals := state.ExpectedWithdrawals()
+		if len(expectedWithdrawals) != len(withdrawals) {
+			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), len(withdrawals))
+		}
+		for i, withdrawal := range withdrawals {
+			if !expectedWithdrawals[i].Equal(withdrawal) {
+				return fmt.Errorf("ProcessWithdrawals: withdrawal %d does not match expected withdrawal", i)
+			}
+		}
+	}
+
+	// Decrease the balance of each validator for the corresponding withdrawal.
+	for _, withdrawal := range withdrawals {
+		if err := state.DecreaseBalance(withdrawal.Validator, withdrawal.Amount); err != nil {
+			return err
+		}
+	}
+
+	// Update next withdrawal index based on number of withdrawals.
+	if len(withdrawals) > 0 {
+		lastWithdrawalIndex := withdrawals[len(withdrawals)-1].Index
+		state.SetNextWithdrawalIndex(lastWithdrawalIndex + 1)
+	}
+
+	// Update next withdrawal validator index based on number of withdrawals.
+	if len(withdrawals) == int(beaconConfig.MaxWithdrawalsPerPayload) {
+		lastWithdrawalValidatorIndex := withdrawals[len(withdrawals)-1].Validator + 1
+		state.SetNextWithdrawalValidatorIndex(lastWithdrawalValidatorIndex % numValidators)
+	} else {
+		nextIndex := state.NextWithdrawalValidatorIndex() + beaconConfig.MaxValidatorsPerWithdrawalsSweep
+		state.SetNextWithdrawalValidatorIndex(nextIndex % numValidators)
+	}
+
+	return nil
 }

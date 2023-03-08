@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func (b *BeaconState) baseOffsetSSZ() uint32 {
@@ -149,7 +148,7 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 	// Offset (24) 'LatestExecutionPayloadHeader'
 	dst = append(dst, ssz_utils.OffsetSSZ(offset)...)
 	if b.version >= clparams.BellatrixVersion {
-		offset += uint32(b.latestExecutionPayloadHeader.EncodingSizeSSZ(b.version))
+		offset += uint32(b.latestExecutionPayloadHeader.EncodingSizeSSZ())
 	}
 
 	if b.version >= clparams.CapellaVersion {
@@ -368,8 +367,8 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if len(buf) < int(endOffset) || executionPayloadOffset > endOffset {
 		return ssz_utils.ErrLowBufferSize
 	}
-	b.latestExecutionPayloadHeader = new(types.Header)
-	if err := b.latestExecutionPayloadHeader.DecodeSSZ(buf[executionPayloadOffset:endOffset], b.version); err != nil {
+	b.latestExecutionPayloadHeader = new(cltypes.Eth1Header)
+	if err := b.latestExecutionPayloadHeader.DecodeSSZWithVersion(buf[executionPayloadOffset:endOffset], int(b.version)); err != nil {
 		return err
 	}
 	if b.version == clparams.BellatrixVersion {
