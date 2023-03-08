@@ -661,7 +661,7 @@ func TestIterateChanged2(t *testing.T) {
 		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 0, tx)
 		require.NoError(err)
 		require.True(ok)
-		require.Nil(v)
+		require.Equal([]byte{}, v)
 		v, ok, err = hc.GetNoStateWithRecent(hexutility.MustDecodeHex("0100000000000001"), 1000, tx)
 		require.NoError(err)
 		require.True(ok)
