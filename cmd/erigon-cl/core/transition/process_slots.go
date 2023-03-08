@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -122,26 +123,38 @@ func verifyBlockSignature(state *state.BeaconState, block *cltypes.SignedBeaconB
 	return bls.Verify(block.Signature[:], sigRoot[:], proposer.PublicKey[:])
 }
 
+// ProcessHistoricalRootsUpdate updates the historical root data structure by computing a new historical root batch when it is time to do so.
 func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
-	var (
-		nextEpoch    = state.Epoch() + 1
-		beaconConfig = state.BeaconConfig()
-		blockRoots   = state.BlockRoots()
-		stateRoots   = state.StateRoots()
-	)
+	nextEpoch := state.Epoch() + 1
+	beaconConfig := state.BeaconConfig()
+	blockRoots := state.BlockRoots()
+	stateRoots := state.StateRoots()
 
-	if nextEpoch%(beaconConfig.SlotsPerHistoricalRoot/beaconConfig.SlotsPerEpoch) == 0 {
-		// Compute historical root batch.
-		blockRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(blockRoots[:]), state_encoding.BlockRootsLength)
-		if err != nil {
-			return err
-		}
-		stateRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(stateRoots[:]), state_encoding.StateRootsLength)
-		if err != nil {
-			return err
-		}
-
-		state.AddHistoricalRoot(utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:]))
+	// Check if it's time to compute the historical root batch.
+	if nextEpoch%(beaconConfig.SlotsPerHistoricalRoot/beaconConfig.SlotsPerEpoch) != 0 {
+		return nil
 	}
+
+	// Compute historical root batch.
+	blockRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(blockRoots[:]), state_encoding.BlockRootsLength)
+	if err != nil {
+		return err
+	}
+	stateRootsLeaf, err := merkle_tree.ArraysRoot(utils.PreparateRootsForHashing(stateRoots[:]), state_encoding.StateRootsLength)
+	if err != nil {
+		return err
+	}
+
+	// Add the historical summary or root to the state.
+	if state.Version() >= clparams.CapellaVersion {
+		state.AddHistoricalSummary(&cltypes.HistoricalSummary{
+			BlockSummaryRoot: blockRootsLeaf,
+			StateSummaryRoot: stateRootsLeaf,
+		})
+	} else {
+		historicalRoot := utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:])
+		state.AddHistoricalRoot(historicalRoot)
+	}
+
 	return nil
 }

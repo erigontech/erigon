@@ -2,7 +2,6 @@ package transition
 
 import (
 	"encoding/hex"
-	"math/big"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -10,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,15 +17,7 @@ var (
 	testPublicKeyRandao        = [48]byte{185, 225, 110, 228, 192, 192, 246, 253, 101, 180, 140, 141, 199, 89, 3, 139, 210, 238, 189, 151, 158, 72, 157, 8, 214, 152, 37, 190, 211, 42, 55, 195, 204, 105, 233, 224, 95, 87, 116, 69, 238, 39, 49, 151, 145, 131, 41, 97}
 	testSignatureRandao        = [96]byte{176, 25, 98, 55, 102, 11, 185, 56, 3, 22, 58, 233, 230, 117, 206, 195, 18, 104, 110, 224, 140, 189, 89, 124, 247, 110, 34, 24, 137, 244, 55, 83, 15, 8, 202, 57, 11, 60, 112, 92, 226, 219, 183, 237, 167, 236, 67, 192, 11, 6, 2, 84, 137, 7, 71, 232, 61, 13, 111, 99, 125, 174, 150, 122, 177, 219, 187, 234, 12, 60, 229, 15, 199, 29, 125, 30, 238, 123, 23, 138, 38, 232, 248, 31, 234, 1, 149, 77, 70, 111, 237, 19, 7, 35, 209, 236}
 	testInvalidSignatureRandao = [96]byte{184, 251, 223, 57, 162, 123, 12, 186, 44, 184, 215, 35, 161, 141, 224, 113, 181, 186, 115, 49, 235, 201, 109, 120, 232, 80, 255, 174, 134, 106, 251, 67, 181, 99, 103, 137, 52, 0, 32, 249, 129, 139, 187, 236, 191, 67, 189, 233, 1, 46, 128, 22, 101, 172, 228, 195, 232, 87, 204, 52, 44, 10, 62, 91, 250, 72, 104, 5, 160, 248, 0, 54, 135, 170, 198, 172, 15, 194, 222, 39, 74, 45, 5, 196, 225, 97, 99, 85, 253, 190, 142, 245, 16, 148, 29, 42}
-	emptyBlock                 = &cltypes.Eth1Block{
-		Header: &types.Header{
-			BaseFee:   big.NewInt(0),
-			Number:    big.NewInt(0),
-			Bloom:     types.Bloom{},
-			TxHashSSZ: txHashEmpty,
-		},
-		Body: &types.RawBody{},
-	}
+	emptyBlock                 = &cltypes.Eth1Block{}
 )
 
 func getTestState(t *testing.T) *state.BeaconState {
@@ -96,7 +86,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	validator, err := badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex))
 	require.NoError(t, err)
 	validator.Slashed = true
-	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), &validator)
+	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), validator)
 
 	testCases := []struct {
 		description string
@@ -173,7 +163,7 @@ func TestProcessRandao(t *testing.T) {
 	validator, err := testStateSuccess.ValidatorAt(int(propInd))
 	require.NoError(t, err)
 	validator.PublicKey = testPublicKeyRandao
-	testStateSuccess.SetValidatorAt(int(propInd), &validator)
+	testStateSuccess.SetValidatorAt(int(propInd), validator)
 	testBlock := getTestBlock(t)
 	testBlock.Body.RandaoReveal = testSignatureRandao
 	testBody := testBlock.Body

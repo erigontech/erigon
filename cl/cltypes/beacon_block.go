@@ -31,6 +31,7 @@ type BeaconBlockForStorage struct {
 	AttesterSlashings []*AttesterSlashing
 	Deposits          []*Deposit
 	VoluntaryExits    []*SignedVoluntaryExit
+	AddressChanges    []*SignedBLSToExecutionChange
 	SyncAggregate     *SyncAggregate
 	// Metadatas
 	Eth1Number    uint64
@@ -156,7 +157,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	if b.Version >= clparams.BellatrixVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
-		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ(b.Version))
+		offset += uint32(b.ExecutionPayload.EncodingSizeSSZ())
 	}
 	if b.Version >= clparams.CapellaVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(offset)...)
@@ -221,7 +222,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	if b.Version >= clparams.BellatrixVersion {
-		buf, err = b.ExecutionPayload.EncodeSSZ(buf, b.Version)
+		buf, err = b.ExecutionPayload.EncodeSSZ(buf)
 		if err != nil {
 			return nil, err
 		}
@@ -259,7 +260,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		if b.ExecutionPayload == nil {
 			b.ExecutionPayload = new(Eth1Block)
 		}
-		size += b.ExecutionPayload.EncodingSizeSSZ(b.Version)
+		size += b.ExecutionPayload.EncodingSizeSSZ()
 	}
 
 	if b.Version >= clparams.CapellaVersion {
@@ -357,7 +358,7 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 		if offsetExecution > uint32(endOffset) || len(buf) < endOffset {
 			return ssz_utils.ErrBadOffset
 		}
-		if err := b.ExecutionPayload.DecodeSSZ(buf[offsetExecution:endOffset], b.Version); err != nil {
+		if err := b.ExecutionPayload.DecodeSSZWithVersion(buf[offsetExecution:endOffset], int(b.Version)); err != nil {
 			return err
 		}
 	}
@@ -433,6 +434,13 @@ func (b *BeaconBody) HashSSZ() ([32]byte, error) {
 			return [32]byte{}, err
 		}
 		leaves = append(leaves, payloadLeaf)
+	}
+	if b.Version >= clparams.CapellaVersion {
+		blsExecutionLeaf, err := merkle_tree.ListObjectSSZRoot(b.ExecutionChanges, MaxExecutionChanges)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		leaves = append(leaves, blsExecutionLeaf)
 	}
 	if b.Version == clparams.Phase0Version {
 		return merkle_tree.ArraysRoot(leaves, 8)
@@ -558,14 +566,15 @@ func (b *SignedBeaconBlock) EncodeForStorage() ([]byte, error) {
 		Deposits:          b.Block.Body.Deposits,
 		VoluntaryExits:    b.Block.Body.VoluntaryExits,
 		SyncAggregate:     b.Block.Body.SyncAggregate,
+		AddressChanges:    b.Block.Body.ExecutionChanges,
 		Version:           uint8(b.Version()),
 		Eth2BlockRoot:     blockRoot,
 	}
 
 	if b.Version() >= clparams.BellatrixVersion {
 		eth1Block := b.Block.Body.ExecutionPayload
-		storageObject.Eth1Number = eth1Block.NumberU64()
-		storageObject.Eth1BlockHash = eth1Block.Header.BlockHashCL
+		storageObject.Eth1Number = eth1Block.BlockNumber
+		storageObject.Eth1BlockHash = eth1Block.BlockHash
 	}
 	var buffer bytes.Buffer
 	if err := cbor.Marshal(&buffer, storageObject); err != nil {
@@ -605,6 +614,7 @@ func DecodeBeaconBlockForStorage(buf []byte) (block *SignedBeaconBlock, eth1Numb
 				Deposits:          storageObject.Deposits,
 				VoluntaryExits:    storageObject.VoluntaryExits,
 				SyncAggregate:     storageObject.SyncAggregate,
+				ExecutionChanges:  storageObject.AddressChanges,
 				Version:           clparams.StateVersion(storageObject.Version),
 			},
 		},

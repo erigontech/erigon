@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const (
@@ -19,13 +18,14 @@ const (
 
 type LightClientHeader struct {
 	HeaderEth2      *BeaconBlockHeader
-	HeaderEth1      *types.Header
+	HeaderEth1      *Eth1Header
 	ExecutionBranch [ExecutionBranchLength]libcommon.Hash
 	version         clparams.StateVersion
 }
 
 func (l *LightClientHeader) WithVersion(v clparams.StateVersion) *LightClientHeader {
 	l.version = v
+	l.HeaderEth1.version = v
 	return l
 }
 
@@ -49,8 +49,8 @@ func (l *LightClientHeader) DecodeSSZWithVersion(buf []byte, v int) error {
 		copy(l.ExecutionBranch[i][:], buf[pos:])
 		pos += length.Hash
 	}
-	l.HeaderEth1 = new(types.Header)
-	return l.HeaderEth1.DecodeSSZ(buf[pos:], l.version)
+	l.HeaderEth1 = new(Eth1Header)
+	return l.HeaderEth1.DecodeSSZWithVersion(buf[pos:], int(l.version))
 }
 
 func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
@@ -81,9 +81,9 @@ func (l *LightClientHeader) EncodingSizeSSZ() int {
 	size := l.HeaderEth2.EncodingSizeSSZ()
 	if l.version >= clparams.CapellaVersion {
 		if l.HeaderEth1 == nil {
-			l.HeaderEth1 = new(types.Header)
+			l.HeaderEth1 = NewEth1Header(l.version)
 		}
-		size += l.HeaderEth1.EncodingSizeSSZ(l.version) + 4
+		size += l.HeaderEth1.EncodingSizeSSZ() + 4
 		size += length.Hash * len(l.ExecutionBranch)
 	}
 	return size

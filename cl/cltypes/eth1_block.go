@@ -2,6 +2,7 @@ package cltypes
 
 import (
 	"fmt"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -9,63 +10,162 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/serenity"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // ETH1Block represents a block structure CL-side.
 type Eth1Block struct {
-	Header *types.Header
-	// Transactions can be kept in bytes.
-	Body *types.RawBody
+	ParentHash    libcommon.Hash
+	FeeRecipient  libcommon.Address
+	StateRoot     libcommon.Hash
+	ReceiptsRoot  libcommon.Hash
+	LogsBloom     types.Bloom
+	PrevRandao    libcommon.Hash
+	BlockNumber   uint64
+	GasLimit      uint64
+	GasUsed       uint64
+	Time          uint64
+	Extra         []byte
+	BaseFeePerGas [32]byte
+	// Extra fields
+	BlockHash    libcommon.Hash
+	Transactions [][]byte
+	Withdrawals  types.Withdrawals
+	// internals
+	version clparams.StateVersion
 }
 
-func (b *Eth1Block) NumberU64() uint64 {
-	return b.Header.Number.Uint64()
+// NewEth1Block creates a new Eth1Block.
+func NewEth1Block(version clparams.StateVersion) *Eth1Block {
+	return &Eth1Block{version: version}
 }
 
-func (b *Eth1Block) Withdrawals() types.Withdrawals {
-	return types.Withdrawals(b.Body.Withdrawals)
-}
-
-func (b *Eth1Block) EncodingSizeSSZ(version clparams.StateVersion) (size int) {
-	size = 508
-
-	if b.Header == nil {
-		return
+// NewEth1BlockFromHeaderAndBody with given header/body.
+func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody) *Eth1Block {
+	baseFeeBytes := header.BaseFee.Bytes()
+	for i, j := 0, len(baseFeeBytes)-1; i < j; i, j = i+1, j-1 {
+		baseFeeBytes[i], baseFeeBytes[j] = baseFeeBytes[j], baseFeeBytes[i]
 	}
+	var baseFee32 [32]byte
+	copy(baseFee32[:], baseFeeBytes)
+
+	block := &Eth1Block{
+		ParentHash:    header.ParentHash,
+		FeeRecipient:  header.Coinbase,
+		StateRoot:     header.Root,
+		ReceiptsRoot:  header.ReceiptHash,
+		LogsBloom:     header.Bloom,
+		PrevRandao:    header.MixDigest,
+		BlockNumber:   header.Number.Uint64(),
+		GasLimit:      header.GasLimit,
+		GasUsed:       header.GasUsed,
+		Time:          header.Time,
+		Extra:         header.Extra,
+		BaseFeePerGas: baseFee32,
+		BlockHash:     header.Hash(),
+		Transactions:  body.Transactions,
+		Withdrawals:   body.Withdrawals,
+	}
+	if header.WithdrawalsHash == nil {
+		block.version = clparams.BellatrixVersion
+	} else {
+		block.version = clparams.CapellaVersion
+	}
+	return block
+}
+
+// PayloadHeader returns the equivalent ExecutionPayloadHeader object.
+func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
+	var err error
+	var transactionsRoot, withdrawalsRoot libcommon.Hash
+	if transactionsRoot, err = merkle_tree.TransactionsListRoot(b.Transactions); err != nil {
+		return nil, err
+	}
+	if b.version >= clparams.CapellaVersion {
+		withdrawalsRoot, err = b.Withdrawals.HashSSZ(16)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &Eth1Header{
+		ParentHash:       b.ParentHash,
+		FeeRecipient:     b.FeeRecipient,
+		StateRoot:        b.StateRoot,
+		ReceiptsRoot:     b.ReceiptsRoot,
+		LogsBloom:        b.LogsBloom,
+		PrevRandao:       b.PrevRandao,
+		BlockNumber:      b.BlockNumber,
+		GasLimit:         b.GasLimit,
+		GasUsed:          b.GasUsed,
+		Time:             b.Time,
+		Extra:            b.Extra,
+		BaseFeePerGas:    b.BaseFeePerGas,
+		BlockHash:        b.BlockHash,
+		TransactionsRoot: transactionsRoot,
+		WithdrawalsRoot:  withdrawalsRoot,
+		version:          b.version,
+	}, nil
+}
+
+// Return minimum required buffer length to be an acceptable SSZ encoding.
+func (b *Eth1Block) EncodingSizeSSZ() (size int) {
+	size = 508
 	// Field (10) 'ExtraData'
-	size += len(b.Header.Extra)
+	size += len(b.Extra)
 	// Field (13) 'Transactions'
-	for _, tx := range b.Body.Transactions {
+	for _, tx := range b.Transactions {
 		size += 4
 		size += len(tx)
 	}
 
-	if version >= clparams.CapellaVersion {
-		size += len(b.Body.Withdrawals)*44 + 4
+	if b.version >= clparams.CapellaVersion {
+		size += len(b.Withdrawals)*44 + 4
 	}
 
 	return
 }
 
-func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
-	if len(buf) < b.EncodingSizeSSZ(clparams.BellatrixVersion) {
+// Need a version
+func (b *Eth1Block) DecodeSSZ(buf []byte) error {
+	panic("stop")
+}
+
+// DecodeSSZWithVersion decodes the block in SSZ format.
+func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
+	b.version = clparams.StateVersion(version)
+	if len(buf) < b.EncodingSizeSSZ() {
 		return ssz_utils.ErrLowBufferSize
 	}
-	b.Header = new(types.Header)
-
-	pos, extraDataOffset := b.Header.DecodeHeaderMetadataForSSZ(buf)
+	// We can reuse code from eth1-header for partial decoding
+	payloadHeader := Eth1Header{}
+	pos, extraDataOffset := payloadHeader.decodeHeaderMetadataForSSZ(buf)
+	// Set all header shared fields accordingly
+	b.ParentHash = payloadHeader.ParentHash
+	b.FeeRecipient = payloadHeader.FeeRecipient
+	b.StateRoot = payloadHeader.StateRoot
+	b.ReceiptsRoot = payloadHeader.ReceiptsRoot
+	b.BlockHash = payloadHeader.BlockHash
+	b.LogsBloom = payloadHeader.LogsBloom
+	b.PrevRandao = payloadHeader.PrevRandao
+	b.BlockNumber = payloadHeader.BlockNumber
+	b.GasLimit = payloadHeader.GasLimit
+	b.GasUsed = payloadHeader.GasUsed
+	b.Time = payloadHeader.Time
+	b.BaseFeePerGas = payloadHeader.BaseFeePerGas
+	// Decode the rest
 	transactionsOffset := ssz_utils.DecodeOffset(buf[pos:])
 	pos += 4
 	var withdrawalOffset *uint32
-	if version >= clparams.CapellaVersion {
+	if version >= int(clparams.CapellaVersion) {
 		withdrawalOffset = new(uint32)
 		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos:])
 	}
 	// Compute extra data.
-	b.Header.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
-	if len(b.Header.Extra) > 32 {
-		return fmt.Errorf("Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Header.Extra))
+	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
+	if len(b.Extra) > 32 {
+		return fmt.Errorf("Decode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
 	// Compute transactions
 	var transactionsBuffer []byte
@@ -98,8 +198,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 		}
 	}
 
-	b.Body = new(types.RawBody)
-	b.Body.Transactions = make([][]byte, length)
+	b.Transactions = make([][]byte, length)
 	txIdx := 0
 	// Loop through each transaction
 	for length > 0 {
@@ -113,103 +212,136 @@ func (b *Eth1Block) DecodeSSZ(buf []byte, version clparams.StateVersion) error {
 		if txOffset > txEndOffset {
 			return ssz_utils.ErrBadOffset
 		}
-		b.Body.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
+		b.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
 		// Decode RLP and put it in the tx list.
 		// Update parameters for next iteration
 		txOffset = txEndOffset
 		txIdx++
 		length--
 	}
-	// Cache transaction ssz root.
-	var err error
-	b.Header.TxHashSSZ, err = merkle_tree.TransactionsListRoot(b.Body.Transactions)
-	if err != nil {
-		return err
-	}
-	// Cache transaction rlp hash.
-	b.Header.TxHash = types.DeriveSha(types.BinaryTransactions(b.Body.Transactions))
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
-		b.Body.Withdrawals, err = ssz_utils.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
+		var err error
+		b.Withdrawals, err = ssz_utils.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
 		if err != nil {
 			return err
 		}
-		withdrawalRoot, err := b.Withdrawals().HashSSZ(16)
-		if err != nil {
-			return err
-		}
-		b.Header.WithdrawalsHash = new(libcommon.Hash)
-		*b.Header.WithdrawalsHash = withdrawalRoot
 	}
 	return nil
 }
 
-func (b *Eth1Block) EncodeSSZ(dst []byte, version clparams.StateVersion) ([]byte, error) {
+// EncodeSSZ encodes the block in SSZ format.
+func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
 	currentOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
 
-	if version >= clparams.CapellaVersion {
+	if b.version >= clparams.CapellaVersion {
 		currentOffset += 4
 	}
-	buf, err = b.Header.EncodeHeaderMetadataForSSZ(buf, currentOffset)
+	payloadHeader, err := b.PayloadHeader()
 	if err != nil {
 		return nil, err
 	}
-	currentOffset += len(b.Header.Extra)
-	// use raw body for encoded txs and offsets.
-	body := b.Body
+	buf, err = payloadHeader.encodeHeaderMetadataForSSZ(buf, currentOffset)
+	if err != nil {
+		return nil, err
+	}
+	currentOffset += len(b.Extra)
 	// Write transaction offset
 	buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
 
-	for _, tx := range body.Transactions {
+	for _, tx := range b.Transactions {
 		currentOffset += len(tx) + 4
 	}
 	// Write withdrawals offset if exist
-	if version >= clparams.CapellaVersion {
+	if b.version >= clparams.CapellaVersion {
 		buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
 	}
 	// Sanity check for extra data then write it.
-	if len(b.Header.Extra) > 32 {
-		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Header.Extra))
+	if len(b.Extra) > 32 {
+		return nil, fmt.Errorf("Encode(SSZ): Extra data field length should be less or equal to 32, got %d", len(b.Extra))
 	}
-	buf = append(buf, b.Header.Extra...)
+	buf = append(buf, b.Extra...)
 	// Write all tx offsets
-	txOffset := len(body.Transactions) * 4
-	for _, tx := range body.Transactions {
+	txOffset := len(b.Transactions) * 4
+	for _, tx := range b.Transactions {
 		buf = append(buf, ssz_utils.OffsetSSZ(uint32(txOffset))...)
 		txOffset += len(tx)
 	}
 	// Write all transactions
-	for _, tx := range body.Transactions {
+	for _, tx := range b.Transactions {
 		buf = append(buf, tx...)
 	}
 
-	if version >= clparams.CapellaVersion {
-		// Append all withdrawals SSZ
-		for _, withdrawal := range body.Withdrawals {
-			buf = append(buf, withdrawal.EncodeSSZ()...)
-		}
+	// Append all withdrawals SSZ
+	for _, withdrawal := range b.Withdrawals {
+		buf = append(buf, withdrawal.EncodeSSZ()...)
 	}
+
 	return buf, nil
 }
 
+// HashSSZ calculates the SSZ hash of the Eth1Block's payload header.
 func (b *Eth1Block) HashSSZ(version clparams.StateVersion) ([32]byte, error) {
-	var err error
-	if b.Header.TxHashSSZ, err = merkle_tree.TransactionsListRoot(b.Body.Transactions); err != nil {
+	// Get the payload header.
+	header, err := b.PayloadHeader()
+	if err != nil {
 		return [32]byte{}, err
 	}
-	if version >= clparams.CapellaVersion {
-		b.Header.WithdrawalsHash = new(libcommon.Hash)
-		if *b.Header.WithdrawalsHash, err = types.Withdrawals(b.Body.Withdrawals).HashSSZ(16); err != nil {
-			return [32]byte{}, err
-		}
-	} else {
-		b.Header.WithdrawalsHash = nil
-	}
-	return b.Header.HashSSZ()
+
+	// Calculate the SSZ hash of the header and return it.
+	return header.HashSSZ()
 }
 
-func (b *Eth1Block) Hash() libcommon.Hash {
-	return b.Header.Hash()
+// RlpHeader returns the equivalent types.Header struct with RLP-based fields.
+func (b *Eth1Block) RlpHeader() (*types.Header, error) {
+	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
+	reversedBaseFeePerGas := b.BaseFeePerGas[:]
+	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
+		reversedBaseFeePerGas[i], reversedBaseFeePerGas[j] = reversedBaseFeePerGas[j], reversedBaseFeePerGas[i]
+	}
+	baseFee := new(big.Int).SetBytes(reversedBaseFeePerGas)
+
+	// If the block version is Capella or later, calculate the withdrawals hash.
+	var withdrawalsHash *libcommon.Hash
+	if b.version >= clparams.CapellaVersion {
+		withdrawalsHash = new(libcommon.Hash)
+		*withdrawalsHash = types.DeriveSha(b.Withdrawals)
+	}
+
+	header := &types.Header{
+		ParentHash:      b.ParentHash,
+		UncleHash:       types.EmptyUncleHash,
+		Coinbase:        b.FeeRecipient,
+		Root:            b.StateRoot,
+		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions)),
+		ReceiptHash:     b.ReceiptsRoot,
+		Bloom:           b.LogsBloom,
+		Difficulty:      serenity.SerenityDifficulty,
+		Number:          big.NewInt(int64(b.BlockNumber)),
+		GasLimit:        b.GasLimit,
+		GasUsed:         b.GasUsed,
+		Time:            b.Time,
+		Extra:           b.Extra,
+		MixDigest:       b.PrevRandao,
+		Nonce:           serenity.SerenityNonce,
+		BaseFee:         baseFee,
+		WithdrawalsHash: withdrawalsHash,
+	}
+
+	// If the header hash does not match the block hash, return an error.
+	if header.Hash() != b.BlockHash {
+		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash")
+	}
+
+	return header, nil
+}
+
+// Body returns the equivalent raw body (only eth1 body section).
+func (b *Eth1Block) Body() *types.RawBody {
+	return &types.RawBody{
+		Transactions: b.Transactions,
+		Withdrawals:  b.Withdrawals,
+	}
 }
