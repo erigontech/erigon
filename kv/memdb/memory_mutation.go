@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -229,6 +230,9 @@ func (m *MemoryMutation) RangeAscend(table string, fromPrefix, toPrefix []byte, 
 	panic("please implement me")
 }
 func (m *MemoryMutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+	panic("please implement me")
+}
+func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
 	panic("please implement me")
 }
 

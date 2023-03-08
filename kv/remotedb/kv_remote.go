@@ -707,6 +707,10 @@ func (tx *remoteTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limi
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
 
+func (tx *remoteTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+	panic("not supported yet")
+}
+
 /*
 type grpcStream[Msg any] interface {
 	Recv() (Msg, error)

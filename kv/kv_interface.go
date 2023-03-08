@@ -335,6 +335,9 @@ type Tx interface {
 	// Prefix - is exactly Range(Table, prefix, kv.NextSubtree(prefix))
 	Prefix(table string, prefix []byte) (iter.KV, error)
 
+	// RangeDupSort - like Range but for fixed single key and iterating over range of values
+	RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error)
+
 	// --- High-Level methods: 1request -> 1page of values in response -> send next page request ---
 	// Paginate(table string, fromPrefix, toPrefix []byte) (PairsStream, error)
 

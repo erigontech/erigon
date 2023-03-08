@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -131,7 +132,73 @@ func TestRange(t *testing.T) {
 		k, v, err := it.Next()
 		require.NoError(t, err)
 		require.Equal(t, "key3", string(k))
+		require.Equal(t, "value3.3", string(v))
+
+		require.True(t, it.HasNext())
+		k, v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, "key3", string(k))
 		require.Equal(t, "value3.1", string(v))
+
+		require.False(t, it.HasNext())
+
+		it, err = tx.RangeDescend("Table", nil, nil, 2)
+		require.NoError(t, err)
+
+		cnt := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(t, err)
+			cnt++
+		}
+		require.Equal(t, 2, cnt)
+	})
+}
+
+func TestRangeDupSort(t *testing.T) {
+	t.Run("Asc", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+
+		//[from, to)
+		it, err := tx.RangeDupSort("Table", []byte("key1"), nil, nil, order.Asc, -1)
+		require.NoError(t, err)
+		require.True(t, it.HasNext())
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, "key1", string(k))
+		require.Equal(t, "value1.1", string(v))
+
+		require.True(t, it.HasNext())
+		k, v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, "key1", string(k))
+		require.Equal(t, "value1.3", string(v))
+
+		require.False(t, it.HasNext())
+		require.False(t, it.HasNext())
+
+		// [from, nil) means [from, INF)
+		it, err = tx.Range("Table", []byte("key1"), nil)
+		require.NoError(t, err)
+		cnt := 0
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(t, err)
+			cnt++
+		}
+		require.Equal(t, 4, cnt)
+	})
+	t.Run("Desc", func(t *testing.T) {
+		_, tx, _ := BaseCase(t)
+
+		//[from, to)
+		it, err := tx.RangeDupSort("Table", []byte("key3"), nil, nil, order.Desc, -1)
+		require.NoError(t, err)
+		require.True(t, it.HasNext())
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		require.Equal(t, "key3", string(k))
+		require.Equal(t, "value3.3", string(v))
 
 		require.False(t, it.HasNext())
 
