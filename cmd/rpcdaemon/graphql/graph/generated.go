@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/introspection"
@@ -3907,6 +3908,7 @@ func (ec *executionContext) _Mutation_sendRawTransaction(ctx context.Context, fi
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4282,6 +4284,7 @@ func (ec *executionContext) _Query_block(ctx context.Context, field graphql.Coll
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		return graphql.Null
@@ -4397,6 +4400,7 @@ func (ec *executionContext) _Query_blocks(ctx context.Context, field graphql.Col
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4515,6 +4519,7 @@ func (ec *executionContext) _Query_pending(ctx context.Context, field graphql.Co
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4570,6 +4575,7 @@ func (ec *executionContext) _Query_transaction(ctx context.Context, field graphq
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		return graphql.Null
@@ -4675,6 +4681,7 @@ func (ec *executionContext) _Query_logs(ctx context.Context, field graphql.Colle
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4741,6 +4748,7 @@ func (ec *executionContext) _Query_gasPrice(ctx context.Context, field graphql.C
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4784,6 +4792,7 @@ func (ec *executionContext) _Query_maxPriorityFeePerGas(ctx context.Context, fie
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4827,6 +4836,7 @@ func (ec *executionContext) _Query_syncing(ctx context.Context, field graphql.Co
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		return graphql.Null
@@ -4875,6 +4885,7 @@ func (ec *executionContext) _Query_chainID(ctx context.Context, field graphql.Co
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		if !graphql.HasFieldError(ctx, fc) {
@@ -4918,6 +4929,7 @@ func (ec *executionContext) _Query___type(ctx context.Context, field graphql.Col
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		return graphql.Null
@@ -4991,6 +5003,7 @@ func (ec *executionContext) _Query___schema(ctx context.Context, field graphql.C
 	})
 	if err != nil {
 		ec.Error(ctx, err)
+		return graphql.Null
 	}
 	if resTmp == nil {
 		return graphql.Null
@@ -8771,6 +8784,7 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 	})
 
 	out := graphql.NewFieldSet(fields)
+	var invalids uint32
 	for i, field := range fields {
 		innerCtx := graphql.WithRootFieldContext(ctx, &graphql.RootFieldContext{
 			Object: field.Name,
@@ -8786,11 +8800,17 @@ func (ec *executionContext) _Mutation(ctx context.Context, sel ast.SelectionSet)
 				return ec._Mutation_sendRawTransaction(ctx, field)
 			})
 
+			if out.Values[i] == graphql.Null {
+				invalids++
+			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
 	}
 	out.Dispatch()
+	if invalids > 0 {
+		return graphql.Null
+	}
 	return out
 }
 
@@ -8853,6 +8873,7 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 	})
 
 	out := graphql.NewFieldSet(fields)
+	var invalids uint32
 	for i, field := range fields {
 		innerCtx := graphql.WithRootFieldContext(ctx, &graphql.RootFieldContext{
 			Object: field.Name,
@@ -8892,6 +8913,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_blocks(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -8912,6 +8936,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_pending(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -8952,6 +8979,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_logs(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -8972,6 +9002,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_gasPrice(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -8992,6 +9025,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_maxPriorityFeePerGas(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -9032,6 +9068,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 					}
 				}()
 				res = ec._Query_chainID(ctx, field)
+				if res == graphql.Null {
+					atomic.AddUint32(&invalids, 1)
+				}
 				return res
 			}
 
@@ -9059,6 +9098,9 @@ func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) gr
 		}
 	}
 	out.Dispatch()
+	if invalids > 0 {
+		return graphql.Null
+	}
 	return out
 }
 
