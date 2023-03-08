@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -42,7 +44,6 @@ func init() {
 	withUnwindEvery(stateDomains)
 	withBlock(stateDomains)
 	withIntegrityChecks(stateDomains)
-	withBatchSize(stateDomains)
 	withChain(stateDomains)
 	withHeimdall(stateDomains)
 	withWorkers(stateDomains)
@@ -71,10 +72,16 @@ var stateDomains = &cobra.Command{
 		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
-		db := openDB(dbCfg(kv.ChainDB, chaindata), true)
-		defer db.Close()
+		dirs := datadir.New(datadirCli)
+		chainDb := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		defer chainDb.Close()
 
-		if err := loopProcessDomains(db, ctx); err != nil {
+		stateDB := kv.Label(6)
+
+		stateDb := openDB(dbCfg(stateDB, filepath.Join(dirs.DataDir, "state")), true)
+		defer stateDb.Close()
+
+		if err := loopProcessDomains(chainDb, stateDb, ctx); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Error(err.Error())
 			}
@@ -109,35 +116,26 @@ func ParseCommitmentMode(s string) libstate.CommitmentMode {
 	return mode
 }
 
-func loopProcessDomains(db kv.RwDB, ctx context.Context) error {
-	//dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	//sn, agg := allSnapshots(ctx, db)
-	//defer sn.Close()
-	//defer agg.Close()
-	//var batchSize datasize.ByteSize
-	//must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
+func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	trieVariant := ParseTrieVariant(commitmentTrie)
 	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
 	}
 	mode := ParseCommitmentMode(commitmentMode)
 
-	engine, _, _, agg := newDomains(ctx, db, mode, trieVariant)
+	engine, _, _, agg := newDomains(ctx, chainDb, mode, trieVariant)
 	defer agg.Close()
 
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	must(tx.Commit())
-	tx, err = db.BeginRw(ctx)
+	histTx, err := chainDb.BeginRo(ctx)
 	must(err)
-	defer tx.Rollback()
+	defer histTx.Rollback()
 
-	agg.SetTx(tx)
+	stateTx, err := stateDb.BeginRw(ctx)
+	must(err)
+	defer stateTx.Rollback()
+
+	agg.SetTx(stateTx)
+	defer agg.StartWrites().FinishWrites()
 
 	latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
@@ -153,17 +151,17 @@ func loopProcessDomains(db kv.RwDB, ctx context.Context) error {
 		blockNum  uint64
 		txNum     uint64
 
-		readWrapper  = &ReaderWrapper4{ac: agg.MakeContext(), roTx: tx}
+		readWrapper  = &ReaderWrapper4{ac: agg.MakeContext(), roTx: histTx}
 		writeWrapper = &WriterWrapper4{w: agg}
 		started      = time.Now()
 	)
 
 	commitFn := func(txn uint64) error {
-		if db == nil || tx == nil {
-			return fmt.Errorf("commit failed due to invalid db/rwTx")
+		if stateDb == nil || stateTx == nil {
+			return fmt.Errorf("commit failed due to invalid chainDb/rwTx")
 		}
 		var spaceDirty uint64
-		if spaceDirty, _, err = tx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
+		if spaceDirty, _, err = stateTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
 			return fmt.Errorf("retrieving spaceDirty: %w", err)
 		}
 		if spaceDirty >= dirtySpaceThreshold {
@@ -173,42 +171,45 @@ func loopProcessDomains(db kv.RwDB, ctx context.Context) error {
 		if err := agg.Flush(ctx); err != nil {
 			return err
 		}
-		if err = tx.Commit(); err != nil {
+		if err = stateTx.Commit(); err != nil {
 			return err
 		}
 		if interrupt {
 			return nil
 		}
 
-		if tx, err = db.BeginRw(ctx); err != nil {
+		if stateTx, err = stateDb.BeginRw(ctx); err != nil {
 			return err
 		}
 
 		readWrapper.ac.Close()
-		agg.SetTx(tx)
-		readWrapper.roTx = tx
+		agg.SetTx(stateTx)
+		readWrapper.roTx = stateTx
 		readWrapper.ac = agg.MakeContext()
 		return nil
 	}
 
-	blockReader := getBlockReader(db)
+	blockReader := getBlockReader(chainDb)
 	mergedRoots := agg.AggregatedRoots()
 
 	proc := blockProcessor{
-		chainConfig: fromdb.ChainConfig(db),
+		chainConfig: fromdb.ChainConfig(chainDb),
 		vmConfig:    vm.Config{},
 		engine:      engine,
 		reader:      readWrapper,
 		writer:      writeWrapper,
 		blockReader: blockReader,
+		agg:         agg,
 		getHeader: func(hash libcommon.Hash, number uint64) *types.Header {
-			h, err := blockReader.Header(ctx, tx /*, historyTx*/, hash, number)
+			h, err := blockReader.Header(ctx, histTx /*, historyTx*/, hash, number)
 			if err != nil {
 				panic(err)
 			}
 			return h
 		},
 	}
+
+	go proc.PrintStatsLoop(ctx, 30*time.Second, log.New())
 
 	if startTxNum == 0 {
 		genesis := core.DefaultGenesisBlockByChainName(chain)
@@ -218,7 +219,7 @@ func loopProcessDomains(db kv.RwDB, ctx context.Context) error {
 	}
 
 	for {
-		err := proc.ProcessNext(ctx, tx)
+		err := proc.ProcessNext(ctx, stateTx)
 		if err != nil {
 			return err
 		}
@@ -228,18 +229,18 @@ func loopProcessDomains(db kv.RwDB, ctx context.Context) error {
 		case <-ctx.Done():
 			interrupt = true
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-			if err := agg.Flush(ctx); err != nil {
+			if err := proc.agg.Flush(ctx); err != nil {
 				log.Error("aggregator flush", "err", err)
 			}
 
 			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit", "err", err)
+				log.Error("chainDb commit", "err", err)
 			}
 			return nil
-		case <-mergedRoots:
+		case <-mergedRoots: // notified with rootHash of latest aggregation
 			if err := commitFn(txNum); err != nil {
-				log.Error("db commit on merge", "err", err)
+				log.Error("chainDb commit on merge", "err", err)
 			}
 		default:
 		}
@@ -252,6 +253,7 @@ type blockProcessor struct {
 	chainConfig *chain2.Config
 	engine      consensus.Engine
 	agg         *libstate.Aggregator
+	stat        stat4
 	trace       bool
 
 	blockReader services.FullBlockReader
@@ -262,6 +264,20 @@ type blockProcessor struct {
 	txNum    uint64
 
 	getHeader func(hash libcommon.Hash, number uint64) *types.Header
+}
+
+func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Duration, logger log.Logger) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.stat.delta(b.blockNum, b.txNum).print(b.agg.Stats(), logger)
+		}
+	}
 }
 
 func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
@@ -313,18 +329,18 @@ func (b *blockProcessor) ProcessNext(ctx context.Context, tx kv.RwTx) error {
 	b.agg.SetTx(tx)
 	b.agg.SetTxNum(b.txNum)
 
-	if _, err = b.processBlock4(startTxNum, b.reader, b.writer, block); err != nil {
+	if _, err = b.applyBlock(startTxNum, b.reader, b.writer, block); err != nil {
 		log.Error("processing error", "block", b.blockNum, "err", err)
 		return fmt.Errorf("processing block %d: %w", b.blockNum, err)
 	}
 	return err
 }
 
-func (b *blockProcessor) processBlock4(
-	startTxNum uint64,
-	rw *ReaderWrapper4,
-	ww *WriterWrapper4,
-	block *types.Block,
+func (b *blockProcessor) applyBlock(
+	 startTxNum uint64,
+	 rw *ReaderWrapper4,
+	 ww *WriterWrapper4,
+	 block *types.Block,
 ) (types.Receipts, error) {
 	//defer blockExecutionTimer.UpdateDuration(time.Now())
 
@@ -336,8 +352,8 @@ func (b *blockProcessor) processBlock4(
 	rules := b.chainConfig.Rules(block.NumberU64(), block.Time())
 
 	rw.blockNum = block.NumberU64()
-	ww.SetBlockNum(block.NumberU64())
-	ww.SetTxNum(b.txNum)
+	b.blockNum = rw.blockNum
+	ww.w.SetTxNum(b.txNum)
 
 	daoFork := b.txNum >= startTxNum && b.chainConfig.DAOForkSupport && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
@@ -353,7 +369,7 @@ func (b *blockProcessor) processBlock4(
 	}
 
 	b.txNum++ // Pre-block transaction
-	ww.SetTxNum(b.txNum)
+	ww.w.SetTxNum(b.txNum)
 	if err := ww.w.FinishTx(); err != nil {
 		return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
 	}
@@ -399,7 +415,7 @@ func (b *blockProcessor) processBlock4(
 			}
 		}
 		b.txNum++
-		ww.SetTxNum(b.txNum)
+		ww.w.SetTxNum(b.txNum)
 	}
 
 	if b.txNum >= startTxNum {
@@ -440,7 +456,7 @@ func (b *blockProcessor) processBlock4(
 	}
 
 	b.txNum++ // Post-block transaction
-	ww.SetTxNum(b.txNum)
+	ww.w.SetTxNum(b.txNum)
 	if b.txNum >= startTxNum {
 		if block.Number().Uint64()%uint64(commitmentFreq) == 0 {
 			rootHash, err := ww.w.ComputeCommitment(true, b.trace)
@@ -468,69 +484,7 @@ type ReaderWrapper4 struct {
 }
 
 type WriterWrapper4 struct {
-	w               *libstate.Aggregator
-	blockNum, txNum uint64
-	stat            stat4
-}
-
-type stat4 struct {
-	prevBlock    uint64
-	blockNum     uint64
-	hits         uint64
-	misses       uint64
-	hitMissRatio float64
-	blockSpeed   float64
-	txSpeed      float64
-	prevTxNum    uint64
-	txNum        uint64
-	prevTime     time.Time
-	mem          runtime.MemStats
-}
-
-func (ww *WriterWrapper4) PrintStatsLoop(ctx context.Context, interval time.Duration, logger log.Logger) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			ww.stat.delta(ww.blockNum, ww.txNum).print(ww.w.Stats(), logger)
-		}
-	}
-}
-
-func (s *stat4) print(aStats libstate.FilesStats, logger log.Logger) {
-	totalFiles := aStats.FilesCount
-	totalDatSize := aStats.DataSize
-	totalIdxSize := aStats.IdxSize
-
-	logger.Info("Progress", "block", s.blockNum, "blk/s", s.blockSpeed, "tx", s.txNum, "txn/s", s.txSpeed, "state files", totalFiles,
-		"total dat", libcommon.ByteCount(totalDatSize), "total idx", libcommon.ByteCount(totalIdxSize),
-		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
-		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
-	)
-}
-
-func (s *stat4) delta(blockNum, txNum uint64) *stat4 {
-	currentTime := time.Now()
-	dbg.ReadMemStats(&s.mem)
-
-	interval := currentTime.Sub(s.prevTime).Seconds()
-	s.blockNum = blockNum
-	s.blockSpeed = float64(s.blockNum-s.prevBlock) / interval
-	s.txNum = txNum
-	s.txSpeed = float64(s.txNum-s.prevTxNum) / interval
-	s.prevBlock = blockNum
-	s.prevTxNum = txNum
-	s.prevTime = currentTime
-
-	total := s.hits + s.misses
-	if total > 0 {
-		s.hitMissRatio = float64(s.hits) / float64(total)
-	}
-	return s
+	w *libstate.Aggregator
 }
 
 func (rw *ReaderWrapper4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
@@ -691,15 +645,6 @@ func (ww *WriterWrapper4) CreateContract(address libcommon.Address) error {
 	return nil
 }
 
-func (ww *WriterWrapper4) SetBlockNum(blockNum uint64) {
-	ww.blockNum = blockNum
-}
-
-func (ww *WriterWrapper4) SetTxNum(txNum uint64) {
-	ww.txNum = txNum
-	ww.w.SetTxNum(txNum)
-}
-
 func bytesToUint64(buf []byte) (x uint64) {
 	for i, b := range buf {
 		x = x<<8 + uint64(b)
@@ -709,3 +654,50 @@ func bytesToUint64(buf []byte) (x uint64) {
 	}
 	return
 }
+
+type stat4 struct {
+	prevBlock    uint64
+	blockNum     uint64
+	hits         uint64
+	misses       uint64
+	hitMissRatio float64
+	blockSpeed   float64
+	txSpeed      float64
+	prevTxNum    uint64
+	txNum        uint64
+	prevTime     time.Time
+	mem          runtime.MemStats
+}
+
+func (s *stat4) print(aStats libstate.FilesStats, logger log.Logger) {
+	totalFiles := aStats.FilesCount
+	totalDatSize := aStats.DataSize
+	totalIdxSize := aStats.IdxSize
+
+	logger.Info("Progress", "block", s.blockNum, "blk/s", s.blockSpeed, "tx", s.txNum, "txn/s", s.txSpeed, "state files", totalFiles,
+		"total dat", libcommon.ByteCount(totalDatSize), "total idx", libcommon.ByteCount(totalIdxSize),
+		"hit ratio", s.hitMissRatio, "hits+misses", s.hits+s.misses,
+		"alloc", libcommon.ByteCount(s.mem.Alloc), "sys", libcommon.ByteCount(s.mem.Sys),
+	)
+}
+
+func (s *stat4) delta(blockNum, txNum uint64) *stat4 {
+	currentTime := time.Now()
+	dbg.ReadMemStats(&s.mem)
+
+	interval := currentTime.Sub(s.prevTime).Seconds()
+	s.blockNum = blockNum
+	s.blockSpeed = float64(s.blockNum-s.prevBlock) / interval
+	s.txNum = txNum
+	s.txSpeed = float64(s.txNum-s.prevTxNum) / interval
+	s.prevBlock = blockNum
+	s.prevTxNum = txNum
+	s.prevTime = currentTime
+
+	total := s.hits + s.misses
+	if total > 0 {
+		s.hitMissRatio = float64(s.hits) / float64(total)
+	}
+	return s
+}
+

@@ -1275,13 +1275,11 @@ func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, t
 
 func newDomains(ctx context.Context, db kv.RwDB, mode libstate.CommitmentMode, trie commitment.TrieVariant) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
-	//vmConfig := &vm.Config{}
-	//
 	//events := shards.NewEvents()
 	genesis := core.DefaultGenesisBlockByChainName(chain)
 
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
-	_ = genesisBlock
+	_ = genesisBlock // TODO apply if needed here
 
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
@@ -1306,13 +1304,11 @@ func newDomains(ctx context.Context, db kv.RwDB, mode libstate.CommitmentMode, t
 	//	cfg.Miner = *miningConfig
 	//}
 	cfg.Dirs = datadir.New(datadirCli)
+
 	allSn, agg := allDomains(ctx, db, mode, trie)
 	cfg.Snapshot = allSn.Cfg()
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
-
-	//br := getBlockReader(db)
-
 	return engine, cfg, allSn, agg
 }
 
