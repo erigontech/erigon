@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -28,17 +30,19 @@ func NewHttpBlockSource(url string) HttpBlockSource {
 	}
 }
 
-type jsonRequest struct {
+type jsonResponse struct {
 	Jsonrpc string
-	Method  string
-	Params  []string
+	Id      int
+	Result  string
+	Error   interface{}
 }
 
-func makeBlockRequest(fromBlock uint64) jsonRequest {
-	return jsonRequest{
-		Jsonrpc: "2.0",
-		Method:  "ic_getBlocks",
-		Params:  []string{fmt.Sprintf("%x", fromBlock)},
+func makeBlockRequest(fromBlock uint64) map[string]interface{} {
+	return map[string]interface{}{
+		"jsonrpc": "2.0",
+		"method":  "ic_getBlocksRLP",
+		"params":  []string{fmt.Sprintf("0x%02x", fromBlock)},
+		"id":      1,
 	}
 }
 
@@ -54,10 +58,19 @@ func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 	if err != nil {
 		return nil, err
 	}
-
 	defer resp.Body.Close()
 
-	stream := rlp.NewStream(resp.Body, 0)
+	decoder := json.NewDecoder(resp.Body)
+	var response jsonResponse
+	if err = decoder.Decode(&response); err != nil {
+		return nil, err
+	}
+
+	if response.Error != nil {
+		return nil, fmt.Errorf("%v", response.Error)
+	}
+
+	stream := rlp.NewStream(hex.NewDecoder(strings.NewReader(response.Result)), 0)
 	blocksNum, err := stream.List()
 	if err != nil {
 		return nil, err
