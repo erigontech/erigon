@@ -3,16 +3,16 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230308024012-597cb94aabb1
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230309041000-63ebb2a26987
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.8
+	github.com/torquem-ch/mdbx-go v0.27.10
 )
 
 require (
-	github.com/99designs/gqlgen v0.17.25
+	github.com/99designs/gqlgen v0.17.26
 	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1

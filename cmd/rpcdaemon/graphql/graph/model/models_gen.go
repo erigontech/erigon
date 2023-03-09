@@ -30,7 +30,7 @@ type Block struct {
 	GasUsed           uint64         `json:"gasUsed"`
 	BaseFeePerGas     *string        `json:"baseFeePerGas"`
 	NextBaseFeePerGas *string        `json:"nextBaseFeePerGas"`
-	Timestamp         uint64         `json:"timestamp"`
+	Timestamp         string         `json:"timestamp"`
 	LogsBloom         string         `json:"logsBloom"`
 	MixHash           string         `json:"mixHash"`
 	Difficulty        string         `json:"difficulty"`
@@ -102,7 +102,7 @@ type SyncState struct {
 
 type Transaction struct {
 	Hash                 string         `json:"hash"`
-	Nonce                uint64         `json:"nonce"`
+	Nonce                string         `json:"nonce"`
 	Index                *int           `json:"index"`
 	From                 *Account       `json:"from"`
 	To                   *Account       `json:"to"`
