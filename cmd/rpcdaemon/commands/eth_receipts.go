@@ -551,7 +551,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			if err != nil {
 				return nil, err
 			}
-			topicsUnion = iter.Union[uint64](topicsUnion, it)
+			topicsUnion = iter.Union[uint64](topicsUnion, it, order.Asc)
 		}
 
 		if res == nil {
@@ -569,7 +569,7 @@ func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64)
 		if err != nil {
 			return nil, err
 		}
-		res = iter.Union[uint64](res, it)
+		res = iter.Union[uint64](res, it, order.Asc)
 	}
 	return res, nil
 }
