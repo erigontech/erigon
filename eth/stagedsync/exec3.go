@@ -333,16 +333,16 @@ func ExecV3(ctx context.Context,
 						// too much steps in db will slow-down everything: flush and prune
 						// it means better spend time for pruning, before flushing more data to db
 						// also better do it now - instead of before Commit() - because Commit does block execution
-						if stepsInDBAfterCommit > 10 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
+						if stepsInDBAfterCommit > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						}
 
-						if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
+						if err = agg.Flush(ctx, tx); err != nil {
 							return err
 						}
-						if err = agg.Flush(ctx, tx); err != nil {
+						if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
 							return err
 						}
 						break
