@@ -19,7 +19,7 @@ package p2p
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"errors"
 	"io"
 	"math/rand"

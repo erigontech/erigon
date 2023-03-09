@@ -1,7 +1,7 @@
 package state
 
 import (
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"encoding/binary"
 
 	lru "github.com/hashicorp/golang-lru"

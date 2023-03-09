@@ -37,7 +37,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/elliptic"
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"crypto/sha512"
 	"fmt"
 	"hash"

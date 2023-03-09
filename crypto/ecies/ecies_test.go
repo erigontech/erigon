@@ -33,7 +33,7 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"encoding/hex"
 	"flag"
 	"fmt"

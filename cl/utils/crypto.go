@@ -14,7 +14,7 @@
 package utils
 
 import (
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"hash"
 	"sync"
 )
