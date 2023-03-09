@@ -405,7 +405,9 @@ func (b *BeaconState) DecodeSSZWithVersion(buf []byte, version int) error {
 	if b.inactivityScores, err = ssz_utils.DecodeNumbersList(buf, inactivityScoresOffset, endOffset, state_encoding.ValidatorRegistryLimit); err != nil {
 		return err
 	}
-
+	if b.version == clparams.AltairVersion {
+		return nil
+	}
 	endOffset = uint32(len(buf))
 	if historicalSummariesOffset != 0 {
 		endOffset = historicalSummariesOffset

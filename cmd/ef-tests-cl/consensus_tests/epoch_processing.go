@@ -107,3 +107,8 @@ var slashingsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error
 	transition.ProcessSlashingsReset(s)
 	return nil
 })
+
+var recordsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessParticipationRecordUpdates(s)
+	return nil
+})

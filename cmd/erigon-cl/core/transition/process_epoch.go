@@ -34,9 +34,7 @@ func ProcessEpoch(state *state.BeaconState) error {
 		return err
 	}
 	if state.Version() == clparams.Phase0Version {
-		if err := ProcessParticipationRecordUpdates(state); err != nil {
-			return err
-		}
+		ProcessParticipationRecordUpdates(state)
 	}
 
 	if state.Version() >= clparams.AltairVersion {
@@ -75,6 +73,7 @@ func ProcessEpoch(state *state.BeaconState) error {
 	*/
 }
 
-func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
-	panic("not implemented")
+func ProcessParticipationRecordUpdates(state *state.BeaconState) {
+	state.SetPreviousEpochAtteastations(state.CurrentEpochAttestations())
+	state.SetCurrentEpochAtteastations(nil)
 }

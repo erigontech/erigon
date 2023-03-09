@@ -15,6 +15,7 @@ package utils
 
 import (
 	"encoding/binary"
+	"math/bits"
 
 	"github.com/golang/snappy"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
@@ -104,4 +105,24 @@ func IsSliceSortedSet(vals []uint64) bool {
 		}
 	}
 	return true
+}
+
+// getBitlistLength return the amount of bits in given bitlist.
+func GetBitlistLength(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	// The most significant bit is present in the last byte in the array.
+	last := b[len(b)-1]
+
+	// Determine the position of the most significant bit.
+	msb := bits.Len8(last)
+	if msb == 0 {
+		return 0
+	}
+
+	// The absolute position of the most significant bit will be the number of
+	// bits in the preceding bytes plus the position of the most significant
+	// bit. Subtract this value by 1 to determine the length of the bitlist.
+	return 8*(len(b)-1) + msb - 1
 }

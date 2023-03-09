@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/binary"
 	"fmt"
-	"math/bits"
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -385,32 +384,12 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
-// getBitlistLength return the amount of bits in given bitlist.
-func getBitlistLength(b []byte) int {
-	if len(b) == 0 {
-		return 0
-	}
-	// The most significant bit is present in the last byte in the array.
-	last := b[len(b)-1]
-
-	// Determine the position of the most significant bit.
-	msb := bits.Len8(last)
-	if msb == 0 {
-		return 0
-	}
-
-	// The absolute position of the most significant bit will be the number of
-	// bits in the preceding bytes plus the position of the most significant
-	// bit. Subtract this value by 1 to determine the length of the bitlist.
-	return 8*(len(b)-1) + msb - 1
-}
-
 func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
 	}
-	if getBitlistLength(aggregationBits) != len(committee) {
+	if utils.GetBitlistLength(aggregationBits) != len(committee) {
 		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits")
 	}
 	attestingIndices := []uint64{}
@@ -541,4 +520,60 @@ func (b *BeaconState) ExpectedWithdrawals() []*types.Withdrawal {
 
 	// Return the withdrawals slice
 	return withdrawals
+}
+
+// MatchingSourceAttestations retrieves pending attestations for specific epoch.
+func (b *BeaconState) MatchingSourceAttestations(epoch uint64) ([]*cltypes.PendingAttestation, error) {
+	if b.version == clparams.Phase0Version {
+		panic("can call GetMatchingSourceAttestations only on Phase0")
+	}
+	if epoch == b.PreviousEpoch() {
+		return b.previousEpochAttestations, nil
+	} else if epoch == b.Epoch() {
+		return b.currentEpochAttestations, nil
+	} else {
+		return nil, fmt.Errorf("GetMatchingSourceAttestations: invalid epoch")
+	}
+}
+
+// MatchingTargetAttestations retrieves pending attestations for specific epoch, whose vote went on the block root.
+func (b *BeaconState) MatchingTargetAttestations(epoch uint64) ([]*cltypes.PendingAttestation, error) {
+	if b.version == clparams.Phase0Version {
+		panic("can call GetMatchingTargetAttestations only on Phase0")
+	}
+	sourceAttestations, err := b.MatchingSourceAttestations(epoch)
+	if err != nil {
+		return nil, err
+	}
+	ret := []*cltypes.PendingAttestation{}
+	blockRoot, err := b.GetBlockRoot(epoch)
+	if err != nil {
+		return nil, err
+	}
+	// Now we filter then
+	for _, attestation := range sourceAttestations {
+		if blockRoot != attestation.Data.Target.Root {
+			continue
+		}
+		ret = append(ret, attestation)
+	}
+	return ret, nil
+}
+
+// UnslashedAttestingBalance total balance of attesting indicies.
+func (b *BeaconState) UnslashedAttestingBalance(attestations []*cltypes.PendingAttestation) (uint64, error) {
+	sum := uint64(0)
+	for _, attestation := range attestations {
+		attestingIndicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+		if err != nil {
+			return 0, err
+		}
+		for _, index := range attestingIndicies {
+			if b.validators[index].Slashed {
+				continue
+			}
+			sum += b.validators[index].EffectiveBalance
+		}
+	}
+	return sum, nil
 }
