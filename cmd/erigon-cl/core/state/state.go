@@ -1,8 +1,8 @@
 package state
 
 import (
-	"github.com/minio/sha256-simd"
 	"encoding/binary"
+	"github.com/minio/sha256-simd"
 
 	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

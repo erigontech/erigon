@@ -37,9 +37,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/elliptic"
-	"github.com/minio/sha256-simd"
 	"crypto/sha512"
 	"fmt"
+	"github.com/minio/sha256-simd"
 	"hash"
 
 	ethcrypto "github.com/ledgerwatch/erigon/crypto"
