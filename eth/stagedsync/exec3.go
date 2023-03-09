@@ -339,10 +339,10 @@ func ExecV3(ctx context.Context,
 							}
 						}
 
-						if err = agg.Flush(ctx, tx); err != nil {
+						if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
 							return err
 						}
-						if err = agg.PruneWithTiemout(ctx, 2*time.Second); err != nil {
+						if err = agg.Flush(ctx, tx); err != nil {
 							return err
 						}
 						break
