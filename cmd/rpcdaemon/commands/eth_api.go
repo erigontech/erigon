@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -92,7 +93,7 @@ type EthAPI interface {
 	SendTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject interface{}) (common.Hash, error)
-	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi2.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)

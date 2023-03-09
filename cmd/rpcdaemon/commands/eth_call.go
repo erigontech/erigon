@@ -15,10 +15,12 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -27,6 +29,7 @@ import (
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
@@ -300,10 +303,69 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	return hexutil.Uint64(hi), nil
 }
 
-// GetProof not implemented
-func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []string, blockNr rpc.BlockNumber) (*interface{}, error) {
-	var stub interface{}
-	return &stub, fmt.Errorf(NotImplemented, "eth_getProof")
+// GetProof is partially implemented; no Storage proofs; only for the latest block
+func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	} else if blockNr != latestBlock {
+		return nil, fmt.Errorf(NotImplemented, "eth_getProof for block != latest")
+	} else if len(storageKeys) != 0 {
+		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
+	} else {
+		addrHash, err := common.HashData(address[:])
+		if err != nil {
+			return nil, err
+		}
+
+		rl := trie.NewRetainList(0)
+		rl.AddKey(addrHash[:])
+
+		loader := trie.NewFlatDBTrieLoader("getProof")
+		trace := true
+		if err := loader.Reset(rl, nil, nil, trace); err != nil {
+			return nil, err
+		}
+
+		var accProof accounts.AccProofResult
+		accProof.Address = address
+
+		// Fill in the Account fields here to reduce the code changes
+		// needed in turbo/trie/hashbuilder.go
+		reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
+		if err != nil {
+			return nil, err
+		}
+		a, err := reader.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+		if a != nil {
+			accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
+			accProof.CodeHash = a.CodeHash
+			accProof.Nonce = hexutil.Uint64(a.Nonce)
+			accProof.StorageHash = a.Root
+		}
+
+		loader.SetProofReturn(&accProof)
+		_, err = loader.CalcTrieRoot(tx, nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		return &accProof, nil
+	}
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
