@@ -1927,7 +1927,7 @@ func (ec *executionContext) _Block_nonce(ctx context.Context, field graphql.Coll
 	}
 	res := resTmp.(string)
 	fc.Result = res
-	return ec.marshalNBytes2string(ctx, field.Selections, res)
+	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_nonce(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -1937,7 +1937,7 @@ func (ec *executionContext) fieldContext_Block_nonce(ctx context.Context, field 
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Bytes does not have child fields")
+			return nil, errors.New("field of type BigInt does not have child fields")
 		},
 	}
 	return fc, nil
@@ -2423,9 +2423,9 @@ func (ec *executionContext) _Block_timestamp(ctx context.Context, field graphql.
 		}
 		return graphql.Null
 	}
-	res := resTmp.(uint64)
+	res := resTmp.(string)
 	fc.Result = res
-	return ec.marshalNLong2uint64(ctx, field.Selections, res)
+	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Block_timestamp(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -2435,7 +2435,7 @@ func (ec *executionContext) fieldContext_Block_timestamp(ctx context.Context, fi
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Long does not have child fields")
+			return nil, errors.New("field of type BigInt does not have child fields")
 		},
 	}
 	return fc, nil
@@ -5242,9 +5242,9 @@ func (ec *executionContext) _Transaction_nonce(ctx context.Context, field graphq
 		}
 		return graphql.Null
 	}
-	res := resTmp.(uint64)
+	res := resTmp.(string)
 	fc.Result = res
-	return ec.marshalNLong2uint64(ctx, field.Selections, res)
+	return ec.marshalNBigInt2string(ctx, field.Selections, res)
 }
 
 func (ec *executionContext) fieldContext_Transaction_nonce(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
@@ -5254,7 +5254,7 @@ func (ec *executionContext) fieldContext_Transaction_nonce(ctx context.Context, 
 		IsMethod:   false,
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Long does not have child fields")
+			return nil, errors.New("field of type BigInt does not have child fields")
 		},
 	}
 	return fc, nil
