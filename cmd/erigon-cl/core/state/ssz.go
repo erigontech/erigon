@@ -53,11 +53,12 @@ func (b *BeaconState) EncodeSSZ(buf []byte) ([]byte, error) {
 		return nil, fmt.Errorf("too many balances")
 	}
 
+	maxEpochAttestations := int(b.beaconConfig.SlotsPerEpoch * b.beaconConfig.MaxAttestations)
 	if b.version != clparams.Phase0Version && len(b.previousEpochParticipation) > state_encoding.ValidatorRegistryLimit || len(b.currentEpochParticipation) > state_encoding.ValidatorRegistryLimit {
 		return nil, fmt.Errorf("too many participations")
 	}
 
-	if b.version == clparams.Phase0Version && len(b.previousEpochAttestations) > state_encoding.ValidatorRegistryLimit || len(b.currentEpochAttestations) > state_encoding.ValidatorRegistryLimit {
+	if b.version == clparams.Phase0Version && len(b.previousEpochAttestations) > maxEpochAttestations || len(b.currentEpochAttestations) > maxEpochAttestations {
 		return nil, fmt.Errorf("too many participations")
 	}
 
