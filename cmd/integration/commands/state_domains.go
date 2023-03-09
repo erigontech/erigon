@@ -208,7 +208,6 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		default:
 		}
 	}
-	return nil
 }
 
 type blockProcessor struct {
@@ -341,8 +340,8 @@ func (b *blockProcessor) ProcessNext(ctx context.Context) error {
 }
 
 func (b *blockProcessor) applyBlock(
-	 ctx context.Context,
-	 block *types.Block,
+	ctx context.Context,
+	block *types.Block,
 ) (types.Receipts, error) {
 	//defer blockExecutionTimer.UpdateDuration(time.Now())
 
