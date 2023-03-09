@@ -76,9 +76,16 @@ var stateDomains = &cobra.Command{
 		chainDb := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
 		defer chainDb.Close()
 
-		stateDB := kv.Label(6)
+		//stateDB := kv.Label(6)
+		//stateOpts := dbCfg(stateDB, filepath.Join(dirs.DataDir, "statedb")).WriteMap()
+		//stateOpts.MapSize(1 * datasize.TB).WriteMap().DirtySpace(dirtySpaceThreshold)
+		//stateDb := openDB(stateOpts, true)
+		//defer stateDb.Close()
 
-		stateDb := openDB(dbCfg(stateDB, filepath.Join(dirs.DataDir, "state")), true)
+		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap().Open()
+		if err != nil {
+			return
+		}
 		defer stateDb.Close()
 
 		if err := loopProcessDomains(chainDb, stateDb, ctx); err != nil {
@@ -144,74 +151,30 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	if latestTx < startTxNum {
 		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
 	}
-	fmt.Printf("Max txNum in files: %d\n", latestTx)
-
-	var (
-		interrupt bool
-		blockNum  uint64
-		txNum     uint64
-
-		readWrapper  = &ReaderWrapper4{ac: agg.MakeContext(), roTx: histTx}
-		writeWrapper = &WriterWrapper4{w: agg}
-		started      = time.Now()
-	)
-
-	commitFn := func(txn uint64) error {
-		if stateDb == nil || stateTx == nil {
-			return fmt.Errorf("commit failed due to invalid chainDb/rwTx")
-		}
-		var spaceDirty uint64
-		if spaceDirty, _, err = stateTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
-			return fmt.Errorf("retrieving spaceDirty: %w", err)
-		}
-		if spaceDirty >= dirtySpaceThreshold {
-			log.Info("Initiated tx commit", "block", blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
-		}
-		log.Info("database commitment", "block", blockNum, "txNum", txn, "uptime", time.Since(started))
-		if err := agg.Flush(ctx); err != nil {
-			return err
-		}
-		if err = stateTx.Commit(); err != nil {
-			return err
-		}
-		if interrupt {
-			return nil
-		}
-
-		if stateTx, err = stateDb.BeginRw(ctx); err != nil {
-			return err
-		}
-
-		readWrapper.ac.Close()
-		agg.SetTx(stateTx)
-		readWrapper.roTx = stateTx
-		readWrapper.ac = agg.MakeContext()
-		return nil
+	if latestTx > 0 {
+		log.Info("Max txNum in files", "txn", latestTx)
 	}
-
-	blockReader := getBlockReader(chainDb)
-	mergedRoots := agg.AggregatedRoots()
 
 	proc := blockProcessor{
 		chainConfig: fromdb.ChainConfig(chainDb),
 		vmConfig:    vm.Config{},
 		engine:      engine,
-		reader:      readWrapper,
-		writer:      writeWrapper,
-		blockReader: blockReader,
+		reader:      &ReaderWrapper4{ac: agg.MakeContext(), roTx: stateTx},
+		writer:      &WriterWrapper4{w: agg},
+		blockReader: getBlockReader(chainDb),
+		stateTx:     stateTx,
+		stateDb:     stateDb,
+		startTxNum:  latestTx,
+		histTx:      histTx,
 		agg:         agg,
-		getHeader: func(hash libcommon.Hash, number uint64) *types.Header {
-			h, err := blockReader.Header(ctx, histTx /*, historyTx*/, hash, number)
-			if err != nil {
-				panic(err)
-			}
-			return h
-		},
+		logger:      log.New(),
+		stat:        stat4{startedAt: time.Now()},
 	}
 
-	go proc.PrintStatsLoop(ctx, 30*time.Second, log.New())
+	mergedRoots := agg.AggregatedRoots()
+	go proc.PrintStatsLoop(ctx, 30*time.Second)
 
-	if startTxNum == 0 {
+	if proc.startTxNum == 0 {
 		genesis := core.DefaultGenesisBlockByChainName(chain)
 		if err := proc.ApplyGenesis(genesis); err != nil {
 			return err
@@ -219,7 +182,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	}
 
 	for {
-		err := proc.ProcessNext(ctx, stateTx)
+		err := proc.ProcessNext(ctx)
 		if err != nil {
 			return err
 		}
@@ -227,19 +190,19 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		// Check for interrupts
 		select {
 		case <-ctx.Done():
-			interrupt = true
 			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
 			if err := proc.agg.Flush(ctx); err != nil {
 				log.Error("aggregator flush", "err", err)
 			}
 
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
-			if err := commitFn(txNum); err != nil {
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", proc.txNum))
+
+			if err := proc.commit(ctx); err != nil {
 				log.Error("chainDb commit", "err", err)
 			}
 			return nil
 		case <-mergedRoots: // notified with rootHash of latest aggregation
-			if err := commitFn(txNum); err != nil {
+			if err := proc.commit(ctx); err != nil {
 				log.Error("chainDb commit on merge", "err", err)
 			}
 		default:
@@ -249,24 +212,67 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 }
 
 type blockProcessor struct {
-	vmConfig    vm.Config
-	chainConfig *chain2.Config
 	engine      consensus.Engine
 	agg         *libstate.Aggregator
-	stat        stat4
-	trace       bool
-
 	blockReader services.FullBlockReader
 	writer      *WriterWrapper4
 	reader      *ReaderWrapper4
-
-	blockNum uint64
-	txNum    uint64
-
-	getHeader func(hash libcommon.Hash, number uint64) *types.Header
+	stateDb     kv.RwDB
+	stateTx     kv.RwTx
+	histTx      kv.Tx
+	blockNum    uint64
+	startTxNum  uint64
+	txNum       uint64
+	stat        stat4
+	trace       bool
+	logger      log.Logger
+	vmConfig    vm.Config
+	chainConfig *chain2.Config
 }
 
-func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Duration, logger log.Logger) {
+func (b *blockProcessor) getHeader(hash libcommon.Hash, number uint64) *types.Header {
+	h, err := b.blockReader.Header(context.Background(), b.histTx, hash, number)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+func (b *blockProcessor) commit(ctx context.Context) error {
+	if b.stateDb == nil || b.stateTx == nil {
+		return fmt.Errorf("commit failed due to invalid chainDb/rwTx")
+	}
+
+	var spaceDirty uint64
+	var err error
+	if spaceDirty, _, err = b.stateTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
+		return fmt.Errorf("retrieving spaceDirty: %w", err)
+	}
+	if spaceDirty >= dirtySpaceThreshold {
+		b.logger.Info("Initiated tx commit", "block", b.blockNum, "space dirty", libcommon.ByteCount(spaceDirty))
+	}
+
+	b.logger.Info("database commitment", "block", b.blockNum, "txNum", b.txNum, "uptime", time.Since(b.stat.startedAt))
+	if err := b.agg.Flush(ctx); err != nil {
+		return err
+	}
+	if err = b.stateTx.Commit(); err != nil {
+		return err
+	}
+
+	if b.stateTx, err = b.stateDb.BeginRw(ctx); err != nil {
+		return err
+	}
+
+	b.reader.ac.Close()
+	b.agg.SetTx(b.stateTx)
+	b.reader.roTx = b.stateTx
+	b.reader.ac = b.agg.MakeContext()
+
+	return nil
+}
+
+func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -275,12 +281,13 @@ func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Durat
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			b.stat.delta(b.blockNum, b.txNum).print(b.agg.Stats(), logger)
+			b.stat.delta(b.blockNum, b.txNum).print(b.agg.Stats(), b.logger)
 		}
 	}
 }
 
 func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
+	b.logger.Info("apply genesis", "chain_id", genesis.Config.ChainID)
 	genBlock, genesisIbs, err := genesis.ToBlock("")
 	if err != nil {
 		return err
@@ -299,47 +306,42 @@ func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
 	}
 
 	genesisRootHash := genBlock.Root()
-	if blockRootMismatchExpected && !bytes.Equal(blockRootHash, genesisRootHash[:]) {
+	if !blockRootMismatchExpected && !bytes.Equal(blockRootHash, genesisRootHash[:]) {
 		return fmt.Errorf("genesis root hash mismatch: expected %x got %x", genesisRootHash, blockRootHash)
 	}
 	return nil
 }
 
-func (b *blockProcessor) blockHeader(hash libcommon.Hash, number uint64) *types.Header {
-	return b.getHeader(hash, number)
-}
-
-func (b *blockProcessor) ProcessNext(ctx context.Context, tx kv.RwTx) error {
+func (b *blockProcessor) ProcessNext(ctx context.Context) error {
 	b.blockNum++
 	b.trace = traceFromTx > 0 && b.txNum == traceFromTx
-	blockHash, err := b.blockReader.CanonicalHash(ctx, tx, b.blockNum)
+
+	blockHash, err := b.blockReader.CanonicalHash(ctx, b.histTx, b.blockNum)
 	if err != nil {
 		return err
 	}
 
-	block, _, err := b.blockReader.BlockWithSenders(ctx, tx, blockHash, b.blockNum)
+	block, _, err := b.blockReader.BlockWithSenders(ctx, b.histTx, blockHash, b.blockNum)
 	if err != nil {
 		return err
 	}
 	if block == nil {
-		log.Info("history: block is nil", "block", b.blockNum)
+		b.logger.Info("history: block is nil", "block", b.blockNum)
 		return fmt.Errorf("block %d is nil", b.blockNum)
 	}
 
-	b.agg.SetTx(tx)
+	b.agg.SetTx(b.stateTx)
 	b.agg.SetTxNum(b.txNum)
 
-	if _, err = b.applyBlock(startTxNum, b.reader, b.writer, block); err != nil {
-		log.Error("processing error", "block", b.blockNum, "err", err)
+	if _, err = b.applyBlock(ctx, block); err != nil {
+		b.logger.Error("processing error", "block", b.blockNum, "err", err)
 		return fmt.Errorf("processing block %d: %w", b.blockNum, err)
 	}
 	return err
 }
 
 func (b *blockProcessor) applyBlock(
-	 startTxNum uint64,
-	 rw *ReaderWrapper4,
-	 ww *WriterWrapper4,
+	 ctx context.Context,
 	 block *types.Block,
 ) (types.Receipts, error) {
 	//defer blockExecutionTimer.UpdateDuration(time.Now())
@@ -351,63 +353,62 @@ func (b *blockProcessor) applyBlock(
 	var receipts types.Receipts
 	rules := b.chainConfig.Rules(block.NumberU64(), block.Time())
 
-	rw.blockNum = block.NumberU64()
-	b.blockNum = rw.blockNum
-	ww.w.SetTxNum(b.txNum)
+	b.blockNum = block.NumberU64()
+	b.writer.w.SetTxNum(b.txNum)
 
-	daoFork := b.txNum >= startTxNum && b.chainConfig.DAOForkSupport && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkSupport && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
-		ibs := state.New(rw)
+		ibs := state.New(b.reader)
 		// TODO Actually add tracing to the DAO related accounts
 		misc.ApplyDAOHardFork(ibs)
-		if err := ibs.FinalizeTx(rules, ww); err != nil {
+		if err := ibs.FinalizeTx(rules, b.writer); err != nil {
 			return nil, err
 		}
-		if err := ww.w.FinishTx(); err != nil {
+		if err := b.writer.w.FinishTx(); err != nil {
 			return nil, fmt.Errorf("finish daoFork failed: %w", err)
 		}
 	}
 
 	b.txNum++ // Pre-block transaction
-	ww.w.SetTxNum(b.txNum)
-	if err := ww.w.FinishTx(); err != nil {
+	b.writer.w.SetTxNum(b.txNum)
+	if err := b.writer.w.FinishTx(); err != nil {
 		return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
 	}
 
 	getHashFn := core.GetHashFn(header, b.getHeader)
 
 	for i, tx := range block.Transactions() {
-		if b.txNum >= startTxNum {
-			ibs := state.New(rw)
+		if b.txNum >= b.startTxNum {
+			ibs := state.New(b.reader)
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, ww, header, tx, usedGas, b.vmConfig)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
 			for from := range ct.Froms() {
-				if err := ww.w.AddTraceFrom(from[:]); err != nil {
+				if err := b.writer.w.AddTraceFrom(from[:]); err != nil {
 					return nil, err
 				}
 			}
 			for to := range ct.Tos() {
-				if err := ww.w.AddTraceTo(to[:]); err != nil {
+				if err := b.writer.w.AddTraceTo(to[:]); err != nil {
 					return nil, err
 				}
 			}
 			receipts = append(receipts, receipt)
 			for _, log := range receipt.Logs {
-				if err = ww.w.AddLogAddr(log.Address[:]); err != nil {
+				if err = b.writer.w.AddLogAddr(log.Address[:]); err != nil {
 					return nil, fmt.Errorf("adding event log for addr %x: %w", log.Address, err)
 				}
 				for _, topic := range log.Topics {
-					if err = ww.w.AddLogTopic(topic[:]); err != nil {
+					if err = b.writer.w.AddLogTopic(topic[:]); err != nil {
 						return nil, fmt.Errorf("adding event log for topic %x: %w", topic, err)
 					}
 				}
 			}
-			if err = ww.w.FinishTx(); err != nil {
+			if err = b.writer.w.FinishTx(); err != nil {
 				return nil, fmt.Errorf("finish tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}
 			if b.trace {
@@ -415,10 +416,10 @@ func (b *blockProcessor) applyBlock(
 			}
 		}
 		b.txNum++
-		ww.w.SetTxNum(b.txNum)
+		b.writer.w.SetTxNum(b.txNum)
 	}
 
-	if b.txNum >= startTxNum {
+	if b.txNum >= b.startTxNum {
 		if b.chainConfig.IsByzantium(block.NumberU64()) {
 			receiptSha := types.DeriveSha(receipts)
 			if receiptSha != block.ReceiptHash() {
@@ -428,12 +429,12 @@ func (b *blockProcessor) applyBlock(
 				}
 			}
 		}
-		ibs := state.New(rw)
-		if err := ww.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
+		ibs := state.New(b.reader)
+		if err := b.writer.w.AddTraceTo(block.Coinbase().Bytes()); err != nil {
 			return nil, fmt.Errorf("adding coinbase trace: %w", err)
 		}
 		for _, uncle := range block.Uncles() {
-			if err := ww.w.AddTraceTo(uncle.Coinbase.Bytes()); err != nil {
+			if err := b.writer.w.AddTraceTo(uncle.Coinbase.Bytes()); err != nil {
 				return nil, fmt.Errorf("adding uncle trace: %w", err)
 			}
 		}
@@ -443,11 +444,11 @@ func (b *blockProcessor) applyBlock(
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
-		if err := ibs.CommitBlock(rules, ww); err != nil {
+		if err := ibs.CommitBlock(rules, b.writer); err != nil {
 			return nil, fmt.Errorf("committing block %d failed: %w", block.NumberU64(), err)
 		}
 
-		if err := ww.w.FinishTx(); err != nil {
+		if err := b.writer.w.FinishTx(); err != nil {
 			return nil, fmt.Errorf("failed to finish tx: %w", err)
 		}
 		if b.trace {
@@ -456,10 +457,10 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	b.txNum++ // Post-block transaction
-	ww.w.SetTxNum(b.txNum)
-	if b.txNum >= startTxNum {
+	b.writer.w.SetTxNum(b.txNum)
+	if b.txNum >= b.startTxNum {
 		if block.Number().Uint64()%uint64(commitmentFreq) == 0 {
-			rootHash, err := ww.w.ComputeCommitment(true, b.trace)
+			rootHash, err := b.writer.w.ComputeCommitment(true, b.trace)
 			if err != nil {
 				return nil, err
 			}
@@ -468,7 +469,7 @@ func (b *blockProcessor) applyBlock(
 			}
 		}
 
-		if err := ww.w.FinishTx(); err != nil {
+		if err := b.writer.w.FinishTx(); err != nil {
 			return nil, fmt.Errorf("finish after-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
 		}
 	}
@@ -478,9 +479,8 @@ func (b *blockProcessor) applyBlock(
 
 // Implements StateReader and StateWriter
 type ReaderWrapper4 struct {
-	roTx     kv.Tx
-	ac       *libstate.AggregatorContext
-	blockNum uint64
+	roTx kv.Tx
+	ac   *libstate.AggregatorContext
 }
 
 type WriterWrapper4 struct {
@@ -667,6 +667,7 @@ type stat4 struct {
 	txNum        uint64
 	prevTime     time.Time
 	mem          runtime.MemStats
+	startedAt    time.Time
 }
 
 func (s *stat4) print(aStats libstate.FilesStats, logger log.Logger) {
@@ -693,6 +694,9 @@ func (s *stat4) delta(blockNum, txNum uint64) *stat4 {
 	s.prevBlock = blockNum
 	s.prevTxNum = txNum
 	s.prevTime = currentTime
+	if s.startedAt.IsZero() {
+		s.startedAt = currentTime
+	}
 
 	total := s.hits + s.misses
 	if total > 0 {
@@ -700,4 +704,3 @@ func (s *stat4) delta(blockNum, txNum uint64) *stat4 {
 	}
 	return s
 }
-

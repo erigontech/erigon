@@ -1248,7 +1248,7 @@ func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, t
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 
 		var err error
-		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "e4"), dirs.Tmp, ethconfig.HistoryV3AggregationStep, mode, trie)
+		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, ethconfig.HistoryV3AggregationStep, mode, trie)
 		if err != nil {
 			panic(err)
 		}
