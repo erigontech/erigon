@@ -54,6 +54,9 @@ type BeaconState struct {
 	nextWithdrawalIndex          uint64
 	nextWithdrawalValidatorIndex uint64
 	historicalSummaries          []*cltypes.HistoricalSummary
+	// Phase0: genesis fork. these 2 fields replace participation bits.
+	previousEpochAttestations []*cltypes.PendingAttestation
+	currentEpochAttestations  []*cltypes.PendingAttestation
 	// Internals
 	version           clparams.StateVersion   // State version
 	leaves            [32][32]byte            // Pre-computed leaves.

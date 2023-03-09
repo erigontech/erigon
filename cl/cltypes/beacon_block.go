@@ -323,12 +323,12 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 		return err
 	}
 	// Decode attester slashings
-	b.AttesterSlashings, err = ssz_utils.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, uint32(MaxAttesterSlashings))
+	b.AttesterSlashings, err = ssz_utils.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, MaxAttesterSlashings)
 	if err != nil {
 		return err
 	}
 	// Decode attestations
-	b.Attestations, err = ssz_utils.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, uint32(MaxAttestations))
+	b.Attestations, err = ssz_utils.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations)
 	if err != nil {
 		return err
 	}
