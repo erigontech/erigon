@@ -58,9 +58,8 @@ func (m *Memory) Set32(offset uint64, val *uint256.Int) {
 		panic("invalid memory: store empty")
 	}
 	// Zero the memory area
-	copy(m.store[offset:offset+32], []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})
-	// Fill in relevant bits
-	val.WriteToSlice(m.store[offset:])
+	copy(m.store[offset:offset+32], zeroes)
+	val.WriteToSlice(m.store)
 }
 
 // zeroes - pre-allocated zeroes for Resize()
