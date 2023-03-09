@@ -192,7 +192,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 				logArs = append(logArs, "current_prefix", makeCurrentKeyStr(k))
 			}
 
-			log.Info(fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
+			log.Log(c.logLvl, fmt.Sprintf("[%s] ETL [2/2] Loading", c.logPrefix), logArs...)
 		}
 
 		isNil := (c.bufType == SortableSliceBuffer && v == nil) ||
