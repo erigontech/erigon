@@ -188,29 +188,11 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 		}
 	}
 	// Write attester slashings as a dynamic list.
-	subOffset := len(b.AttesterSlashings) * 4
-	for _, attesterSlashing := range b.AttesterSlashings {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(subOffset))...)
-		subOffset += attesterSlashing.EncodingSizeSSZ()
+	if buf, err = ssz_utils.EncodeDynamicList(buf, b.AttesterSlashings); err != nil {
+		return nil, err
 	}
-
-	for _, attesterSlashing := range b.AttesterSlashings {
-		buf, err = attesterSlashing.EncodeSSZ(buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	// Attestation
-	subOffset = len(b.Attestations) * 4
-	for _, attestation := range b.Attestations {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(subOffset))...)
-		subOffset += attestation.EncodingSizeSSZ()
-	}
-	for _, attestation := range b.Attestations {
-		buf, err = attestation.EncodeSSZ(buf)
-		if err != nil {
-			return nil, err
-		}
+	if buf, err = ssz_utils.EncodeDynamicList(buf, b.Attestations); err != nil {
+		return nil, err
 	}
 
 	for _, deposit := range b.Deposits {

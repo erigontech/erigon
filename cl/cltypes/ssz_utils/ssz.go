@@ -187,3 +187,20 @@ func DecodeString(bytes []byte, start, end, max uint64) ([]byte, error) {
 	}
 	return buf, nil
 }
+
+func EncodeDynamicList[T Marshaler](buf []byte, objs []T) (dst []byte, err error) {
+	dst = buf
+	// Attestation
+	subOffset := len(objs) * 4
+	for _, attestation := range objs {
+		dst = append(dst, OffsetSSZ(uint32(subOffset))...)
+		subOffset += attestation.EncodingSizeSSZ()
+	}
+	for _, obj := range objs {
+		dst, err = obj.EncodeSSZ(dst)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
