@@ -25,22 +25,31 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/stretchr/testify/require"
 )
 
 func TestUnion(t *testing.T) {
 	t.Run("arrays", func(t *testing.T) {
-		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
+		s1 := iter.Array[uint64]([]uint64{1, 3, 6, 7})
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
-		s3 := iter.Union[uint64](s1, s2)
+		s3 := iter.Union[uint64](s1, s2, order.Asc)
 		res, err := iter.ToArr[uint64](s3)
 		require.NoError(t, err)
-		require.Equal(t, []uint64{1, 2, 3, 4, 5, 6, 7, 8}, res)
+		require.Equal(t, []uint64{1, 2, 3, 6, 7, 8}, res)
+
+		s1 = iter.ReverseArray[uint64]([]uint64{1, 3, 6, 7})
+		s2 = iter.ReverseArray[uint64]([]uint64{2, 3, 7, 8})
+		s3 = iter.Union[uint64](s1, s2, order.Desc)
+		res, err = iter.ToArr[uint64](s3)
+		require.NoError(t, err)
+		require.Equal(t, []uint64{8, 7, 6, 3, 2, 1}, res)
+
 	})
 	t.Run("empty left", func(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.Array[uint64]([]uint64{2, 3, 7, 8})
-		s3 := iter.Union[uint64](s1, s2)
+		s3 := iter.Union[uint64](s1, s2, order.Asc)
 		res, err := iter.ToArr[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{2, 3, 7, 8}, res)
@@ -48,7 +57,7 @@ func TestUnion(t *testing.T) {
 	t.Run("empty right", func(t *testing.T) {
 		s1 := iter.Array[uint64]([]uint64{1, 3, 4, 5, 6, 7})
 		s2 := iter.EmptyU64
-		s3 := iter.Union[uint64](s1, s2)
+		s3 := iter.Union[uint64](s1, s2, order.Asc)
 		res, err := iter.ToArr[uint64](s3)
 		require.NoError(t, err)
 		require.Equal(t, []uint64{1, 3, 4, 5, 6, 7}, res)
@@ -56,7 +65,7 @@ func TestUnion(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		s1 := iter.EmptyU64
 		s2 := iter.EmptyU64
-		s3 := iter.Union[uint64](s1, s2)
+		s3 := iter.Union[uint64](s1, s2, order.Asc)
 		res, err := iter.ToArr[uint64](s3)
 		require.NoError(t, err)
 		require.Nil(t, res)

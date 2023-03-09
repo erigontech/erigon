@@ -1887,7 +1887,7 @@ func (s *cursorDup2iter) Next() (k, v []byte, err error) {
 	if s.orderAscend {
 		_, s.nextV, s.err = s.c.NextDup()
 	} else {
-		_, s.nextV, s.err = s.c.NextDup()
+		_, s.nextV, s.err = s.c.PrevDup()
 	}
 	return s.key, v, err
 }

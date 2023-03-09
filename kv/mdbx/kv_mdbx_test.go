@@ -200,6 +200,12 @@ func TestRangeDupSort(t *testing.T) {
 		require.Equal(t, "key3", string(k))
 		require.Equal(t, "value3.3", string(v))
 
+		require.True(t, it.HasNext())
+		k, v, err = it.Next()
+		require.NoError(t, err)
+		require.Equal(t, "key3", string(k))
+		require.Equal(t, "value3.1", string(v))
+
 		require.False(t, it.HasNext())
 
 		it, err = tx.RangeDescend("Table", nil, nil, 2)

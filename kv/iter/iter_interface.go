@@ -79,6 +79,21 @@ type (
 func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }
 func ToKVArray(s KV) ([][]byte, [][]byte, error) { return ToDualArray[[]byte, []byte](s) }
 
+func ToArrU64Must(s U64) []uint64 {
+	arr, err := ToArr[uint64](s)
+	if err != nil {
+		panic(err)
+	}
+	return arr
+}
+func ToArrKVMust(s KV) ([][]byte, [][]byte) {
+	keys, values, err := ToDualArray[[]byte, []byte](s)
+	if err != nil {
+		panic(err)
+	}
+	return keys, values
+}
+
 func CountU64(s U64) (int, error) { return Count[uint64](s) }
 func CountKV(s KV) (int, error)   { return CountDual[[]byte, []byte](s) }
 
