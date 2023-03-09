@@ -96,7 +96,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(9): Eth1DataVotes
 	if b.isLeafDirty(Eth1DataVotesLeafIndex) {
-		root, err := state_encoding.Eth1DataVectorRoot(b.eth1DataVotes)
+		root, err := merkle_tree.ListObjectSSZRoot(b.eth1DataVotes, maxEth1Votes)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func (b *BeaconState) computeDirtyLeaves() error {
 
 	// Field(11): Validators
 	if b.isLeafDirty(ValidatorsLeafIndex) {
-		root, err := state_encoding.ValidatorsVectorRoot(b.validators)
+		root, err := merkle_tree.ListObjectSSZRoot(b.validators, state_encoding.ValidatorRegistryLimit)
 		if err != nil {
 			return err
 		}
@@ -143,18 +143,34 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(SlashingsLeafIndex, root)
 	}
+
+	// Field(15) and Field(16) are special due to the fact that they have different format in Phase0.
+
 	// Field(15): PreviousEpochParticipation
 	if b.isLeafDirty(PreviousEpochParticipationLeafIndex) {
-		root, err := merkle_tree.BitlistRootWithLimitForState(b.previousEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+		var root libcommon.Hash
+		var err error
+		if b.version == clparams.Phase0Version {
+			root, err = merkle_tree.ListObjectSSZRoot(b.previousEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
+		} else {
+			root, err = merkle_tree.BitlistRootWithLimitForState(b.previousEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+		}
 		if err != nil {
 			return err
 		}
+
 		b.updateLeaf(PreviousEpochParticipationLeafIndex, root)
 	}
 
 	// Field(16): CurrentEpochParticipation
 	if b.isLeafDirty(CurrentEpochParticipationLeafIndex) {
-		root, err := merkle_tree.BitlistRootWithLimitForState(b.currentEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+		var root libcommon.Hash
+		var err error
+		if b.version == clparams.Phase0Version {
+			root, err = merkle_tree.ListObjectSSZRoot(b.currentEpochAttestations, b.beaconConfig.SlotsPerEpoch*b.beaconConfig.MaxAttestations)
+		} else {
+			root, err = merkle_tree.BitlistRootWithLimitForState(b.currentEpochParticipation.Bytes(), state_encoding.ValidatorRegistryLimit)
+		}
 		if err != nil {
 			return err
 		}
@@ -194,7 +210,9 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		}
 		b.updateLeaf(FinalizedCheckpointLeafIndex, checkpointRoot)
 	}
-
+	if b.version == clparams.Phase0Version {
+		return nil
+	}
 	// Field(21): Inactivity Scores
 	if b.isLeafDirty(InactivityScoresLeafIndex) {
 		root, err := merkle_tree.Uint64ListRootWithLimit(b.inactivityScores, state_encoding.ValidatorLimitForBalancesChunks())
@@ -234,26 +252,27 @@ func (b *BeaconState) computeDirtyLeaves() error {
 		b.updateLeaf(LatestExecutionPayloadHeaderLeafIndex, headerRoot)
 	}
 
-	if b.version >= clparams.CapellaVersion {
+	if b.version < clparams.CapellaVersion {
+		return nil
+	}
 
-		// Field(25): NextWithdrawalIndex
-		if b.isLeafDirty(NextWithdrawalIndexLeafIndex) {
-			b.updateLeaf(NextWithdrawalIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalIndex))
-		}
+	// Field(25): NextWithdrawalIndex
+	if b.isLeafDirty(NextWithdrawalIndexLeafIndex) {
+		b.updateLeaf(NextWithdrawalIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalIndex))
+	}
 
-		// Field(26): NextWithdrawalValidatorIndex
-		if b.isLeafDirty(NextWithdrawalValidatorIndexLeafIndex) {
-			b.updateLeaf(NextWithdrawalValidatorIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalValidatorIndex))
-		}
+	// Field(26): NextWithdrawalValidatorIndex
+	if b.isLeafDirty(NextWithdrawalValidatorIndexLeafIndex) {
+		b.updateLeaf(NextWithdrawalValidatorIndexLeafIndex, merkle_tree.Uint64Root(b.nextWithdrawalValidatorIndex))
+	}
 
-		// Field(27): HistoricalSummaries
-		if b.isLeafDirty(HistoricalSummariesLeafIndex) {
-			root, err := merkle_tree.ListObjectSSZRoot(b.historicalSummaries, state_encoding.HistoricalRootsLength)
-			if err != nil {
-				return err
-			}
-			b.updateLeaf(HistoricalSummariesLeafIndex, root)
+	// Field(27): HistoricalSummaries
+	if b.isLeafDirty(HistoricalSummariesLeafIndex) {
+		root, err := merkle_tree.ListObjectSSZRoot(b.historicalSummaries, state_encoding.HistoricalRootsLength)
+		if err != nil {
+			return err
 		}
+		b.updateLeaf(HistoricalSummariesLeafIndex, root)
 	}
 
 	return nil

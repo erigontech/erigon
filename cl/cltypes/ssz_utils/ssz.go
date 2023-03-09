@@ -71,7 +71,7 @@ func UnmarshalUint64SSZ(x []byte) uint64 {
 	return binary.LittleEndian.Uint64(x)
 }
 
-func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end, max uint32) ([]T, error) {
+func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint64) ([]T, error) {
 	if start > end || len(bytes) < int(end) {
 		return nil, ErrBadOffset
 	}
@@ -82,7 +82,7 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end, max uint32) ([]T
 		elementsNum = currentOffset / 4
 	}
 	inPos := 4
-	if elementsNum > max {
+	if uint64(elementsNum) > max {
 		return nil, ErrTooBigList
 	}
 	objs := make([]T, elementsNum)
@@ -186,4 +186,21 @@ func DecodeString(bytes []byte, start, end, max uint64) ([]byte, error) {
 		return nil, ErrTooBigList
 	}
 	return buf, nil
+}
+
+func EncodeDynamicList[T Marshaler](buf []byte, objs []T) (dst []byte, err error) {
+	dst = buf
+	// Attestation
+	subOffset := len(objs) * 4
+	for _, attestation := range objs {
+		dst = append(dst, OffsetSSZ(uint32(subOffset))...)
+		subOffset += attestation.EncodingSizeSSZ()
+	}
+	for _, obj := range objs {
+		dst, err = obj.EncodeSSZ(dst)
+		if err != nil {
+			return
+		}
+	}
+	return
 }
