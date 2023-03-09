@@ -826,8 +826,7 @@ type RecentInvertedIdxIter struct {
 	hasNext bool
 	err     error
 
-	res []uint64
-	bm  *roaring64.Bitmap
+	bm *roaring64.Bitmap
 }
 
 func (it *RecentInvertedIdxIter) Close() {
