@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -261,7 +260,7 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 		var k [8]byte
 		binary.BigEndian.PutUint64(k[:], keyNum)
 		var values []uint64
-		t.Run("asc"+strconv.Itoa(int(keyNum)), func(t *testing.T) {
+		t.Run("asc", func(t *testing.T) {
 			it, err := ic.IterateRange(k[:], 0, 976, order.Asc, -1, nil)
 			require.NoError(t, err)
 			for i := keyNum; i < 976; i += keyNum {

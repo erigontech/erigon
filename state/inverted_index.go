@@ -952,20 +952,14 @@ func (it *RecentInvertedIdxIter) HasNext() bool {
 	return it.hasNext
 }
 
-func (it *RecentInvertedIdxIter) Next() (uint64, error) { return it.next(), nil }
-func (it *RecentInvertedIdxIter) NextBatch() ([]uint64, error) {
-	it.res = append(it.res[:0], it.next())
-	for it.HasNext() && len(it.res) < 128 {
-		it.res = append(it.res, it.next())
+func (it *RecentInvertedIdxIter) Next() (uint64, error) {
+	if it.err != nil {
+		return 0, it.err
 	}
-	return it.res, nil
-}
-
-func (it *RecentInvertedIdxIter) next() uint64 {
 	it.limit--
 	n := it.nextN
 	it.advance()
-	return n
+	return n, nil
 }
 
 type InvertedIterator1 struct {
