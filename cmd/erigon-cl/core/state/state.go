@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -63,9 +63,9 @@ type BeaconState struct {
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru.Cache
-	committeeCache              *lru.Cache
-	shuffledSetsCache           *lru.Cache
+	activeValidatorsCache       *lru2.Cache[uint64, []uint64]
+	committeeCache              *lru2.Cache[[16]byte, []uint64]
+	shuffledSetsCache           *lru2.Cache[libcommon.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
@@ -159,13 +159,13 @@ func (b *BeaconState) initBeaconState() error {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
 	var err error
-	if b.activeValidatorsCache, err = lru.New(5); err != nil {
+	if b.activeValidatorsCache, err = lru2.New[uint64, []uint64](5); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New(25); err != nil {
+	if b.shuffledSetsCache, err = lru2.New[libcommon.Hash, []uint64](25); err != nil {
 		return err
 	}
-	if b.committeeCache, err = lru.New(256); err != nil {
+	if b.committeeCache, err = lru2.New[[16]byte, []uint64](256); err != nil {
 		return err
 	}
 	if err := b._updateProposerIndex(); err != nil {

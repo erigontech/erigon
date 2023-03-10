@@ -20,7 +20,7 @@ const PreAllocatedRewardsAndPenalties = 8192
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok {
-		return cachedIndicies.([]uint64)
+		return cachedIndicies
 	}
 	for i, validator := range b.validators {
 		if !validator.Active(epoch) {
@@ -186,7 +186,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
-		shuffledIndicies = shuffledIndicesInterface.([]uint64)
+		shuffledIndicies = shuffledIndicesInterface
 	} else {
 		shuffledIndicies = make([]uint64, lenIndicies)
 		copy(shuffledIndicies, indicies)
@@ -353,7 +353,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	binary.BigEndian.PutUint64(cacheKey[:], slot)
 	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
 	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
-		return cachedCommittee.([]uint64), nil
+		return cachedCommittee, nil
 	}
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
