@@ -59,8 +59,6 @@ func setDefaults(cfg *Config) {
 		cfg.ChainConfig = &chain.Config{
 			ChainID:               big.NewInt(1),
 			HomesteadBlock:        new(big.Int),
-			DAOForkBlock:          new(big.Int),
-			DAOForkSupport:        false,
 			TangerineWhistleBlock: new(big.Int),
 			SpuriousDragonBlock:   new(big.Int),
 			ByzantiumBlock:        new(big.Int),

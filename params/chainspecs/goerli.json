@@ -3,7 +3,6 @@
   "chainId": 5,
   "consensus": "clique",
   "homesteadBlock": 0,
-  "daoForkSupport": true,
   "eip150Block": 0,
   "eip155Block": 0,
   "byzantiumBlock": 0,

@@ -136,7 +136,6 @@
       "chainId": 1,
       "homesteadBlock": 1150000,
       "daoForkBlock": 1920000,
-      "daoForkSupport": true,
       "eip150Block": 2463000,
       "eip155Block": 2675000,
       "eip158Block": 2675000,
