@@ -571,3 +571,16 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	copy(target, m.buf.Bytes())
 	return target, nil
 }
+
+func ParseTrieVariant(s string) TrieVariant {
+	var trieVariant TrieVariant
+	switch s {
+	case "bin":
+		trieVariant = VariantBinPatriciaTrie
+	case "hex":
+		fallthrough
+	default:
+		trieVariant = VariantHexPatriciaTrie
+	}
+	return trieVariant
+}

@@ -27,10 +27,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -41,6 +42,16 @@ import (
 // StepsInBiggestFile - files of this size are completely frozen/immutable.
 // files of smaller size are also immutable, but can be removed after merge to bigger files.
 const StepsInBiggestFile = 32
+
+var (
+	mxTxProcessed       = metrics.GetOrCreateCounter("domain_tx_processed")
+	mxRunningMerges     = metrics.GetOrCreateCounter("domain_running_merges")
+	mxCollatingProgress = metrics.GetOrCreateCounter("domain_collating_progress")
+	mxPruningProgress   = metrics.GetOrCreateCounter("domain_pruning_progress")
+	mxCollateTimes      = metrics.GetOrCreateSummary("domain_collate_times")
+	mxBuildTimes        = metrics.GetOrCreateSummary("domain_build_files_times")
+	mxPruningTimes      = metrics.GetOrCreateSummary("domain_pruning_times")
+)
 
 type Aggregator struct {
 	aggregationStep uint64
@@ -105,7 +116,7 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	}
 	closeAgg = false
 
-	//a.defaultCtx = a.MakeContext()
+	a.seekTxNum = a.EndTxNumMinimax()
 	return a, nil
 }
 
@@ -317,7 +328,12 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 	for i, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		wg.Add(1)
 
+		mxCollatingProgress.Inc()
+		start := time.Now()
 		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx, logEvery)
+		mxCollateTimes.UpdateDuration(start)
+		mxCollatingProgress.Dec()
+
 		if err != nil {
 			collation.Close()
 			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
@@ -325,15 +341,21 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		go func(wg *sync.WaitGroup, d *Domain, collation Collation) {
 			defer wg.Done()
+			mxRunningMerges.Inc()
 
 			start := time.Now()
 			sf, err := d.buildFiles(ctx, step, collation)
 			collation.Close()
+
 			if err != nil {
 				errCh <- err
+
 				sf.Close()
+				mxRunningMerges.Dec()
 				return
 			}
+
+			mxRunningMerges.Dec()
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			d.stats.LastFileBuildingTook = time.Since(start)
@@ -344,16 +366,23 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 				return fmt.Errorf("warmup %q domain failed: %w", d.filenameBase, err)
 			}
 		}
+		mxPruningProgress.Inc()
+		start = time.Now()
 		if err := d.prune(ctx, step, txFrom, txTo, math.MaxUint64, logEvery); err != nil {
 			return err
 		}
+		mxPruningTimes.UpdateDuration(start)
+		mxPruningProgress.Dec()
 	}
 
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
 		wg.Add(1)
 
+		mxCollatingProgress.Inc()
 		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx, logEvery)
+		mxCollatingProgress.Dec()
+
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 		}
@@ -361,27 +390,43 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		go func(wg *sync.WaitGroup, d *InvertedIndex, tx kv.Tx) {
 			defer wg.Done()
 
+			mxRunningMerges.Inc()
+			start := time.Now()
+
 			sf, err := d.buildFiles(ctx, step, collation)
 			if err != nil {
 				errCh <- err
 				sf.Close()
 				return
 			}
+
+			mxRunningMerges.Dec()
+			mxBuildTimes.UpdateDuration(start)
+
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 
 			icx := d.MakeContext()
-			defer icx.Close()
+			mxRunningMerges.Inc()
 
-			mm := d.endTxNumMinimax()
-			if err := d.mergeRangesUpTo(ctx, mm, maxSpan, workers, icx); err != nil {
+			if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx); err != nil {
 				errCh <- err
+
+				mxRunningMerges.Dec()
+				icx.Close()
 				return
 			}
+
+			mxRunningMerges.Dec()
+			icx.Close()
 		}(&wg, d, d.tx)
 
+		mxPruningProgress.Inc()
+		startPrune := time.Now()
 		if err := d.prune(ctx, txFrom, txTo, math.MaxUint64, logEvery); err != nil {
 			return err
 		}
+		mxPruningTimes.UpdateDuration(startPrune)
+		mxPruningProgress.Dec()
 	}
 
 	go func() {
@@ -436,10 +481,15 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 	for {
 		a.defaultCtx.Close()
 		a.defaultCtx = a.MakeContext()
+
+		mxRunningMerges.Inc()
 		somethingMerged, err := a.mergeLoopStep(ctx, maxEndTxNum, 1)
 		if err != nil {
+			mxRunningMerges.Dec()
 			return err
 		}
+		mxRunningMerges.Dec()
+
 		if !somethingMerged {
 			break
 		}
@@ -720,128 +770,10 @@ func (a *Aggregator) cleanAfterFreeze(in MergedFiles) {
 	a.commitment.cleanAfterFreeze(in.commitment)
 }
 
-func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.Get(addr, nil, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	return ac.accounts.GetBeforeTxNum(addr, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.storage.Get(addr, loc, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	if cap(ac.keyBuf) < len(addr)+len(loc) {
-		ac.keyBuf = make([]byte, len(addr)+len(loc))
-	} else if len(ac.keyBuf) != len(addr)+len(loc) {
-		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
-	}
-	copy(ac.keyBuf, addr)
-	copy(ac.keyBuf[len(addr):], loc)
-	return ac.storage.GetBeforeTxNum(ac.keyBuf, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.code.Get(addr, nil, roTx)
-}
-
-func (ac *AggregatorContext) ReadCommitment(addr []byte, roTx kv.Tx) ([]byte, error) {
-	return ac.commitment.Get(addr, nil, roTx)
-}
-
-func (ac *AggregatorContext) ReadCommitmentBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	return ac.commitment.GetBeforeTxNum(addr, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
-	return ac.code.GetBeforeTxNum(addr, txNum, roTx)
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
-	code, err := ac.code.Get(addr, nil, roTx)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
-}
-
-func (ac *AggregatorContext) ReadAccountCodeSizeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) (int, error) {
-	code, err := ac.code.GetBeforeTxNum(addr, txNum, roTx)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
-}
-
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
-}
-
-func (a *AggregatorContext) branchFn(prefix []byte) ([]byte, error) {
-	// Look in the summary table first
-	stateValue, err := a.ReadCommitment(prefix, a.a.rwTx)
-	if err != nil {
-		return nil, fmt.Errorf("failed read branch %x: %w", commitment.CompactedKeyToHex(prefix), err)
-	}
-	if stateValue == nil {
-		return nil, nil
-	}
-	// fmt.Printf("Returning branch data prefix [%x], mergeVal=[%x]\n", commitment.CompactedKeyToHex(prefix), stateValue)
-	return stateValue[2:], nil // Skip touchMap but keep afterMap
-}
-
-func (a *AggregatorContext) accountFn(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, err := a.ReadAccountData(plainKey, a.a.rwTx)
-	if err != nil {
-		return err
-	}
-	cell.Nonce = 0
-	cell.Balance.Clear()
-	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
-	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
-		cell.Nonce = nonce
-		cell.Balance.Set(balance)
-		if chash != nil {
-			copy(cell.CodeHash[:], chash)
-		}
-	}
-
-	code, err := a.ReadAccountCode(plainKey, a.a.rwTx)
-	if err != nil {
-		return err
-	}
-	if code != nil {
-		a.a.commitment.keccak.Reset()
-		a.a.commitment.keccak.Write(code)
-		copy(cell.CodeHash[:], a.a.commitment.keccak.Sum(nil))
-	}
-	cell.Delete = len(encAccount) == 0 && len(code) == 0
-	return nil
-}
-
-func (a *AggregatorContext) storageFn(plainKey []byte, cell *commitment.Cell) error {
-	// Look in the summary table first
-	enc, err := a.ReadAccountStorage(plainKey[:length.Addr], plainKey[length.Addr:], a.a.rwTx)
-	if err != nil {
-		return err
-	}
-	cell.StorageLen = len(enc)
-	copy(cell.Storage[:], enc)
-	cell.Delete = cell.StorageLen == 0
-	return nil
-}
-
-// Evaluates commitment for processed state. Commit=true - store trie state after evaluation
+// ComputeCommitment evaluates commitment for processed state.
+// If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
 func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
+	// if commitment mode is Disabled, there will be nothing to compute on.
 	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
 	if err != nil {
 		return nil, err
@@ -883,21 +815,33 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 	return rootHash, nil
 }
 
-func (a *Aggregator) ReadyToFinishTx() bool {
-	return (a.txNum+1)%a.aggregationStep == 0 && a.seekTxNum < a.txNum
-}
-
 // Provides channel which receives commitment hash each time aggregation is occured
 func (a *Aggregator) AggregatedRoots() chan [length.Hash]byte {
 	return a.stepDoneNotice
 }
 
+func (a *Aggregator) notifyAggregated(rootHash []byte) {
+	rh := (*[length.Hash]byte)(rootHash[:])
+	select {
+	case a.stepDoneNotice <- *rh:
+	default:
+	}
+}
+
+func (a *Aggregator) ReadyToFinishTx() bool {
+	return (a.txNum+1)%a.aggregationStep == 0 && a.seekTxNum < a.txNum
+}
+
 func (a *Aggregator) FinishTx() (err error) {
 	atomic.AddUint64(&a.stats.TxCount, 1)
+	mxTxProcessed.Inc()
 
 	if !a.ReadyToFinishTx() {
 		return nil
 	}
+
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
 
 	a.commitment.patriciaTrie.ResetFns(a.defaultCtx.branchFn, a.defaultCtx.accountFn, a.defaultCtx.storageFn)
 	rootHash, err := a.ComputeCommitment(true, false)
@@ -921,14 +865,6 @@ func (a *Aggregator) FinishTx() (err error) {
 
 	a.notifyAggregated(rootHash)
 	return nil
-}
-
-func (a *Aggregator) notifyAggregated(rootHash []byte) {
-	rh := (*[length.Hash]byte)(rootHash[:])
-	select {
-	case a.stepDoneNotice <- *rh:
-	default:
-	}
 }
 
 func (a *Aggregator) UpdateAccountData(addr []byte, account []byte) error {
@@ -995,22 +931,6 @@ func (a *Aggregator) AddLogAddr(addr []byte) error {
 
 func (a *Aggregator) AddLogTopic(topic []byte) error {
 	return a.logTopics.Add(topic)
-}
-
-func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
-}
-
-func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
-}
-
-func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
-}
-
-func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 // StartWrites - pattern: `defer agg.StartWrites().FinishWrites()`
@@ -1123,6 +1043,132 @@ func (a *Aggregator) MakeContext() *AggregatorContext {
 	}
 }
 
+func (ac *AggregatorContext) ReadAccountData(addr []byte, roTx kv.Tx) ([]byte, error) {
+	return ac.accounts.Get(addr, nil, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountDataBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	return ac.accounts.GetBeforeTxNum(addr, txNum, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountStorage(addr []byte, loc []byte, roTx kv.Tx) ([]byte, error) {
+	return ac.storage.Get(addr, loc, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountStorageBeforeTxNum(addr []byte, loc []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	if cap(ac.keyBuf) < len(addr)+len(loc) {
+		ac.keyBuf = make([]byte, len(addr)+len(loc))
+	} else if len(ac.keyBuf) != len(addr)+len(loc) {
+		ac.keyBuf = ac.keyBuf[:len(addr)+len(loc)]
+	}
+	copy(ac.keyBuf, addr)
+	copy(ac.keyBuf[len(addr):], loc)
+	return ac.storage.GetBeforeTxNum(ac.keyBuf, txNum, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountCode(addr []byte, roTx kv.Tx) ([]byte, error) {
+	return ac.code.Get(addr, nil, roTx)
+}
+
+func (ac *AggregatorContext) ReadCommitment(addr []byte, roTx kv.Tx) ([]byte, error) {
+	return ac.commitment.Get(addr, nil, roTx)
+}
+
+func (ac *AggregatorContext) ReadCommitmentBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	return ac.commitment.GetBeforeTxNum(addr, txNum, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountCodeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) ([]byte, error) {
+	return ac.code.GetBeforeTxNum(addr, txNum, roTx)
+}
+
+func (ac *AggregatorContext) ReadAccountCodeSize(addr []byte, roTx kv.Tx) (int, error) {
+	code, err := ac.code.Get(addr, nil, roTx)
+	if err != nil {
+		return 0, err
+	}
+	return len(code), nil
+}
+
+func (ac *AggregatorContext) ReadAccountCodeSizeBeforeTxNum(addr []byte, txNum uint64, roTx kv.Tx) (int, error) {
+	code, err := ac.code.GetBeforeTxNum(addr, txNum, roTx)
+	if err != nil {
+		return 0, err
+	}
+	return len(code), nil
+}
+
+func (a *AggregatorContext) branchFn(prefix []byte) ([]byte, error) {
+	// Look in the summary table first
+	stateValue, err := a.ReadCommitment(prefix, a.a.rwTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed read branch %x: %w", commitment.CompactedKeyToHex(prefix), err)
+	}
+	if stateValue == nil {
+		return nil, nil
+	}
+	// fmt.Printf("Returning branch data prefix [%x], mergeVal=[%x]\n", commitment.CompactedKeyToHex(prefix), stateValue)
+	return stateValue[2:], nil // Skip touchMap but keep afterMap
+}
+
+func (a *AggregatorContext) accountFn(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, err := a.ReadAccountData(plainKey, a.a.rwTx)
+	if err != nil {
+		return err
+	}
+	cell.Nonce = 0
+	cell.Balance.Clear()
+	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
+	if len(encAccount) > 0 {
+		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		cell.Nonce = nonce
+		cell.Balance.Set(balance)
+		if chash != nil {
+			copy(cell.CodeHash[:], chash)
+		}
+	}
+
+	code, err := a.ReadAccountCode(plainKey, a.a.rwTx)
+	if err != nil {
+		return err
+	}
+	if code != nil {
+		a.a.commitment.keccak.Reset()
+		a.a.commitment.keccak.Write(code)
+		copy(cell.CodeHash[:], a.a.commitment.keccak.Sum(nil))
+	}
+	cell.Delete = len(encAccount) == 0 && len(code) == 0
+	return nil
+}
+
+func (a *AggregatorContext) storageFn(plainKey []byte, cell *commitment.Cell) error {
+	// Look in the summary table first
+	enc, err := a.ReadAccountStorage(plainKey[:length.Addr], plainKey[length.Addr:], a.a.rwTx)
+	if err != nil {
+		return err
+	}
+	cell.StorageLen = len(enc)
+	copy(cell.Storage[:], enc)
+	cell.Delete = cell.StorageLen == 0
+	return nil
+}
+
+func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
+	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+}
+
+func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
+	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
+}
+
+func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
+	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+}
+
+func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
+	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+}
+
 func (ac *AggregatorContext) Close() {
 	ac.accounts.Close()
 	ac.storage.Close()
@@ -1225,4 +1271,14 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 		}
 	}
 	return value
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
 }

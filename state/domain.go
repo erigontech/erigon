@@ -1152,6 +1152,7 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
 func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group) (err error) {
 	d.History.BuildMissedIndices(ctx, g)
+	d.InvertedIndex.BuildMissedIndices(ctx, g)
 	for _, item := range d.missedIdxFiles() {
 		//TODO: build .kvi
 		fitem := item

@@ -58,6 +58,19 @@ func (m CommitmentMode) String() string {
 	}
 }
 
+func ParseCommitmentMode(s string) CommitmentMode {
+	var mode CommitmentMode
+	switch s {
+	case "off":
+		mode = CommitmentModeDisabled
+	case "update":
+		mode = CommitmentModeUpdate
+	default:
+		mode = CommitmentModeDirect
+	}
+	return mode
+}
+
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
 type DomainCommitted struct {
@@ -533,6 +546,8 @@ func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branch
 		if err != nil {
 			return nil, nil, err
 		}
+	case CommitmentModeDisabled:
+		return nil, nil, nil
 	default:
 		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
 	}
