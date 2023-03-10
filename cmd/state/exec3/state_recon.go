@@ -68,36 +68,9 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) error {
 		}
 		if len(val) > 0 {
 			var a accounts.Account
-			//if err:=accounts.DeserialiseV3(&a, val);err!=nil {
-			//	panic(err)
-			//}
 			a.Reset()
-			pos := 0
-			nonceBytes := int(val[pos])
-			pos++
-			if nonceBytes > 0 {
-				a.Nonce = bytesToUint64(val[pos : pos+nonceBytes])
-				pos += nonceBytes
-			}
-			balanceBytes := int(val[pos])
-			pos++
-			if balanceBytes > 0 {
-				a.Balance.SetBytes(val[pos : pos+balanceBytes])
-				pos += balanceBytes
-			}
-			codeHashBytes := int(val[pos])
-			pos++
-			if codeHashBytes > 0 {
-				copy(a.CodeHash[:], val[pos:pos+codeHashBytes])
-				pos += codeHashBytes
-			}
-			incBytes := int(val[pos])
-			pos++
-			if incBytes > 0 {
-				a.Incarnation = bytesToUint64(val[pos : pos+incBytes])
-			}
-			if a.Incarnation > 0 {
-				a.Incarnation = state.FirstContractIncarnation
+			if err := accounts.DeserialiseV3(&a, val); err != nil {
+				panic(err)
 			}
 			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
