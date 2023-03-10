@@ -190,16 +190,17 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool, error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
+Loop:
 	for rs.queue.Len() < 16 {
 		select {
 		case <-ctx.Done():
-			fmt.Printf("Schedule: cancel\n")
+			fmt.Printf("Schedule: cancel %s\n", ctx.Err())
 			return nil, false, ctx.Err()
 		case txTask, ok := <-rs.workCh:
 			if !ok {
 				fmt.Printf("Schedule: workCh closed %d\n", rs.queue.Len())
 				// No more work, channel is closed
-				break
+				break Loop
 			}
 			heap.Push(&rs.queue, txTask)
 		}
