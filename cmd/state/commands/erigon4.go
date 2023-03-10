@@ -108,6 +108,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err1
 	}
 	defer historyTx.Rollback()
+
 	stateDbPath := path.Join(datadirCli, "db4")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
