@@ -3,7 +3,6 @@
   "chainId": 1337,
   "consensus": "bor",
   "homesteadBlock": 0,
-  "daoForkSupport": true,
   "eip150Block": 0,
   "eip155Block": 0,
   "byzantiumBlock": 0,

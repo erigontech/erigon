@@ -292,7 +292,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) {
 	rw.ibs.Reset()
 	ibs := rw.ibs
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
+	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
