@@ -197,7 +197,7 @@ func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool, error
 			return nil, false, ctx.Err()
 		case txTask, ok := <-rs.workCh:
 			if !ok {
-				fmt.Printf("Schedule: workCh closed\n")
+				fmt.Printf("Schedule: workCh closed %d\n", rs.queue.Len())
 				// No more work, channel is closed
 				break
 			}
