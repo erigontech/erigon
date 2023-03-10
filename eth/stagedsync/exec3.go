@@ -929,6 +929,11 @@ func reconstituteStep(last bool,
 		i := i
 		g.Go(func() error {
 			reconWorkers[i].Run()
+			select {
+			case <-reconstWorkersCtx.Done():
+				return reconstWorkersCtx.Err()
+			default:
+			}
 			return nil
 		})
 	}
@@ -966,10 +971,10 @@ func reconstituteStep(last bool,
 	g.Go(func() error {
 		for {
 			select {
-			case <-reconDone:
+			case <-reconDone: // success finish path
 				return nil
-			case <-reconstWorkersCtx.Done():
-				return nil
+			case <-reconstWorkersCtx.Done(): // force-stop path
+				return reconstWorkersCtx.Err()
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
