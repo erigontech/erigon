@@ -275,7 +275,6 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 func (rw *ReconWorker) Run() error {
 	for txTask, ok, err := rw.rs.Schedule(rw.ctx); ok || err != nil; txTask, ok, err = rw.rs.Schedule(rw.ctx) {
 		if err != nil {
-			fmt.Printf("ReconWorker.Run return err %s\n", err.Error())
 			return err
 		}
 		rw.runTxTask(txTask)
