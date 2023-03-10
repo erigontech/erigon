@@ -334,8 +334,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		rl.AddKey(addrHash[:])
 
 		loader := trie.NewFlatDBTrieLoader("getProof")
-		trace := true
-		if err := loader.Reset(rl, nil, nil, trace); err != nil {
+		if err := loader.Reset(rl, nil, nil, false); err != nil {
 			return nil, err
 		}
 
