@@ -273,7 +273,7 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 }
 
 func (rw *ReconWorker) Run() error {
-	for txTask, ok, err := rw.rs.Schedule(rw.ctx); ok; txTask, ok, err = rw.rs.Schedule(rw.ctx) {
+	for txTask, ok, err := rw.rs.Schedule(rw.ctx); ok || err != nil; txTask, ok, err = rw.rs.Schedule(rw.ctx) {
 		if err != nil {
 			return err
 		}

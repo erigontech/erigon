@@ -907,7 +907,10 @@ func reconstituteStep(last bool,
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
 	workCh := make(chan *exec22.TxTask, workerCount*4)
-	defer safeCloseTxTaskCh(workCh)
+	defer func() {
+		fmt.Printf("close1\n")
+		safeCloseTxTaskCh(workCh)
+	}()
 
 	rs := state.NewReconState(workCh)
 	prevCount := rs.DoneCount()
@@ -933,6 +936,7 @@ func reconstituteStep(last bool,
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})
+
 	defer close(reconDone)
 
 	commit := func(ctx context.Context) error {
@@ -1021,6 +1025,9 @@ func reconstituteStep(last bool,
 
 	var err error // avoid declare global mutable variable
 	for bn := startBlockNum; bn <= endBlockNum; bn++ {
+		if bn%1_000_000 == 0 {
+			panic(1)
+		}
 		t = time.Now()
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
