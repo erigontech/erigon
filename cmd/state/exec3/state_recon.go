@@ -58,13 +58,13 @@ func NewFillWorker(txNum uint64, as *libstate.AggregatorStep) *FillWorker {
 	return fw
 }
 
-func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
+func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) error {
 	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if len(val) > 0 {
 			var a accounts.Account
@@ -102,42 +102,44 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) {
 			value = value[:a.EncodingLengthForStorage()]
 			a.EncodeForStorage(value)
 			if err := plainStateCollector.Collect(key, value); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
 		} else {
 			if err := plainStateCollector.Collect(key, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) {
+func (fw *FillWorker) FillStorage(plainStateCollector *etl.Collector) error {
 	it := fw.as.IterateStorageHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation+length.Hash)
 	binary.BigEndian.PutUint64(compositeKey[20:], state.FirstContractIncarnation)
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		copy(compositeKey[:20], key[:20])
 		copy(compositeKey[20+8:], key[20:])
 		if len(val) > 0 {
 			if err := plainStateCollector.Collect(compositeKey, val); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Storage [%x] => [%x]\n", compositeKey, val)
 		} else {
 			if err := plainStateCollector.Collect(compositeKey, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
-func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) {
+func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collector) error {
 	it := fw.as.IterateCodeHistory(fw.txNum)
 	var compositeKey = make([]byte, length.Addr+length.Incarnation)
 	binary.BigEndian.PutUint64(compositeKey[length.Addr:], state.FirstContractIncarnation)
@@ -145,28 +147,29 @@ func (fw *FillWorker) FillCode(codeCollector, plainContractCollector *etl.Collec
 	for it.HasNext() {
 		key, val, err := it.Next()
 		if err != nil {
-			panic(err)
+			return err
 		}
 		copy(compositeKey, key)
 		if len(val) > 0 {
 
 			codeHash, err := common.HashData(val)
 			if err != nil {
-				panic(err)
+				return err
 			}
 			if err = codeCollector.Collect(codeHash[:], val); err != nil {
-				panic(err)
+				return err
 			}
 			if err = plainContractCollector.Collect(compositeKey, codeHash[:]); err != nil {
-				panic(err)
+				return err
 			}
 			//fmt.Printf("Code [%x] => %d\n", compositeKey, len(val))
 		} else {
 			if err := plainContractCollector.Collect(compositeKey, nil); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
+	return nil
 }
 
 func (sw *ScanWorker) BitmapAccounts() error {
