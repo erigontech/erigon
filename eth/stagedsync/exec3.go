@@ -328,12 +328,10 @@ func ExecV3(ctx context.Context,
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
-							log.Warn("Aggressive prune")
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
 						} else {
-							log.Warn("No aggressive prune")
 							if err = agg.Flush(ctx, tx); err != nil {
 								return err
 							}
