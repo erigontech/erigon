@@ -1,9 +1,8 @@
 package cltypes_test
 
 import (
-	"testing"
-
 	_ "embed"
+	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
