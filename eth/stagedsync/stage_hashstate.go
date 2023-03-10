@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -81,7 +82,10 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet); err != nil {
+		if useExternalTx {
+			log.Info("No parallel execution of hashstate stage with external tx", "from", s.BlockNumber, "to", to)
+		}
+		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet, !useExternalTx); err != nil {
 			return err
 		}
 	}
@@ -126,7 +130,7 @@ func UnwindHashStateStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg HashSta
 func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context) error {
 	// Currently it does not require unwinding because it does not create any Intermediate Hash records
 	// and recomputes the state root from scratch
-	prom := NewPromoter(tx, cfg.dirs, ctx)
+	prom := NewPromoter(cfg, tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
@@ -390,8 +394,9 @@ func (l *OldestAppearedLoad) LoadFunc(k, v []byte, table etl.CurrentTableReader,
 	return l.innerLoadFunc(k, v, table, next)
 }
 
-func NewPromoter(db kv.RwTx, dirs datadir.Dirs, ctx context.Context) *Promoter {
+func NewPromoter(cfg HashStateCfg, db kv.RwTx, dirs datadir.Dirs, ctx context.Context) *Promoter {
 	return &Promoter{
+		cfg:              cfg,
 		tx:               db,
 		ChangeSetBufSize: 256 * 1024 * 1024,
 		dirs:             dirs,
@@ -400,6 +405,7 @@ func NewPromoter(db kv.RwTx, dirs datadir.Dirs, ctx context.Context) *Promoter {
 }
 
 type Promoter struct {
+	cfg              HashStateCfg
 	tx               kv.RwTx
 	ChangeSetBufSize uint64
 	dirs             datadir.Dirs
@@ -654,7 +660,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	}
 	return nil
 }
-func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool, quiet bool) error {
+func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes bool, quiet bool, parallel bool) error {
 	var changeSetBucket string
 	if storage {
 		changeSetBucket = kv.StorageChangeSet
@@ -668,17 +674,73 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	startkey := hexutility.EncodeTs(from + 1)
 
 	var loadBucket string
-	var extract etl.ExtractFunc
+	var defaultExtract etl.ExtractFunc
 	if codes {
 		loadBucket = kv.ContractCode
-		extract = getExtractCode(p.tx, changeSetBucket)
+		defaultExtract = getExtractCode(p.tx, changeSetBucket)
+	} else if storage {
+		loadBucket = kv.HashedStorage
+		defaultExtract = getExtractFunc(p.tx, changeSetBucket)
 	} else {
-		if storage {
-			loadBucket = kv.HashedStorage
-		} else {
-			loadBucket = kv.HashedAccounts
+		loadBucket = kv.HashedAccounts
+		defaultExtract = getExtractFunc(p.tx, changeSetBucket)
+	}
+	transformArgs := etl.TransformArgs{
+		BufferType:      etl.SortableOldestAppearedBuffer,
+		ExtractStartKey: startkey,
+		Quit:            p.ctx.Done(),
+	}
+	var numExtracts uint64
+	var postTransform func() error
+
+	if parallel {
+		extractChan := make(chan etl.ExtractFuncArgs, etl.AsyncBufferSize)
+		resultChan := make(chan etl.ExtractResult, etl.AsyncBufferSize)
+		numThreads := 16
+		aliveThreads := int64(numThreads)
+		log.Info("Parallel extract", "numThreads", numThreads, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket)
+		g := errgroup.Group{}
+		for i := 0; i < numThreads; i++ {
+			g.Go(func() error {
+				defer func() {
+					if atomic.AddInt64(&aliveThreads, -1) == 0 {
+						close(resultChan)
+					}
+				}()
+				readTx, err := p.cfg.db.BeginRo(context.Background())
+				if err != nil {
+					return err
+				}
+				defer readTx.Rollback()
+				var extract etl.ExtractFunc
+				if codes {
+					extract = getExtractCode(readTx, changeSetBucket)
+				} else {
+					extract = getExtractFunc(readTx, changeSetBucket)
+				}
+
+				for args := range extractChan {
+					atomic.AddUint64(&numExtracts, 1)
+					if err := extract(args.K, args.V, func(originalK, k, v []byte) error {
+						resultChan <- etl.ExtractResult{
+							OriginalK: originalK,
+							K:         k,
+							V:         v,
+						}
+						return nil
+					}); err != nil {
+						resultChan <- etl.ExtractResult{Err: err}
+					}
+				}
+				return nil
+			})
 		}
-		extract = getExtractFunc(p.tx, changeSetBucket)
+		transformArgs.UseAsyncExecution = true
+		transformArgs.AsyncExtractChan = extractChan
+		transformArgs.AsyncExtractResultChan = resultChan
+		postTransform = func() error {
+			return g.Wait()
+		}
 	}
 
 	if err := etl.Transform(
@@ -687,15 +749,20 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 		changeSetBucket,
 		loadBucket,
 		p.dirs.Tmp,
-		extract,
+		defaultExtract,
 		etl.IdentityLoadFunc,
-		etl.TransformArgs{
-			BufferType:      etl.SortableOldestAppearedBuffer,
-			ExtractStartKey: startkey,
-			Quit:            p.ctx.Done(),
-		},
+		transformArgs,
 	); err != nil {
 		return err
+	}
+	if postTransform != nil {
+		if err := postTransform(); err != nil {
+			return err
+		}
+	}
+	if numExtracts > 0 {
+		log.Info("Promoted", "numParallelExtracts", numExtracts, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket,
+			"from", from, "to", to)
 	}
 
 	return nil
@@ -861,8 +928,9 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
-	prom := NewPromoter(tx, cfg.dirs, ctx)
+func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool,
+	parallel bool) error {
+	prom := NewPromoter(cfg, tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
 		if err := prom.PromoteOnHistoryV3(logPrefix, cfg.agg, from, to, false, quiet); err != nil {
@@ -874,13 +942,13 @@ func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.Rw
 		return nil
 	}
 
-	if err := prom.Promote(logPrefix, from, to, false, true, quiet); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, true, quiet, parallel); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, false, false, quiet); err != nil {
+	if err := prom.Promote(logPrefix, from, to, false, false, quiet, parallel); err != nil {
 		return err
 	}
-	if err := prom.Promote(logPrefix, from, to, true, false, quiet); err != nil {
+	if err := prom.Promote(logPrefix, from, to, true, false, quiet, parallel); err != nil {
 		return err
 	}
 	return nil

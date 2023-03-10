@@ -30,47 +30,68 @@ func TestPromoteHashedStateClearState(t *testing.T) {
 	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage, kv.ContractCode)
 }
 
+func CommitTx(t *testing.T, db kv.RwDB, tx kv.RwTx) kv.RwTx {
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(tx.Rollback)
+	return tx
+}
+
 func TestPromoteHashedStateIncremental(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	historyV3 := false
-	_, tx1 := memdb.NewTestTx(t)
-	db2, tx2 := memdb.NewTestTx(t)
+	parallelArgs := []bool{false, true}
+	for i := range parallelArgs {
+		dirs := datadir.New(t.TempDir())
+		historyV3 := false
+		_, tx1 := memdb.NewTestTx(t)
+		db2, tx2 := memdb.NewTestTx(t)
 
-	generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
-	generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
+		generateBlocks(t, 1, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
+		generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	cfg := StageHashStateCfg(db2, dirs, historyV3, nil)
-	err := PromoteHashedStateCleanly("logPrefix", tx2, cfg, context.Background())
-	if err != nil {
-		t.Errorf("error while promoting state: %v", err)
+		cfg := StageHashStateCfg(db2, dirs, historyV3, nil)
+		err := PromoteHashedStateCleanly("logPrefix", tx2, cfg, context.Background())
+		if err != nil {
+			t.Errorf("error while promoting state: %v", err)
+		}
+
+		generateBlocks(t, 51, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
+		generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
+
+		tx2 = CommitTx(t, db2, tx2)
+		err = promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, cfg, context.Background(), false /* quiet */, parallelArgs[i])
+		if err != nil {
+			t.Errorf("error while promoting state: %v", err)
+		}
+
+		compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 	}
-
-	generateBlocks(t, 51, 50, hashedWriterGen(tx1), changeCodeWithIncarnations)
-	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
-
-	err = promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, cfg, context.Background(), false /* quiet */)
-	if err != nil {
-		t.Errorf("error while promoting state: %v", err)
-	}
-
-	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestPromoteHashedStateIncrementalMixed(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	historyV3 := false
-	_, tx1 := memdb.NewTestTx(t)
-	db2, tx2 := memdb.NewTestTx(t)
+	parallelArgs := []bool{false, true}
+	for i := range parallelArgs {
+		dirs := datadir.New(t.TempDir())
+		historyV3 := false
+		_, tx1 := memdb.NewTestTx(t)
+		db2, tx2 := memdb.NewTestTx(t)
 
-	generateBlocks(t, 1, 100, hashedWriterGen(tx1), changeCodeWithIncarnations)
-	generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
-	generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
+		generateBlocks(t, 1, 100, hashedWriterGen(tx1), changeCodeWithIncarnations)
+		generateBlocks(t, 1, 50, hashedWriterGen(tx2), changeCodeWithIncarnations)
+		generateBlocks(t, 51, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-	err := promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background(), false /* quiet */)
-	if err != nil {
-		t.Errorf("error while promoting state: %v", err)
+		tx2 = CommitTx(t, db2, tx2)
+		err := promoteHashedStateIncrementally("logPrefix", 50, 101, tx2, StageHashStateCfg(db2, dirs, historyV3, nil), context.Background(), false, /* quiet */
+			parallelArgs[i])
+		if err != nil {
+			t.Errorf("error while promoting state: %v", err)
+		}
+		compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 	}
-	compareCurrentState(t, tx1, tx2, kv.HashedAccounts, kv.HashedStorage)
 }
 
 func TestUnwindHashed(t *testing.T) {
@@ -119,7 +140,7 @@ func TestPromoteIncrementallyShutdown(t *testing.T) {
 			}
 			db, tx := memdb.NewTestTx(t)
 			generateBlocks(t, 1, 10, plainWriterGen(tx), changeCodeWithIncarnations)
-			if err := promoteHashedStateIncrementally("logPrefix", 1, 10, tx, StageHashStateCfg(db, dirs, historyV3, nil), ctx, false /* quiet */); !errors.Is(err, tc.errExp) {
+			if err := promoteHashedStateIncrementally("logPrefix", 1, 10, tx, StageHashStateCfg(db, dirs, historyV3, nil), ctx, false /* quiet */, true); !errors.Is(err, tc.errExp) {
 				t.Errorf("error does not match expected error while shutdown promoteHashedStateIncrementally, got: %v, expected: %v", err, tc.errExp)
 			}
 		})

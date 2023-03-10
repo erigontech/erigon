@@ -144,7 +144,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	}); err != nil {
 		return headBlockHash, err
 	}
-	canRunCycleInOneTransaction := !initialCycle
+	canRunCycleInOneTransaction := false //!initialCycle
 
 	var tx kv.RwTx // on this variable will run sync cycle.
 	if canRunCycleInOneTransaction {

@@ -38,6 +38,8 @@ func GetModifiedAccounts(db kv.Tx, startNum, endNum uint64) ([]libcommon.Address
 
 // [from:to)
 func ForRange(db kv.Tx, bucket string, from, to uint64, walker func(blockN uint64, k, v []byte) error) error {
+	// According to observation, most time is spent on iowait, with very poor io depth.
+	// We need to improve this by adding more parallel io requests, to amortize the latency from network storage.
 	var blockN uint64
 	c, err := db.Cursor(bucket)
 	if err != nil {
