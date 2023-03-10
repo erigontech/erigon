@@ -154,6 +154,38 @@ func (txNums) FindBlockNum(tx kv.Tx, endTxNumMinimax uint64) (ok bool, blockNum 
 	}
 	return true, blockNum, nil
 }
+func (txNums) Last(tx kv.Tx) (blockNum, txNum uint64, err error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer c.Close()
+
+	lastK, lastV, err := c.Last()
+	if err != nil {
+		return 0, 0, err
+	}
+	if lastK == nil || lastV == nil {
+		return 0, 0, nil
+	}
+	return binary.BigEndian.Uint64(lastK), binary.BigEndian.Uint64(lastV), nil
+}
+func (txNums) First(tx kv.Tx) (blockNum, txNum uint64, err error) {
+	c, err := tx.Cursor(kv.MaxTxNum)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer c.Close()
+
+	lastK, lastV, err := c.First()
+	if err != nil {
+		return 0, 0, err
+	}
+	if lastK == nil || lastV == nil {
+		return 0, 0, nil
+	}
+	return binary.BigEndian.Uint64(lastK), binary.BigEndian.Uint64(lastV), nil
+}
 
 // LastKey
 func LastKey(tx kv.Tx, table string) ([]byte, error) {
