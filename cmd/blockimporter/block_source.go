@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -44,10 +45,31 @@ func makeBlockRequest(fromBlock uint64) map[string]interface{} {
 		"method":  "ic_getBlocksRLP",
 		"params": []string{
 			fmt.Sprintf("0x%02x", fromBlock), // from block
-			"0x01",                           // max blocks per request
+			"0x05",                           // max blocks per request
 		},
 		"id": 1,
 	}
+}
+
+func readBlocksFromRlp(byteStream io.Reader) ([]types.Block, error) {
+	stream := rlp.NewStream(byteStream, 0)
+	_, err := stream.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []types.Block
+	var block types.Block
+	for err = block.DecodeRLP(stream); err == nil; err = block.DecodeRLP(stream) {
+		result = append(result, block)
+		block = types.Block{}
+	}
+
+	if !errors.Is(err, rlp.EOL) {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block, error) {
@@ -74,24 +96,7 @@ func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 		return nil, fmt.Errorf("%v", response.Error)
 	}
 
-	stream := rlp.NewStream(hex.NewDecoder(strings.NewReader(response.Result)), 0)
-	_, err = stream.List()
-	if err != nil {
-		return nil, err
-	}
-
-	var result []types.Block
-	var block types.Block
-	for err = block.DecodeRLP(stream); err == nil; err = block.DecodeRLP(stream) {
-		result = append(result, block)
-		block = types.Block{}
-	}
-
-	if !errors.Is(err, rlp.EOL) {
-		return nil, err
-	}
-
-	return result, nil
+	return readBlocksFromRlp(hex.NewDecoder(strings.NewReader(response.Result)))
 }
 
 type intervalBlockSourceDecorator struct {
