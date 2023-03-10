@@ -71,22 +71,16 @@ func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
 	}
 	var previousTargetBalance, currentTargetBalance uint64
 	if state.Version() == clparams.Phase0Version {
-		// Use attestations to determine the finality.
-		previousAttestations, err := state.MatchingTargetAttestations(previousEpoch)
-		if err != nil {
-			return err
-		}
-		currentAttestations, err := state.MatchingTargetAttestations(currentEpoch)
-		if err != nil {
-			return err
-		}
-		previousTargetBalance, err = state.UnslashedAttestingBalance(previousAttestations)
-		if err != nil {
-			return err
-		}
-		currentTargetBalance, err = state.UnslashedAttestingBalance(currentAttestations)
-		if err != nil {
-			return err
+		for _, validator := range state.Validators() {
+			if validator.Slashed {
+				continue
+			}
+			if validator.IsCurrentMatchingTargetAttester {
+				currentTargetBalance += validator.EffectiveBalance
+			}
+			if validator.IsPreviousMatchingTargetAttester {
+				previousTargetBalance += validator.EffectiveBalance
+			}
 		}
 	} else {
 		// Use bitlists to determine finality.

@@ -149,6 +149,69 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	return
 }
 
+// _initializeValidatorsPhase0 initializes the validators matching flags based on previous/current attestations
+func (b *BeaconState) _initializeValidatorsPhase0() error {
+	// Previous Pending attestations
+	if b.slot == 0 {
+		return nil
+	}
+	previousEpochRoot, err := b.GetBlockRoot(b.PreviousEpoch())
+	if err != nil {
+		return err
+	}
+	for _, attestation := range b.previousEpochAttestations {
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		if err != nil {
+			return err
+		}
+		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		if err != nil {
+			return err
+		}
+		for _, index := range indicies {
+			b.validators[index].IsPreviousMatchingSourceAttester = true
+			if attestation.Data.Target.Root == previousEpochRoot {
+				b.validators[index].IsPreviousMatchingTargetAttester = true
+			}
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				b.validators[index].IsPreviousMatchingHeadAttester = true
+			}
+		}
+	}
+
+	// Current Pending attestations
+	if len(b.currentEpochAttestations) == 0 {
+		return nil
+	}
+	currentEpochRoot, err := b.GetBlockRoot(b.Epoch())
+	if err != nil {
+		return err
+	}
+	for _, attestation := range b.currentEpochAttestations {
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		if err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		if err != nil {
+			return err
+		}
+		for _, index := range indicies {
+			b.validators[index].IsCurrentMatchingSourceAttester = true
+			if attestation.Data.Target.Root == currentEpochRoot {
+				b.validators[index].IsCurrentMatchingTargetAttester = true
+			}
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				b.validators[index].IsCurrentMatchingHeadAttester = true
+			}
+		}
+	}
+	return nil
+}
+
 func (b *BeaconState) initBeaconState() error {
 	if b.touchedLeaves == nil {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
@@ -170,6 +233,9 @@ func (b *BeaconState) initBeaconState() error {
 	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
+	}
+	if b.version >= clparams.Phase0Version {
+		return b._initializeValidatorsPhase0()
 	}
 	return nil
 }

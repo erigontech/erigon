@@ -46,7 +46,7 @@ func processAttestationPostAltair(state *state.BeaconState, attestation *cltypes
 		return nil, err
 	}
 
-	attestingIndicies, err := state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+	attestingIndicies, err := state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +109,9 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 		InclusionDelay:  state.Slot() - data.Slot,
 		ProposerIndex:   proposerIndex,
 	}
-	if data.Target.Epoch == state.Epoch() {
+	isCurrentAttestation := data.Target.Epoch == state.Epoch()
+	// Depending of what slot we are on we put in either the current justified or previous justified.
+	if isCurrentAttestation {
 		if !data.Source.Equal(state.CurrentJustifiedCheckpoint()) {
 			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
 		}
@@ -120,8 +122,50 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 		}
 		state.AddPreviousEpochAtteastation(pendingAttestation)
 	}
+	// Not required by specs but needed if we want performant epoch transition.
+	indicies, err := state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
+	if err != nil {
+		return nil, err
+	}
+	epochRoot, err := state.GetBlockRoot(attestation.Data.Target.Epoch)
+	if err != nil {
+		return nil, err
+	}
+	slotRoot, err := state.GetBlockRootAtSlot(attestation.Data.Slot)
+	if err != nil {
+		return nil, err
+	}
+	// Basically we flag all validators we are currently attesting. will be important for rewards/finalization processing.
+	for _, index := range indicies {
+		validator, err := state.ValidatorAt(int(index))
+		if err != nil {
+			return nil, err
+		}
+		// NOTE: does not affect state root.
+		// We need to set it to currents or previouses depending on which attestation we process.
+		if isCurrentAttestation {
+			validator.IsCurrentMatchingSourceAttester = true
+			if attestation.Data.Target.Root == epochRoot {
+				validator.IsCurrentMatchingTargetAttester = true
+			}
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				validator.IsCurrentMatchingHeadAttester = true
+			}
+		} else {
+			validator.IsPreviousMatchingSourceAttester = true
+			if attestation.Data.Target.Root == epochRoot {
+				validator.IsPreviousMatchingTargetAttester = true
+			}
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				validator.IsPreviousMatchingHeadAttester = true
+			}
+		}
 
-	return state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+		if err := state.SetValidatorAt(int(index), validator); err != nil {
+			return nil, err
+		}
+	}
+	return indicies, nil
 }
 
 // ProcessAttestation takes an attestation and process it.

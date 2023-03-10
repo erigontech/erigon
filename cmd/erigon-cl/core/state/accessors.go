@@ -2,6 +2,7 @@ package state
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -15,6 +16,10 @@ import (
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
+
+var (
+	ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
+)
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
@@ -118,7 +123,7 @@ func (b *BeaconState) GetBlockRoot(epoch uint64) (libcommon.Hash, error) {
 // GetBlockRootAtSlot returns the block root at a given slot
 func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 	if slot >= b.slot {
-		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot in the future")
+		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.slot > slot+b.beaconConfig.SlotsPerHistoricalRoot {
 		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
@@ -384,13 +389,16 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
-func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
+// GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
+// thus, it is a flag now.
+func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
 	}
-	if utils.GetBitlistLength(aggregationBits) != len(committee) {
-		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits")
+	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
+		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
 	}
 	attestingIndices := []uint64{}
 	for i, member := range committee {
@@ -419,9 +427,14 @@ func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64)
 	return
 }
 
+// FinalityDelay determines by how many epochs we are late on finality.
+func (b *BeaconState) FinalityDelay() uint64 {
+	return b.PreviousEpoch() - b.finalizedCheckpoint.Epoch
+}
+
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
 func (b *BeaconState) InactivityLeaking() bool {
-	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
+	return b.FinalityDelay() > b.beaconConfig.MinEpochsToInactivityPenalty
 }
 
 func (b *BeaconState) IsUnslashedParticipatingIndex(epoch, index uint64, flagIdx int) bool {
@@ -564,7 +577,7 @@ func (b *BeaconState) MatchingTargetAttestations(epoch uint64) ([]*cltypes.Pendi
 func (b *BeaconState) UnslashedAttestingBalance(attestations []*cltypes.PendingAttestation) (uint64, error) {
 	sum := uint64(0)
 	for _, attestation := range attestations {
-		attestingIndicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
+		attestingIndicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
 		if err != nil {
 			return 0, err
 		}
