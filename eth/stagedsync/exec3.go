@@ -907,7 +907,10 @@ func reconstituteStep(last bool,
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
 	workCh := make(chan *exec22.TxTask, workerCount*4)
-	defer safeCloseTxTaskCh(workCh)
+	defer func() {
+		fmt.Printf("close1\n")
+		safeCloseTxTaskCh(workCh)
+	}()
 
 	rs := state.NewReconState(workCh)
 	prevCount := rs.DoneCount()
