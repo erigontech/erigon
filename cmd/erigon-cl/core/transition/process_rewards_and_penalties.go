@@ -77,31 +77,32 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 	rewardDenominator := state.GetTotalActiveBalance() / beaconConfig.EffectiveBalanceIncrement
 	validators := state.Validators()
 	// Make buffer for flag indexes totTargetal balances.
-	var unslashedMatchingSourceBalance, unslashedMatchingTargetBalance, unslashedMatchingHeadBalance uint64
+	var unslashedMatchingSourceBalanceIncrements, unslashedMatchingTargetBalanceIncrements, unslashedMatchingHeadBalanceIncrements uint64
 	// Compute all total balances for each enable unslashed validator indicies with all flags on.
 	for _, validator := range state.Validators() {
 		if validator.Slashed {
 			continue
 		}
 		if validator.IsPreviousMatchingSourceAttester {
-			unslashedMatchingSourceBalance += validator.EffectiveBalance
+			unslashedMatchingSourceBalanceIncrements += validator.EffectiveBalance
 		}
 		if validator.IsPreviousMatchingTargetAttester {
-			unslashedMatchingTargetBalance += validator.EffectiveBalance
+			unslashedMatchingTargetBalanceIncrements += validator.EffectiveBalance
 		}
 		if validator.IsPreviousMatchingHeadAttester {
-			unslashedMatchingHeadBalance += validator.EffectiveBalance
+			unslashedMatchingHeadBalanceIncrements += validator.EffectiveBalance
 		}
 	}
 	// Then compute their total increment.
-	unslashedMatchingSourceBalance /= beaconConfig.EffectiveBalanceIncrement
-	unslashedMatchingTargetBalance /= beaconConfig.EffectiveBalanceIncrement
-	unslashedMatchingHeadBalance /= beaconConfig.EffectiveBalanceIncrement
-	// precompute partially the base reward.
-	baseRewardIncrement := state.BaseRewardPerIncrement()
+	unslashedMatchingSourceBalanceIncrements /= beaconConfig.EffectiveBalanceIncrement
+	unslashedMatchingTargetBalanceIncrements /= beaconConfig.EffectiveBalanceIncrement
+	unslashedMatchingHeadBalanceIncrements /= beaconConfig.EffectiveBalanceIncrement
 	// Now process deltas and whats nots.
 	for _, index := range eligibleValidators {
-		baseReward := (validators[index].EffectiveBalance / beaconConfig.EffectiveBalanceIncrement) * baseRewardIncrement
+		baseReward, err := state.BaseReward(index)
+		if err != nil {
+			return err
+		}
 		// we can use a multiplier to account for all attesting
 		attested, missed := validators[index].DutiesAttested()
 		// If we attested then we reward the validator.
@@ -112,19 +113,19 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 				}
 			} else {
 				if !validators[index].Slashed && validators[index].IsPreviousMatchingSourceAttester {
-					rewardNumerator := baseReward * unslashedMatchingSourceBalance
+					rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
 					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 						return err
 					}
 				}
 				if !validators[index].Slashed && validators[index].IsPreviousMatchingTargetAttester {
-					rewardNumerator := baseReward * unslashedMatchingTargetBalance
+					rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
 					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 						return err
 					}
 				}
 				if !validators[index].Slashed && validators[index].IsPreviousMatchingHeadAttester {
-					rewardNumerator := baseReward * unslashedMatchingHeadBalance
+					rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
 					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 						return err
 					}
@@ -132,12 +133,12 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 			}
 			// Process inactivity of the network as a whole finalities.
 			if state.InactivityLeaking() {
-				proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
+				proposerReward := baseReward / beaconConfig.ProposerRewardQuotient
 				// Neutralize rewards.
-				if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward*proposerReward); err != nil {
+				if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
 					return err
 				}
-				if validators[index].Slashed || validators[index].IsPreviousMatchingTargetAttester {
+				if validators[index].Slashed || !validators[index].IsPreviousMatchingTargetAttester {
 					// Increase penalities linearly if network is leaking.
 					if state.DecreaseBalance(index, validators[index].EffectiveBalance*state.FinalityDelay()/beaconConfig.InactivityPenaltyQuotient); err != nil {
 						return err

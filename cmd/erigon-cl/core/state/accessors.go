@@ -272,7 +272,13 @@ func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
 	if index >= uint64(len(b.validators)) {
 		return 0, ErrInvalidValidatorIndex
 	}
-	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
+	}
+	if b.version != clparams.Phase0Version {
+		return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
+	}
+	return b.validators[index].EffectiveBalance * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache / b.beaconConfig.BaseRewardsPerEpoch, nil
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
