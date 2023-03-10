@@ -67,6 +67,7 @@ func processRewardsAndPenaltiesPostAltair(state *state.BeaconState) (err error) 
 	return
 }
 
+// processRewardsAndPenaltiesPhase0 process rewards and penalties for phase0 state.
 func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 	beaconConfig := state.BeaconConfig()
 	if state.Epoch() == beaconConfig.GenesisEpoch {
@@ -106,43 +107,41 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 		// we can use a multiplier to account for all attesting
 		attested, missed := validators[index].DutiesAttested()
 		// If we attested then we reward the validator.
-		if attested > 0 {
-			if state.InactivityLeaking() {
-				if err := state.IncreaseBalance(index, baseReward*attested); err != nil {
+		if state.InactivityLeaking() {
+			if err := state.IncreaseBalance(index, baseReward*attested); err != nil {
+				return err
+			}
+		} else {
+			if !validators[index].Slashed && validators[index].IsPreviousMatchingSourceAttester {
+				rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
+				if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 					return err
-				}
-			} else {
-				if !validators[index].Slashed && validators[index].IsPreviousMatchingSourceAttester {
-					rewardNumerator := baseReward * unslashedMatchingSourceBalanceIncrements
-					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
-						return err
-					}
-				}
-				if !validators[index].Slashed && validators[index].IsPreviousMatchingTargetAttester {
-					rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
-					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
-						return err
-					}
-				}
-				if !validators[index].Slashed && validators[index].IsPreviousMatchingHeadAttester {
-					rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
-					if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
-						return err
-					}
 				}
 			}
-			// Process inactivity of the network as a whole finalities.
-			if state.InactivityLeaking() {
-				proposerReward := baseReward / beaconConfig.ProposerRewardQuotient
-				// Neutralize rewards.
-				if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
+			if !validators[index].Slashed && validators[index].IsPreviousMatchingTargetAttester {
+				rewardNumerator := baseReward * unslashedMatchingTargetBalanceIncrements
+				if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
 					return err
 				}
-				if validators[index].Slashed || !validators[index].IsPreviousMatchingTargetAttester {
-					// Increase penalities linearly if network is leaking.
-					if state.DecreaseBalance(index, validators[index].EffectiveBalance*state.FinalityDelay()/beaconConfig.InactivityPenaltyQuotient); err != nil {
-						return err
-					}
+			}
+			if !validators[index].Slashed && validators[index].IsPreviousMatchingHeadAttester {
+				rewardNumerator := baseReward * unslashedMatchingHeadBalanceIncrements
+				if err := state.IncreaseBalance(index, rewardNumerator/rewardDenominator); err != nil {
+					return err
+				}
+			}
+		}
+		// Process inactivity of the network as a whole finalities.
+		if state.InactivityLeaking() {
+			proposerReward := baseReward / beaconConfig.ProposerRewardQuotient
+			// Neutralize rewards.
+			if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward-proposerReward); err != nil {
+				return err
+			}
+			if validators[index].Slashed || !validators[index].IsPreviousMatchingTargetAttester {
+				// Increase penalities linearly if network is leaking.
+				if state.DecreaseBalance(index, validators[index].EffectiveBalance*state.FinalityDelay()/beaconConfig.InactivityPenaltyQuotient); err != nil {
+					return err
 				}
 			}
 		}
