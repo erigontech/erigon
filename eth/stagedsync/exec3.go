@@ -930,15 +930,7 @@ func reconstituteStep(last bool,
 
 	for i := 0; i < workerCount; i++ {
 		i := i
-		g.Go(func() error {
-			reconWorkers[i].Run()
-			select {
-			case <-reconstWorkersCtx.Done():
-				return reconstWorkersCtx.Err()
-			default:
-			}
-			return nil
-		})
+		g.Go(func() error { return reconWorkers[i].Run() })
 	}
 	commitThreshold := batchSize.Bytes()
 	prevRollbackCount := uint64(0)

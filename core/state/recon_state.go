@@ -186,13 +186,13 @@ func (rs *ReconState) Flush(rwTx kv.RwTx) error {
 	return nil
 }
 
-func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
+func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool, error) {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 	for rs.queue.Len() < 16 {
 		select {
 		case <-ctx.Done():
-			return nil, false
+			return nil, false, ctx.Err()
 		case txTask, ok := <-rs.workCh:
 			if !ok {
 				// No more work, channel is closed
@@ -202,9 +202,9 @@ func (rs *ReconnWork) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
 		}
 	}
 	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true
+		return heap.Pop(&rs.queue).(*exec22.TxTask), true, nil
 	}
-	return nil, false
+	return nil, false, nil
 }
 
 func (rs *ReconnWork) CommitTxNum(txNum uint64) {
