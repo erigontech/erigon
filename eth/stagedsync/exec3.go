@@ -1344,7 +1344,8 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 			return err
 		}
 		if !ok {
-			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found", toTxNum)
+			lastBn, lastTn, _ := rawdbv3.TxNums.Last(tx)
+			return fmt.Errorf("blockNum for mininmaxTxNum=%d not found. See lastBlockNum=%d,lastTxNum=%d", toTxNum, lastBn, lastTn)
 		}
 		if blockNum == 0 {
 			return fmt.Errorf("not enough transactions in the history data")
