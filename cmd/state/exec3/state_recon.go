@@ -273,14 +273,8 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 }
 
 func (rw *ReconWorker) Run() {
-	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
+	for txTask, ok := rw.rs.Schedule(rw.ctx); ok; txTask, ok = rw.rs.Schedule(rw.ctx) {
 		rw.runTxTask(txTask)
-
-		select {
-		case <-rw.ctx.Done():
-			return
-		default:
-		}
 	}
 }
 
