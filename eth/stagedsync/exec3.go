@@ -330,7 +330,7 @@ func ExecV3(ctx context.Context,
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
 							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
-								panic(err)
+								return err
 							}
 						} else {
 							if err = agg.Flush(ctx, tx); err != nil {
@@ -600,7 +600,7 @@ Loop:
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
 				if err != nil {
-					panic(err)
+					return err
 				}
 
 				if sender, ok := txs[txIndex].GetSender(); ok {
@@ -1393,17 +1393,23 @@ func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, wo
 
 	fillWorker := exec3.NewFillWorker(txNum, aggSteps[len(aggSteps)-1])
 	t := time.Now()
-	fillWorker.FillAccounts(plainStateCollector)
+	if err := fillWorker.FillAccounts(plainStateCollector); err != nil {
+		return err
+	}
 	if time.Since(t) > 5*time.Second {
 		log.Info(fmt.Sprintf("[%s] Filled accounts", s.LogPrefix()), "took", time.Since(t))
 	}
 	t = time.Now()
-	fillWorker.FillStorage(plainStateCollector)
+	if err := fillWorker.FillStorage(plainStateCollector); err != nil {
+		return err
+	}
 	if time.Since(t) > 5*time.Second {
 		log.Info(fmt.Sprintf("[%s] Filled storage", s.LogPrefix()), "took", time.Since(t))
 	}
 	t = time.Now()
-	fillWorker.FillCode(codeCollector, plainContractCollector)
+	if err := fillWorker.FillCode(codeCollector, plainContractCollector); err != nil {
+		return err
+	}
 	if time.Since(t) > 5*time.Second {
 		log.Info(fmt.Sprintf("[%s] Filled code", s.LogPrefix()), "took", time.Since(t))
 	}
