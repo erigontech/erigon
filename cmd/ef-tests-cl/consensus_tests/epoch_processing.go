@@ -29,10 +29,9 @@ func getTestEpochProcessing(f func(s *state.BeaconState) error) testFunc {
 		expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 		if os.IsNotExist(err) {
 			isErrExpected = true
-		} else {
+		} else if err != nil {
 			return err
 		}
-
 		// Make up state transistor
 		if err := f(testState); err != nil {
 			if isErrExpected {

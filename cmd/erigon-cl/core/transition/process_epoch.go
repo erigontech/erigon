@@ -57,7 +57,9 @@ func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 		validator.IsPreviousMatchingSourceAttester = validator.IsCurrentMatchingSourceAttester
 		validator.IsPreviousMatchingTargetAttester = validator.IsCurrentMatchingTargetAttester
 		validator.IsPreviousMatchingHeadAttester = validator.IsCurrentMatchingHeadAttester
+		validator.MinPreviousInclusionDelayAttestation = validator.MinCurrentInclusionDelayAttestation
 		// Current sources/target/head
+		validator.MinCurrentInclusionDelayAttestation = nil
 		validator.IsCurrentMatchingSourceAttester = false
 		validator.IsCurrentMatchingTargetAttester = false
 		validator.IsCurrentMatchingHeadAttester = false

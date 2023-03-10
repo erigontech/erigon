@@ -132,8 +132,9 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 			}
 			// Process inactivity of the network as a whole finalities.
 			if state.InactivityLeaking() {
+				proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
 				// Neutralize rewards.
-				if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward*(baseReward/beaconConfig.ProposerRewardQuotient)); err != nil {
+				if state.DecreaseBalance(index, beaconConfig.BaseRewardsPerEpoch*baseReward*proposerReward); err != nil {
 					return err
 				}
 				if validators[index].Slashed || validators[index].IsPreviousMatchingTargetAttester {
@@ -151,13 +152,33 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 		}
 
 	}
+	// Lastly process late attestations
+	for index, validator := range validators {
+		if validator.Slashed || !validator.IsPreviousMatchingSourceAttester {
+			continue
+		}
+		attestation := validators[index].MinPreviousInclusionDelayAttestation
+		baseReward, err := state.BaseReward(uint64(index))
+		if err != nil {
+			return err
+		}
+		// Compute proposer reward.
+		proposerReward := (baseReward / beaconConfig.ProposerRewardQuotient)
+		if err := state.IncreaseBalance(attestation.ProposerIndex, proposerReward); err != nil {
+			return err
+		}
+		maxAttesterReward := baseReward - proposerReward
+		if err := state.IncreaseBalance(uint64(index), maxAttesterReward/attestation.InclusionDelay); err != nil {
+			return err
+		}
+	}
 	return
 }
 
 // ProcessRewardsAndPenalties applies rewards/penalties accumulated during previous epoch.
 func ProcessRewardsAndPenalties(state *state.BeaconState) error {
 	if state.Version() == clparams.Phase0Version {
-		return nil
+		return processRewardsAndPenaltiesPhase0(state)
 	}
 	return processRewardsAndPenaltiesPostAltair(state)
 }

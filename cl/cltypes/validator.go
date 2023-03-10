@@ -304,6 +304,9 @@ type Validator struct {
 	// Head attesters
 	IsCurrentMatchingHeadAttester  bool
 	IsPreviousMatchingHeadAttester bool
+	// MinInclusionDelay
+	MinCurrentInclusionDelayAttestation  *PendingAttestation
+	MinPreviousInclusionDelayAttestation *PendingAttestation
 }
 
 // DutiesAttested returns how many of its duties the validator attested and missed

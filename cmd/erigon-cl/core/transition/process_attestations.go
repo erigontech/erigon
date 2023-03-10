@@ -144,6 +144,9 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 		// NOTE: does not affect state root.
 		// We need to set it to currents or previouses depending on which attestation we process.
 		if isCurrentAttestation {
+			if validator.MinCurrentInclusionDelayAttestation == nil || validator.MinCurrentInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
+				validator.MinCurrentInclusionDelayAttestation = pendingAttestation
+			}
 			validator.IsCurrentMatchingSourceAttester = true
 			if attestation.Data.Target.Root == epochRoot {
 				validator.IsCurrentMatchingTargetAttester = true
@@ -152,6 +155,9 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 				validator.IsCurrentMatchingHeadAttester = true
 			}
 		} else {
+			if validator.MinPreviousInclusionDelayAttestation == nil || validator.MinPreviousInclusionDelayAttestation.InclusionDelay > pendingAttestation.InclusionDelay {
+				validator.MinPreviousInclusionDelayAttestation = pendingAttestation
+			}
 			validator.IsPreviousMatchingSourceAttester = true
 			if attestation.Data.Target.Root == epochRoot {
 				validator.IsPreviousMatchingTargetAttester = true

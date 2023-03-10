@@ -169,6 +169,9 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			return err
 		}
 		for _, index := range indicies {
+			if b.validators[index].MinPreviousInclusionDelayAttestation == nil || b.validators[index].MinPreviousInclusionDelayAttestation.InclusionDelay > attestation.InclusionDelay {
+				b.validators[index].MinPreviousInclusionDelayAttestation = attestation
+			}
 			b.validators[index].IsPreviousMatchingSourceAttester = true
 			if attestation.Data.Target.Root == previousEpochRoot {
 				b.validators[index].IsPreviousMatchingTargetAttester = true
@@ -200,6 +203,9 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 			return err
 		}
 		for _, index := range indicies {
+			if b.validators[index].MinCurrentInclusionDelayAttestation == nil || b.validators[index].MinCurrentInclusionDelayAttestation.InclusionDelay > attestation.InclusionDelay {
+				b.validators[index].MinCurrentInclusionDelayAttestation = attestation
+			}
 			b.validators[index].IsCurrentMatchingSourceAttester = true
 			if attestation.Data.Target.Root == currentEpochRoot {
 				b.validators[index].IsCurrentMatchingTargetAttester = true
