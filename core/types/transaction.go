@@ -162,6 +162,8 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 			return nil, err
 		}
 		tx = t
+	// TODO: remove when all transactions are signed
+	// https://infinityswap.atlassian.net/browse/EPROD-203
 	case 42:
 		kind, size, err := s.Kind()
 		if err != nil {
