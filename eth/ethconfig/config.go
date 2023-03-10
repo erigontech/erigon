@@ -227,6 +227,9 @@ type Config struct {
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
 
+	// gRPC Address to connect to Heimdall node
+	HeimdallgRPCAddress string
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 

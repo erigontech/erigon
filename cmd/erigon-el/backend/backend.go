@@ -145,7 +145,7 @@ type Ethereum struct {
 
 	txPool2DB               kv.RwDB
 	txPool2                 *txpool2.TxPool
-	newTxs2                 chan types2.Hashes
+	newTxs2                 chan types2.Announcements
 	txPool2Fetch            *txpool2.Fetch
 	txPool2Send             *txpool2.Send
 	txPool2GrpcServer       txpool_proto.TxpoolServer
@@ -203,7 +203,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}); err != nil {
 		panic(err)
 	}
-	config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && config.Sync.UseSnapshots
+	config.Snapshot.Enabled = config.Sync.UseSnapshots
 
 	log.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
@@ -235,7 +235,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		if !isCorrectSync {
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
 			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
+			config.Snapshot.Enabled = useSnapshots
 		}
 		log.Info("Effective", "prune_flags", config.Prune.String(), "snapshot_flags", config.Snapshot.String(), "history.v3", config.HistoryV3)
 
@@ -307,9 +307,12 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return res
 		}
 
-		discovery, err := setupDiscovery(backend.config.EthDiscoveryURLs)
-		if err != nil {
-			return nil, err
+		discovery := func() enode.Iterator {
+			d, err := setupDiscovery(backend.config.EthDiscoveryURLs)
+			if err != nil {
+				panic(err)
+			}
+			return d
 		}
 
 		refCfg := stack.Config().P2P
@@ -361,8 +364,15 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 					return
 				case <-logEvery.C:
 					logItems = logItems[:0]
+					peerCountMap := map[uint]int{}
 					for _, srv := range backend.sentryServers {
-						logItems = append(logItems, eth.ProtocolToString[srv.Protocol.Version], strconv.Itoa(srv.SimplePeerCount()))
+						counts := srv.SimplePeerCount()
+						for protocol, count := range counts {
+							peerCountMap[protocol] += count
+						}
+					}
+					for protocol, count := range peerCountMap {
+						logItems = append(logItems, eth.ProtocolToString[protocol], strconv.Itoa(count))
 					}
 					log.Info("[p2p] GoodPeers", logItems...)
 				}
@@ -411,7 +421,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */, backend.chainDB)
+	backend.engine = ethconsensusconfig.CreateConsensusEngine(chainConfig, logger, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, stack.DataDir(), allSnapshots, false /* readonly */, backend.chainDB)
 	backend.forkValidator = engineapi.NewForkValidator(currentBlockNumber, inMemoryExecution, tmpdir)
 
 	if err != nil {
@@ -443,7 +453,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		//cacheConfig := kvcache.DefaultCoherentCacheConfig
 		//cacheConfig.MetricsLabel = "txpool"
 
-		backend.newTxs2 = make(chan types2.Hashes, 1024)
+		backend.newTxs2 = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPool2DB, backend.txPool2, backend.txPool2Fetch, backend.txPool2Send, backend.txPool2GrpcServer, err = txpooluitl.AllComponents(
 			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs2, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient,
@@ -911,7 +921,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 func (s *Ethereum) Protocols() []p2p.Protocol {
 	protocols := make([]p2p.Protocol, 0, len(s.sentryServers))
 	for i := range s.sentryServers {
-		protocols = append(protocols, s.sentryServers[i].Protocol)
+		protocols = append(protocols, s.sentryServers[i].Protocols...)
 	}
 	return protocols
 }

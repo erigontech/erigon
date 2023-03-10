@@ -143,7 +143,7 @@ func (ms *MockSentry) PeerMinBlock(context.Context, *proto_sentry.PeerMinBlockRe
 }
 
 func (ms *MockSentry) HandShake(ctx context.Context, in *emptypb.Empty) (*proto_sentry.HandShakeReply, error) {
-	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH66}, nil
+	return &proto_sentry.HandShakeReply{Protocol: proto_sentry.Protocol_ETH68}, nil
 }
 func (ms *MockSentry) SendMessageByMinBlock(_ context.Context, r *proto_sentry.SendMessageByMinBlockRequest) (*proto_sentry.SentPeers, error) {
 	ms.sentMessages = append(ms.sentMessages, r.Data)
@@ -293,7 +293,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 	propagateNewBlockHashes := func(context.Context, []headerdownload.Announce) {}
 	penalize := func(context.Context, []headerdownload.PenaltyItem) {}
 
-	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH66, mock)
+	mock.SentryClient = direct.NewSentryClientDirect(eth.ETH68, mock)
 	sentries := []direct.SentryClient{mock.SentryClient}
 
 	sendBodyRequest := func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool) { return [64]byte{}, false }
@@ -301,7 +301,7 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 
 	if !cfg.DeprecatedTxPool.Disable {
 		poolCfg := txpool.DefaultConfig
-		newTxs := make(chan types2.Hashes, 1024)
+		newTxs := make(chan types2.Announcements, 1024)
 		if t != nil {
 			t.Cleanup(func() {
 				close(newTxs)

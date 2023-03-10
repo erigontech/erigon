@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -20,7 +20,7 @@ type Snapshot struct {
 
 	Number       uint64                       `json:"number"`       // Block number where the snapshot was created
 	Hash         libcommon.Hash               `json:"hash"`         // Block hash where the snapshot was created
-	ValidatorSet *ValidatorSet                `json:"validatorSet"` // Validator set at this moment
+	ValidatorSet *valset.ValidatorSet         `json:"validatorSet"` // Validator set at this moment
 	Recents      map[uint64]libcommon.Address `json:"recents"`      // Set of recent signers for spam protections
 }
 
@@ -41,14 +41,14 @@ func newSnapshot(
 	sigcache *lru.ARCCache,
 	number uint64,
 	hash libcommon.Hash,
-	validators []*Validator,
+	validators []*valset.Validator,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:       config,
 		sigcache:     sigcache,
 		Number:       number,
 		Hash:         hash,
-		ValidatorSet: NewValidatorSet(validators),
+		ValidatorSet: valset.NewValidatorSet(validators),
 		Recents:      make(map[uint64]libcommon.Address),
 	}
 	return snap
@@ -60,20 +60,25 @@ func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, h
 	if err != nil {
 		return nil, err
 	}
+
 	defer tx.Rollback()
+
 	blob, err := tx.GetOne(kv.BorSeparate, append([]byte("bor-"), hash[:]...))
 	if err != nil {
 		return nil, err
 	}
+
 	snap := new(Snapshot)
+
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
+
 	snap.config = config
 	snap.sigcache = sigcache
 
 	// update total voting power
-	if err := snap.ValidatorSet.updateTotalVotingPower(); err != nil {
+	if err := snap.ValidatorSet.UpdateTotalVotingPower(); err != nil {
 		return nil, err
 	}
 
@@ -120,6 +125,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			return nil, errOutOfRangeChain
 		}
 	}
+
 	if headers[0].Number.Uint64() != s.Number+1 {
 		return nil, errOutOfRangeChain
 	}
@@ -142,7 +148,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		}
 
 		// check if signer is in validator set
-		if !snap.ValidatorSet.HasAddress(signer.Bytes()) {
+		if !snap.ValidatorSet.HasAddress(signer) {
 			return nil, &UnauthorizedSignerError{number, signer.Bytes()}
 		}
 
@@ -161,12 +167,13 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]
 
 			// get validators from headers and use that for new validator set
-			newVals, _ := ParseValidators(validatorBytes)
+			newVals, _ := valset.ParseValidators(validatorBytes)
 			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals)
 			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}
 	}
+
 	snap.Number += uint64(len(headers))
 	snap.Hash = headers[len(headers)-1].Hash()
 
@@ -178,10 +185,13 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer libcommon.Address) (int, err
 	validators := s.ValidatorSet.Validators
 	proposer := s.ValidatorSet.GetProposer().Address
 	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
+
 	if proposerIndex == -1 {
 		return -1, &UnauthorizedProposerError{s.Number, proposer.Bytes()}
 	}
+
 	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
+
 	if signerIndex == -1 {
 		return -1, &UnauthorizedSignerError{s.Number, signer.Bytes()}
 	}
@@ -192,6 +202,7 @@ func (s *Snapshot) GetSignerSuccessionNumber(signer libcommon.Address) (int, err
 			tempIndex = tempIndex + len(validators)
 		}
 	}
+
 	return tempIndex - proposerIndex, nil
 }
 
@@ -201,6 +212,7 @@ func (s *Snapshot) signers() []libcommon.Address {
 	for _, sig := range s.ValidatorSet.Validators {
 		sigs = append(sigs, sig.Address)
 	}
+
 	return sigs
 }
 
