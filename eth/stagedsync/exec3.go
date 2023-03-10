@@ -923,6 +923,7 @@ func reconstituteStep(last bool,
 	rollbackCount := uint64(0)
 	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
+		i := i
 		g.Go(func() error {
 			reconWorkers[i].Run()
 			return nil
