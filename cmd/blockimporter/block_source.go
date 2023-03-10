@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -41,8 +42,11 @@ func makeBlockRequest(fromBlock uint64) map[string]interface{} {
 	return map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  "ic_getBlocksRLP",
-		"params":  []string{fmt.Sprintf("0x%02x", fromBlock)},
-		"id":      1,
+		"params": []string{
+			fmt.Sprintf("0x%02x", fromBlock), // from block
+			"0x01",                           // max blocks per request
+		},
+		"id": 1,
 	}
 }
 
@@ -71,16 +75,20 @@ func (blockSource *HttpBlockSource) PollBlocks(fromBlock uint64) ([]types.Block,
 	}
 
 	stream := rlp.NewStream(hex.NewDecoder(strings.NewReader(response.Result)), 0)
-	blocksNum, err := stream.List()
+	_, err = stream.List()
 	if err != nil {
 		return nil, err
 	}
 
-	result := make([]types.Block, blocksNum)
-	for i := range result {
-		if err := result[i].DecodeRLP(stream); err != nil {
-			return nil, err
-		}
+	var result []types.Block
+	var block types.Block
+	for err = block.DecodeRLP(stream); err == nil; err = block.DecodeRLP(stream) {
+		result = append(result, block)
+		block = types.Block{}
+	}
+
+	if !errors.Is(err, rlp.EOL) {
+		return nil, err
 	}
 
 	return result, nil

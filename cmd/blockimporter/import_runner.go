@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Settings struct {
 	DBPath        string
-	LogPrefix     string
+	Logger        log.Logger
 	Terminated    chan struct{}
 	RetryCount    uint64
 	RetryInterval time.Duration
@@ -17,9 +17,7 @@ type Settings struct {
 }
 
 func RunImport(settings *Settings, blockSource BlockSource) error {
-	logger := logging.GetLogger(settings.LogPrefix)
-
-	db, err := NewDB(settings.DBPath, logger)
+	db, err := NewDB(settings.DBPath, settings.Logger)
 	if err != nil {
 		panic(err)
 	}

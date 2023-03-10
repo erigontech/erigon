@@ -27,7 +27,7 @@ type State struct {
 }
 
 // Account that is used to perform withdraws/deposits
-const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
+const ownerAccount string = "0x0000000000000000000000000000000000000000"
 
 func NewState(db *DB) (*State, error) {
 	tx, err := db.GetChain().BeginRw(context.Background())

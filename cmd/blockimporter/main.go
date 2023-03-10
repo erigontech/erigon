@@ -1,16 +1,27 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 func main() {
+	// Parse commandline arguments
+	var (
+		dbPath = flag.String("db", "./db", "database path")
+		evmUrl = flag.String("evm", "http://127.0.0.1:8545", "EVM canister HTTP endpoint URL")
+	)
+	flag.Parse()
+
+	logger := logging.GetLogger("blockimporter")
 	settings := Settings{
-		DBPath:        "./db",
-		LogPrefix:     "",
+		DBPath:        *dbPath,
+		Logger:        logger,
 		Terminated:    make(chan struct{}),
 		RetryCount:    100,
 		RetryInterval: time.Second,
@@ -24,10 +35,11 @@ func main() {
 		close(settings.Terminated)
 	}()
 
-	blockSource := NewHttpBlockSource("localhost:8000")
+	blockSource := NewHttpBlockSource(*evmUrl)
 	err := RunImport(&settings, &blockSource)
 
 	if err != nil {
+		logger.Error(err.Error())
 		panic(err)
 	}
 }
