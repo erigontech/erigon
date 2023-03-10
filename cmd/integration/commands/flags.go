@@ -1,8 +1,9 @@
 package commands
 
 import (
-	"github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/erigon/turbo/cli"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -30,6 +31,12 @@ var (
 	pruneTBefore, pruneCBefore     uint64
 	experiments                    []string
 	chain                          string // Which chain to use (mainnet, rinkeby, goerli, etc.)
+
+	commitmentMode string
+	commitmentTrie string
+	commitmentFreq int
+	startTxNum     uint64
+	traceFromTx    uint64
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
@@ -141,4 +148,18 @@ func withHeimdall(cmd *cobra.Command) {
 func withWorkers(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&workers, "exec.workers", uint64(ethconfig.Defaults.Sync.ExecWorkerCount), "")
 	cmd.Flags().Uint64Var(&reconWorkers, "recon.workers", uint64(ethconfig.Defaults.Sync.ReconWorkerCount), "")
+}
+
+func withStartTx(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&startTxNum, "startTx", 0, "start processing from tx")
+}
+
+func withTraceFromTx(cmd *cobra.Command) {
+	cmd.Flags().Uint64Var(&traceFromTx, "txtrace.from", 0, "start tracing from tx number")
+}
+
+func withCommitment(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&commitmentMode, "commitment.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment, 'off' actually disables commitment calculation")
+	cmd.Flags().StringVar(&commitmentTrie, "commitment.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
+	cmd.Flags().IntVar(&commitmentFreq, "commitment.freq", 25000, "how many blocks to skip between calculating commitment")
 }

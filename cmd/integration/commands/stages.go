@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -479,6 +481,8 @@ func init() {
 
 	withDataDir2(cmdForceSetHistoryV3)
 	cmdForceSetHistoryV3.Flags().BoolVar(&_forceSetHistoryV3, "history.v3", false, "")
+	rootCmd.AddCommand(cmdForceSetHistoryV3)
+
 	rootCmd.AddCommand(cmdForceSetHistoryV3)
 
 	withDataDir(cmdSetPrune)
@@ -1225,6 +1229,87 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 		_blockReaderSingleton = snapshotsync.NewBlockReaderWithSnapshots(sn, transactionsV3)
 	})
 	return _blockReaderSingleton
+}
+
+var openDomainsOnce sync.Once
+var _aggDomainSingleton *libstate.Aggregator
+
+func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, trie commitment.TrieVariant) (*snapshotsync.RoSnapshots, *libstate.Aggregator) {
+	openDomainsOnce.Do(func() {
+		var useSnapshots bool
+		_ = db.View(context.Background(), func(tx kv.Tx) error {
+			useSnapshots, _ = snap.Enabled(tx)
+			return nil
+		})
+		dirs := datadir.New(datadirCli)
+		dir.MustExist(dirs.SnapHistory)
+
+		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
+		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
+
+		var err error
+		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, ethconfig.HistoryV3AggregationStep, mode, trie)
+		if err != nil {
+			panic(err)
+		}
+		if err = _aggDomainSingleton.ReopenFolder(); err != nil {
+			panic(err)
+		}
+
+		if useSnapshots {
+			if err := _allSnapshotsSingleton.ReopenFolder(); err != nil {
+				panic(err)
+			}
+			_allSnapshotsSingleton.LogStat()
+			//db.View(context.Background(), func(tx kv.Tx) error {
+			//	_aggSingleton.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			//		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			//		return histBlockNumProgress
+			//	})
+			//	return nil
+			//})
+		}
+	})
+	return _allSnapshotsSingleton, _aggDomainSingleton
+}
+
+func newDomains(ctx context.Context, db kv.RwDB, mode libstate.CommitmentMode, trie commitment.TrieVariant) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
+	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+	//events := shards.NewEvents()
+	genesis := core.DefaultGenesisBlockByChainName(chain)
+
+	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
+	_ = genesisBlock // TODO apply if needed here
+
+	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
+		panic(genesisErr)
+	}
+	//log.Info("Initialised chain configuration", "config", chainConfig)
+
+	// Apply special hacks for BSC params
+	if chainConfig.Parlia != nil {
+		params.ApplyBinanceSmartChainParams()
+	}
+
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
+	cfg := ethconfig.Defaults
+	cfg.HistoryV3 = historyV3
+	cfg.Prune = pm
+	cfg.BatchSize = batchSize
+	cfg.DeprecatedTxPool.Disable = true
+	cfg.Genesis = core.DefaultGenesisBlockByChainName(chain)
+	//if miningConfig != nil {
+	//	cfg.Miner = *miningConfig
+	//}
+	cfg.Dirs = datadir.New(datadirCli)
+
+	allSn, agg := allDomains(ctx, db, mode, trie)
+	cfg.Snapshot = allSn.Cfg()
+
+	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
+	return engine, cfg, allSn, agg
 }
 
 func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig) (consensus.Engine, *vm.Config, *stagedsync.Sync, *stagedsync.Sync, stagedsync.MiningState) {
