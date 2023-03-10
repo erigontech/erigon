@@ -29,7 +29,6 @@
       "petersburgBlock": 0,
       "IstanbulBlock":1561651,
       "chainId": 5,
-      "daoForkSupport": true,
       "eip150Block": 0,
       "eip155Block": 10,
       "eip158Block": 10,

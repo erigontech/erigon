@@ -355,7 +355,7 @@ func (b *blockProcessor) applyBlock(
 	b.blockNum = block.NumberU64()
 	b.writer.w.SetTxNum(b.txNum)
 
-	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkSupport && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(b.reader)
 		// TODO Actually add tracing to the DAO related accounts

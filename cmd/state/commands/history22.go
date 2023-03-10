@@ -240,7 +240,7 @@ func runHistory22(trace bool, blockNum, txNumStart uint64, hw *state.HistoryRead
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	txNum := txNumStart
 	hw.SetTxNum(txNum)
-	daoFork := chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(hw)
 		misc.ApplyDAOHardFork(ibs)
