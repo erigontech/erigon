@@ -168,7 +168,7 @@ func (c *Clique) Snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
+			snap = s
 			break
 		}
 		// If an on-disk checkpoint snapshot can be found, use that
