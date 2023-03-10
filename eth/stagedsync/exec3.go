@@ -1018,6 +1018,9 @@ func reconstituteStep(last bool,
 
 	var err error // avoid declare global mutable variable
 	for bn := startBlockNum; bn <= endBlockNum; bn++ {
+		if bn%1_000_000 == 0 {
+			panic(1)
+		}
 		t = time.Now()
 		b, err = blockWithSenders(chainDb, nil, blockReader, bn)
 		if err != nil {
