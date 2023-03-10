@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	atomic2 "go.uber.org/atomic"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
@@ -880,7 +881,6 @@ func reconstituteStep(last bool,
 	}
 	bitmap := scanWorker.Bitmap()
 
-	var wg sync.WaitGroup
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -908,6 +908,8 @@ func reconstituteStep(last bool,
 			return err
 		}
 	}
+	g, reconstWorkersCtx := errgroup.WithContext(ctx)
+	defer g.Wait()
 	for i := 0; i < workerCount; i++ {
 		var localAs *libstate.AggregatorStep
 		if i == 0 {
@@ -915,16 +917,18 @@ func reconstituteStep(last bool,
 		} else {
 			localAs = as.Clone()
 		}
-		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), &wg, rs, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
+		reconWorkers[i] = exec3.NewReconWorker(lock.RLocker(), reconstWorkersCtx, rs, localAs, blockReader, chainConfig, logger, genesis, engine, chainTxs[i])
 		reconWorkers[i].SetTx(roTxs[i])
 		reconWorkers[i].SetChainTx(chainTxs[i])
 	}
-	wg.Add(workerCount)
 
 	rollbackCount := uint64(0)
 	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
-		go reconWorkers[i].Run()
+		g.Go(func() error {
+			reconWorkers[i].Run()
+			return nil
+		})
 	}
 	commitThreshold := batchSize.Bytes()
 	prevRollbackCount := uint64(0)
@@ -1083,7 +1087,8 @@ func reconstituteStep(last bool,
 		}
 	}
 	close(workCh)
-	wg.Wait()
+	_ = g.Wait()
+
 	reconDone <- struct{}{} // Complete logging and committing go-routine
 	for i := 0; i < workerCount; i++ {
 		roTxs[i].Rollback()

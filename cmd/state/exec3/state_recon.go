@@ -219,7 +219,6 @@ func (sw *ScanWorker) Bitmap() *roaring64.Bitmap { return &sw.bitmap }
 
 type ReconWorker struct {
 	lock        sync.Locker
-	wg          *sync.WaitGroup
 	rs          *state.ReconState
 	blockReader services.FullBlockReader
 	stateWriter *state.StateReconWriterInc
@@ -238,17 +237,16 @@ type ReconWorker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewReconWorker(lock sync.Locker, wg *sync.WaitGroup, rs *state.ReconState,
+func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
 	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	rw := &ReconWorker{
 		lock:        lock,
-		wg:          wg,
+		ctx:         ctx,
 		rs:          rs,
 		blockReader: blockReader,
-		ctx:         context.Background(),
 		stateWriter: state.NewStateReconWriterInc(as, rs),
 		stateReader: state.NewHistoryReaderInc(as, rs),
 		chainConfig: chainConfig,
@@ -275,9 +273,14 @@ func (rw *ReconWorker) SetChainTx(chainTx kv.Tx) {
 }
 
 func (rw *ReconWorker) Run() {
-	defer rw.wg.Done()
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.runTxTask(txTask)
+
+		select {
+		case <-rw.ctx.Done():
+			return
+		default:
+		}
 	}
 }
 
