@@ -850,8 +850,6 @@ func reconstituteStep(last bool,
 
 	var maxTxNum = startTxNum
 
-	workCh := make(chan *exec22.TxTask, workerCount*4)
-	rs := state.NewReconState(workCh)
 	scanWorker := exec3.NewScanWorker(txNum, as)
 
 	t := time.Now()
@@ -908,6 +906,11 @@ func reconstituteStep(last bool,
 	}
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
+	workCh := make(chan *exec22.TxTask, workerCount*4)
+	defer safeCloseTxTaskCh(workCh)
+
+	rs := state.NewReconState(workCh)
+	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
 		var localAs *libstate.AggregatorStep
 		if i == 0 {
@@ -921,7 +924,7 @@ func reconstituteStep(last bool,
 	}
 
 	rollbackCount := uint64(0)
-	prevCount := rs.DoneCount()
+
 	for i := 0; i < workerCount; i++ {
 		i := i
 		g.Go(func() error {
@@ -933,6 +936,7 @@ func reconstituteStep(last bool,
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
 	reconDone := make(chan struct{})
+
 	//var bn uint64
 	go func() {
 		for {
@@ -1285,6 +1289,18 @@ func reconstituteStep(last bool,
 		return err
 	}
 	return nil
+}
+
+func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
+	if ch == nil {
+		return
+	}
+	select {
+	case <-ch:
+		// Channel was already closed
+	default:
+		close(ch)
+	}
 }
 
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
