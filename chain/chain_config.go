@@ -36,48 +36,49 @@ type Config struct {
 
 	Consensus ConsensusName `json:"consensus,omitempty"` // aura, ethash or clique
 
-	HomesteadBlock *big.Int `json:"homesteadBlock,omitempty"` // Homestead switch block (nil = no fork, 0 = already homestead)
+	// *Block fields activate the corresponding hard fork at a certain block number,
+	// while *Time fields do so based on the block's time stamp.
+	// nil means that the hard-fork is not scheduled,
+	// while 0 means that it's already activated from genesis.
 
-	DAOForkBlock   *big.Int `json:"daoForkBlock,omitempty"`   // TheDAO hard-fork switch block (nil = no fork)
-	DAOForkSupport bool     `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
+	// ETH mainnet upgrades
+	// See https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades
+	HomesteadBlock        *big.Int `json:"homesteadBlock,omitempty"`
+	DAOForkBlock          *big.Int `json:"daoForkBlock,omitempty"`
+	TangerineWhistleBlock *big.Int `json:"eip150Block,omitempty"`
+	SpuriousDragonBlock   *big.Int `json:"eip155Block,omitempty"`
+	ByzantiumBlock        *big.Int `json:"byzantiumBlock,omitempty"`
+	ConstantinopleBlock   *big.Int `json:"constantinopleBlock,omitempty"`
+	PetersburgBlock       *big.Int `json:"petersburgBlock,omitempty"`
+	IstanbulBlock         *big.Int `json:"istanbulBlock,omitempty"`
+	MuirGlacierBlock      *big.Int `json:"muirGlacierBlock,omitempty"`
+	BerlinBlock           *big.Int `json:"berlinBlock,omitempty"`
+	LondonBlock           *big.Int `json:"londonBlock,omitempty"`
+	ArrowGlacierBlock     *big.Int `json:"arrowGlacierBlock,omitempty"`
+	GrayGlacierBlock      *big.Int `json:"grayGlacierBlock,omitempty"`
 
-	// Tangerine Whistle (EIP150) implements the Gas price changes (https://github.com/ethereum/EIPs/issues/150)
-	TangerineWhistleBlock *big.Int    `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
-	TangerineWhistleHash  common.Hash `json:"eip150Hash,omitempty"`  // EIP150 HF hash (needed for header only clients as only gas pricing changed)
-
-	SpuriousDragonBlock *big.Int `json:"eip155Block,omitempty"` // Spurious Dragon HF block
-
-	ByzantiumBlock      *big.Int `json:"byzantiumBlock,omitempty"`      // Byzantium switch block (nil = no fork, 0 = already on byzantium)
-	ConstantinopleBlock *big.Int `json:"constantinopleBlock,omitempty"` // Constantinople switch block (nil = no fork, 0 = already activated)
-	PetersburgBlock     *big.Int `json:"petersburgBlock,omitempty"`     // Petersburg switch block (nil = same as Constantinople)
-	IstanbulBlock       *big.Int `json:"istanbulBlock,omitempty"`       // Istanbul switch block (nil = no fork, 0 = already on istanbul)
-	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // EIP-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
-	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // EIP-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
-	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // EIP-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
-
-	// EIP-3675: Upgrade consensus to Proof-of-Stake
+	// EIP-3675: Upgrade consensus to Proof-of-Stake (a.k.a. "Paris", "The Merge")
 	TerminalTotalDifficulty       *big.Int `json:"terminalTotalDifficulty,omitempty"`       // The merge happens when terminal total difficulty is reached
 	TerminalTotalDifficultyPassed bool     `json:"terminalTotalDifficultyPassed,omitempty"` // Disable PoW sync for networks that have already passed through the Merge
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
-	ShanghaiTime     *big.Int `json:"shanghaiTime,omitempty"`     // Shanghai switch time (nil = no fork, 0 = already activated)
-	CancunTime       *big.Int `json:"cancunTime,omitempty"`       // Cancun switch time (nil = no fork, 0 = already activated)
-	ShardingForkTime *big.Int `json:"shardingForkTime,omitempty"` // Mini-Danksharding switch block (nil = no fork, 0 = already activated)
-	PragueTime       *big.Int `json:"pragueTime,omitempty"`       // Prague switch time (nil = no fork, 0 = already activated)
+	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
+	ShanghaiTime     *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime       *big.Int `json:"cancunTime,omitempty"`
+	ShardingForkTime *big.Int `json:"shardingForkTime,omitempty"`
+	PragueTime       *big.Int `json:"pragueTime,omitempty"`
 
 	// Parlia fork blocks
-	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`  // ramanujanBlock switch block (nil = no fork, 0 = already activated)
-	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`      // nielsBlock switch block (nil = no fork, 0 = already activated)
-	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"` // mirrorSyncBlock switch block (nil = no fork, 0 = already activated)
-	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`      // brunoBlock switch block (nil = no fork, 0 = already activated)
-	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`      // eulerBlock switch block (nil = no fork, 0 = already activated)
-	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`      // gibbsBlock switch block (nil = no fork, 0 = already activated)
-	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`       // nanoBlock switch block (nil = no fork, 0 = already activated)
-	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`      // moranBlock switch block (nil = no fork, 0 = already activated)
+	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`
+	NielsBlock      *big.Int `json:"nielsBlock,omitempty" toml:",omitempty"`
+	MirrorSyncBlock *big.Int `json:"mirrorSyncBlock,omitempty" toml:",omitempty"`
+	BrunoBlock      *big.Int `json:"brunoBlock,omitempty" toml:",omitempty"`
+	EulerBlock      *big.Int `json:"eulerBlock,omitempty" toml:",omitempty"`
+	GibbsBlock      *big.Int `json:"gibbsBlock,omitempty" toml:",omitempty"`
+	NanoBlock       *big.Int `json:"nanoBlock,omitempty" toml:",omitempty"`
+	MoranBlock      *big.Int `json:"moranBlock,omitempty" toml:",omitempty"`
 
-	// Gnosis Chain fork blocks
+	// Forks specific to Gnosis Chain
 	PosdaoBlock *big.Int `json:"posdaoBlock,omitempty"`
 
 	Eip1559FeeCollector           *common.Address `json:"eip1559FeeCollector,omitempty"`           // (Optional) Address where burnt EIP-1559 fees go to
@@ -110,11 +111,10 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, DAO Support: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Sharding: %v, Prague: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Sharding: %v, Prague: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
-		c.DAOForkSupport,
 		c.TangerineWhistleBlock,
 		c.SpuriousDragonBlock,
 		c.ByzantiumBlock,
@@ -408,9 +408,6 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	}
 	if incompatible(c.DAOForkBlock, newcfg.DAOForkBlock, head) {
 		return newCompatError("DAO fork block", c.DAOForkBlock, newcfg.DAOForkBlock)
-	}
-	if c.IsDAOFork(head) && c.DAOForkSupport != newcfg.DAOForkSupport {
-		return newCompatError("DAO fork support flag", c.DAOForkBlock, newcfg.DAOForkBlock)
 	}
 	if incompatible(c.TangerineWhistleBlock, newcfg.TangerineWhistleBlock, head) {
 		return newCompatError("Tangerine Whistle fork block", c.TangerineWhistleBlock, newcfg.TangerineWhistleBlock)
