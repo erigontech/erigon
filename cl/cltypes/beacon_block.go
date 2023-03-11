@@ -188,29 +188,11 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 		}
 	}
 	// Write attester slashings as a dynamic list.
-	subOffset := len(b.AttesterSlashings) * 4
-	for _, attesterSlashing := range b.AttesterSlashings {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(subOffset))...)
-		subOffset += attesterSlashing.EncodingSizeSSZ()
+	if buf, err = ssz_utils.EncodeDynamicList(buf, b.AttesterSlashings); err != nil {
+		return nil, err
 	}
-
-	for _, attesterSlashing := range b.AttesterSlashings {
-		buf, err = attesterSlashing.EncodeSSZ(buf)
-		if err != nil {
-			return nil, err
-		}
-	}
-	// Attestation
-	subOffset = len(b.Attestations) * 4
-	for _, attestation := range b.Attestations {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(subOffset))...)
-		subOffset += attestation.EncodingSizeSSZ()
-	}
-	for _, attestation := range b.Attestations {
-		buf, err = attestation.EncodeSSZ(buf)
-		if err != nil {
-			return nil, err
-		}
+	if buf, err = ssz_utils.EncodeDynamicList(buf, b.Attestations); err != nil {
+		return nil, err
 	}
 
 	for _, deposit := range b.Deposits {
@@ -323,12 +305,12 @@ func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {
 		return err
 	}
 	// Decode attester slashings
-	b.AttesterSlashings, err = ssz_utils.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, uint32(MaxAttesterSlashings))
+	b.AttesterSlashings, err = ssz_utils.DecodeDynamicList[*AttesterSlashing](buf, offsetAttesterSlashings, offsetAttestations, MaxAttesterSlashings)
 	if err != nil {
 		return err
 	}
 	// Decode attestations
-	b.Attestations, err = ssz_utils.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, uint32(MaxAttestations))
+	b.Attestations, err = ssz_utils.DecodeDynamicList[*Attestation](buf, offsetAttestations, offsetDeposits, MaxAttestations)
 	if err != nil {
 		return err
 	}

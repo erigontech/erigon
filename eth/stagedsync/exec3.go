@@ -330,20 +330,14 @@ func ExecV3(ctx context.Context,
 					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
-						// too much steps in db will slow-down everything: flush and prune
-						// it means better spend time for pruning, before flushing more data to db
-						// also better do it now - instead of before Commit() - because Commit does block execution
-						if stepsInDBAfterCommit > 5 && rs.SizeEstimate() < uint64(float64(commitThreshold)*0.2) {
-							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/2); err != nil { // prune part of retired data, before commit
+						if agg.CanPrune(tx) {
+							if err = agg.Prune(ctx, ethconfig.HistoryV3AggregationStep/10); err != nil { // prune part of retired data, before commit
 								panic(err)
 							}
-						}
-
-						if err = agg.PruneWithTiemout(ctx, 1*time.Second); err != nil {
-							return err
-						}
-						if err = agg.Flush(ctx, tx); err != nil {
-							return err
+						} else {
+							if err = agg.Flush(ctx, tx); err != nil {
+								return err
+							}
 						}
 						break
 					}

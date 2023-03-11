@@ -16,9 +16,10 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/erigon-lib/commitment"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -52,7 +53,7 @@ func init() {
 
 	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
-	erigon4Cmd.Flags().StringVar(&commitmentsMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
+	erigon4Cmd.Flags().StringVar(&commitmentMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
 	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
 	erigon4Cmd.Flags().StringVar(&commitmentTrie, "commitments.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	erigon4Cmd.Flags().IntVar(&height, "height", 32, "amount of steps in biggest file")
@@ -63,7 +64,7 @@ func init() {
 
 var (
 	startTxNumFrom      uint64                           // flag --tx
-	commitmentsMode     string                           // flag --commitments.mode [direct|update]
+	commitmentMode      string                           // flag --commitments.mode [direct|update]
 	logInterval         = 30 * time.Second               // time period to print aggregation stat to log
 	dirtySpaceThreshold = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
 	commitmentFrequency int                              // How many blocks to skip between calculating commitment
@@ -108,6 +109,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err1
 	}
 	defer historyTx.Rollback()
+
 	stateDbPath := path.Join(datadirCli, "db4")
 	if _, err = os.Stat(stateDbPath); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -133,24 +135,11 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		return err
 	}
 
-	var trieVariant commitment.TrieVariant
-	switch commitmentTrie {
-	case "bin":
-		trieVariant = commitment.VariantBinPatriciaTrie
+	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
+	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
-	case "hex":
-		fallthrough
-	default:
-		trieVariant = commitment.VariantHexPatriciaTrie
 	}
-
-	var mode libstate.CommitmentMode
-	switch commitmentsMode {
-	case "update":
-		mode = libstate.CommitmentModeUpdate
-	default:
-		mode = libstate.CommitmentModeDirect
-	}
+	mode := libstate.ParseCommitmentMode(commitmentMode)
 
 	logger.Info("aggregator commitment trie", "variant", trieVariant, "mode", mode.String())
 
@@ -398,7 +387,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	rw.blockNum = block.NumberU64()
 	ww.blockNum = block.NumberU64()
 
-	daoFork := txNum >= startTxNum && chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := txNum >= startTxNum && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(rw)
 		// TODO Actually add tracing to the DAO related accounts
