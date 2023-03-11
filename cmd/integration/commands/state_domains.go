@@ -10,7 +10,11 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -19,8 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
@@ -58,6 +60,11 @@ func init() {
 var (
 	dirtySpaceThreshold       = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
 	blockRootMismatchExpected bool
+
+	mxBlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
+	mxTxProcessed         = metrics.GetOrCreateCounter("domain_tx_processed")
+	mxBlockProcessed      = metrics.GetOrCreateCounter("domain_block_processed")
+	mxRunningCommits      = metrics.GetOrCreateCounter("domain_running_commits")
 )
 
 var stateDomains = &cobra.Command{
@@ -97,38 +104,12 @@ var stateDomains = &cobra.Command{
 	},
 }
 
-func ParseTrieVariant(s string) commitment.TrieVariant {
-	var trieVariant commitment.TrieVariant
-	switch s {
-	case "bin":
-		trieVariant = commitment.VariantBinPatriciaTrie
-	case "hex":
-		fallthrough
-	default:
-		trieVariant = commitment.VariantHexPatriciaTrie
-	}
-	return trieVariant
-}
-
-func ParseCommitmentMode(s string) libstate.CommitmentMode {
-	var mode libstate.CommitmentMode
-	switch s {
-	case "off":
-		mode = libstate.CommitmentModeDisabled
-	case "update":
-		mode = libstate.CommitmentModeUpdate
-	default:
-		mode = libstate.CommitmentModeDirect
-	}
-	return mode
-}
-
 func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
-	trieVariant := ParseTrieVariant(commitmentTrie)
+	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
 	if trieVariant != commitment.VariantHexPatriciaTrie {
 		blockRootMismatchExpected = true
 	}
-	mode := ParseCommitmentMode(commitmentMode)
+	mode := libstate.ParseCommitmentMode(commitmentMode)
 
 	engine, _, _, agg := newDomains(ctx, chainDb, mode, trieVariant)
 	defer agg.Close()
@@ -155,12 +136,13 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		log.Info("Max txNum in files", "txn", latestTx)
 	}
 
+	aggWriter, aggReader := WrapAggregator(agg, stateTx)
 	proc := blockProcessor{
 		chainConfig: fromdb.ChainConfig(chainDb),
 		vmConfig:    vm.Config{},
 		engine:      engine,
-		reader:      &ReaderWrapper4{ac: agg.MakeContext(), roTx: stateTx},
-		writer:      &WriterWrapper4{w: agg},
+		reader:      aggReader,
+		writer:      aggWriter,
 		blockReader: getBlockReader(chainDb),
 		stateTx:     stateTx,
 		stateDb:     stateDb,
@@ -242,6 +224,8 @@ func (b *blockProcessor) commit(ctx context.Context) error {
 		return fmt.Errorf("commit failed due to invalid chainDb/rwTx")
 	}
 
+	mxRunningCommits.Inc()
+	defer mxRunningCommits.Dec()
 	var spaceDirty uint64
 	var err error
 	if spaceDirty, _, err = b.stateTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
@@ -263,10 +247,8 @@ func (b *blockProcessor) commit(ctx context.Context) error {
 		return err
 	}
 
-	b.reader.ac.Close()
 	b.agg.SetTx(b.stateTx)
-	b.reader.roTx = b.stateTx
-	b.reader.ac = b.agg.MakeContext()
+	b.reader.SetTx(b.stateTx, b.agg.MakeContext())
 
 	return nil
 }
@@ -343,7 +325,7 @@ func (b *blockProcessor) applyBlock(
 	ctx context.Context,
 	block *types.Block,
 ) (types.Receipts, error) {
-	//defer blockExecutionTimer.UpdateDuration(time.Now())
+	defer mxBlockExecutionTimer.UpdateDuration(time.Now())
 
 	header := block.Header()
 	b.vmConfig.Debug = true
@@ -355,7 +337,7 @@ func (b *blockProcessor) applyBlock(
 	b.blockNum = block.NumberU64()
 	b.writer.w.SetTxNum(b.txNum)
 
-	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkSupport && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
+	daoFork := b.txNum >= b.startTxNum && b.chainConfig.DAOForkBlock != nil && b.chainConfig.DAOForkBlock.Cmp(block.Number()) == 0
 	if daoFork {
 		ibs := state.New(b.reader)
 		// TODO Actually add tracing to the DAO related accounts
@@ -369,6 +351,7 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	b.txNum++ // Pre-block transaction
+	mxTxProcessed.Inc()
 	b.writer.w.SetTxNum(b.txNum)
 	if err := b.writer.w.FinishTx(); err != nil {
 		return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
@@ -415,6 +398,7 @@ func (b *blockProcessor) applyBlock(
 			}
 		}
 		b.txNum++
+		mxTxProcessed.Inc()
 		b.writer.w.SetTxNum(b.txNum)
 	}
 
@@ -456,6 +440,7 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	b.txNum++ // Post-block transaction
+	mxTxProcessed.Inc()
 	b.writer.w.SetTxNum(b.txNum)
 	if b.txNum >= b.startTxNum {
 		if block.Number().Uint64()%uint64(commitmentFreq) == 0 {
@@ -473,6 +458,8 @@ func (b *blockProcessor) applyBlock(
 		}
 	}
 
+	mxTxProcessed.Inc()
+	mxBlockProcessed.Inc()
 	return receipts, nil
 }
 
@@ -484,6 +471,16 @@ type ReaderWrapper4 struct {
 
 type WriterWrapper4 struct {
 	w *libstate.Aggregator
+}
+
+func WrapAggregator(agg *libstate.Aggregator, roTx kv.Tx) (*WriterWrapper4, *ReaderWrapper4) {
+	return &WriterWrapper4{w: agg}, &ReaderWrapper4{ac: agg.MakeContext(), roTx: roTx}
+}
+
+func (rw *ReaderWrapper4) SetTx(roTx kv.Tx, ctx *libstate.AggregatorContext) {
+	rw.roTx = roTx
+	rw.ac.Close()
+	rw.ac = ctx
 }
 
 func (rw *ReaderWrapper4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
