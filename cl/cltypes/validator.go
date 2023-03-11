@@ -294,8 +294,38 @@ type Validator struct {
 	ActivationEpoch            uint64
 	ExitEpoch                  uint64
 	WithdrawableEpoch          uint64
+	// This is all stuff used by phase0 state transition. It makes many operations faster.
+	// Source attesters
+	IsCurrentMatchingSourceAttester  bool
+	IsPreviousMatchingSourceAttester bool
+	// Target Attesters
+	IsCurrentMatchingTargetAttester  bool
+	IsPreviousMatchingTargetAttester bool
+	// Head attesters
+	IsCurrentMatchingHeadAttester  bool
+	IsPreviousMatchingHeadAttester bool
+	// MinInclusionDelay
+	MinCurrentInclusionDelayAttestation  *PendingAttestation
+	MinPreviousInclusionDelayAttestation *PendingAttestation
 }
 
+// DutiesAttested returns how many of its duties the validator attested and missed
+func (v *Validator) DutiesAttested() (attested, missed uint64) {
+	if v.Slashed {
+		return 0, 3
+	}
+	if v.IsPreviousMatchingSourceAttester {
+		attested++
+	}
+	if v.IsPreviousMatchingTargetAttester {
+		attested++
+	}
+	if v.IsPreviousMatchingHeadAttester {
+		attested++
+	}
+	missed = 3 - attested
+	return
+}
 func (v *Validator) IsSlashable(epoch uint64) bool {
 	return !v.Slashed && (v.ActivationEpoch <= epoch) && (epoch < v.WithdrawableEpoch)
 }

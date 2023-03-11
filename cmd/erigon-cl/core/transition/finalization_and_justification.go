@@ -62,17 +62,6 @@ func weighJustificationAndFinalization(state *state.BeaconState, previousEpochTa
 }
 
 func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
-	if state.Version() == clparams.Phase0Version {
-		return processJustificationBitsAndFinalityPreAltair(state)
-	}
-	return processJustificationBitsAndFinalityAltair(state)
-}
-
-func processJustificationBitsAndFinalityPreAltair(state *state.BeaconState) error {
-	panic("NOT IMPLEMENTED. STOOOOOP")
-}
-
-func processJustificationBitsAndFinalityAltair(state *state.BeaconState) error {
 	currentEpoch := state.Epoch()
 	previousEpoch := state.PreviousEpoch()
 	beaconConfig := state.BeaconConfig()
@@ -80,19 +69,34 @@ func processJustificationBitsAndFinalityAltair(state *state.BeaconState) error {
 	if currentEpoch <= beaconConfig.GenesisEpoch+1 {
 		return nil
 	}
-	previousParticipation, currentParticipation := state.PreviousEpochParticipation(), state.CurrentEpochParticipation()
 	var previousTargetBalance, currentTargetBalance uint64
-	for i, validator := range state.Validators() {
-		if validator.Slashed {
-			continue
+	if state.Version() == clparams.Phase0Version {
+		for _, validator := range state.Validators() {
+			if validator.Slashed {
+				continue
+			}
+			if validator.IsCurrentMatchingTargetAttester {
+				currentTargetBalance += validator.EffectiveBalance
+			}
+			if validator.IsPreviousMatchingTargetAttester {
+				previousTargetBalance += validator.EffectiveBalance
+			}
 		}
-		if validator.Active(previousEpoch) &&
-			previousParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-			previousTargetBalance += validator.EffectiveBalance
-		}
-		if validator.Active(currentEpoch) &&
-			currentParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
-			currentTargetBalance += validator.EffectiveBalance
+	} else {
+		// Use bitlists to determine finality.
+		previousParticipation, currentParticipation := state.PreviousEpochParticipation(), state.CurrentEpochParticipation()
+		for i, validator := range state.Validators() {
+			if validator.Slashed {
+				continue
+			}
+			if validator.Active(previousEpoch) &&
+				previousParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				previousTargetBalance += validator.EffectiveBalance
+			}
+			if validator.Active(currentEpoch) &&
+				currentParticipation[i].HasFlag(int(beaconConfig.TimelyTargetFlagIndex)) {
+				currentTargetBalance += validator.EffectiveBalance
+			}
 		}
 	}
 

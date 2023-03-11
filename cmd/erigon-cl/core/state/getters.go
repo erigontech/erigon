@@ -152,6 +152,10 @@ func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
 }
 
+func (b *BeaconState) CurrentEpochAttestations() []*cltypes.PendingAttestation {
+	return b.currentEpochAttestations
+}
+
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
 	return b.nextWithdrawalValidatorIndex
 }
