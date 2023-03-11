@@ -162,7 +162,7 @@ func Downloader(ctx context.Context) error {
 	}
 	defer d.Close()
 	log.Info("[torrent] Start", "my peerID", fmt.Sprintf("%x", d.Torrent().PeerID()))
-	go downloader.MainLoop(ctx, d, false)
+	d.MainLoopInBackground(ctx, false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
