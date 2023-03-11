@@ -150,6 +150,8 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 			validator.IsCurrentMatchingSourceAttester = true
 			if attestation.Data.Target.Root == epochRoot {
 				validator.IsCurrentMatchingTargetAttester = true
+			} else {
+				continue
 			}
 			if attestation.Data.BeaconBlockHash == slotRoot {
 				validator.IsCurrentMatchingHeadAttester = true
@@ -159,9 +161,10 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 				validator.MinPreviousInclusionDelayAttestation = pendingAttestation
 			}
 			validator.IsPreviousMatchingSourceAttester = true
-			if attestation.Data.Target.Root == epochRoot {
-				validator.IsPreviousMatchingTargetAttester = true
+			if attestation.Data.Target.Root != epochRoot {
+				continue
 			}
+			validator.IsPreviousMatchingTargetAttester = true
 			if attestation.Data.BeaconBlockHash == slotRoot {
 				validator.IsPreviousMatchingHeadAttester = true
 			}

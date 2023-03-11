@@ -8,9 +8,6 @@ import (
 func processRewardsAndPenaltiesPostAltair(state *state.BeaconState) (err error) {
 	beaconConfig := state.BeaconConfig()
 	weights := beaconConfig.ParticipationWeights()
-	if state.Epoch() == beaconConfig.GenesisEpoch {
-		return nil
-	}
 	eligibleValidators := state.EligibleValidatorsIndicies()
 	// Initialize variables
 	totalActiveBalance := state.GetTotalActiveBalance()
@@ -177,6 +174,9 @@ func processRewardsAndPenaltiesPhase0(state *state.BeaconState) (err error) {
 
 // ProcessRewardsAndPenalties applies rewards/penalties accumulated during previous epoch.
 func ProcessRewardsAndPenalties(state *state.BeaconState) error {
+	if state.Epoch() == state.BeaconConfig().GenesisEpoch {
+		return nil
+	}
 	if state.Version() == clparams.Phase0Version {
 		return processRewardsAndPenaltiesPhase0(state)
 	}

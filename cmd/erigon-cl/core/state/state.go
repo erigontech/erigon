@@ -173,9 +173,11 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 				b.validators[index].MinPreviousInclusionDelayAttestation = attestation
 			}
 			b.validators[index].IsPreviousMatchingSourceAttester = true
-			if attestation.Data.Target.Root == previousEpochRoot {
-				b.validators[index].IsPreviousMatchingTargetAttester = true
+			if attestation.Data.Target.Root != previousEpochRoot {
+				continue
 			}
+			b.validators[index].IsPreviousMatchingTargetAttester = true
+
 			if attestation.Data.BeaconBlockHash == slotRoot {
 				b.validators[index].IsPreviousMatchingHeadAttester = true
 			}

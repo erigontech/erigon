@@ -39,7 +39,6 @@ func getTestEpochProcessing(f func(s *state.BeaconState) error) testFunc {
 			}
 			return err
 		}
-
 		if isErrExpected && err == nil {
 			return fmt.Errorf("expected an error got none")
 		}
