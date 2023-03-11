@@ -1124,7 +1124,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
-	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
+	if err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
 	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), limit); err != nil {
