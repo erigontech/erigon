@@ -64,7 +64,7 @@ func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
 		validator.IsCurrentMatchingTargetAttester = false
 		validator.IsCurrentMatchingHeadAttester = false
 		// Setting the validator
-		if err := state.SetValidatorAt(int(validatorIndex), validator); err != nil {
+		if err := state.SetValidatorAt(validatorIndex, validator); err != nil {
 			return err
 		}
 	}
