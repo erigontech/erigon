@@ -4,7 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
@@ -22,8 +22,8 @@ type BeaconBlockHeader struct {
 
 func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
-	buf = append(buf, ssz_utils.Uint64SSZ(b.Slot)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(b.ProposerIndex)...)
+	buf = append(buf, ssz.Uint64SSZ(b.Slot)...)
+	buf = append(buf, ssz.Uint64SSZ(b.ProposerIndex)...)
 	buf = append(buf, b.ParentRoot[:]...)
 	buf = append(buf, b.Root[:]...)
 	buf = append(buf, b.BodyRoot[:]...)
@@ -31,8 +31,8 @@ func (b *BeaconBlockHeader) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (b *BeaconBlockHeader) DecodeSSZ(buf []byte) error {
-	b.Slot = ssz_utils.UnmarshalUint64SSZ(buf)
-	b.ProposerIndex = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	b.Slot = ssz.UnmarshalUint64SSZ(buf)
+	b.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[8:])
 	copy(b.ParentRoot[:], buf[16:])
 	copy(b.Root[:], buf[48:])
 	copy(b.BodyRoot[:], buf[80:])

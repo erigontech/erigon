@@ -4,7 +4,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
@@ -18,16 +18,16 @@ func (c *Checkpoint) Equal(other *Checkpoint) bool {
 }
 
 func (c *Checkpoint) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(ssz_utils.Uint64SSZ(c.Epoch), c.Root[:]...)...), nil
+	return append(buf, append(ssz.Uint64SSZ(c.Epoch), c.Root[:]...)...), nil
 }
 
 func (c *Checkpoint) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < uint64(c.EncodingSizeSSZ()) {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
-	c.Epoch = ssz_utils.UnmarshalUint64SSZ(buf[0:8])
+	c.Epoch = ssz.UnmarshalUint64SSZ(buf[0:8])
 	copy(c.Root[:], buf[8:40])
 
 	return err

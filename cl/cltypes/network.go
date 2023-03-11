@@ -3,7 +3,7 @@ package cltypes
 import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/common"
 )
 
@@ -15,24 +15,24 @@ type Metadata struct {
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 	ret := buf
-	ret = append(ret, ssz_utils.Uint64SSZ(m.SeqNumber)...)
-	ret = append(ret, ssz_utils.Uint64SSZ(m.Attnets)...)
+	ret = append(ret, ssz.Uint64SSZ(m.SeqNumber)...)
+	ret = append(ret, ssz.Uint64SSZ(m.Attnets)...)
 	if m.Syncnets == nil {
 		return ret, nil
 	}
-	ret = append(ret, ssz_utils.Uint64SSZ(*m.Syncnets)...)
+	ret = append(ret, ssz.Uint64SSZ(*m.Syncnets)...)
 
 	return ret, nil
 }
 
 func (m *Metadata) DecodeSSZ(buf []byte) error {
-	m.SeqNumber = ssz_utils.UnmarshalUint64SSZ(buf)
-	m.Attnets = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	m.SeqNumber = ssz.UnmarshalUint64SSZ(buf)
+	m.Attnets = ssz.UnmarshalUint64SSZ(buf[8:])
 	if len(buf) < 24 {
 		return nil
 	}
 	m.Syncnets = new(uint64)
-	*m.Syncnets = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	*m.Syncnets = ssz.UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -54,11 +54,11 @@ type Ping struct {
 }
 
 func (p *Ping) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, ssz_utils.Uint64SSZ(p.Id)...), nil
+	return append(buf, ssz.Uint64SSZ(p.Id)...), nil
 }
 
 func (p *Ping) DecodeSSZ(buf []byte) error {
-	p.Id = ssz_utils.UnmarshalUint64SSZ(buf)
+	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
 }
 
@@ -114,12 +114,12 @@ func (l *LightClientUpdatesByRangeRequest) DecodeSSZWithVersion(buf []byte, _ in
 }
 
 func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
-	return append(buf, append(ssz_utils.Uint64SSZ(l.Period), ssz_utils.Uint64SSZ(l.Count)...)...), nil
+	return append(buf, append(ssz.Uint64SSZ(l.Period), ssz.Uint64SSZ(l.Count)...)...), nil
 }
 
 func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte) error {
-	l.Period = ssz_utils.UnmarshalUint64SSZ(buf)
-	l.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	l.Period = ssz.UnmarshalUint64SSZ(buf)
+	l.Count = ssz.UnmarshalUint64SSZ(buf[8:])
 	return nil
 }
 
@@ -138,16 +138,16 @@ type BeaconBlocksByRangeRequest struct {
 
 func (b *BeaconBlocksByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
-	dst = append(dst, ssz_utils.Uint64SSZ(b.StartSlot)...)
-	dst = append(dst, ssz_utils.Uint64SSZ(b.Count)...)
-	dst = append(dst, ssz_utils.Uint64SSZ(b.Step)...)
+	dst = append(dst, ssz.Uint64SSZ(b.StartSlot)...)
+	dst = append(dst, ssz.Uint64SSZ(b.Count)...)
+	dst = append(dst, ssz.Uint64SSZ(b.Step)...)
 	return dst, nil
 }
 
 func (b *BeaconBlocksByRangeRequest) DecodeSSZ(buf []byte) error {
-	b.StartSlot = ssz_utils.UnmarshalUint64SSZ(buf)
-	b.Count = ssz_utils.UnmarshalUint64SSZ(buf[8:])
-	b.Step = ssz_utils.UnmarshalUint64SSZ(buf[16:])
+	b.StartSlot = ssz.UnmarshalUint64SSZ(buf)
+	b.Count = ssz.UnmarshalUint64SSZ(buf[8:])
+	b.Step = ssz.UnmarshalUint64SSZ(buf[16:])
 	return nil
 }
 
@@ -179,18 +179,18 @@ func (s *Status) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf
 	dst = append(dst, s.ForkDigest[:]...)
 	dst = append(dst, s.FinalizedRoot[:]...)
-	dst = append(dst, ssz_utils.Uint64SSZ(s.FinalizedEpoch)...)
+	dst = append(dst, ssz.Uint64SSZ(s.FinalizedEpoch)...)
 	dst = append(dst, s.HeadRoot[:]...)
-	dst = append(dst, ssz_utils.Uint64SSZ(s.HeadSlot)...)
+	dst = append(dst, ssz.Uint64SSZ(s.HeadSlot)...)
 	return dst, nil
 }
 
 func (s *Status) DecodeSSZ(buf []byte) error {
 	copy(s.ForkDigest[:], buf)
 	copy(s.FinalizedRoot[:], buf[4:])
-	s.FinalizedEpoch = ssz_utils.UnmarshalUint64SSZ(buf[36:])
+	s.FinalizedEpoch = ssz.UnmarshalUint64SSZ(buf[36:])
 	copy(s.HeadRoot[:], buf[44:])
-	s.HeadSlot = ssz_utils.UnmarshalUint64SSZ(buf[76:])
+	s.HeadSlot = ssz.UnmarshalUint64SSZ(buf[76:])
 	return nil
 }
 
