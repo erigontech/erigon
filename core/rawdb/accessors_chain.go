@@ -1259,7 +1259,10 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := cmp.Min(blockTo, blockFrom+uint64(blocksDeleteLimit))
-	k, _, _ := c.Current()
+	k, _, err := c.Current()
+	if err != nil {
+		return 0, 0, err
+	}
 	deletedFrom = binary.BigEndian.Uint64(k)
 
 	var canonicalHash libcommon.Hash
@@ -1311,8 +1314,13 @@ func DeleteAncientBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (del
 		}
 	}
 
-	k, _, _ = c.Current()
-	deletedTo = binary.BigEndian.Uint64(k)
+	k, _, err = c.Current()
+	if err != nil {
+		return
+	}
+	if len(k) > 0 {
+		deletedTo = binary.BigEndian.Uint64(k)
+	}
 
 	return
 }
