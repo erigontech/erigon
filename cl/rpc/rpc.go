@@ -17,7 +17,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -132,7 +132,7 @@ func (b *BeaconRpcP2P) SendLightClientUpdatesReqV1(period uint64) (*cltypes.Ligh
 		return nil, err
 	}
 
-	responsePacket := []ssz_utils.EncodableSSZ{&cltypes.LightClientUpdate{}}
+	responsePacket := []ssz.EncodableSSZ{&cltypes.LightClientUpdate{}}
 
 	data := common.CopyBytes(buffer.Bytes())
 	message, err := b.sentinel.SendRequest(b.ctx, &sentinel.RequestData{
