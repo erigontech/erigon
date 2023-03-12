@@ -23,11 +23,7 @@ func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock,
 	if err := ProcessSlots(state, currentBlock.Slot); err != nil {
 		return err
 	}
-	// Here is where fork upgrades occur.
-	if shouldStateBeUpdgraded(state) {
-		// Do the upgrading.
-	}
-	// Write the block root to the cache
+
 	if fullValidation {
 		valid, err := verifyBlockSignature(state, block)
 		if err != nil {
@@ -86,6 +82,7 @@ func transitionSlot(state *state.BeaconState) error {
 }
 
 func ProcessSlots(state *state.BeaconState, slot uint64) error {
+	beaconConfig := state.BeaconConfig()
 	stateSlot := state.Slot()
 	if slot <= stateSlot {
 		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
@@ -97,7 +94,7 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
 		// TODO(Someone): Add epoch transition.
-		if (stateSlot+1)%state.BeaconConfig().SlotsPerEpoch == 0 {
+		if (stateSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
 			start := time.Now()
 			if err := ProcessEpoch(state); err != nil {
 				return err
@@ -107,6 +104,24 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
 		state.SetSlot(stateSlot)
+		if stateSlot%beaconConfig.SlotsPerEpoch != 0 {
+			continue
+		}
+		if state.Epoch() == beaconConfig.AltairForkEpoch {
+			if err := state.UpgradeToAltair(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch() == beaconConfig.BellatrixForkEpoch {
+			if err := state.UpgradeToBellatrix(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch() == beaconConfig.CapellaForkEpoch {
+			if err := state.UpgradeToCapella(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -161,11 +176,4 @@ func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
 	}
 
 	return nil
-}
-
-func shouldStateBeUpdgraded(state *state.BeaconState) bool {
-	beaconConfig := state.BeaconConfig()
-	return state.Slot()%beaconConfig.SlotsPerEpoch != 0 &&
-		(state.Epoch() == beaconConfig.AltairForkEpoch || state.Epoch() == beaconConfig.BellatrixForkEpoch ||
-			state.Epoch() == beaconConfig.CapellaForkEpoch)
 }

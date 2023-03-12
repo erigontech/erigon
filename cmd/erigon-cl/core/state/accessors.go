@@ -473,7 +473,7 @@ func (b *BeaconState) ValidatorChurnLimit() uint64 {
 
 // Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
 func (b *BeaconState) IsMergeTransitionComplete() bool {
-	return b.latestExecutionPayloadHeader.StateRoot != libcommon.Hash{}
+	return !b.latestExecutionPayloadHeader.IsZero()
 }
 
 // Compute the Unix timestamp at the specified slot number.

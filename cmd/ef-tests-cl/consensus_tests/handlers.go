@@ -51,6 +51,9 @@ var sanitySlots = "sanity/slots"
 // random
 var random = "random/random"
 
+// transitionCore
+var transitionCore = "transition/core"
+
 // Stays here bc debugging >:-(
 func placeholderTest() error {
 	fmt.Println("hallo")
@@ -80,8 +83,9 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(operationsDivision, caseVoluntaryExit):                     operationVoluntaryExitHandler,
 	path.Join(operationsDivision, caseWithdrawal):                        operationWithdrawalHandler,
 	path.Join(operationsDivision, caseBlsChange):                         operationSignedBlsChangeHandler,
-	sanityBlocks: testSanityFunction,
-	sanitySlots:  testSanityFunctionSlot,
-	finality:     finalityTestFunction,
-	random:       testSanityFunction, // Same as sanity handler.
+	transitionCore: transitionTestFunction,
+	sanityBlocks:   testSanityFunction,
+	sanitySlots:    testSanityFunctionSlot,
+	finality:       finalityTestFunction,
+	random:         testSanityFunction, // Same as sanity handler.
 }

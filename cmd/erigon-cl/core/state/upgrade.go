@@ -1,27 +1,14 @@
 package state
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-// Upgrade process a state upgrade.
-func (b *BeaconState) Upgrade() error {
-	switch b.version {
-	case clparams.Phase0Version:
-		return b.upgradeToAltair()
-	case clparams.AltairVersion:
-		return b.upgradeToBellatrix()
-	case clparams.BellatrixVersion:
-		return b.upgradeToCapella()
-	default:
-		panic("not implemented")
-	}
-
-}
-
-func (b *BeaconState) upgradeToAltair() error {
+func (b *BeaconState) UpgradeToAltair() error {
+	b.previousStateRoot = libcommon.Hash{}
 	epoch := b.Epoch()
 	// update version
 	b.fork.Epoch = epoch
@@ -48,6 +35,7 @@ func (b *BeaconState) upgradeToAltair() error {
 			}
 		}
 	}
+	b.previousEpochAttestations = nil
 	// Process sync committees
 	var err error
 	if b.currentSyncCommittee, err = b.ComputeNextSyncCommittee(); err != nil {
@@ -67,10 +55,12 @@ func (b *BeaconState) upgradeToAltair() error {
 	return nil
 }
 
-func (b *BeaconState) upgradeToBellatrix() error {
+func (b *BeaconState) UpgradeToBellatrix() error {
+	b.previousStateRoot = libcommon.Hash{}
 	epoch := b.Epoch()
 	// update version
 	b.fork.Epoch = epoch
+	b.fork.PreviousVersion = b.fork.CurrentVersion
 	b.fork.CurrentVersion = utils.Uint32ToBytes4(b.beaconConfig.BellatrixForkVersion)
 	b.latestExecutionPayloadHeader = cltypes.NewEth1Header(clparams.BellatrixVersion)
 	// Update the state root cache
@@ -80,27 +70,15 @@ func (b *BeaconState) upgradeToBellatrix() error {
 	return nil
 }
 
-func (b *BeaconState) upgradeToCapella() error {
+func (b *BeaconState) UpgradeToCapella() error {
+	b.previousStateRoot = libcommon.Hash{}
 	epoch := b.Epoch()
 	// update version
 	b.fork.Epoch = epoch
+	b.fork.PreviousVersion = b.fork.CurrentVersion
 	b.fork.CurrentVersion = utils.Uint32ToBytes4(b.beaconConfig.CapellaForkVersion)
 	// Update the payload header.
-	latestExecutionPayloadHeader := cltypes.NewEth1Header(clparams.CapellaVersion)
-	latestExecutionPayloadHeader.ParentHash = b.latestExecutionPayloadHeader.ParentHash
-	latestExecutionPayloadHeader.FeeRecipient = b.latestExecutionPayloadHeader.FeeRecipient
-	latestExecutionPayloadHeader.ReceiptsRoot = b.latestExecutionPayloadHeader.ReceiptsRoot
-	latestExecutionPayloadHeader.LogsBloom = b.latestExecutionPayloadHeader.LogsBloom
-	latestExecutionPayloadHeader.PrevRandao = b.latestExecutionPayloadHeader.PrevRandao
-	latestExecutionPayloadHeader.BlockNumber = b.latestExecutionPayloadHeader.BlockNumber
-	latestExecutionPayloadHeader.GasLimit = b.latestExecutionPayloadHeader.GasLimit
-	latestExecutionPayloadHeader.GasUsed = b.latestExecutionPayloadHeader.GasUsed
-	latestExecutionPayloadHeader.Time = b.latestExecutionPayloadHeader.Time
-	latestExecutionPayloadHeader.Extra = b.latestExecutionPayloadHeader.Extra
-	latestExecutionPayloadHeader.BaseFeePerGas = b.latestExecutionPayloadHeader.BaseFeePerGas
-	latestExecutionPayloadHeader.BlockHash = b.latestExecutionPayloadHeader.BlockHash
-	latestExecutionPayloadHeader.TransactionsRoot = b.latestExecutionPayloadHeader.TransactionsRoot
-	b.latestExecutionPayloadHeader = latestExecutionPayloadHeader
+	b.latestExecutionPayloadHeader.Capella()
 	// Set new fields
 	b.nextWithdrawalIndex = 0
 	b.nextWithdrawalValidatorIndex = 0
