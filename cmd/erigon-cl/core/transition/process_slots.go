@@ -23,6 +23,10 @@ func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock,
 	if err := ProcessSlots(state, currentBlock.Slot); err != nil {
 		return err
 	}
+	// Here is where fork upgrades occur.
+	if shouldStateBeUpdgraded(state) {
+		// Do the upgrading.
+	}
 	// Write the block root to the cache
 	if fullValidation {
 		valid, err := verifyBlockSignature(state, block)
@@ -157,4 +161,11 @@ func ProcessHistoricalRootsUpdate(state *state.BeaconState) error {
 	}
 
 	return nil
+}
+
+func shouldStateBeUpdgraded(state *state.BeaconState) bool {
+	beaconConfig := state.BeaconConfig()
+	return state.Slot()%beaconConfig.SlotsPerEpoch != 0 &&
+		(state.Epoch() == beaconConfig.AltairForkEpoch || state.Epoch() == beaconConfig.BellatrixForkEpoch ||
+			state.Epoch() == beaconConfig.CapellaForkEpoch)
 }
