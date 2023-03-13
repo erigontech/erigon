@@ -25,6 +25,9 @@ func (b *BeaconState) SetSlot(slot uint64) {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
 	b.proposerIndex = nil
+	if b.slot%b.beaconConfig.SlotsPerEpoch == 0 {
+		b.totalActiveBalanceCache = nil
+	}
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
