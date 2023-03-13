@@ -25,7 +25,10 @@ const MaxOutstandingBodyRequests = 128
 
 func (bd *BodyDownload) PrintProgressBitmap() {
 	curr := bd.requestedLow
-	limit := bd.delivered.Maximum()
+	var limit uint64
+	if !bd.delivered.IsEmpty() {
+		limit = bd.delivered.Maximum()
+	}
 	pos := 0
 	var buf bytes.Buffer
 	for curr <= limit {

@@ -133,18 +133,25 @@ func BodiesForward(
 			sentToPeer := false
 			perRequestTimeout := timeout
 			isImminentBlock := false
+			backupRequestSent := 0
 
 			if req != nil {
-				if len(req.BlockNums) > 0 && req.BlockNums[0]-bodyProgress < 128 {
+				if len(req.BlockNums) > 0 && req.BlockNums[0]-bodyProgress <= 512 {
 					isImminentBlock = true
 					perRequestTimeout = timeout / 2
 				}
 				start := time.Now()
 				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
 				if isImminentBlock && sentToPeer {
-					// Send a backup request to a different peer.
-					// This is to ensure that we don't get stuck waiting for a response from a peer that is not responding.
-					cfg.bodyReqSend(ctx, req)
+					for i := 0; i < 3; i++ {
+						// Send a few backup requests to a different peer.
+						// This is to ensure that we don't get stuck waiting for a response from a peer that is not responding.
+						_, ok := cfg.bodyReqSend(ctx, req)
+						if !ok {
+							break
+						}
+						backupRequestSent++
+					}
 				}
 				d2 += time.Since(start)
 			}
@@ -162,7 +169,7 @@ func BodiesForward(
 				log.Info(fmt.Sprintf("[%s] BodyRequest", logPrefix), "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
 					"peer", peerHex[0:8], "deliveryCount", deliveryCount,
 					"timeout", perRequestTimeout,
-					"nextProcessingCount", cfg.bd.NextProcessingCount(),
+					"backupRequestSent", backupRequestSent,
 				)
 			}
 
