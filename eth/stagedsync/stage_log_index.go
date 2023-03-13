@@ -84,7 +84,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	if startBlock > 0 {
 		startBlock++
 	}
-	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx, !useExternalTx); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -100,18 +100,20 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context) error {
+const LogIndexParallelWorkers = 32
+
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context,
+	parallel bool) error {
+	if endBlock == 0 {
+		parallel = false
+		log.Info(fmt.Sprintf("[%s] Not parallel", logPrefix), "reason", "endBlock == 0")
+	}
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
 	topics := map[string]*roaring.Bitmap{}
 	addresses := map[string]*roaring.Bitmap{}
-	logs, err := tx.Cursor(kv.Log)
-	if err != nil {
-		return err
-	}
-	defer logs.Close()
 	checkFlushEvery := time.NewTicker(cfg.flushEvery)
 	defer checkFlushEvery.Stop()
 
@@ -120,57 +122,12 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 	collectorAddrs := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorAddrs.Close()
 
-	reader := bytes.NewReader(nil)
-
 	if endBlock != 0 && endBlock-start > 100 {
 		log.Info(fmt.Sprintf("[%s] processing", logPrefix), "from", start, "to", endBlock)
 	}
-
-	for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
-		if err != nil {
-			return err
-		}
-
-		if err := libcommon.Stopped(quit); err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k[:8])
-
-		// if endBlock is positive, we only run the stage up until endBlock
-		// if endBlock is zero, we run the stage for all available blocks
-		if endBlock != 0 && blockNum > endBlock {
-			log.Info(fmt.Sprintf("[%s] Reached user-specified end block", logPrefix), "endBlock", endBlock)
-			break
-		}
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-		case <-checkFlushEvery.C:
-			if needFlush(topics, cfg.bufLimit) {
-				if err := flushBitmaps(collectorTopics, topics); err != nil {
-					return err
-				}
-				topics = map[string]*roaring.Bitmap{}
-			}
-
-			if needFlush(addresses, cfg.bufLimit) {
-				if err := flushBitmaps(collectorAddrs, addresses); err != nil {
-					return err
-				}
-				addresses = map[string]*roaring.Bitmap{}
-			}
-		}
-
-		var ll types.Logs
-		reader.Reset(v)
-		if err := cbor.Unmarshal(&ll, reader); err != nil {
-			return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
-		}
-
+	var numTxs uint64
+	handleOnePart := func(blockNum uint64, ll types.Logs) {
+		numTxs++
 		for _, l := range ll {
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
@@ -189,6 +146,133 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 				addresses[accStr] = m
 			}
 			m.Add(uint32(blockNum))
+		}
+	}
+
+	if parallel {
+		type txLogPart struct {
+			blockNum uint64
+			logs     types.Logs
+		}
+		resChan := make(chan txLogPart, 10_000)
+		g := SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, endBlock, LogIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+			logs, err := roTx.Cursor(kv.Log)
+			if err != nil {
+				return err
+			}
+			defer logs.Close()
+			reader := bytes.NewReader(nil)
+			for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
+				if err != nil {
+					return err
+				}
+				if err := libcommon.Stopped(quit); err != nil {
+					return err
+				}
+				blockNum := binary.BigEndian.Uint64(k[:8])
+				if blockNum > end {
+					break
+				}
+
+				var ll types.Logs
+				reader.Reset(v)
+				if err := cbor.Unmarshal(&ll, reader); err != nil {
+					return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+				}
+				resChan <- txLogPart{
+					blockNum: blockNum,
+					logs:     ll,
+				}
+			}
+			return nil
+		}, func() {
+			close(resChan)
+		})
+	outer:
+		for {
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "numTxs", numTxs, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush(topics, cfg.bufLimit) {
+					if err := flushBitmaps(collectorTopics, topics); err != nil {
+						return err
+					}
+					topics = map[string]*roaring.Bitmap{}
+				}
+
+				if needFlush(addresses, cfg.bufLimit) {
+					if err := flushBitmaps(collectorAddrs, addresses); err != nil {
+						return err
+					}
+					addresses = map[string]*roaring.Bitmap{}
+				}
+			case part, ok := <-resChan:
+				if !ok {
+					break outer
+				}
+				handleOnePart(part.blockNum, part.logs)
+			}
+		}
+		if err := <-g.Done; err != nil {
+			log.Info(fmt.Sprintf("[%s] Parallel worker error", logPrefix), "err", err)
+			return err
+		}
+		log.Info(fmt.Sprintf("[%s] Finished parallel collecting bitmaps", logPrefix), "numTxs", numTxs)
+	} else {
+		logs, err := tx.Cursor(kv.Log)
+		if err != nil {
+			return err
+		}
+		defer logs.Close()
+		reader := bytes.NewReader(nil)
+		for k, v, err := logs.Seek(dbutils.LogKey(start, 0)); k != nil; k, v, err = logs.Next() {
+			if err != nil {
+				return err
+			}
+
+			if err := libcommon.Stopped(quit); err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k[:8])
+
+			// if endBlock is positive, we only run the stage up until endBlock
+			// if endBlock is zero, we run the stage for all available blocks
+			if endBlock != 0 && blockNum > endBlock {
+				log.Info(fmt.Sprintf("[%s] Reached user-specified end block", logPrefix), "endBlock", endBlock)
+				break
+			}
+
+			select {
+			default:
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "blockNum", blockNum, "numTxs", numTxs,
+					"alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush(topics, cfg.bufLimit) {
+					if err := flushBitmaps(collectorTopics, topics); err != nil {
+						return err
+					}
+					topics = map[string]*roaring.Bitmap{}
+				}
+
+				if needFlush(addresses, cfg.bufLimit) {
+					if err := flushBitmaps(collectorAddrs, addresses); err != nil {
+						return err
+					}
+					addresses = map[string]*roaring.Bitmap{}
+				}
+			}
+			var ll types.Logs
+			reader.Reset(v)
+			if err := cbor.Unmarshal(&ll, reader); err != nil {
+				return fmt.Errorf("receipt unmarshal failed: %w, blocl=%d", err, blockNum)
+			}
+			handleOnePart(blockNum, ll)
 		}
 	}
 
@@ -211,10 +295,14 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		if err != nil {
 			return fmt.Errorf("find last chunk: %w", err)
 		}
+		// Make a copy of lastChunkBytes.  Someone is modifying the underlying buffer for some reason that I do not know yet.
+		// Probably caused by reading and writing on the same key multiple times.
+		// This fixes err: the fundamental arrayContainer assumption of sorted ac.content was broken, trace: [stageloop.go:133 panic.go:890 arraycontainer.go:972 arraycontainer.go:990 roaringarray.go:120 roaring.go:160 bitmapdb.go:90 bitmapdb.go:115 bitmapdb.go:123 stage_log_index.go:252 collector.go:228 collector.go:279 collector.go:230 stage_log_index.go:261 stage_log_index.go:89 default_stages.go:191 sync.go:353 sync.go:255 stageloop.go:167 stageloop.go:95 asm_amd64.s:1598]
+		copyLastChunkBytes := libcommon.Copy(lastChunkBytes)
 
 		lastChunk := roaring.New()
-		if len(lastChunkBytes) > 0 {
-			_, err = lastChunk.FromBuffer(lastChunkBytes)
+		if len(copyLastChunkBytes) > 0 {
+			_, err = lastChunk.FromBuffer(copyLastChunkBytes)
 			if err != nil {
 				return fmt.Errorf("couldn't read last log index chunk: %w, len(lastChunkBytes)=%d", err, len(lastChunkBytes))
 			}

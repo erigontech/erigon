@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,7 +15,7 @@ type ParallelWorkerGroup struct {
 	Done     <-chan error
 }
 
-func SpawnWorkers(ctx context.Context, start, end uint64, numPartitions int,
+func SpawnWorkers(ctx context.Context, logPrefix string, start, end uint64, numPartitions int,
 	worker func(uint64, uint64, int, context.Context) error,
 	cleanup func()) *ParallelWorkerGroup {
 	if uint64(numPartitions) > end-start+1 {
@@ -24,7 +25,7 @@ func SpawnWorkers(ctx context.Context, start, end uint64, numPartitions int,
 	if partitionSize == 0 {
 		partitionSize = 1
 	}
-	log.Info("Spawn parallel workers", "numPartitions", numPartitions, "partitionSize", partitionSize, "start", start, "end", end)
+	log.Info(fmt.Sprintf("[%s] Spawn parallel workers", logPrefix), "numPartitions", numPartitions, "partitionSize", partitionSize, "start", start, "end", end)
 	g, gctx := errgroup.WithContext(ctx)
 	for i := 0; i < numPartitions; i++ {
 		partitionStart := start + uint64(i)*partitionSize
@@ -35,9 +36,9 @@ func SpawnWorkers(ctx context.Context, start, end uint64, numPartitions int,
 		i := i
 		g.Go(func() error {
 			startTime := time.Now()
-			log.Info("Parallel worker start", "i", i, "partitionStart", partitionStart, "partitionEnd", partitionEnd)
+			log.Debug(fmt.Sprintf("[%s] Parallel worker start", logPrefix), "i", i, "partitionStart", partitionStart, "partitionEnd", partitionEnd)
 			defer func() {
-				log.Info("Parallel worker done", "i", i, "duration", time.Since(startTime))
+				log.Debug(fmt.Sprintf("[%s] Parallel worker done", logPrefix), "i", i, "duration", time.Since(startTime))
 			}()
 			return worker(partitionStart, partitionEnd, i, gctx)
 		})
@@ -55,11 +56,11 @@ func SpawnWorkers(ctx context.Context, start, end uint64, numPartitions int,
 	return ret
 }
 
-func SpawnWorkersWithRoTx(ctx context.Context,
+func SpawnWorkersWithRoTx(ctx context.Context, logPrefix string,
 	db kv.RwDB, start, end uint64, numPartitions int,
 	worker func(uint64, uint64, int, context.Context, kv.Tx) error,
 	cleanup func()) *ParallelWorkerGroup {
-	return SpawnWorkers(ctx, start, end, numPartitions,
+	return SpawnWorkers(ctx, logPrefix, start, end, numPartitions,
 		func(partitionStart, partitionEnd uint64, i int, gctx context.Context) error {
 			roTx, err := db.BeginRo(ctx)
 			if err != nil {
