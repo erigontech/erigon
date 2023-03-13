@@ -70,7 +70,7 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir); err != nil {
+	if err := promoteCallTraces(logPrefix, cfg.db, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir, !useExternalTx); err != nil {
 		return err
 	}
 
@@ -86,7 +86,10 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
-func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration, quit <-chan struct{}, tmpdir string) error {
+const CallTraceIndexParallelWorkers = 32
+
+func promoteCallTraces(logPrefix string, db kv.RwDB, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration,
+	quit <-chan struct{}, tmpdir string, parallel bool) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -99,27 +102,11 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 	checkFlushEvery := time.NewTicker(flushEvery)
 	defer checkFlushEvery.Stop()
 
-	traceCursor, err := tx.RwCursorDupSort(kv.CallTraceSet)
-	if err != nil {
-		return fmt.Errorf("failed to create cursor: %w", err)
-	}
-	defer traceCursor.Close()
-
-	var k, v []byte
-	prev := startBlock
-	for k, v, err = traceCursor.Seek(hexutility.EncodeTs(startBlock)); k != nil; k, v, err = traceCursor.Next() {
-		if err != nil {
-			return err
-		}
-		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > endBlock {
-			break
-		}
-		if len(v) != length.Addr+1 {
-			return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
-		}
-		mapKey := string(v[:length.Addr])
-		if v[length.Addr]&1 > 0 {
+	var numTraces uint64
+	handleOnePart := func(blockNum uint64, addrs []byte) {
+		numTraces++
+		mapKey := string(addrs[:length.Addr])
+		if addrs[length.Addr]&1 > 0 {
 			m, ok := froms[mapKey]
 			if !ok {
 				m = roaring64.New()
@@ -127,7 +114,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			}
 			m.Add(blockNum)
 		}
-		if v[length.Addr]&2 > 0 {
+		if addrs[length.Addr]&2 > 0 {
 			m, ok := tos[mapKey]
 			if !ok {
 				m = roaring64.New()
@@ -135,33 +122,125 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 			}
 			m.Add(blockNum)
 		}
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			speed := float64(blockNum-prev) / float64(logInterval/time.Second)
-			prev = blockNum
+	}
+	traceCursor, err := tx.RwCursorDupSort(kv.CallTraceSet)
+	if err != nil {
+		return fmt.Errorf("failed to create cursor: %w", err)
+	}
+	defer traceCursor.Close()
 
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
-				"blk/second", speed,
-				"alloc", libcommon.ByteCount(m.Alloc),
-				"sys", libcommon.ByteCount(m.Sys))
-		case <-checkFlushEvery.C:
-			if needFlush64(froms, bufLimit) {
-				if err := flushBitmaps64(collectorFrom, froms); err != nil {
-					return err
-				}
-
-				froms = map[string]*roaring64.Bitmap{}
+	if parallel {
+		startTime := time.Now()
+		type blockPart struct {
+			blockNum uint64
+			addrs    []byte
+		}
+		resChan := make(chan blockPart, 10_000)
+		ctx := context.Background()
+		g := SpawnWorkersWithRoTx(ctx, logPrefix, db, startBlock, endBlock, CallTraceIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+			traceCursor, err := roTx.CursorDupSort(kv.CallTraceSet)
+			if err != nil {
+				return fmt.Errorf("failed to create cursor: %w", err)
 			}
-
-			if needFlush64(tos, bufLimit) {
-				if err := flushBitmaps64(collectorTo, tos); err != nil {
+			defer traceCursor.Close()
+			for k, v, err := traceCursor.Seek(hexutility.EncodeTs(start)); k != nil; k, v, err = traceCursor.Next() {
+				if err != nil {
 					return err
 				}
+				blockNum := binary.BigEndian.Uint64(k)
+				if blockNum > end {
+					break
+				}
+				if len(v) != length.Addr+1 {
+					return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
+				}
+				resChan <- blockPart{blockNum: blockNum, addrs: libcommon.Copy(v)}
+			}
+			return nil
+		}, func() {
+			close(resChan)
+		})
+	outer:
+		for {
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "numTraces", numTraces,
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush64(froms, bufLimit) {
+					if err := flushBitmaps64(collectorFrom, froms); err != nil {
+						return err
+					}
 
-				tos = map[string]*roaring64.Bitmap{}
+					froms = map[string]*roaring64.Bitmap{}
+				}
+
+				if needFlush64(tos, bufLimit) {
+					if err := flushBitmaps64(collectorTo, tos); err != nil {
+						return err
+					}
+
+					tos = map[string]*roaring64.Bitmap{}
+				}
+			case part, ok := <-resChan:
+				if !ok {
+					break outer
+				}
+				handleOnePart(part.blockNum, part.addrs)
+			}
+		}
+		if err := <-g.Done; err != nil {
+			log.Info("Parallel worker error", "err", err)
+			return err
+		}
+		log.Info(fmt.Sprintf("[%s] Finished parallel collecting bitmaps", logPrefix), "numTraces", numTraces, "elapsed", time.Since(startTime))
+	} else {
+
+		var k, v []byte
+		prev := startBlock
+		for k, v, err = traceCursor.Seek(hexutility.EncodeTs(startBlock)); k != nil; k, v, err = traceCursor.Next() {
+			if err != nil {
+				return err
+			}
+			blockNum := binary.BigEndian.Uint64(k)
+			if blockNum > endBlock {
+				break
+			}
+			if len(v) != length.Addr+1 {
+				return fmt.Errorf(" wrong size of value in CallTraceSet: %x (size %d)", v, len(v))
+			}
+			handleOnePart(blockNum, v)
+			select {
+			default:
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				speed := float64(blockNum-prev) / float64(logInterval/time.Second)
+				prev = blockNum
+
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockNum,
+					"blk/second", speed,
+					"alloc", libcommon.ByteCount(m.Alloc),
+					"sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush64(froms, bufLimit) {
+					if err := flushBitmaps64(collectorFrom, froms); err != nil {
+						return err
+					}
+
+					froms = map[string]*roaring64.Bitmap{}
+				}
+
+				if needFlush64(tos, bufLimit) {
+					if err := flushBitmaps64(collectorTo, tos); err != nil {
+						return err
+					}
+
+					tos = map[string]*roaring64.Bitmap{}
+				}
 			}
 		}
 	}
@@ -175,7 +254,7 @@ func promoteCallTraces(logPrefix string, tx kv.RwTx, startBlock, endBlock uint64
 	// Clean up before loading call traces to reclaim space
 	var prunedMin uint64 = math.MaxUint64
 	var prunedMax uint64 = 0
-	for k, _, err = traceCursor.First(); k != nil; k, _, err = traceCursor.NextNoDup() {
+	for k, _, err := traceCursor.First(); k != nil; k, _, err = traceCursor.NextNoDup() {
 		if err != nil {
 			return err
 		}
