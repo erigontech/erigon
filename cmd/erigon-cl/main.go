@@ -76,7 +76,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		// Execute from genesis to infinity.
+		// Execute from genesis to whatever we have.
 		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, nil, true, executionClient), nil, ctx)
 	}
 
