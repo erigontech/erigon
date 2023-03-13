@@ -212,8 +212,6 @@ func ExecV3(ctx context.Context,
 	applyLoopWg := sync.WaitGroup{} // to wait for finishing of applyLoop after applyCtx cancel
 	defer applyLoopWg.Wait()
 
-	var stepsInDBAfterCommit float64
-
 	applyLoopInner := func(ctx context.Context) error {
 		tx, err := chainDb.BeginRo(ctx)
 		if err != nil {
@@ -310,7 +308,6 @@ func ExecV3(ctx context.Context,
 			} else {
 				defer agg.StartWrites().FinishWrites()
 			}
-			stepsInDBAfterCommit = rawdbhelpers.IdxStepsCountV3(tx)
 
 			defer applyLoopWg.Wait()
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
@@ -444,7 +441,6 @@ func ExecV3(ctx context.Context,
 					}
 					defer tx.Rollback()
 					agg.SetTx(tx)
-					stepsInDBAfterCommit = rawdbhelpers.IdxStepsCountV3(tx)
 
 					applyCtx, cancelApplyCtx = context.WithCancel(ctx)
 					defer cancelApplyCtx()
