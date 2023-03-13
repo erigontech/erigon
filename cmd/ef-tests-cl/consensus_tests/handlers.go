@@ -25,6 +25,7 @@ var (
 	caseRewardsAndPenalties          = "rewards_and_penalties"
 	caseSlashings                    = "slashings"
 	caseSlashingsReset               = "slashings_reset"
+	caseParticipationRecords         = "participation_record_updates"
 )
 
 // Operations cases
@@ -69,6 +70,7 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(epochProcessingDivision, caseRewardsAndPenalties):          rewardsAndPenaltiesTest,
 	path.Join(epochProcessingDivision, caseSlashings):                    slashingsTest,
 	path.Join(epochProcessingDivision, caseSlashingsReset):               slashingsResetTest,
+	path.Join(epochProcessingDivision, caseParticipationRecords):         recordsResetTest,
 	path.Join(operationsDivision, caseAttestation):                       operationAttestationHandler,
 	path.Join(operationsDivision, caseAttesterSlashing):                  operationAttesterSlashingHandler,
 	path.Join(operationsDivision, caseProposerSlashing):                  operationProposerSlashingHandler,
