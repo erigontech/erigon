@@ -23,7 +23,7 @@ func TransitionState(state *state.BeaconState, block *cltypes.SignedBeaconBlock,
 	if err := ProcessSlots(state, currentBlock.Slot); err != nil {
 		return err
 	}
-	// Write the block root to the cache
+
 	if fullValidation {
 		valid, err := verifyBlockSignature(state, block)
 		if err != nil {
@@ -82,6 +82,7 @@ func transitionSlot(state *state.BeaconState) error {
 }
 
 func ProcessSlots(state *state.BeaconState, slot uint64) error {
+	beaconConfig := state.BeaconConfig()
 	stateSlot := state.Slot()
 	if slot <= stateSlot {
 		return fmt.Errorf("new slot: %d not greater than state slot: %d", slot, stateSlot)
@@ -93,7 +94,7 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 			return fmt.Errorf("unable to process slot transition: %v", err)
 		}
 		// TODO(Someone): Add epoch transition.
-		if (stateSlot+1)%state.BeaconConfig().SlotsPerEpoch == 0 {
+		if (stateSlot+1)%beaconConfig.SlotsPerEpoch == 0 {
 			start := time.Now()
 			if err := ProcessEpoch(state); err != nil {
 				return err
@@ -103,6 +104,24 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
 		state.SetSlot(stateSlot)
+		if stateSlot%beaconConfig.SlotsPerEpoch != 0 {
+			continue
+		}
+		if state.Epoch() == beaconConfig.AltairForkEpoch {
+			if err := state.UpgradeToAltair(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch() == beaconConfig.BellatrixForkEpoch {
+			if err := state.UpgradeToBellatrix(); err != nil {
+				return err
+			}
+		}
+		if state.Epoch() == beaconConfig.CapellaForkEpoch {
+			if err := state.UpgradeToCapella(); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

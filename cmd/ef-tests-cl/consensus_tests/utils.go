@@ -16,7 +16,8 @@ func decodeStateFromFile(context testContext, filepath string) (*state.BeaconSta
 	if err != nil {
 		return nil, err
 	}
-	testState := state.New(&clparams.MainnetBeaconConfig)
+	config := clparams.MainnetBeaconConfig
+	testState := state.New(&config)
 	if err := utils.DecodeSSZSnappyWithVersion(testState, sszSnappy, int(context.version)); err != nil {
 		return nil, err
 	}
@@ -52,4 +53,40 @@ func testBlocks(context testContext) ([]*cltypes.SignedBeaconBlock, error) {
 		err = nil
 	}
 	return blocks, err
+}
+
+func testBlock(context testContext, index int) (*cltypes.SignedBeaconBlock, error) {
+	var blockBytes []byte
+	var err error
+	blockBytes, err = os.ReadFile(fmt.Sprintf("blocks_%d.ssz_snappy", index))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	blk := &cltypes.SignedBeaconBlock{}
+	if err = utils.DecodeSSZSnappyWithVersion(blk, blockBytes, int(context.version)); err != nil {
+		return nil, err
+	}
+
+	return blk, nil
+}
+
+func testBlockSlot(index int) (uint64, error) {
+	var blockBytes []byte
+	var err error
+	blockBytes, err = os.ReadFile(fmt.Sprintf("blocks_%d.ssz_snappy", index))
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	blockBytes, err = utils.DecompressSnappy(blockBytes)
+	if err != nil {
+		return 0, err
+	}
+	return ssz.UnmarshalUint64SSZ(blockBytes[100:108]), nil
 }
