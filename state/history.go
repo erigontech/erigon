@@ -485,11 +485,10 @@ func (h *History) FinishWrites() {
 }
 
 func (h *History) Rotate() historyFlusher {
-	if h.wal != nil {
-		h.wal.historyValsFlushing, h.wal.historyVals = h.wal.historyVals, h.wal.historyValsFlushing
-		h.wal.autoIncrementFlush = h.wal.autoIncrement
-	}
-	return historyFlusher{h.wal, h.InvertedIndex.Rotate()}
+	w := h.wal
+	h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
+	h.wal.autoIncrement = w.autoIncrement
+	return historyFlusher{w, h.InvertedIndex.Rotate()}
 }
 
 type historyFlusher struct {
@@ -508,16 +507,14 @@ func (f historyFlusher) Flush(ctx context.Context, tx kv.RwTx) error {
 }
 
 type historyWAL struct {
-	h                   *History
-	historyVals         *etl.Collector
-	historyValsFlushing *etl.Collector
-	tmpdir              string
-	autoIncrementBuf    []byte
-	historyKey          []byte
-	autoIncrement       uint64
-	autoIncrementFlush  uint64
-	buffered            bool
-	discard             bool
+	h                *History
+	historyVals      *etl.Collector
+	tmpdir           string
+	autoIncrementBuf []byte
+	historyKey       []byte
+	autoIncrement    uint64
+	buffered         bool
+	discard          bool
 }
 
 func (h *historyWAL) close() {
@@ -540,9 +537,7 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 	}
 	if buffered {
 		w.historyVals = etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
-		w.historyValsFlushing = etl.NewCollector(h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
 		w.historyVals.LogLvl(log.LvlTrace)
-		w.historyValsFlushing.LogLvl(log.LvlTrace)
 	}
 
 	val, err := h.tx.GetOne(h.settingsTable, historyValCountKey)
@@ -562,13 +557,14 @@ func (h *historyWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard {
 		return nil
 	}
-	binary.BigEndian.PutUint64(h.autoIncrementBuf, h.autoIncrementFlush)
+	binary.BigEndian.PutUint64(h.autoIncrementBuf, h.autoIncrement)
 	if err := tx.Put(h.h.settingsTable, historyValCountKey, h.autoIncrementBuf); err != nil {
 		return err
 	}
-	if err := h.historyValsFlushing.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := h.historyVals.Load(tx, h.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	h.close()
 	return nil
 }
 
