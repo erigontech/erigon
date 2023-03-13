@@ -409,25 +409,24 @@ func TestHistoryScanFiles(t *testing.T) {
 func TestIterateChanged(t *testing.T) {
 	_, db, h, txs := filledHistory(t)
 	collateAndMergeHistory(t, db, h, txs)
-	ctx := context.Background()
+	ctx, require := context.Background(), require.New(t)
 
 	tx, err := db.BeginRo(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	var keys, vals []string
 	ic := h.MakeContext()
 	defer ic.Close()
 
-	it := ic.IterateChanged(2, 20, order.Asc, -1, tx)
-	defer it.Close()
+	it, err := ic.IterateChanged(2, 20, order.Asc, -1, tx)
+	require.NoError(err)
 	for it.HasNext() {
 		k, v, err := it.Next()
-		require.NoError(t, err)
+		require.NoError(err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
 	}
-	it.Close()
-	require.Equal(t, []string{
+	require.Equal([]string{
 		"0100000000000001",
 		"0100000000000002",
 		"0100000000000003",
@@ -447,7 +446,7 @@ func TestIterateChanged(t *testing.T) {
 		"0100000000000011",
 		"0100000000000012",
 		"0100000000000013"}, keys)
-	require.Equal(t, []string{
+	require.Equal([]string{
 		"ff00000000000001",
 		"",
 		"",
@@ -467,16 +466,16 @@ func TestIterateChanged(t *testing.T) {
 		"",
 		"",
 		""}, vals)
-	it = ic.IterateChanged(995, 1000, order.Asc, -1, tx)
+	it, err = ic.IterateChanged(995, 1000, order.Asc, -1, tx)
+	require.NoError(err)
 	keys, vals = keys[:0], vals[:0]
 	for it.HasNext() {
 		k, v, err := it.Next()
-		require.NoError(t, err)
+		require.NoError(err)
 		keys = append(keys, fmt.Sprintf("%x", k))
 		vals = append(vals, fmt.Sprintf("%x", v))
 	}
-	it.Close()
-	require.Equal(t, []string{
+	require.Equal([]string{
 		"0100000000000001",
 		"0100000000000002",
 		"0100000000000003",
@@ -488,7 +487,7 @@ func TestIterateChanged(t *testing.T) {
 		"010000000000001b",
 	}, keys)
 
-	require.Equal(t, []string{
+	require.Equal([]string{
 		"ff000000000003e2",
 		"ff000000000001f1",
 		"ff0000000000014b",

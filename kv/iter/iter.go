@@ -24,6 +24,10 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+type Closer interface {
+	Close()
+}
+
 var (
 	EmptyU64 = &EmptyUnary[uint64]{}
 	EmptyKV  = &EmptyDual[[]byte, []byte]{}
@@ -157,7 +161,16 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	m.advanceY()
 	return k, v, err
 }
-func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToKVArray(m) }
+
+// func (m *UnionKVIter) ToArray() (keys, values [][]byte, err error) { return ToKVArray(m) }
+func (m *UnionKVIter) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
 
 // UnionUnary
 type UnionUnary[T constraints.Ordered] struct {
@@ -244,6 +257,14 @@ func (m *UnionUnary[T]) Next() (res T, err error) {
 	m.advanceY()
 	return k, err
 }
+func (m *UnionUnary[T]) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
 
 // IntersectIter
 type IntersectIter[T constraints.Ordered] struct {
@@ -305,6 +326,14 @@ func (m *IntersectIter[T]) Next() (T, error) {
 	m.advance()
 	return k, err
 }
+func (m *IntersectIter[T]) Close() {
+	if x, ok := m.x.(Closer); ok {
+		x.Close()
+	}
+	if y, ok := m.y.(Closer); ok {
+		y.Close()
+	}
+}
 
 // TransformDualIter - analog `map` (in terms of map-filter-reduce pattern)
 type TransformDualIter[K, V any] struct {
@@ -323,6 +352,11 @@ func (m *TransformDualIter[K, V]) Next() (K, V, error) {
 	}
 	return m.transform(k, v)
 }
+func (m *TransformDualIter[K, v]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
 
 type TransformKV2U64Iter[K, V []byte] struct {
 	it        KV
@@ -339,6 +373,11 @@ func (m *TransformKV2U64Iter[K, V]) Next() (uint64, error) {
 		return 0, err
 	}
 	return m.transform(k, v)
+}
+func (m *TransformKV2U64Iter[K, v]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
 }
 
 // FilterDualIter - analog `map` (in terms of map-filter-reduce pattern)
@@ -386,6 +425,11 @@ func (m *FilterDualIter[K, V]) Next() (k K, v V, err error) {
 	m.advance()
 	return k, v, err
 }
+func (m *FilterDualIter[K, v]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
+}
 
 // FilterUnaryIter - analog `map` (in terms of map-filter-reduce pattern)
 // please avoid reading from Disk/DB more elements and then filter them. Better
@@ -429,6 +473,11 @@ func (m *FilterUnaryIter[T]) Next() (k T, err error) {
 	k, err = m.nextK, m.err
 	m.advance()
 	return k, err
+}
+func (m *FilterUnaryIter[T]) Close() {
+	if x, ok := m.it.(Closer); ok {
+		x.Close()
+	}
 }
 
 // PaginatedIter - for remote-list pagination

@@ -1359,15 +1359,15 @@ func (ac *AggregatorV3Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 	return len(code), noState, nil
 }
 
-func (ac *AggregatorV3Context) AccountHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) *HistoryChangesIter {
+func (ac *AggregatorV3Context) AccountHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.accounts.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) StorageHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) *HistoryChangesIter {
+func (ac *AggregatorV3Context) StorageHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.storage.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) CodeHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) *HistoryChangesIter {
+func (ac *AggregatorV3Context) CodeHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
 	return ac.code.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
 }
 
