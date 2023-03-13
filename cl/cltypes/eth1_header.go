@@ -3,7 +3,7 @@ package cltypes
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -45,11 +45,11 @@ func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int)
 	buf = append(buf, h.ReceiptsRoot[:]...)
 	buf = append(buf, h.LogsBloom[:]...)
 	buf = append(buf, h.PrevRandao[:]...)
-	buf = append(buf, ssz_utils.Uint64SSZ(h.BlockNumber)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(h.GasLimit)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(h.GasUsed)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(h.Time)...)
-	buf = append(buf, ssz_utils.OffsetSSZ(uint32(extraDataOffset))...)
+	buf = append(buf, ssz.Uint64SSZ(h.BlockNumber)...)
+	buf = append(buf, ssz.Uint64SSZ(h.GasLimit)...)
+	buf = append(buf, ssz.Uint64SSZ(h.GasUsed)...)
+	buf = append(buf, ssz.Uint64SSZ(h.Time)...)
+	buf = append(buf, ssz.OffsetSSZ(uint32(extraDataOffset))...)
 
 	// Add Base Fee
 	buf = append(buf, h.BaseFeePerGas[:]...)
@@ -60,7 +60,7 @@ func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int)
 // EncodeSSZ encodes the header in SSZ format.
 func (h *Eth1Header) EncodeSSZ(dst []byte) (buf []byte, err error) {
 	buf = dst
-	offset := ssz_utils.BaseExtraDataSSZOffsetHeader
+	offset := ssz.BaseExtraDataSSZOffsetHeader
 
 	if h.version >= clparams.CapellaVersion {
 		offset += 32
@@ -100,12 +100,12 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 	copy(h.PrevRandao[:], buf[pos:])
 	pos += len(h.PrevRandao)
 
-	h.BlockNumber = ssz_utils.UnmarshalUint64SSZ(buf[pos:])
-	h.GasLimit = ssz_utils.UnmarshalUint64SSZ(buf[pos+8:])
-	h.GasUsed = ssz_utils.UnmarshalUint64SSZ(buf[pos+16:])
-	h.Time = ssz_utils.UnmarshalUint64SSZ(buf[pos+24:])
+	h.BlockNumber = ssz.UnmarshalUint64SSZ(buf[pos:])
+	h.GasLimit = ssz.UnmarshalUint64SSZ(buf[pos+8:])
+	h.GasUsed = ssz.UnmarshalUint64SSZ(buf[pos+16:])
+	h.Time = ssz.UnmarshalUint64SSZ(buf[pos+24:])
 	pos += 32
-	extraDataOffset = int(ssz_utils.DecodeOffset(buf[pos:]))
+	extraDataOffset = int(ssz.DecodeOffset(buf[pos:]))
 	pos += 4
 	// Add Base Fee
 	copy(h.BaseFeePerGas[:], buf[pos:])
@@ -119,7 +119,7 @@ func (h *Eth1Header) decodeHeaderMetadataForSSZ(buf []byte) (pos int, extraDataO
 func (h *Eth1Header) DecodeSSZWithVersion(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 	pos, _ := h.decodeHeaderMetadataForSSZ(buf)
 	copy(h.TransactionsRoot[:], buf[pos:])

@@ -7,7 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/serenity"
@@ -136,7 +136,7 @@ func (b *Eth1Block) DecodeSSZ(buf []byte) error {
 func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
 	if len(buf) < b.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 	// We can reuse code from eth1-header for partial decoding
 	payloadHeader := Eth1Header{}
@@ -155,12 +155,12 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	b.Time = payloadHeader.Time
 	b.BaseFeePerGas = payloadHeader.BaseFeePerGas
 	// Decode the rest
-	transactionsOffset := ssz_utils.DecodeOffset(buf[pos:])
+	transactionsOffset := ssz.DecodeOffset(buf[pos:])
 	pos += 4
 	var withdrawalOffset *uint32
 	if version >= int(clparams.CapellaVersion) {
 		withdrawalOffset = new(uint32)
-		*withdrawalOffset = ssz_utils.DecodeOffset(buf[pos:])
+		*withdrawalOffset = ssz.DecodeOffset(buf[pos:])
 	}
 	// Compute extra data.
 	b.Extra = common.CopyBytes(buf[extraDataOffset:transactionsOffset])
@@ -171,12 +171,12 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	var transactionsBuffer []byte
 	if withdrawalOffset == nil {
 		if len(transactionsBuffer) > len(buf) {
-			return ssz_utils.ErrLowBufferSize
+			return ssz.ErrLowBufferSize
 		}
 		transactionsBuffer = buf[transactionsOffset:]
 	} else {
 		if len(transactionsBuffer) > int(*withdrawalOffset) || int(*withdrawalOffset) > len(buf) {
-			return ssz_utils.ErrBadOffset
+			return ssz.ErrBadOffset
 		}
 		transactionsBuffer = buf[transactionsOffset:*withdrawalOffset]
 	}
@@ -188,13 +188,13 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		length = 0
 	} else {
 		if len(transactionsBuffer) < 4 {
-			return ssz_utils.ErrLowBufferSize
+			return ssz.ErrLowBufferSize
 		}
-		txOffset = ssz_utils.DecodeOffset(transactionsBuffer)
+		txOffset = ssz.DecodeOffset(transactionsBuffer)
 		length = txOffset / 4
 		// Retrieve tx length
 		if txOffset%4 != 0 {
-			return ssz_utils.ErrBadDynamicLength
+			return ssz.ErrBadDynamicLength
 		}
 	}
 
@@ -206,11 +206,11 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 		if length == 1 {
 			txEndOffset = uint32(len(transactionsBuffer))
 		} else {
-			txEndOffset = ssz_utils.DecodeOffset(transactionsBuffer[transactionsPosition:])
+			txEndOffset = ssz.DecodeOffset(transactionsBuffer[transactionsPosition:])
 		}
 		transactionsPosition += 4
 		if txOffset > txEndOffset {
-			return ssz_utils.ErrBadOffset
+			return ssz.ErrBadOffset
 		}
 		b.Transactions[txIdx] = transactionsBuffer[txOffset:txEndOffset]
 		// Decode RLP and put it in the tx list.
@@ -222,7 +222,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 	// If withdrawals are enabled, process them.
 	if withdrawalOffset != nil {
 		var err error
-		b.Withdrawals, err = ssz_utils.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
+		b.Withdrawals, err = ssz.DecodeStaticList[*types.Withdrawal](buf, *withdrawalOffset, uint32(len(buf)), 44, 16)
 		if err != nil {
 			return err
 		}
@@ -234,7 +234,7 @@ func (b *Eth1Block) DecodeSSZWithVersion(buf []byte, version int) error {
 func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
-	currentOffset := ssz_utils.BaseExtraDataSSZOffsetBlock
+	currentOffset := ssz.BaseExtraDataSSZOffsetBlock
 
 	if b.version >= clparams.CapellaVersion {
 		currentOffset += 4
@@ -249,14 +249,14 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	currentOffset += len(b.Extra)
 	// Write transaction offset
-	buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
+	buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
 
 	for _, tx := range b.Transactions {
 		currentOffset += len(tx) + 4
 	}
 	// Write withdrawals offset if exist
 	if b.version >= clparams.CapellaVersion {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(currentOffset))...)
+		buf = append(buf, ssz.OffsetSSZ(uint32(currentOffset))...)
 	}
 	// Sanity check for extra data then write it.
 	if len(b.Extra) > 32 {
@@ -266,7 +266,7 @@ func (b *Eth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	// Write all tx offsets
 	txOffset := len(b.Transactions) * 4
 	for _, tx := range b.Transactions {
-		buf = append(buf, ssz_utils.OffsetSSZ(uint32(txOffset))...)
+		buf = append(buf, ssz.OffsetSSZ(uint32(txOffset))...)
 		txOffset += len(tx)
 	}
 	// Write all transactions

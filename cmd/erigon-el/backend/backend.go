@@ -882,7 +882,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			go downloader3.MainLoop(ctx, s.downloader, true)
+			s.downloader.MainLoopInBackground(ctx, true)
 			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("new server: %w", err)

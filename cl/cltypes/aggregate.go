@@ -1,7 +1,7 @@
 package cltypes
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -20,8 +20,8 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 
 	var err error
-	buf = append(buf, ssz_utils.Uint64SSZ(a.AggregatorIndex)...)
-	buf = append(buf, ssz_utils.OffsetSSZ(108)...)
+	buf = append(buf, ssz.Uint64SSZ(a.AggregatorIndex)...)
+	buf = append(buf, ssz.OffsetSSZ(108)...)
 	buf = append(buf, a.SelectionProof[:]...)
 	buf, err = a.Aggregate.EncodeSSZ(buf)
 	if err != nil {
@@ -31,7 +31,7 @@ func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 }
 
 func (a *AggregateAndProof) DecodeSSZ(buf []byte) error {
-	a.AggregatorIndex = ssz_utils.UnmarshalUint64SSZ(buf)
+	a.AggregatorIndex = ssz.UnmarshalUint64SSZ(buf)
 	if a.Aggregate == nil {
 		a.Aggregate = new(Attestation)
 	}
@@ -55,7 +55,7 @@ type SignedAggregateAndProof struct {
 func (a *SignedAggregateAndProof) EncodedSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
-	buf = append(buf, ssz_utils.OffsetSSZ(100)...)
+	buf = append(buf, ssz.OffsetSSZ(100)...)
 
 	buf = append(buf, a.Signature[:]...)
 	buf, err = a.Message.EncodeSSZ(buf)

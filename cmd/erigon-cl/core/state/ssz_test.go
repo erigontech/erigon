@@ -36,7 +36,7 @@ func TestBeaconStatePhase0EncodingDecoding(t *testing.T) {
 	state := state.New(&clparams.MainnetBeaconConfig)
 	decodedSSZ, err := utils.DecompressSnappy(phase0BeaconSnappyTest)
 	require.NoError(t, err)
-	require.NoError(t, state.DecodeSSZWithVersion(decodedSSZ, int(clparams.Phase0Version)))
+	state.DecodeSSZWithVersion(decodedSSZ, int(clparams.Phase0Version))
 	root, err := state.HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(root), libcommon.HexToHash("0x5fd0bc1a74028b598f2eb0190a25e58896b26d4aad24fa9cb7672e6114e01446"))

@@ -7,9 +7,8 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	ssz "github.com/prysmaticlabs/fastssz"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -271,7 +270,7 @@ func rebuildAggregationBits(buf []byte) (n int, ret []byte) {
 // MarshalSSZTo ssz marshals the Attestation object to a target array
 func (a *Attestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
-	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
+	dst = append(dst, ssz.OffsetSSZ(228)...)
 
 	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
 		return
@@ -291,7 +290,7 @@ func (a *Attestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
 	tail := buf
@@ -308,16 +307,14 @@ func (a *Attestation) DecodeSSZ(buf []byte) error {
 	copy(a.Signature[:], buf[132:228])
 
 	// Field (0) 'AggregationBits'
-	{
-		buf = tail[228:]
-		if err = ssz.ValidateBitlist(buf, 2048); err != nil {
-			return err
-		}
-		if cap(a.AggregationBits) == 0 {
-			a.AggregationBits = make([]byte, 0, len(buf))
-		}
-		a.AggregationBits = append(a.AggregationBits, buf...)
+
+	buf = tail[228:]
+
+	if cap(a.AggregationBits) == 0 {
+		a.AggregationBits = make([]byte, 0, len(buf))
 	}
+	a.AggregationBits = append(a.AggregationBits, buf...)
+
 	return err
 }
 
@@ -367,7 +364,7 @@ type IndexedAttestation struct {
 func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
 	// Write indicies offset.
-	dst = append(dst, ssz_utils.OffsetSSZ(228)...)
+	dst = append(dst, ssz.OffsetSSZ(228)...)
 
 	// Process data field.
 	if dst, err = i.Data.EncodeSSZ(dst); err != nil {
@@ -381,7 +378,7 @@ func (i *IndexedAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 		return nil, errors.New("too bing attesting indices")
 	}
 	for _, index := range i.AttestingIndices {
-		dst = append(dst, ssz_utils.Uint64SSZ(index)...)
+		dst = append(dst, ssz.Uint64SSZ(index)...)
 	}
 
 	return
@@ -392,7 +389,7 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 228 {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
 	i.Data = new(AttestationData)
@@ -404,15 +401,15 @@ func (i *IndexedAttestation) DecodeSSZ(buf []byte) error {
 	bitsBuf := buf[228:]
 	num := len(bitsBuf) / 8
 	if len(bitsBuf)%8 != 0 {
-		return ssz_utils.ErrBufferNotRounded
+		return ssz.ErrBufferNotRounded
 	}
 	if num > 2048 {
-		return ssz_utils.ErrBadDynamicLength
+		return ssz.ErrBadDynamicLength
 	}
 	i.AttestingIndices = make([]uint64, num)
 
 	for index := 0; index < num; index++ {
-		i.AttestingIndices[index] = ssz_utils.UnmarshalUint64SSZ(bitsBuf[index*8:])
+		i.AttestingIndices[index] = ssz.UnmarshalUint64SSZ(bitsBuf[index*8:])
 	}
 	return nil
 }
@@ -426,7 +423,7 @@ func (i *IndexedAttestation) EncodingSizeSSZ() int {
 func (i *IndexedAttestation) HashSSZ() ([32]byte, error) {
 	leaves := make([][32]byte, 3)
 	var err error
-	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, ssz_utils.CalculateIndiciesLimit(2048, uint64(len(i.AttestingIndices)), 8))
+	leaves[0], err = merkle_tree.Uint64ListRootWithLimit(i.AttestingIndices, ssz.CalculateIndiciesLimit(2048, uint64(len(i.AttestingIndices)), 8))
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -461,8 +458,8 @@ func (a *AttestationData) Equal(other *AttestationData) bool {
 func (a *AttestationData) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	var err error
-	buf = append(buf, ssz_utils.Uint64SSZ(a.Slot)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(a.Index)...)
+	buf = append(buf, ssz.Uint64SSZ(a.Slot)...)
+	buf = append(buf, ssz.Uint64SSZ(a.Index)...)
 	buf = append(buf, a.BeaconBlockHash[:]...)
 	if buf, err = a.Source.EncodeSSZ(buf); err != nil {
 		return nil, err
@@ -475,11 +472,11 @@ func (a *AttestationData) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size != uint64(a.EncodingSizeSSZ()) {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
-	a.Slot = ssz_utils.UnmarshalUint64SSZ(buf)
-	a.Index = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	a.Slot = ssz.UnmarshalUint64SSZ(buf)
+	a.Index = ssz.UnmarshalUint64SSZ(buf[8:])
 	copy(a.BeaconBlockHash[:], buf[16:48])
 
 	a.Source = new(Checkpoint)
@@ -530,13 +527,13 @@ type PendingAttestation struct {
 // MarshalSSZTo ssz marshals the Attestation object to a target array
 func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
-	dst = append(dst, ssz_utils.OffsetSSZ(148)...)
+	dst = append(dst, ssz.OffsetSSZ(148)...)
 	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
 		return
 	}
 	fmt.Println(dst)
-	dst = append(dst, ssz_utils.Uint64SSZ(a.InclusionDelay)...)
-	dst = append(dst, ssz_utils.Uint64SSZ(a.ProposerIndex)...)
+	dst = append(dst, ssz.Uint64SSZ(a.InclusionDelay)...)
+	dst = append(dst, ssz.Uint64SSZ(a.ProposerIndex)...)
 
 	if len(a.AggregationBits) > 2048 {
 		return nil, fmt.Errorf("too many aggregation bits in attestation")
@@ -550,7 +547,7 @@ func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
 	var err error
 	if len(buf) < a.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
 	tail := buf
@@ -563,19 +560,16 @@ func (a *PendingAttestation) DecodeSSZ(buf []byte) error {
 		return err
 	}
 
-	a.InclusionDelay = ssz_utils.UnmarshalUint64SSZ(buf[132:])
-	a.ProposerIndex = ssz_utils.UnmarshalUint64SSZ(buf[140:])
-	// Field (0) 'AggregationBits'
-	{
-		buf = tail[148:]
-		if err = ssz.ValidateBitlist(buf, 2048); err != nil {
-			return err
-		}
-		if cap(a.AggregationBits) == 0 {
-			a.AggregationBits = make([]byte, 0, len(buf))
-		}
-		a.AggregationBits = append(a.AggregationBits, buf...)
+	a.InclusionDelay = ssz.UnmarshalUint64SSZ(buf[132:])
+	a.ProposerIndex = ssz.UnmarshalUint64SSZ(buf[140:])
+
+	buf = tail[148:]
+
+	if cap(a.AggregationBits) == 0 {
+		a.AggregationBits = make([]byte, 0, len(buf))
 	}
+	a.AggregationBits = append(a.AggregationBits, buf...)
+
 	return err
 }
 
