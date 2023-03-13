@@ -150,6 +150,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 	}
 
 	if parallel {
+		startTime := time.Now()
 		type txLogPart struct {
 			blockNum uint64
 			logs     types.Logs
@@ -220,7 +221,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 			log.Info(fmt.Sprintf("[%s] Parallel worker error", logPrefix), "err", err)
 			return err
 		}
-		log.Info(fmt.Sprintf("[%s] Finished parallel collecting bitmaps", logPrefix), "numTxs", numTxs)
+		log.Info(fmt.Sprintf("[%s] Finished parallel collecting bitmaps", logPrefix), "numTxs", numTxs, "elapsed", time.Since(startTime))
 	} else {
 		logs, err := tx.Cursor(kv.Log)
 		if err != nil {

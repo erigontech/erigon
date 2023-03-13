@@ -158,7 +158,7 @@ func BodiesForward(
 		if req != nil {
 			deliveryCount, _ := cfg.bd.DeliveryCounts()
 			peerHex := hex.EncodeToString(peer[:])
-			log.Info("BodyRequest", "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
+			log.Info(fmt.Sprintf("[%s] BodyRequest", logPrefix), "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
 				"peer", peerHex[0:8], "deliveryCount", deliveryCount,
 				"nextProcessingCount", cfg.bd.NextProcessingCount(),
 			)

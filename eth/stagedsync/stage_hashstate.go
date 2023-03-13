@@ -83,7 +83,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		}
 	} else {
 		if useExternalTx {
-			log.Info("No parallel execution of hashstate stage with external tx", "from", s.BlockNumber, "to", to)
+			log.Info(fmt.Sprintf("[%s] Parallel execution disabled (external tx)", logPrefix), "from", s.BlockNumber, "to", to)
 		}
 		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet, !useExternalTx); err != nil {
 			return err
@@ -692,13 +692,13 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	}
 	var numExtracts uint64
 	var postTransform func() error
-
+	startTime := time.Now()
 	if parallel {
 		extractChan := make(chan etl.ExtractFuncArgs, etl.AsyncBufferSize)
 		resultChan := make(chan etl.ExtractResult, etl.AsyncBufferSize)
 		numThreads := 16
 		aliveThreads := int64(numThreads)
-		log.Info("Parallel extract", "numThreads", numThreads, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket)
+		log.Info(fmt.Sprintf("[%s] Parallel extract", logPrefix), "numThreads", numThreads, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket)
 		g := errgroup.Group{}
 		for i := 0; i < numThreads; i++ {
 			g.Go(func() error {
@@ -761,8 +761,8 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 		}
 	}
 	if numExtracts > 0 {
-		log.Info("Promoted", "numParallelExtracts", numExtracts, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket,
-			"from", from, "to", to)
+		log.Info(fmt.Sprintf("[%s] Promoted", logPrefix), "numParallelExtracts", numExtracts, "loadBucket", loadBucket, "changeSetBucket", changeSetBucket,
+			"from", from, "to", to, "elapsed", time.Since(startTime))
 	}
 
 	return nil
