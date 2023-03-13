@@ -122,14 +122,53 @@ func BodiesForward(
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var req *bodydownload.BodyRequest
-	var peer [64]byte
-	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
 	loopBody := func() (bool, error) {
+		sendOneRequest := func(req *bodydownload.BodyRequest) bool {
+			peer := [64]byte{}
+			sentToPeer := false
+			perRequestTimeout := timeout
+			isImminentBlock := false
+
+			if req != nil {
+				if len(req.BlockNums) > 0 && req.BlockNums[0]-bodyProgress < 128 {
+					isImminentBlock = true
+					perRequestTimeout = timeout / 2
+				}
+				start := time.Now()
+				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
+				if isImminentBlock && sentToPeer {
+					// Send a backup request to a different peer.
+					// This is to ensure that we don't get stuck waiting for a response from a peer that is not responding.
+					cfg.bodyReqSend(ctx, req)
+				}
+				d2 += time.Since(start)
+			}
+
+			if req != nil && sentToPeer {
+				start := time.Now()
+				currentTime := uint64(time.Now().Unix())
+				cfg.bd.RequestSent(req, currentTime+uint64(perRequestTimeout), peer)
+				d3 += time.Since(start)
+			}
+
+			if req != nil {
+				deliveryCount, _ := cfg.bd.DeliveryCounts()
+				peerHex := hex.EncodeToString(peer[:])
+				log.Info(fmt.Sprintf("[%s] BodyRequest", logPrefix), "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
+					"peer", peerHex[0:8], "deliveryCount", deliveryCount,
+					"timeout", perRequestTimeout,
+					"nextProcessingCount", cfg.bd.NextProcessingCount(),
+				)
+			}
+
+			return sentToPeer
+		}
+
 		// always check if a new request is needed at the start of the loop
 		// this will check for timed out old requests and attempt to send them again
 		start := time.Now()
@@ -139,30 +178,7 @@ func BodiesForward(
 			return false, fmt.Errorf("request more bodies: %w", err)
 		}
 		d1 += time.Since(start)
-
-		peer = [64]byte{}
-		sentToPeer = false
-
-		if req != nil {
-			start := time.Now()
-			peer, sentToPeer = cfg.bodyReqSend(ctx, req)
-			d2 += time.Since(start)
-		}
-		if req != nil && sentToPeer {
-			start := time.Now()
-			currentTime := uint64(time.Now().Unix())
-			cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
-			d3 += time.Since(start)
-		}
-
-		if req != nil {
-			deliveryCount, _ := cfg.bd.DeliveryCounts()
-			peerHex := hex.EncodeToString(peer[:])
-			log.Info(fmt.Sprintf("[%s] BodyRequest", logPrefix), "firstBlockNum", req.BlockNums[0], "sentToPeer", sentToPeer,
-				"peer", peerHex[0:8], "deliveryCount", deliveryCount,
-				"nextProcessingCount", cfg.bd.NextProcessingCount(),
-			)
-		}
+		sentToPeer := sendOneRequest(req)
 
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
 		// having some time out so requesting again and cycling like that forever.  We'll cap it
@@ -177,18 +193,7 @@ func BodiesForward(
 				return false, fmt.Errorf("request more bodies: %w", err)
 			}
 			d1 += time.Since(start)
-			peer = [64]byte{}
-			sentToPeer = false
-			if req != nil {
-				start = time.Now()
-				peer, sentToPeer = cfg.bodyReqSend(ctx, req)
-				d2 += time.Since(start)
-			}
-			if req != nil && sentToPeer {
-				start = time.Now()
-				cfg.bd.RequestSent(req, currentTime+uint64(timeout), peer)
-				d3 += time.Since(start)
-			}
+			sentToPeer = sendOneRequest(req)
 
 			loopCount++
 			if loopCount >= requestLoopCutOff {

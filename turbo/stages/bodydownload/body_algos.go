@@ -21,7 +21,7 @@ import (
 )
 
 const BlockBufferSize = 128
-const MaxOutstandingBodyRequests = 64
+const MaxOutstandingBodyRequests = 128
 
 func (bd *BodyDownload) PrintProgressBitmap() {
 	curr := bd.requestedLow
