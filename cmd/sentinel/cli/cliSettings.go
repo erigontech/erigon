@@ -35,7 +35,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg := &ConsensusClientCliCfg{}
 	chainName := ctx.String(flags.Chain.Name)
 	var err error
-	var network clparams.NetworkType
 	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
@@ -66,7 +65,8 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	if ctx.String(flags.CheckpointSyncUrlFlag.Name) != "" {
 		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
 	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+		fmt.Println(cfg.CheckpointUri)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
 	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
