@@ -184,15 +184,10 @@ func decodeNode(t *testing.T, encoded []byte) any {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []string) map[libcommon.Hash]any {
+func proofMap(t *testing.T, proof []hexutil.Bytes) map[libcommon.Hash]any {
 	res := map[libcommon.Hash]any{}
-	for _, proofStr := range proof {
-		// TODO(jky) fix underlying type
-		proofB := &hexutil.Bytes{}
-		err := proofB.UnmarshalText([]byte(proofStr))
-		require.NoError(t, err)
-
-		res[crypto.Keccak256Hash(*proofB)] = decodeNode(t, *proofB)
+	for _, proofB := range proof {
+		res[crypto.Keccak256Hash(proofB)] = decodeNode(t, proofB)
 	}
 	return res
 }
@@ -244,11 +239,7 @@ func verifyAccountProof(t *testing.T, stateRoot libcommon.Hash, proof *accounts.
 func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts.StorProofResult) {
 	t.Helper()
 
-	// TODO(jky) fix underlying type
-	proofB := &hexutil.Bytes{}
-	err := proofB.UnmarshalText([]byte(proof.Key))
-	require.NoError(t, err)
-	storageKey := crypto.Keccak256(*proofB)
+	storageKey := crypto.Keccak256(proof.Key[:])
 	pm := proofMap(t, proof.Proof)
 	value := verifyProof(t, storageRoot, storageKey, pm)
 
@@ -274,7 +265,7 @@ func TestGetProof(t *testing.T) {
 	tests := []struct {
 		name        string
 		blockNum    uint64
-		storageKeys []string
+		storageKeys []libcommon.Hash
 		expectedErr string
 	}{
 		{
@@ -284,7 +275,7 @@ func TestGetProof(t *testing.T) {
 		{
 			name:        "withState",
 			blockNum:    2,
-			storageKeys: []string{(libcommon.Hash{1}).String()},
+			storageKeys: []libcommon.Hash{{1}},
 			expectedErr: "the method is currently not implemented: eth_getProof with storageKeys",
 		},
 		{
