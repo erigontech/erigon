@@ -3,7 +3,7 @@ package cltypes
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 )
@@ -22,7 +22,7 @@ func (e *Eth1Data) Equal(b *Eth1Data) bool {
 func (e *Eth1Data) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	dst = buf
 	dst = append(dst, e.Root[:]...)
-	dst = append(dst, ssz_utils.Uint64SSZ(e.DepositCount)...)
+	dst = append(dst, ssz.Uint64SSZ(e.DepositCount)...)
 	dst = append(dst, e.BlockHash[:]...)
 	return
 }
@@ -32,11 +32,11 @@ func (e *Eth1Data) DecodeSSZ(buf []byte) error {
 	var err error
 	size := uint64(len(buf))
 	if size < 72 {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
 	copy(e.Root[:], buf[0:32])
-	e.DepositCount = ssz_utils.UnmarshalUint64SSZ(buf[32:40])
+	e.DepositCount = ssz.UnmarshalUint64SSZ(buf[32:40])
 	copy(e.BlockHash[:], buf[40:72])
 
 	return err

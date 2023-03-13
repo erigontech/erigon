@@ -8,7 +8,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 var testMetadata = &cltypes.Metadata{
@@ -89,7 +89,7 @@ var testLcBootstrap = (&cltypes.LightClientBootstrap{
 }).WithVersion(clparams.CapellaVersion)
 
 func TestMarshalNetworkTypes(t *testing.T) {
-	cases := []ssz_utils.EncodableSSZ{
+	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
 		testSingleRoot,
@@ -102,7 +102,7 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		testLcBootstrap,
 	}
 
-	unmarshalDestinations := []ssz_utils.EncodableSSZ{
+	unmarshalDestinations := []ssz.EncodableSSZ{
 		&cltypes.Metadata{},
 		&cltypes.Ping{},
 		&cltypes.SingleRoot{},

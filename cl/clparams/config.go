@@ -24,7 +24,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -753,7 +753,7 @@ func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
 		return GenesisConfig{}, nil
 	}
 	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
+	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
 	copy(cfg.GenesisValidatorRoot[:], b[8:])
 	return cfg, nil
 }

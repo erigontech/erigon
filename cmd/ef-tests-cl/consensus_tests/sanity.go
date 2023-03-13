@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -12,6 +13,7 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
+	testState.HashSSZ()
 	var expectedError bool
 	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 	if os.IsNotExist(err) {
@@ -25,7 +27,9 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	for _, block := range blocks {
+	startSlot := testState.Slot()
+	var block *cltypes.SignedBeaconBlock
+	for _, block = range blocks {
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
@@ -39,7 +43,7 @@ func testSanityFunction(context testContext) error {
 		if expectedError {
 			return nil
 		}
-		return err
+		return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 	}
 	expectedRoot, err := expectedState.HashSSZ()
 	if err != nil {
