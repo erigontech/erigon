@@ -7,6 +7,8 @@ WORKDIR /app
 ADD go.mod go.mod
 ADD go.sum go.sum
 
+ADD erigon-lib /Users/hetianyi/work/erigon-lib
+
 RUN go mod download
 ADD . .
 
