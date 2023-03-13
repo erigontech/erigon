@@ -51,7 +51,7 @@ func init() {
 	withDataDir(erigon4Cmd)
 	withChain(erigon4Cmd)
 
-	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 0, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	erigon4Cmd.Flags().StringVar(&commitmentMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
 	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
@@ -309,7 +309,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 				log.Error("aggregator flush", "err", err)
 			}
 
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", agg.Stats().TxCount))
 			if err := commitFn(txNum); err != nil {
 				log.Error("db commit", "err", err)
 			}
@@ -490,7 +490,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
 	if txNum >= startTxNum {
-		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+		if commitments && commitmentFrequency > 0 && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
 			rootHash, err := ww.w.ComputeCommitment(true, trace)
 			if err != nil {
 				return 0, nil, err
