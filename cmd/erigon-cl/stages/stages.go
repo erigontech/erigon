@@ -40,7 +40,7 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 			ID:          stages.BeaconState,
 			Description: "Execute Consensus Layer transition",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnStageBeaconState(beaconState, s, tx, ctx)
+				return SpawnStageBeaconState(beaconState, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
 				return nil
@@ -77,7 +77,7 @@ func NewConsensusStagedSync(ctx context.Context,
 			ctx,
 			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, beaconDBCfg, state, tmpdir, executionClient),
 			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient),
-			StageBeaconState(db, genesisCfg, beaconCfg, state, triggerExecution, clearEth1Data, executionClient),
+			StageBeaconState(db, beaconCfg, state, triggerExecution, clearEth1Data, executionClient),
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,
