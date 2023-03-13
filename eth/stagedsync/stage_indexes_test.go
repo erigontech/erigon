@@ -29,7 +29,7 @@ import (
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	db := kv2.NewTestDB(t)
 	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir())
-	test := func(blocksNum int, csBucket string) func(t *testing.T) {
+	test := func(blocksNum int, csBucket string, parallel bool) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := db.BeginRw(context.Background())
 			require.NoError(t, err)
@@ -43,9 +43,11 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			cfgCopy := cfg
 			cfgCopy.bufLimit = 10
 			cfgCopy.flushEvery = time.Microsecond
-			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil)
+			cfgCopy.db = db
+			tx = CommitTx(t, db, tx)
+			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil, parallel)
 			require.NoError(t, err)
-			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil)
+			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil, parallel)
 			require.NoError(t, err)
 
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])])
@@ -55,121 +57,128 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 		}
 	}
 
-	t.Run("account plain state", test(2100, kv.AccountChangeSet))
-	t.Run("storage plain state", test(2100, kv.StorageChangeSet))
+	t.Run("account plain state", test(2100, kv.AccountChangeSet, false))
+	t.Run("account plain state parallel", test(2100, kv.AccountChangeSet, true))
+	t.Run("storage plain state", test(2100, kv.StorageChangeSet, false))
+	t.Run("storage plain state parallel", test(2100, kv.StorageChangeSet, true))
 
 }
 
 func TestIndexGenerator_Truncate(t *testing.T) {
-	buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
-	tmpDir, ctx := t.TempDir(), context.Background()
-	kv := kv2.NewTestDB(t)
-	cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
-	for i := range buckets {
-		csbucket := buckets[i]
+	parallelArgs := []bool{false, true}
+	for j := range parallelArgs {
+		buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
+		tmpDir, ctx := t.TempDir(), context.Background()
+		kv := kv2.NewTestDB(t)
+		cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
+		for i := range buckets {
+			csbucket := buckets[i]
 
-		tx, err := kv.BeginRw(context.Background())
-		require.NoError(t, err)
-		defer tx.Rollback()
+			tx, err := kv.BeginRw(context.Background())
+			require.NoError(t, err)
+			defer tx.Rollback()
 
-		hashes, expected := generateTestData(t, tx, csbucket, 2100)
-		mp := historyv2.Mapper[csbucket]
-		indexBucket := mp.IndexBucket
-		cfgCopy := cfg
-		cfgCopy.bufLimit = 10
-		cfgCopy.flushEvery = time.Microsecond
-		err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil)
-		require.NoError(t, err)
+			hashes, expected := generateTestData(t, tx, csbucket, 2100)
+			mp := historyv2.Mapper[csbucket]
+			indexBucket := mp.IndexBucket
+			cfgCopy := cfg
+			cfgCopy.bufLimit = 10
+			cfgCopy.flushEvery = time.Microsecond
+			cfgCopy.db = kv
+			tx = CommitTx(t, kv, tx)
+			err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil, parallelArgs[j])
+			require.NoError(t, err)
 
-		reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
-			pos := sort.Search(len(arr), func(i int) bool {
-				return arr[i] > timestamtTo
-			})
-			return arr[:pos]
+			reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
+				pos := sort.Search(len(arr), func(i int) bool {
+					return arr[i] > timestamtTo
+				})
+				return arr[:pos]
+			}
+
+			//t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
+			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2050)
+			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2050)
+			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
+
+			err = unwindHistory("logPrefix", tx, csbucket, 2050, cfg, nil)
+			require.NoError(t, err)
+
+			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+			//})
+
+			//t.Run("truncate to 2000 "+csbucket, func(t *testing.T) {
+			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2000)
+			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2000)
+			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
+
+			err = unwindHistory("logPrefix", tx, csbucket, 2000, cfg, nil)
+			require.NoError(t, err)
+
+			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+			//})
+
+			//t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
+			err = unwindHistory("logPrefix", tx, csbucket, 1999, cfg, nil)
+			require.NoError(t, err)
+			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 1999)
+			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 1999)
+			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 1999)
+
+			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+			bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
+			require.NoError(t, err)
+			if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+				t.Fatal(bm.Maximum())
+			}
+			bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
+			require.NoError(t, err)
+			if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
+				t.Fatal()
+			}
+			//})
+
+			//t.Run("truncate to 999 "+csbucket, func(t *testing.T) {
+			expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 999)
+			expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 999)
+			expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 999)
+
+			err = unwindHistory("logPrefix", tx, csbucket, 999, cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
+			require.NoError(t, err)
+			if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+				t.Fatal()
+			}
+			bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
+			require.NoError(t, err)
+			if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
+				t.Fatal()
+			}
+
+			checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
+			checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
+			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
+
+			//})
+			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+			assert.NoError(t, err)
+			expectNoHistoryBefore(t, tx, csbucket, 128)
+
+			// double prune is safe
+			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+			assert.NoError(t, err)
+			expectNoHistoryBefore(t, tx, csbucket, 128)
+			tx.Rollback()
 		}
-
-		//t.Run("truncate to 2050 "+csbucket, func(t *testing.T) {
-		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2050)
-		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2050)
-		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2050)
-
-		err = unwindHistory("logPrefix", tx, csbucket, 2050, cfg, nil)
-		require.NoError(t, err)
-
-		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		//})
-
-		//t.Run("truncate to 2000 "+csbucket, func(t *testing.T) {
-		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 2000)
-		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 2000)
-		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 2000)
-
-		err = unwindHistory("logPrefix", tx, csbucket, 2000, cfg, nil)
-		require.NoError(t, err)
-
-		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		//})
-
-		//t.Run("truncate to 1999 "+csbucket, func(t *testing.T) {
-		err = unwindHistory("logPrefix", tx, csbucket, 1999, cfg, nil)
-		require.NoError(t, err)
-		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 1999)
-		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 1999)
-		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 1999)
-
-		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-		bm, err := bitmapdb.Get64(tx, indexBucket, hashes[0], 1999, math.MaxUint32)
-		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
-			t.Fatal(bm.Maximum())
-		}
-		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 1999, math.MaxUint32)
-		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 1999 {
-			t.Fatal()
-		}
-		//})
-
-		//t.Run("truncate to 999 "+csbucket, func(t *testing.T) {
-		expected[string(hashes[0])] = reduceSlice(expected[string(hashes[0])], 999)
-		expected[string(hashes[1])] = reduceSlice(expected[string(hashes[1])], 999)
-		expected[string(hashes[2])] = reduceSlice(expected[string(hashes[2])], 999)
-
-		err = unwindHistory("logPrefix", tx, csbucket, 999, cfg, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[0], 999, math.MaxUint32)
-		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
-			t.Fatal()
-		}
-		bm, err = bitmapdb.Get64(tx, indexBucket, hashes[1], 999, math.MaxUint32)
-		require.NoError(t, err)
-		if bm.GetCardinality() > 0 && bm.Maximum() > 999 {
-			t.Fatal()
-		}
-
-		checkIndex(t, tx, indexBucket, hashes[0], expected[string(hashes[0])])
-		checkIndex(t, tx, indexBucket, hashes[1], expected[string(hashes[1])])
-		checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
-
-		//})
-		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
-		assert.NoError(t, err)
-		expectNoHistoryBefore(t, tx, csbucket, 128)
-
-		// double prune is safe
-		err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
-		assert.NoError(t, err)
-		expectNoHistoryBefore(t, tx, csbucket, 128)
-		tx.Rollback()
 	}
 }
 

@@ -79,7 +79,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 		startBlock = pruneTo
 	}
 
-	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx); err != nil {
 		return err
 	}
 
@@ -122,7 +122,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx); err != nil {
 		return err
 	}
 
@@ -137,7 +137,10 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	return nil
 }
 
-func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{}) error {
+const IndexParallelWorkers = 32
+
+func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{},
+	parallel bool) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -148,38 +151,98 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 	collectorUpdates := etl.NewCollector(logPrefix, cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer collectorUpdates.Close()
 
-	if err := changeset.ForRange(tx, changesetBucket, start, stop, func(blockN uint64, k, v []byte) error {
-		if err := libcommon.Stopped(quit); err != nil {
-			return err
-		}
-
-		k = dbutils.CompositeKeyWithoutIncarnation(k)
-
-		select {
-		default:
-		case <-logEvery.C:
-			var m runtime.MemStats
-			dbg.ReadMemStats(&m)
-			log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-		case <-checkFlushEvery.C:
-			if needFlush64(updates, cfg.bufLimit) {
-				if err := flushBitmaps64(collectorUpdates, updates); err != nil {
-					return err
-				}
-				updates = map[string]*roaring64.Bitmap{}
-			}
-		}
-
+	var numParts uint64
+	handleOnePart := func(blockN uint64, k []byte) {
+		numParts++
 		m, ok := updates[string(k)]
 		if !ok {
 			m = roaring64.New()
 			updates[string(k)] = m
 		}
 		m.Add(blockN)
+	}
+	if parallel {
+		startTime := time.Now()
+		type changeSetPart struct {
+			blockN uint64
+			k      []byte
+		}
+		resChan := make(chan changeSetPart, 10_000)
+		ctx := context.Background()
+		g := SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, stop-1, IndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+			return changeset.ForRange(roTx, changesetBucket, start, end+1, func(blockN uint64, k, v []byte) error {
+				if err := libcommon.Stopped(quit); err != nil {
+					return err
+				}
+				k = dbutils.CompositeKeyWithoutIncarnation(k)
+				// We have already obtained a copy by calling CompositeKeyWithoutIncarnation.
+				// No need to copy it again.
+				resChan <- changeSetPart{blockN, k}
+				return nil
+			})
+		}, func() {
+			close(resChan)
+		})
+	outer:
+		for {
+			select {
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "numParts", numParts, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush64(updates, cfg.bufLimit) {
+					if err := flushBitmaps64(collectorUpdates, updates); err != nil {
+						return err
+					}
+					updates = map[string]*roaring64.Bitmap{}
+				}
+			case part, ok := <-resChan:
+				if !ok {
+					break outer
+				}
+				handleOnePart(part.blockN, part.k)
+			}
+		}
+		if err := <-g.Done; err != nil {
+			log.Info("Parallel worker error", "err", err)
+			return err
+		}
+		log.Info(fmt.Sprintf("[%s] Finished parallel collecting bitmaps", logPrefix), "numParts", numParts, "elapsed", time.Since(startTime))
+	} else {
+		if err := changeset.ForRange(tx, changesetBucket, start, stop, func(blockN uint64, k, v []byte) error {
+			if err := libcommon.Stopped(quit); err != nil {
+				return err
+			}
 
-		return nil
-	}); err != nil {
-		return err
+			k = dbutils.CompositeKeyWithoutIncarnation(k)
+
+			select {
+			default:
+			case <-logEvery.C:
+				var m runtime.MemStats
+				dbg.ReadMemStats(&m)
+				log.Info(fmt.Sprintf("[%s] Progress", logPrefix), "number", blockN, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+			case <-checkFlushEvery.C:
+				if needFlush64(updates, cfg.bufLimit) {
+					if err := flushBitmaps64(collectorUpdates, updates); err != nil {
+						return err
+					}
+					updates = map[string]*roaring64.Bitmap{}
+				}
+			}
+
+			m, ok := updates[string(k)]
+			if !ok {
+				m = roaring64.New()
+				updates[string(k)] = m
+			}
+			m.Add(blockN)
+
+			return nil
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := flushBitmaps64(collectorUpdates, updates); err != nil {
