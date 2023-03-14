@@ -304,7 +304,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 }
 
 // GetProof is partially implemented; no Storage proofs; only for the latest block
-func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
+func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -334,8 +334,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		rl.AddKey(addrHash[:])
 
 		loader := trie.NewFlatDBTrieLoader("getProof")
-		trace := true
-		if err := loader.Reset(rl, nil, nil, trace); err != nil {
+		if err := loader.Reset(rl, nil, nil, false); err != nil {
 			return nil, err
 		}
 
