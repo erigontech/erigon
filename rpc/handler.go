@@ -524,6 +524,9 @@ var nullAsBytes = []byte{110, 117, 108, 108}
 // there are many avenues that could lead to an error being handled in runMethod, so we need to check
 // if nil has already been written to the stream before writing it again here
 func writeNilIfNotPresent(stream *jsoniter.Stream) {
+	if stream == nil {
+		return
+	}
 	b := stream.Buffer()
 	hasNil := true
 	if len(b) >= 4 {
