@@ -80,6 +80,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, nil, true, executionClient), nil, ctx)
 	}
 
+	fmt.Println(cfg.CheckpointUri)
 	// Fetch the checkpoint state.
 	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
