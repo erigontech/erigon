@@ -92,7 +92,7 @@ require (
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.53.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
-	google.golang.org/protobuf v1.29.0
+	google.golang.org/protobuf v1.29.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.21.0
