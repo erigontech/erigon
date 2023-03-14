@@ -156,28 +156,30 @@ func NewRootHashAggregator() *RootHashAggregator {
 	}
 }
 
-func NewFlatDBTrieLoader(logPrefix string) *FlatDBTrieLoader {
-	return &FlatDBTrieLoader{
-		logPrefix:       logPrefix,
-		defaultReceiver: NewRootHashAggregator(),
-	}
-}
-
-// Reset prepares the loader for reuse
-func (l *FlatDBTrieLoader) Reset(rd RetainDeciderWithMarker, hc HashCollector2, shc StorageHashCollector2, trace bool) error {
-	l.defaultReceiver.Reset(hc, shc, trace)
-	l.hc = hc
-	l.shc = shc
-	l.receiver = l.defaultReceiver
-	l.trace = trace
-	l.ihSeek, l.accSeek, l.storageSeek, l.kHex, l.kHexS = make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128), make([]byte, 0, 128)
-	l.rd = rd
-	if l.trace {
+func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCollector2, shc StorageHashCollector2, trace bool) *FlatDBTrieLoader {
+	if trace {
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")
 	}
-	l.accProofResult = nil
-	return nil
+	receiver := &RootHashAggregator{
+		hb:    NewHashBuilder(false),
+		hc:    hc,
+		shc:   shc,
+		trace: trace,
+	}
+	return &FlatDBTrieLoader{
+		logPrefix:       logPrefix,
+		defaultReceiver: receiver,
+		receiver:        receiver,
+		ihSeek:          make([]byte, 0, 128),
+		accSeek:         make([]byte, 0, 128),
+		storageSeek:     make([]byte, 0, 128),
+		kHex:            make([]byte, 0, 128),
+		kHexS:           make([]byte, 0, 128),
+		rd:              rd,
+		hc:              hc,
+		shc:             shc,
+	}
 }
 
 func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
@@ -342,28 +344,6 @@ func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {
 
 func (r *RootHashAggregator) RetainNothing(_ []byte) bool {
 	return false
-}
-
-func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2, trace bool) {
-	r.hc = hc
-	r.shc = shc
-	r.curr.Reset()
-	r.succ.Reset()
-	r.value = nil
-	r.groups = r.groups[:0]
-	r.hasTree = r.hasTree[:0]
-	r.hasHash = r.hasHash[:0]
-	r.a.Reset()
-	r.hb.Reset()
-	r.wasIH = false
-	r.currStorage.Reset()
-	r.succStorage.Reset()
-	r.valueStorage = nil
-	r.wasIHStorage = false
-	r.root = libcommon.Hash{}
-	r.trace = trace
-	r.hb.trace = trace
-	r.proofMatch = nil
 }
 
 func (r *RootHashAggregator) Receive(itemType StreamItem,
@@ -1514,10 +1494,7 @@ func CastTrieNodeValue(hashes, rootHash []byte) []libcommon.Hash {
 // CalcRoot is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
-	loader := NewFlatDBTrieLoader(logPrefix)
-	if err := loader.Reset(NewRetainList(0), nil, nil, false); err != nil {
-		return EmptyRoot, err
-	}
+	loader := NewFlatDBTrieLoader(logPrefix, NewRetainList(0), nil, nil, false)
 
 	h, err := loader.CalcTrieRoot(tx, nil)
 	if err != nil {

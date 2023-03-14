@@ -333,10 +333,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		rl := trie.NewRetainList(0)
 		rl.AddKey(addrHash[:])
 
-		loader := trie.NewFlatDBTrieLoader("getProof")
-		if err := loader.Reset(rl, nil, nil, false); err != nil {
-			return nil, err
-		}
+		loader := trie.NewFlatDBTrieLoader("getProof", rl, nil, nil, false)
 
 		var accProof accounts.AccProofResult
 		accProof.Address = address
