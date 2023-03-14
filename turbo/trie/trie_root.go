@@ -92,9 +92,6 @@ type FlatDBTrieLoader struct {
 	receiver *RootHashAggregator
 	hc       HashCollector2
 	shc      StorageHashCollector2
-
-	// Optionally construct an Account Proof for an account key specified in 'rd'
-	accProofResult *accounts.AccProofResult
 }
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
@@ -164,7 +161,6 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 }
 
 func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
-	l.accProofResult = accProofResult
 	l.receiver.proofMatch = l.rd
 	l.receiver.hb.SetProofReturn(accProofResult)
 }
@@ -500,10 +496,6 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 // 		r.trace = bytes.HasPrefix(r.currAccK, common.FromHex(acc)) && bytes.HasPrefix(r.succStorage.Bytes(), common.FromHex(st))
 // 	}
 // }
-
-func (r *RootHashAggregator) Result() SubTries {
-	panic("don't call me")
-}
 
 func (r *RootHashAggregator) Root() libcommon.Hash {
 	return r.root
