@@ -222,6 +222,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	if realMsg, ok := msg.(types.Message); ok && config.GasOverride != nil {
 		realMsg.ChangeGas(api.GasCap, *config.GasOverride)
+		msg = realMsg
 	}
 
 	// Trace the transaction and return
