@@ -73,7 +73,7 @@ Then delete this account (SELFDESTRUCT).
 // FlatDBTrieLoader reads state and intermediate trie hashes in order equal to "Preorder trie traversal"
 // (Preorder - visit Root, visit Left, visit Right)
 //
-// It produces stream of values and send this stream to `defaultReceiver`
+// It produces stream of values and send this stream to `receiver`
 // It skips storage with incorrect incarnations
 //
 // Each intermediate hash key firstly pass to RetainDecider, only if it returns "false" - such AccTrie can be used.
@@ -89,10 +89,9 @@ type FlatDBTrieLoader struct {
 	// Account item buffer
 	accountValue accounts.Account
 
-	receiver        StreamReceiver
-	defaultReceiver *RootHashAggregator
-	hc              HashCollector2
-	shc             StorageHashCollector2
+	receiver *RootHashAggregator
+	hc       HashCollector2
+	shc      StorageHashCollector2
 
 	// Optionally construct an Account Proof for an account key specified in 'rd'
 	accProofResult *accounts.AccProofResult
@@ -134,22 +133,6 @@ type RootHashAggregator struct {
 	cutoff     bool
 }
 
-type StreamReceiver interface {
-	Receive(
-		itemType StreamItem,
-		accountKey []byte,
-		storageKey []byte,
-		accountValue *accounts.Account,
-		storageValue []byte,
-		hash []byte,
-		hasTree bool,
-		cutoff int,
-	) error
-
-	Result() SubTries
-	Root() libcommon.Hash
-}
-
 func NewRootHashAggregator() *RootHashAggregator {
 	return &RootHashAggregator{
 		hb: NewHashBuilder(false),
@@ -161,35 +144,29 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")
 	}
-	receiver := &RootHashAggregator{
-		hb:    NewHashBuilder(false),
-		hc:    hc,
-		shc:   shc,
-		trace: trace,
-	}
 	return &FlatDBTrieLoader{
-		logPrefix:       logPrefix,
-		defaultReceiver: receiver,
-		receiver:        receiver,
-		ihSeek:          make([]byte, 0, 128),
-		accSeek:         make([]byte, 0, 128),
-		storageSeek:     make([]byte, 0, 128),
-		kHex:            make([]byte, 0, 128),
-		kHexS:           make([]byte, 0, 128),
-		rd:              rd,
-		hc:              hc,
-		shc:             shc,
+		logPrefix: logPrefix,
+		receiver: &RootHashAggregator{
+			hb:    NewHashBuilder(false),
+			hc:    hc,
+			shc:   shc,
+			trace: trace,
+		},
+		ihSeek:      make([]byte, 0, 128),
+		accSeek:     make([]byte, 0, 128),
+		storageSeek: make([]byte, 0, 128),
+		kHex:        make([]byte, 0, 128),
+		kHexS:       make([]byte, 0, 128),
+		rd:          rd,
+		hc:          hc,
+		shc:         shc,
 	}
 }
 
 func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
 	l.accProofResult = accProofResult
-	l.defaultReceiver.proofMatch = l.rd
-	l.defaultReceiver.hb.SetProofReturn(accProofResult)
-}
-
-func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
-	l.receiver = receiver
+	l.receiver.proofMatch = l.rd
+	l.receiver.hb.SetProofReturn(accProofResult)
 }
 
 // CalcTrieRoot algo:
