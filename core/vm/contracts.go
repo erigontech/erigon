@@ -17,9 +17,9 @@
 package vm
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"github.com/minio/sha256-simd"
 	"math/big"
 
 	"github.com/holiman/uint256"

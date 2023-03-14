@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"reflect"
 	"strings"
 	"testing"
