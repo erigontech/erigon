@@ -273,6 +273,13 @@ func SetFlagsFromConfigFile(ctx *cli.Context) error {
 
 func SetCobraFlagsFromConfigFile(cmd *cobra.Command) error {
 	flags := cmd.Flags()
+
+	// flag might not be set for any reason so just exit if we're not aware of it
+	exists := flags.Lookup(configFlag.Name)
+	if exists == nil {
+		return nil
+	}
+
 	filePath, err := flags.GetString(configFlag.Name)
 	if err != nil {
 		return err
