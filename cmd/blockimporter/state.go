@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -28,6 +29,7 @@ type State struct {
 
 // Account that is used to perform withdraws/deposits
 const ownerAccount string = "0x0000000000000000000000000000000000000000"
+const chainID int64 = 355113
 
 func NewState(db *DB) (*State, error) {
 	tx, err := db.GetChain().BeginRw(context.Background())
@@ -50,7 +52,7 @@ func NewState(db *DB) (*State, error) {
 		}
 		genesis.Alloc = initState
 		chainConfig := chain.Config{
-			ChainID: big.NewInt(355113),
+			ChainID: big.NewInt(chainID),
 		}
 		genesis.Config = &chainConfig
 		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis)
@@ -62,7 +64,7 @@ func NewState(db *DB) (*State, error) {
 		state.totalDifficulty = big.NewInt(0)
 		state.chainConfig = &chainConfig
 	} else {
-		state.blockNum = (&big.Int{}).SetUint64(*blockNum)
+		state.blockNum = (&big.Int{}).SetUint64(*blockNum + 1)
 
 		currentHash := rawdb.ReadHeadBlockHash(tx)
 		if state.totalDifficulty, err = rawdb.ReadTdByHash(tx, currentHash); err != nil {
@@ -85,6 +87,15 @@ func NewState(db *DB) (*State, error) {
 }
 
 func (state *State) ProcessBlock(block types.Block) error {
+	// Set v equal to 27, otherwise the wrong chain ID will be derived for legacy transaction
+	// TODO: remove it when all the transactions are signed
+	// https: //infinityswap.atlassian.net/browse/EPROD-203
+	for _, tr := range block.Transactions() {
+		if legacyTr, ok := tr.(*types.LegacyTx); ok {
+			legacyTr.V = *uint256.NewInt(27)
+		}
+	}
+
 	tx, err := state.db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return err
@@ -92,6 +103,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 	defer tx.Rollback()
 
 	batch := olddb.NewHashBatch(tx, make(<-chan struct{}), ".")
+	defer batch.Rollback()
 	stateReader := coreState.NewPlainStateReader(tx)
 	stateWriter := coreState.NewPlainStateWriter(tx, tx, block.NumberU64())
 	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
