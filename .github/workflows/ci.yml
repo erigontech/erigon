@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+    branches:
+      - sentio-dev
+
+jobs:
+  send-head-changed-event:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    steps:
+    - uses: passeidireto/trigger-external-workflow-action@main
+      env:
+        PAYLOAD_BRANCH: ${{github.ref}}
+        PAYLOAD_COMMIT: ${{github.sha}}
+      with:
+        repository: sentioxyz/sentio
+        event: erigon_head_changed
+        github_pat: ${{ secrets.CI_DEPLOY_PAT }}
