@@ -3,11 +3,14 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/bits"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -20,6 +23,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -53,11 +57,24 @@ func init() {
 	withCommitment(stateDomains)
 	withTraceFromTx(stateDomains)
 
+	stateDomains.Flags().Uint64Var(&stepSize, "step-size", ethconfig.HistoryV3AggregationStep, "size of aggregation step, tx")
+	stateDomains.Flags().Uint64Var(&lastStep, "last-step", 0, "step of last aggregation, step=txnum/step-size, unsigned integers only")
+
 	rootCmd.AddCommand(stateDomains)
+
+	withDataDir(readDomains)
+	withChain(readDomains)
+	withHeimdall(readDomains)
+	withWorkers(readDomains)
+	withStartTx(readDomains)
+
+	rootCmd.AddCommand(readDomains)
 }
 
 // if trie variant is not hex, we could not have another rootHash with to verify it
 var (
+	stepSize                  uint64
+	lastStep                  uint64
 	dirtySpaceThreshold       = uint64(2 * 1024 * 1024 * 1024) /* threshold of dirty space in MDBX transaction that triggers a commit */
 	blockRootMismatchExpected bool
 
@@ -67,6 +84,136 @@ var (
 	mxRunningCommits      = metrics.GetOrCreateCounter("domain_running_commits")
 )
 
+// write command to just seek and query state by addr and domain from state db and files (if any)
+var readDomains = &cobra.Command{
+	Use:       "read_domains",
+	Short:     `Run block execution and commitment with Domains.`,
+	Example:   "go run ./cmd/integration read_domains --datadir=... --verbosity=3",
+	ValidArgs: []string{"account", "storage", "code", "commitment"},
+	Args:      cobra.ArbitraryArgs,
+	Run: func(cmd *cobra.Command, args []string) {
+		ctx, _ := libcommon.RootContext()
+		cfg := &nodecfg.DefaultConfig
+		utils.SetNodeConfigCobra(cmd, cfg)
+		ethConfig := &ethconfig.Defaults
+		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
+
+		log.Info("vargs", "a", args)
+
+		var readFromDomain string
+		var addrs [][]byte
+		for i := 0; i < len(args); i++ {
+			if i == 0 {
+				switch s := strings.ToLower(args[i]); s {
+				case "account", "storage", "code", "commitment":
+					readFromDomain = s
+				default:
+					log.Error("invalid domain to read from", "arg", args[i])
+					return
+				}
+				continue
+			}
+			addr, err := hex.DecodeString(strings.TrimPrefix(args[i], "0x"))
+			if err != nil {
+				log.Warn("invalid address passed", "str", args[i], "at position", i, "err", err)
+				continue
+			}
+			addrs = append(addrs, addr)
+		}
+
+		dirs := datadir.New(datadirCli)
+		chainDb := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true)
+		defer chainDb.Close()
+
+		stateDb, err := kv2.NewMDBX(log.New()).Path(filepath.Join(dirs.DataDir, "statedb")).WriteMap().Open()
+		if err != nil {
+			return
+		}
+		defer stateDb.Close()
+
+		if err := requestDomains(chainDb, stateDb, ctx, readFromDomain, addrs); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte) error {
+	trieVariant := commitment.ParseTrieVariant(commitmentTrie)
+	if trieVariant != commitment.VariantHexPatriciaTrie {
+		blockRootMismatchExpected = true
+	}
+	mode := libstate.ParseCommitmentMode(commitmentMode)
+	libstate.COMPARE_INDEXES = true
+
+	_, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	defer agg.Close()
+
+	histTx, err := chainDb.BeginRo(ctx)
+	must(err)
+	defer histTx.Rollback()
+
+	stateTx, err := stateDb.BeginRw(ctx)
+	must(err)
+	defer stateTx.Rollback()
+
+	agg.SetTx(stateTx)
+	defer agg.StartWrites().FinishWrites()
+
+	latestBlock, latestTx, err := agg.SeekCommitment()
+	if err != nil && startTxNum != 0 {
+		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
+	}
+	if latestTx < startTxNum {
+		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
+	}
+	if latestTx > 0 {
+		log.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
+	}
+	agg.SetTxNum(latestTx)
+
+	r := ReaderWrapper4{
+		roTx: histTx,
+		ac:   agg.MakeContext(),
+	}
+
+	switch readDomain {
+	case "account":
+		for _, addr := range addrs {
+			acc, err := r.ReadAccountData(libcommon.BytesToAddress(addr))
+			if err != nil {
+				log.Error("failed to read account", "addr", addr, "err", err)
+				continue
+			}
+			fmt.Printf("%x: nonce=%d balance=%d code=%x root=%x\n", addr, acc.Nonce, acc.Balance.Uint64(), acc.CodeHash, acc.Root)
+		}
+	case "storage":
+		for _, addr := range addrs {
+			a, s := libcommon.BytesToAddress(addr[:length.Addr]), libcommon.BytesToHash(addr[length.Addr:])
+			st, err := r.ReadAccountStorage(a, 0, &s)
+			if err != nil {
+				log.Error("failed to read storage", "addr", a.String(), "key", s.String(), "err", err)
+				continue
+			}
+			fmt.Printf("%s %s -> %x\n", a.String(), s.String(), st)
+		}
+	case "code":
+		for _, addr := range addrs {
+			code, err := r.ReadAccountCode(libcommon.BytesToAddress(addr), 0, libcommon.Hash{})
+			if err != nil {
+				log.Error("failed to read code", "addr", addr, "err", err)
+				continue
+			}
+			fmt.Printf("%s: %x\n", addr, code)
+		}
+	}
+	return nil
+}
+
+// write command to just seek and query state by addr and domain from state db and files (if any)
 var stateDomains = &cobra.Command{
 	Use:     "state_domains",
 	Short:   `Run block execution and commitment with Domains.`,
@@ -111,7 +258,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	}
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 
-	engine, _, _, agg := newDomains(ctx, chainDb, mode, trieVariant)
+	engine, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
 	defer agg.Close()
 
 	histTx, err := chainDb.BeginRo(ctx)
@@ -125,7 +272,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	agg.SetTx(stateTx)
 	defer agg.StartWrites().FinishWrites()
 
-	latestTx, err := agg.SeekCommitment()
+	latestBlock, latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
@@ -133,7 +280,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		return fmt.Errorf("latest available tx to start is  %d and its less than start tx %d", latestTx, startTxNum)
 	}
 	if latestTx > 0 {
-		log.Info("Max txNum in files", "txn", latestTx)
+		log.Info("aggregator files opened", "txn", latestTx, "block", latestBlock)
 	}
 
 	aggWriter, aggReader := WrapAggregator(agg, stateTx)
@@ -146,11 +293,16 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		blockReader: getBlockReader(chainDb),
 		stateTx:     stateTx,
 		stateDb:     stateDb,
+		blockNum:    latestBlock,
+		txNum:       latestTx,
 		startTxNum:  latestTx,
 		histTx:      histTx,
 		agg:         agg,
 		logger:      log.New(),
 		stat:        stat4{startedAt: time.Now()},
+	}
+	if proc.txNum > 0 {
+		proc.txNum--
 	}
 
 	mergedRoots := agg.AggregatedRoots()
@@ -164,32 +316,45 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	}
 
 	for {
-		err := proc.ProcessNext(ctx)
-		if err != nil {
-			return err
-		}
-
 		// Check for interrupts
 		select {
 		case <-ctx.Done():
-			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
-			if err := proc.agg.Flush(ctx); err != nil {
-				log.Error("aggregator flush", "err", err)
-			}
-
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", proc.txNum))
-
-			if err := proc.commit(ctx); err != nil {
-				log.Error("chainDb commit", "err", err)
-			}
-			return nil
+			log.Info(fmt.Sprintf("interrupted, please wait for commitment and cleanup, next time start with --tx %d", proc.txNum))
+			break
 		case <-mergedRoots: // notified with rootHash of latest aggregation
 			if err := proc.commit(ctx); err != nil {
 				log.Error("chainDb commit on merge", "err", err)
 			}
 		default:
 		}
+
+		if lastStep > 0 && proc.txNum/stepSize >= lastStep {
+			log.Info("last step reached")
+			// Commit transaction only when interrupted or just before computing commitment (so it can be re-done)
+			break
+		}
+
+		err := proc.ProcessNext(ctx)
+		if err != nil {
+			return err
+		}
 	}
+	log.Info("exiting loop")
+
+	rh, err := proc.agg.ComputeCommitment(true, false)
+	if err != nil {
+		log.Error("compute commitment", "err", err)
+	}
+	if err := proc.agg.Flush(ctx); err != nil {
+		log.Error("aggregator flush", "err", err)
+	}
+	if err := proc.commit(ctx); err != nil {
+		log.Error("chainDb commit", "err", err)
+	}
+	log.Info("commitment", "root", hex.EncodeToString(rh))
+
+	os.Exit(0)
+	return nil
 }
 
 type blockProcessor struct {
@@ -313,6 +478,7 @@ func (b *blockProcessor) ProcessNext(ctx context.Context) error {
 
 	b.agg.SetTx(b.stateTx)
 	b.agg.SetTxNum(b.txNum)
+	b.agg.SetBlockNum(b.blockNum)
 
 	if _, err = b.applyBlock(ctx, block); err != nil {
 		b.logger.Error("processing error", "block", b.blockNum, "err", err)
