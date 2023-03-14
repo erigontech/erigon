@@ -86,7 +86,8 @@ if err != nil {
 - Methods .Bucket() and .Cursor(), can’t return nil, can't return error.
 - Bucket and Cursor - are interfaces - means different classes can satisfy it: for example `MdbxCursor`
   and `MdbxDupSortCursor` classes satisfy it.
-  If your are not familiar with "DupSort" concept, please read [dupsort.md](../docs/programmers_guide/dupsort.md) first.
+  If your are not familiar with "DupSort" concept, please read [dupsort.md](https://github.com/ledgerwatch/erigon/blob/devel/docs/programmers_guide/dupsort.md)
+
 
 
 - If Cursor returns err!=nil then key SHOULD be != nil (can be []byte{} for example).
