@@ -905,6 +905,7 @@ func NewP2PConfig(
 	port uint,
 	protocol uint,
 	allowedPorts []uint,
+	metricsEnabled bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -935,6 +936,7 @@ func NewP2PConfig(
 		NodeDatabase:    enodeDBPath,
 		AllowedPorts:    allowedPorts,
 		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1096,6 +1098,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 
 	if ctx.IsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.Bool(DiscoveryV5Flag.Name)
+	}
+
+	if ctx.IsSet(MetricsEnabledFlag.Name) {
+		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
 	}
 
 	ethPeers := cfg.MaxPeers

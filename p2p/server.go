@@ -32,6 +32,8 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
@@ -42,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
-	"github.com/ledgerwatch/log/v3"
 )
 
 const (
@@ -171,6 +172,8 @@ type Config struct {
 	clock mclock.Clock //nolint:structcheck
 
 	TmpDir string
+
+	MetricsEnabled bool
 }
 
 // Server manages all peer connections.
@@ -1057,7 +1060,7 @@ func (srv *Server) checkpoint(c *conn, stage chan<- *conn) error {
 }
 
 func (srv *Server) launchPeer(c *conn, pubkey [64]byte) *Peer {
-	p := newPeer(srv.log, c, srv.Protocols, pubkey)
+	p := newPeer(srv.log, c, srv.Protocols, pubkey, srv.MetricsEnabled)
 	if srv.EnableMsgEvents {
 		// If message events are enabled, pass the peerFeed
 		// to the peer.

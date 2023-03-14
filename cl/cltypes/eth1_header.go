@@ -36,6 +36,18 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 	return &Eth1Header{version: version}
 }
 
+// Capella converts the header to capella version.
+func (e *Eth1Header) Capella() {
+	e.version = clparams.CapellaVersion
+	e.WithdrawalsRoot = libcommon.Hash{}
+}
+
+func (e *Eth1Header) IsZero() bool {
+	return e.ParentHash == libcommon.Hash{} && e.FeeRecipient == libcommon.Address{} && e.StateRoot == libcommon.Hash{} &&
+		e.ReceiptsRoot == libcommon.Hash{} && e.LogsBloom == types.Bloom{} && e.PrevRandao == libcommon.Hash{} && e.BlockNumber == 0 &&
+		e.GasLimit == 0 && e.GasUsed == 0 && e.Time == 0 && len(e.Extra) == 0 && e.BaseFeePerGas == [32]byte{} && e.BlockHash == libcommon.Hash{} && e.TransactionsRoot == libcommon.Hash{}
+}
+
 // Encodes header data partially. used to not dupicate code across Eth1Block and Eth1Header.
 func (h *Eth1Header) encodeHeaderMetadataForSSZ(dst []byte, extraDataOffset int) ([]byte, error) {
 	buf := dst

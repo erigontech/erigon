@@ -136,5 +136,5 @@ func ProcessExecutionPayload(state *state.BeaconState, payload *cltypes.Eth1Bloc
 }
 
 func executionEnabled(state *state.BeaconState, payload *cltypes.Eth1Block) bool {
-	return (!state.IsMergeTransitionComplete() && payload.StateRoot != libcommon.Hash{}) || state.IsMergeTransitionComplete()
+	return (!state.IsMergeTransitionComplete() && payload.BlockHash != libcommon.Hash{}) || state.IsMergeTransitionComplete()
 }
