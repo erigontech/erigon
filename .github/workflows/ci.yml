@@ -3,6 +3,8 @@ on:
   push:
     branches:
       - sentio-dev
+    tags:
+      - 'v*'
 
 jobs:
   send-head-changed-event:
