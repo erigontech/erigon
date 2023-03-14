@@ -30,12 +30,13 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	atomic2 "go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -1500,7 +1501,6 @@ type StateAsOfIter struct {
 	nextKey     []byte
 
 	h              ReconHeap
-	total          uint64
 	startTxNum     uint64
 	startTxKey     [8]byte
 	txnKey         [8]byte
@@ -2024,8 +2024,6 @@ type HistoryDBIterator struct {
 	endTxNum      uint64
 	startTxNum    uint64
 	startTxKey    [8]byte
-
-	searchBuf []byte
 }
 
 func (hi *HistoryDBIterator) Close() {
