@@ -304,6 +304,9 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	if proc.txNum > 0 {
 		proc.txNum--
 	}
+	if proc.blockNum == 0 {
+		proc.txNum = 2
+	}
 
 	mergedRoots := agg.AggregatedRoots()
 	go proc.PrintStatsLoop(ctx, 30*time.Second)
