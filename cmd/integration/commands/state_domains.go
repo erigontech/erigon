@@ -41,6 +41,7 @@ import (
 )
 
 func init() {
+	withConfig(stateDomains)
 	withDataDir(stateDomains)
 	withUnwind(stateDomains)
 	withUnwindEvery(stateDomains)
@@ -52,7 +53,6 @@ func init() {
 	withStartTx(stateDomains)
 	withCommitment(stateDomains)
 	withTraceFromTx(stateDomains)
-
 	rootCmd.AddCommand(stateDomains)
 }
 
