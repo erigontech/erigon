@@ -18,6 +18,7 @@ package vm
 
 import (
 	"hash"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -41,6 +42,12 @@ type Config struct {
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+}
+
+var pool = sync.Pool{
+	New: func() any {
+		return NewMemory()
+	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -192,8 +199,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	in.returnData = nil
 
 	var (
-		op          OpCode        // current opcode
-		mem         = NewMemory() // bound memory
+		op          OpCode // current opcode
+		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
 			Memory:   mem,
@@ -215,6 +222,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
+	mem.Reset()
+	defer pool.Put(mem)
 	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
 
@@ -304,7 +313,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	return res, err
+	ret = append(ret, res...)
+	return
 }
 
 // Depth returns the current call stack depth.
