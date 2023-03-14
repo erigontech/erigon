@@ -212,7 +212,7 @@ func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
 //	   SkipAccounts:
 //			use(AccTrie)
 //		}
-func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan struct{}) (libcommon.Hash, error) {
+func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, quit <-chan struct{}) (libcommon.Hash, error) {
 
 	accC, err := tx.Cursor(kv.HashedAccounts)
 	if err != nil {
@@ -245,7 +245,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 	defer ss.Close()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	for ihK, ihV, hasTree, err := accTrie.AtPrefix(prefix); ; ihK, ihV, hasTree, err = accTrie.Next() { // no loop termination is at he end of loop
+	for ihK, ihV, hasTree, err := accTrie.AtPrefix(nil); ; ihK, ihV, hasTree, err = accTrie.Next() { // no loop termination is at he end of loop
 		if err != nil {
 			return EmptyRoot, err
 		}
@@ -257,7 +257,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 			if err1 != nil {
 				return EmptyRoot, err1
 			}
-			if keyIsBefore(ihK, kHex) || !bytes.HasPrefix(kHex, prefix) { // read all accounts until next AccTrie
+			if keyIsBefore(ihK, kHex) || !bytes.HasPrefix(kHex, nil) { // read all accounts until next AccTrie
 				break
 			}
 			if err = l.accountValue.DecodeForStorage(v); err != nil {
@@ -324,7 +324,7 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, quit <-chan str
 		}
 	}
 
-	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, len(prefix)); err != nil {
+	if err := l.receiver.Receive(CutoffStreamItem, nil, nil, nil, nil, nil, false, 0); err != nil {
 		return EmptyRoot, err
 	}
 	return l.receiver.Root(), nil
@@ -1519,7 +1519,7 @@ func CalcRoot(logPrefix string, tx kv.Tx) (libcommon.Hash, error) {
 		return EmptyRoot, err
 	}
 
-	h, err := loader.CalcTrieRoot(tx, nil, nil)
+	h, err := loader.CalcTrieRoot(tx, nil)
 	if err != nil {
 		return EmptyRoot, err
 	}

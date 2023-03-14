@@ -359,7 +359,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		}
 
 		loader.SetProofReturn(&accProof)
-		_, err = loader.CalcTrieRoot(tx, nil, nil)
+		_, err = loader.CalcTrieRoot(tx, nil)
 		if err != nil {
 			return nil, err
 		}
