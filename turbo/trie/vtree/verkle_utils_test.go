@@ -1,7 +1,7 @@
 package vtree
 
 import (
-	"crypto/sha256"
+	"github.com/minio/sha256-simd"
 	"math/big"
 	"math/rand"
 	"testing"
