@@ -677,9 +677,11 @@ var ChaindataTablesCfg = TableCfg{
 
 	AccountKeys:           {Flags: DupSort},
 	AccountHistoryKeys:    {Flags: DupSort},
+	AccountHistoryVals:    {Flags: DupSort},
 	AccountIdx:            {Flags: DupSort},
 	StorageKeys:           {Flags: DupSort},
 	StorageHistoryKeys:    {Flags: DupSort},
+	StorageHistoryVals:    {Flags: DupSort},
 	StorageIdx:            {Flags: DupSort},
 	CodeKeys:              {Flags: DupSort},
 	CodeHistoryKeys:       {Flags: DupSort},

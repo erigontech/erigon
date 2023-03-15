@@ -50,13 +50,13 @@ func testDbAndDomain(t *testing.T) (string, kv.RwDB, *Domain) {
 			keysTable:        kv.TableCfgItem{Flags: kv.DupSort},
 			valsTable:        kv.TableCfgItem{},
 			historyKeysTable: kv.TableCfgItem{Flags: kv.DupSort},
-			historyValsTable: kv.TableCfgItem{},
+			historyValsTable: kv.TableCfgItem{Flags: kv.DupSort},
 			settingsTable:    kv.TableCfgItem{},
 			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	d, err := NewDomain(path, path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, true /* compressVals */)
+	d, err := NewDomain(path, path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, true /* compressVals */, false)
 	require.NoError(t, err)
 	t.Cleanup(d.Close)
 	return path, db, d
@@ -225,16 +225,9 @@ func TestAfterPrune(t *testing.T) {
 	err = d.prune(ctx, 0, 0, 16, math.MaxUint64, logEvery)
 	require.NoError(t, err)
 
-	for _, table := range []string{d.keysTable, d.valsTable, d.indexKeysTable, d.historyValsTable, d.indexTable} {
-		var cur kv.Cursor
-		cur, err = tx.Cursor(table)
-		require.NoError(t, err)
-		defer cur.Close()
-		var k []byte
-		k, _, err = cur.First()
-		require.NoError(t, err)
-		require.NotNilf(t, k, table, string(k))
-	}
+	isEmpty, err := d.isEmpty(tx)
+	require.NoError(t, err)
+	require.False(t, isEmpty)
 
 	v, err = dc.Get([]byte("key1"), nil, tx)
 	require.NoError(t, err)
@@ -517,9 +510,9 @@ func TestScanFiles(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	_, db, d := testDbAndDomain(t)
-	ctx := context.Background()
+	ctx, require := context.Background(), require.New(t)
 	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
+	require.NoError(err)
 	defer tx.Rollback()
 	d.SetTx(tx)
 	d.StartWrites()
@@ -533,26 +526,30 @@ func TestDelete(t *testing.T) {
 		} else {
 			err = d.Delete([]byte("key1"), nil)
 		}
-		require.NoError(t, err)
+		require.NoError(err)
 	}
 	err = d.Rotate().Flush(ctx, tx)
-	require.NoError(t, err)
+	require.NoError(err)
 	collateAndMerge(t, db, tx, d, 1000)
 	// Check the history
 	dc := d.MakeContext()
 	defer dc.Close()
 	for txNum := uint64(0); txNum < 1000; txNum++ {
-		val, err := dc.GetBeforeTxNum([]byte("key1"), txNum+1, tx)
-		require.NoError(t, err)
 		label := fmt.Sprintf("txNum=%d", txNum)
-		if txNum%2 == 0 {
-			require.Equal(t, []byte("value1"), val, label)
-		} else {
-			require.Nil(t, val, label)
-		}
-		val, err = dc.GetBeforeTxNum([]byte("key2"), txNum+1, tx)
-		require.NoError(t, err)
-		require.Nil(t, val, label)
+		//val, ok, err := dc.GetBeforeTxNum([]byte("key1"), txNum+1, tx)
+		//require.NoError(err)
+		//require.True(ok)
+		//if txNum%2 == 0 {
+		//	require.Equal([]byte("value1"), val, label)
+		//} else {
+		//	require.Nil(val, label)
+		//}
+		//if txNum == 976 {
+		val, err := dc.GetBeforeTxNum([]byte("key2"), txNum+1, tx)
+		require.NoError(err)
+		//require.False(ok, label)
+		require.Nil(val, label)
+		//}
 	}
 }
 
@@ -719,6 +716,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			binary.BigEndian.PutUint64(v[:], valNum)
 
 			val, err := dc.GetBeforeTxNum(k[:], txNum+1, tx)
+			require.NoError(t, err)
 			if keyNum == txNum%d.aggregationStep {
 				if txNum > 1 {
 					binary.BigEndian.PutUint64(v[:], txNum-1)

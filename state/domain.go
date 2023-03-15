@@ -28,7 +28,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -45,10 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-)
-
-var (
-	historyValCountKey = []byte("ValCount")
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -116,8 +111,8 @@ type DomainStats struct {
 	LastPruneTook        time.Duration
 	LastFileBuildingTook time.Duration
 
-	HistoryQueries uint64
-	TotalQueries   uint64
+	HistoryQueries atomic2.Uint64
+	TotalQueries   atomic2.Uint64
 	EfSearchTime   time.Duration
 	DataSize       uint64
 	IndexSize      uint64
@@ -125,8 +120,8 @@ type DomainStats struct {
 }
 
 func (ds *DomainStats) Accumulate(other DomainStats) {
-	ds.HistoryQueries += other.HistoryQueries
-	ds.TotalQueries += other.TotalQueries
+	ds.HistoryQueries.Add(other.HistoryQueries.Load())
+	ds.TotalQueries.Add(other.TotalQueries.Load())
 	ds.EfSearchTime += other.EfSearchTime
 	ds.IndexSize += other.IndexSize
 	ds.DataSize += other.DataSize
@@ -159,6 +154,7 @@ func NewDomain(
 	settingsTable string,
 	indexTable string,
 	compressVals bool,
+	largeValues bool,
 ) (*Domain, error) {
 	d := &Domain{
 		keysTable: keysTable,
@@ -168,7 +164,7 @@ func NewDomain(
 	}
 
 	var err error
-	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals, []string{"kv"}); err != nil {
+	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals, []string{"kv"}, largeValues); err != nil {
 		return nil, err
 	}
 
@@ -428,7 +424,7 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	//var invertedStep [8]byte
-	atomic.AddUint64(&dc.d.stats.TotalQueries, 1)
+	dc.d.stats.TotalQueries.Inc()
 
 	invertedStep := dc.numBuf
 	binary.BigEndian.PutUint64(invertedStep[:], ^(fromTxNum / dc.d.aggregationStep))
@@ -442,7 +438,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		atomic.AddUint64(&dc.d.stats.HistoryQueries, 1)
+		dc.d.stats.HistoryQueries.Inc()
 		v, found := dc.readFromFiles(key, fromTxNum)
 		return v, found, nil
 	}
@@ -711,7 +707,7 @@ func (dc *DomainContext) Close() {
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
-	atomic.AddUint64(&dc.d.stats.HistoryQueries, 1)
+	dc.d.stats.HistoryQueries.Inc()
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -1325,6 +1321,22 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 	return nil
 }
 
+func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
+	k, err := kv.FirstKey(tx, d.keysTable)
+	if err != nil {
+		return false, err
+	}
+	k2, err := kv.FirstKey(tx, d.valsTable)
+	if err != nil {
+		return false, err
+	}
+	isEmptyHist, err := d.History.isEmpty(tx)
+	if err != nil {
+		return false, err
+	}
+	return k == nil && k2 == nil && isEmptyHist, nil
+}
+
 // nolint
 func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) error {
 	domainKeysCursor, err := tx.CursorDupSort(d.keysTable)
@@ -1401,7 +1413,7 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	atomic.AddUint64(&dc.d.stats.HistoryQueries, 1)
+	dc.d.stats.HistoryQueries.Inc()
 
 	var foundTxNum uint64
 	var foundEndTxNum uint64
@@ -1471,39 +1483,7 @@ func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx
 		if roTx == nil {
 			return nil, false, fmt.Errorf("roTx is nil")
 		}
-		indexCursor, err := roTx.CursorDupSort(dc.d.indexTable)
-		if err != nil {
-			return nil, false, err
-		}
-		defer indexCursor.Close()
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], txNum)
-		var foundTxNumVal []byte
-		if foundTxNumVal, err = indexCursor.SeekBothRange(key, txKey[:]); err != nil {
-			return nil, false, err
-		}
-		if foundTxNumVal != nil {
-			var historyKeysCursor kv.CursorDupSort
-			if historyKeysCursor, err = roTx.CursorDupSort(dc.d.indexKeysTable); err != nil {
-				return nil, false, err
-			}
-			defer historyKeysCursor.Close()
-			var vn []byte
-			if vn, err = historyKeysCursor.SeekBothRange(foundTxNumVal, key); err != nil {
-				return nil, false, err
-			}
-			valNum := binary.BigEndian.Uint64(vn[len(vn)-8:])
-			if valNum == 0 {
-				// This is special valNum == 0, which is empty value
-				return nil, true, nil
-			}
-			var v []byte
-			if v, err = roTx.GetOne(dc.d.historyValsTable, vn[len(vn)-8:]); err != nil {
-				return nil, false, err
-			}
-			return v, true, nil
-		}
-		return nil, false, nil
+		return dc.hc.getNoStateFromDB(key, txNum, roTx)
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], foundTxNum)
@@ -1531,6 +1511,11 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		return nil, err
 	}
 	if hOk {
+		// if history returned marker of key creation
+		// domain must return nil
+		if len(v) == 0 {
+			return nil, nil
+		}
 		return v, nil
 	}
 	if v, _, err = dc.get(key, txNum-1, roTx); err != nil {

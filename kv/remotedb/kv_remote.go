@@ -706,9 +706,8 @@ func (tx *remoteTx) RangeAscend(table string, fromPrefix, toPrefix []byte, limit
 func (tx *remoteTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
 	return tx.rangeOrderLimit(table, fromPrefix, toPrefix, order.Desc, limit)
 }
-
 func (tx *remoteTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	panic("not supported yet")
+	panic("not implemented yet")
 }
 
 /*
