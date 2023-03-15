@@ -36,10 +36,11 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/minio/sha256-simd"
 	"math/big"
 	"os"
 	"testing"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )

@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
-	"github.com/minio/sha256-simd"
 	"io"
 	"math/rand"
 	"net"
@@ -28,6 +27,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"

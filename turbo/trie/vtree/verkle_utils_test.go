@@ -1,10 +1,11 @@
 package vtree
 
 import (
-	"github.com/minio/sha256-simd"
 	"math/big"
 	"math/rand"
 	"testing"
+
+	"github.com/minio/sha256-simd"
 )
 
 func BenchmarkPedersenHash(b *testing.B) {

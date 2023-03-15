@@ -20,10 +20,11 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"github.com/minio/sha256-simd"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"

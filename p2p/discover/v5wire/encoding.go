@@ -25,8 +25,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/minio/sha256-simd"
 	"hash"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"

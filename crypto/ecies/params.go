@@ -39,8 +39,9 @@ import (
 	"crypto/elliptic"
 	"crypto/sha512"
 	"fmt"
-	"github.com/minio/sha256-simd"
 	"hash"
+
+	"github.com/minio/sha256-simd"
 
 	ethcrypto "github.com/ledgerwatch/erigon/crypto"
 )

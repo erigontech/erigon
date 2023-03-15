@@ -19,8 +19,9 @@ package vm
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/minio/sha256-simd"
 	"math/big"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
