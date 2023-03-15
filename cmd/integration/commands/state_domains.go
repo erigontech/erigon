@@ -327,7 +327,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 			if err := agg.Flush(ctx); err != nil {
 				log.Error("failed to flush aggregator", "err", err)
 			}
-			break
+			os.Exit(0)
 		case <-mergedRoots: // notified with rootHash of latest aggregation
 			if err := proc.commit(ctx); err != nil {
 				log.Error("chainDb commit on merge", "err", err)
@@ -346,21 +346,6 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 			return err
 		}
 	}
-	log.Info("exiting loop")
-
-	rh, err := proc.agg.ComputeCommitment(true, false)
-	if err != nil {
-		log.Error("compute commitment", "err", err)
-	}
-	if err := proc.agg.Flush(ctx); err != nil {
-		log.Error("aggregator flush", "err", err)
-	}
-	if err := proc.commit(ctx); err != nil {
-		log.Error("chainDb commit", "err", err)
-	}
-	log.Info("commitment", "root", hex.EncodeToString(rh))
-
-	os.Exit(0)
 	return nil
 }
 
