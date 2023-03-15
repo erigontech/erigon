@@ -1822,7 +1822,7 @@ func (p *TxPool) logStats() {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	ctx := []interface{}{
-		"block", p.lastSeenBlock.Load(),
+		//"block", p.lastSeenBlock.Load(),
 		"pending", p.pending.Len(),
 		"baseFee", p.baseFee.Len(),
 		"queued", p.queued.Len(),
