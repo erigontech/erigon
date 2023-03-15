@@ -1522,8 +1522,8 @@ func StorageKey(addressHash []byte, incarnation uint64, prefix []byte) []byte {
 	return dbutils.GenerateCompositeStoragePrefix(addressHash, incarnation, prefix)
 }
 
-func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte, buf []byte) []byte {
-	buf = buf[:len(hashes)+len(rootHash)+6]
+func MarshalTrieNode(hasState, hasTree, hasHash uint16, hashes, rootHash []byte) []byte {
+	buf := make([]byte, len(hashes)+len(rootHash)+6)
 	meta, hashesList := buf[:6], buf[6:]
 	binary.BigEndian.PutUint16(meta, hasState)
 	binary.BigEndian.PutUint16(meta[2:], hasTree)

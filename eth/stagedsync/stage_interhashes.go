@@ -699,7 +699,6 @@ func assertSubset(a, b uint16) {
 }
 
 func accountTrieCollector(collector *etl.Collector) trie.HashCollector2 {
-	newV := make([]byte, 0, 1024)
 	return func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, _ []byte) error {
 		if len(keyHex) == 0 {
 			return nil
@@ -712,16 +711,16 @@ func accountTrieCollector(collector *etl.Collector) trie.HashCollector2 {
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
-		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, nil, newV)
+		newV := trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, nil)
 		return collector.Collect(keyHex, newV)
 	}
 }
 
 func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
-	newK := make([]byte, 0, 128)
-	newV := make([]byte, 0, 1024)
 	return func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
-		newK = append(append(newK[:0], accWithInc...), keyHex...)
+		newK := make([]byte, len(accWithInc)+len(keyHex))
+		copy(newK, accWithInc)
+		copy(newK[len(accWithInc):], keyHex)
 		if hasState == 0 {
 			return collector.Collect(newK, nil)
 		}
@@ -733,7 +732,7 @@ func storageTrieCollector(collector *etl.Collector) trie.StorageHashCollector2 {
 		}
 		assertSubset(hasTree, hasState)
 		assertSubset(hasHash, hasState)
-		newV = trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash, newV)
+		newV := trie.MarshalTrieNode(hasState, hasTree, hasHash, hashes, rootHash)
 		return collector.Collect(newK, newV)
 	}
 }
