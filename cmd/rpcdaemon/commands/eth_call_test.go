@@ -250,12 +250,10 @@ func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts
 }
 
 func TestGetProof(t *testing.T) {
-	pruneTo := uint64(3)
+	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddress, _ := chainWithDeployedContract(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
-
-	doPrune(t, m.DB, pruneTo)
 
 	agg := m.HistoryV3Components()
 
@@ -270,18 +268,22 @@ func TestGetProof(t *testing.T) {
 	}{
 		{
 			name:     "currentBlock",
-			blockNum: 2,
+			blockNum: 3,
 		},
 		{
 			name:        "withState",
-			blockNum:    2,
+			blockNum:    3,
 			storageKeys: []libcommon.Hash{{1}},
 			expectedErr: "the method is currently not implemented: eth_getProof with storageKeys",
 		},
 		{
-			name:        "olderBlock",
+			name:     "olderBlock",
+			blockNum: 2,
+		},
+		{
+			name:        "tooOldBlock",
 			blockNum:    1,
-			expectedErr: "the method is currently not implemented: eth_getProof for block != latest",
+			expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
 		},
 	}
 
@@ -298,15 +300,14 @@ func TestGetProof(t *testing.T) {
 				require.Nil(t, proof)
 				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, proof)
 
 			tx, err := m.DB.BeginRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
-
-			require.NoError(t, err)
-			require.NotNil(t, proof)
 
 			require.Equal(t, bankAddress, proof.Address)
 			verifyAccountProof(t, header.Root, proof)
@@ -489,7 +490,6 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
-
 	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
 		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
@@ -558,7 +558,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 
 	var contractAddr libcommon.Address
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -566,7 +566,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			contractAddr = crypto.CreateAddress(bankAddress, nonce)
-		case 1:
+		case 1, 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 90000, new(uint256.Int), nil), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)

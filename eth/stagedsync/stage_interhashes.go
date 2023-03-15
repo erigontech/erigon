@@ -632,19 +632,18 @@ func UnwindIntermediateHashesStage(u *UnwindState, s *StageState, tx kv.RwTx, cf
 	return nil
 }
 
-func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, expectedRootHash libcommon.Hash, quit <-chan struct{}) error {
+func UnwindIntermediateHashesForTrieLoader(logPrefix string, rl *trie.RetainList, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, accTrieCollectorFunc trie.HashCollector2, stTrieCollectorFunc trie.StorageHashCollector2, quit <-chan struct{}) (*trie.FlatDBTrieLoader, error) {
 	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix)
-	rl := trie.NewRetainList(0)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(db)
 		collect := func(k, v []byte) {
 			rl.AddKeyWithMarker(k, len(v) == 0)
 		}
 		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, collect); err != nil {
-			return err
+			return nil, err
 		}
 		if err := p.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, collect); err != nil {
-			return err
+			return nil, err
 		}
 	} else {
 		collect := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -652,13 +651,17 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 			return nil
 		}
 		if err := p.Unwind(logPrefix, s, u, false /* storage */, collect); err != nil {
-			return err
+			return nil, err
 		}
 		if err := p.Unwind(logPrefix, s, u, true /* storage */, collect); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
+	return trie.NewFlatDBTrieLoader(logPrefix, rl, accTrieCollectorFunc, stTrieCollectorFunc, false), nil
+}
+
+func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *StageState, db kv.RwTx, cfg TrieCfg, expectedRootHash libcommon.Hash, quit <-chan struct{}) error {
 	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer accTrieCollector.Close()
 	accTrieCollectorFunc := accountTrieCollector(accTrieCollector)
@@ -667,7 +670,13 @@ func unwindIntermediateHashesStageImpl(logPrefix string, u *UnwindState, s *Stag
 	defer stTrieCollector.Close()
 	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
 
-	loader := trie.NewFlatDBTrieLoader(logPrefix, rl, accTrieCollectorFunc, stTrieCollectorFunc, false)
+	rl := trie.NewRetainList(0)
+
+	loader, err := UnwindIntermediateHashesForTrieLoader(logPrefix, rl, u, s, db, cfg, accTrieCollectorFunc, stTrieCollectorFunc, quit)
+	if err != nil {
+		return err
+	}
+
 	hash, err := loader.CalcTrieRoot(db, quit)
 	if err != nil {
 		return err
