@@ -510,13 +510,36 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteObjectField("result")
 	_, err := callb.call(ctx, msg.Method, args, stream)
 	if err != nil {
-		stream.WriteNil()
+		writeNilIfNotPresent(stream)
 		stream.WriteMore()
 		HandleError(err, stream)
 	}
 	stream.WriteObjectEnd()
 	stream.Flush()
 	return nil
+}
+
+var nullAsBytes = []byte{110, 117, 108, 108}
+
+// there are many avenues that could lead to an error being handled in runMethod, so we need to check
+// if nil has already been written to the stream before writing it again here
+func writeNilIfNotPresent(stream *jsoniter.Stream) {
+	b := stream.Buffer()
+	hasNil := true
+	if len(b) >= 4 {
+		b = b[len(b)-4:]
+		for i, v := range nullAsBytes {
+			if v != b[i] {
+				hasNil = false
+				break
+			}
+		}
+	} else {
+		hasNil = false
+	}
+	if !hasNil {
+		stream.WriteNil()
+	}
 }
 
 // unsubscribe is the callback function for all *_unsubscribe calls.
