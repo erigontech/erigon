@@ -79,9 +79,7 @@ var (
 	blockRootMismatchExpected bool
 
 	mxBlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-	mxTxProcessed         = metrics.GetOrCreateCounter("domain_tx_processed")
-	mxBlockProcessed      = metrics.GetOrCreateCounter("domain_block_processed")
-	mxRunningCommits      = metrics.GetOrCreateCounter("domain_running_commits")
+	mxCommitTook          = metrics.GetOrCreateHistogram("domain_commit_took")
 )
 
 // write command to just seek and query state by addr and domain from state db and files (if any)
@@ -98,8 +96,6 @@ var readDomains = &cobra.Command{
 		ethConfig := &ethconfig.Defaults
 		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
-
-		log.Info("vargs", "a", args)
 
 		var readFromDomain string
 		var addrs [][]byte
@@ -323,6 +319,14 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			log.Info(fmt.Sprintf("interrupted, please wait for commitment and cleanup, next time start with --tx %d", proc.txNum))
+			rh, err := proc.agg.ComputeCommitment(true, false)
+			if err != nil {
+				log.Error("failed to compute commitment", "err", err)
+			}
+			log.Info("commitment: state root computed", "root", rh)
+			if err := agg.Flush(ctx); err != nil {
+				log.Error("failed to flush aggregator", "err", err)
+			}
 			break
 		case <-mergedRoots: // notified with rootHash of latest aggregation
 			if err := proc.commit(ctx); err != nil {
@@ -392,8 +396,9 @@ func (b *blockProcessor) commit(ctx context.Context) error {
 		return fmt.Errorf("commit failed due to invalid chainDb/rwTx")
 	}
 
-	mxRunningCommits.Inc()
-	defer mxRunningCommits.Dec()
+	s := time.Now()
+	defer mxCommitTook.UpdateDuration(s)
+
 	var spaceDirty uint64
 	var err error
 	if spaceDirty, _, err = b.stateTx.(*kv2.MdbxTx).SpaceDirty(); err != nil {
@@ -520,7 +525,6 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	b.txNum++ // Pre-block transaction
-	mxTxProcessed.Inc()
 	b.writer.w.SetTxNum(b.txNum)
 	if err := b.writer.w.FinishTx(); err != nil {
 		return nil, fmt.Errorf("finish pre-block tx %d (block %d) has failed: %w", b.txNum, block.NumberU64(), err)
@@ -567,7 +571,6 @@ func (b *blockProcessor) applyBlock(
 			}
 		}
 		b.txNum++
-		mxTxProcessed.Inc()
 		b.writer.w.SetTxNum(b.txNum)
 	}
 
@@ -609,7 +612,6 @@ func (b *blockProcessor) applyBlock(
 	}
 
 	b.txNum++ // Post-block transaction
-	mxTxProcessed.Inc()
 	b.writer.w.SetTxNum(b.txNum)
 	if b.txNum >= b.startTxNum {
 		if block.Number().Uint64()%uint64(commitmentFreq) == 0 {
@@ -627,8 +629,6 @@ func (b *blockProcessor) applyBlock(
 		}
 	}
 
-	mxTxProcessed.Inc()
-	mxBlockProcessed.Inc()
 	return receipts, nil
 }
 
