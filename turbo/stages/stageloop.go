@@ -135,6 +135,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	}() // avoid crash because Erigon's core does many things
 
 	var finishProgressBefore uint64
+	startTime := time.Now()
 	if err := db.View(ctx, func(tx kv.Tx) error {
 		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
@@ -213,7 +214,16 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 			log.Info("Commit cycle", "in", commitTime)
 		}
 		if head != finishProgressBefore && len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-			log.Info("Timings (slower than 50ms)", logCtx...)
+			totalTime := time.Since(startTime)
+			blkSpeed := float64(head-finishProgressBefore) / totalTime.Seconds()
+			logArgs := append([]interface{}{
+				"head", head,
+				"prevHead", finishProgressBefore,
+				"movedAhead", head - finishProgressBefore,
+				"totalTime", totalTime.Truncate(time.Millisecond).String(),
+				"blk/sec", fmt.Sprintf("%.2f", blkSpeed),
+			}, logCtx...)
+			log.Info("Timings (slower than 50ms)", logArgs...)
 			if len(tableSizes) > 0 {
 				log.Info("Tables", tableSizes...)
 			}
