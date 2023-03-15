@@ -663,7 +663,7 @@ func (ii *InvertedIndex) mergeFiles(ctx context.Context, files []*filesItem, sta
 	for _, h := range files {
 		defer h.decompressor.EnableMadvNormal().DisableReadAhead()
 	}
-	log.Info(fmt.Sprintf("[snapshots] merge: %s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
+	log.Debug(fmt.Sprintf("[snapshots] merge: %s.%d-%d.ef", ii.filenameBase, startTxNum/ii.aggregationStep, endTxNum/ii.aggregationStep))
 
 	var outItem *filesItem
 	var comp *compress.Compressor
@@ -805,7 +805,7 @@ func (h *History) mergeFiles(ctx context.Context, indexFiles, historyFiles []*fi
 		return nil, nil, err
 	}
 	if r.history {
-		log.Info(fmt.Sprintf("[snapshots] merge: %s.%d-%d.v", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
+		log.Debug(fmt.Sprintf("[snapshots] merge: %s.%d-%d.v", h.filenameBase, r.historyStartTxNum/h.aggregationStep, r.historyEndTxNum/h.aggregationStep))
 		for _, f := range indexFiles {
 			defer f.decompressor.EnableMadvNormal().DisableReadAhead()
 		}
