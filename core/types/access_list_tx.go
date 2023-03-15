@@ -19,7 +19,6 @@ package types
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"math/bits"
@@ -337,115 +336,21 @@ func (tx AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
-func decodeAccessList(al *types2.AccessList, s *rlp.Stream) error {
-	_, err := s.List()
-	if err != nil {
-		return fmt.Errorf("open accessList: %w", err)
-	}
-	var b []byte
-	i := 0
-	for _, err = s.List(); err == nil; _, err = s.List() {
-		// decode tuple
-		*al = append(*al, types2.AccessTuple{StorageKeys: []libcommon.Hash{}})
-		tuple := &(*al)[len(*al)-1]
-		if b, err = s.Bytes(); err != nil {
-			return fmt.Errorf("read Address: %w", err)
-		}
-		if len(b) != 20 {
-			return fmt.Errorf("wrong size for AccessTuple address: %d", len(b))
-		}
-		copy(tuple.Address[:], b)
-		if _, err = s.List(); err != nil {
-			return fmt.Errorf("open StorageKeys: %w", err)
-		}
-		for b, err = s.Bytes(); err == nil; b, err = s.Bytes() {
-			tuple.StorageKeys = append(tuple.StorageKeys, libcommon.Hash{})
-			if len(b) != 32 {
-				return fmt.Errorf("wrong size for StorageKey: %d", len(b))
-			}
-			copy(tuple.StorageKeys[len(tuple.StorageKeys)-1][:], b)
-		}
-		if !errors.Is(err, rlp.EOL) {
-			return fmt.Errorf("read StorageKey: %w", err)
-		}
-		// end of StorageKeys list
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close StorageKeys: %w", err)
-		}
-		// end of tuple
-		if err = s.ListEnd(); err != nil {
-			return fmt.Errorf("close AccessTuple: %w", err)
-		}
-		i++
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return fmt.Errorf("open accessTuple: %d %w", i, err)
-	}
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close accessList: %w", err)
-	}
-	return nil
-}
-
 func (tx *AccessListTx) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read ChainID: %w", err)
+	if err = s.DecodeMany(&tx.ChainID, &tx.Nonce, &tx.GasPrice, &tx.Gas); err != nil {
+		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
-	if tx.Nonce, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
+	if err = s.DecodeOptional(&tx.To); err != nil {
+		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read GasPrice: %w", err)
+	if err = s.DecodeMany(&tx.Value, &tx.Data, &tx.AccessList, &tx.V, &tx.R, &tx.S); err != nil {
+		return err
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %w", err)
-	}
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read To: %w", err)
-	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read Value: %w", err)
-	}
-	tx.Value = new(uint256.Int).SetBytes(b)
-	if tx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
-	}
-	// decode AccessList
-	tx.AccessList = types2.AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return fmt.Errorf("read AccessList: %w", err)
-	}
-	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read V: %w", err)
-	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read R: %w", err)
-	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read S: %w", err)
-	}
-	tx.S.SetBytes(b)
-	if err := s.ListEnd(); err != nil {
-		return fmt.Errorf("close AccessListTx: %w", err)
-	}
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.

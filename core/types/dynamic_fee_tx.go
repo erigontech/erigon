@@ -317,60 +317,15 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.DecodeMany(&tx.ChainID, &tx.Nonce, &tx.Tip, &tx.FeeCap, &tx.Gas); err != nil {
 		return err
 	}
-	tx.ChainID = new(uint256.Int).SetBytes(b)
-	if tx.Nonce, err = s.Uint(); err != nil {
+	if err = s.DecodeOptional(&tx.To); err != nil {
 		return err
 	}
-	if b, err = s.Uint256Bytes(); err != nil {
+	if err = s.DecodeMany(&tx.Value, &tx.Data, &tx.AccessList, &tx.V, &tx.R, &tx.S); err != nil {
 		return err
 	}
-	tx.Tip = new(uint256.Int).SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return err
-	}
-	tx.FeeCap = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
-		return err
-	}
-	if b, err = s.Bytes(); err != nil {
-		return err
-	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
-		return err
-	}
-	tx.Value = new(uint256.Int).SetBytes(b)
-	if tx.Data, err = s.Bytes(); err != nil {
-		return err
-	}
-	// decode AccessList
-	tx.AccessList = types2.AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
-		return err
-	}
-	// decode V
-	if b, err = s.Uint256Bytes(); err != nil {
-		return err
-	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return err
-	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return err
-	}
-	tx.S.SetBytes(b)
 	return s.ListEnd()
 }
 

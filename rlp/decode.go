@@ -871,6 +871,30 @@ func (s *Stream) ListEnd() error {
 	return nil
 }
 
+// Like Decode, but ignores empty values
+func (s *Stream) DecodeOptional(val interface{}) error {
+	_, size, err := s.Kind()
+	if err != nil {
+		return err
+	}
+	if size > 0 {
+		return s.Decode(val)
+	} else {
+		s.Bytes() // ignore it
+		return nil
+	}
+}
+
+func (s *Stream) DecodeMany(vals ...interface{}) error {
+	for _, val := range vals {
+		err := s.Decode(val)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Decode decodes a value and stores the result in the value pointed
 // to by val. Please see the documentation for the Decode function
 // to learn about the decoding rules.

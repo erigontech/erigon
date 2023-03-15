@@ -152,7 +152,7 @@ func DecodeTransaction(s *rlp.Stream) (Transaction, error) {
 		tx = t
 	case DynamicFeeTxType:
 		t := &DynamicFeeTransaction{}
-		if err = t.DecodeRLP(s); err != nil {
+		if err = s.Decode(t); err != nil {
 			return nil, err
 		}
 		tx = t

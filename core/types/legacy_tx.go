@@ -18,7 +18,6 @@ package types
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math/big"
 	"math/bits"
@@ -307,50 +306,16 @@ func (tx LegacyTx) EncodeRLP(w io.Writer) error {
 func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 	var err error
 	s.NewList(encodingSize)
-	if tx.Nonce, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Nonce: %w", err)
+	if err = s.DecodeMany(&tx.Nonce, &tx.GasPrice, &tx.Gas); err != nil {
+		return err
 	}
-	var b []byte
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read GasPrice: %w", err)
+	if err = s.DecodeOptional(&tx.To); err != nil {
+		return err
 	}
-	tx.GasPrice = new(uint256.Int).SetBytes(b)
-	if tx.Gas, err = s.Uint(); err != nil {
-		return fmt.Errorf("read Gas: %w", err)
+	if err = s.DecodeMany(&tx.Value, &tx.Data, &tx.V, &tx.R, &tx.S); err != nil {
+		return err
 	}
-	if b, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read To: %w", err)
-	}
-	if len(b) > 0 && len(b) != 20 {
-		return fmt.Errorf("wrong size for To: %d", len(b))
-	}
-	if len(b) > 0 {
-		tx.To = &libcommon.Address{}
-		copy((*tx.To)[:], b)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read Value: %w", err)
-	}
-	tx.Value = new(uint256.Int).SetBytes(b)
-	if tx.Data, err = s.Bytes(); err != nil {
-		return fmt.Errorf("read Data: %w", err)
-	}
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read V: %w", err)
-	}
-	tx.V.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read R: %w", err)
-	}
-	tx.R.SetBytes(b)
-	if b, err = s.Uint256Bytes(); err != nil {
-		return fmt.Errorf("read S: %w", err)
-	}
-	tx.S.SetBytes(b)
-	if err = s.ListEnd(); err != nil {
-		return fmt.Errorf("close tx struct: %w", err)
-	}
-	return nil
+	return s.ListEnd()
 }
 
 // AsMessage returns the transaction as a core.Message.
