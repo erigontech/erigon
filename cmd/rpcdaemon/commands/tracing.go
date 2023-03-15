@@ -214,6 +214,17 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return err
 	}
+
+	if config != nil && config.StateOverrides != nil {
+		if err := config.StateOverrides.Override(ibs); err != nil {
+			return fmt.Errorf("override state: %v", err)
+		}
+	}
+	if realMsg, ok := msg.(types.Message); ok && config.GasOverride != nil {
+		realMsg.ChangeGas(api.GasCap, *config.GasOverride)
+		msg = realMsg
+	}
+
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 }
