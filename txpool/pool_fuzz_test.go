@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -164,7 +165,7 @@ func parseSenders(in []byte) (nonces []uint64, balances []uint256.Int) {
 	return
 }
 
-func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[string]uint64, txs types.TxSlots, ok bool) {
+func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []byte) (sendersInfo map[uint64]*sender, senderIDs map[common.Address]uint64, txs types.TxSlots, ok bool) {
 	if len(rawTxNonce) < 1 || len(rawValues) < 1 || len(rawTips) < 1 || len(rawFeeCap) < 1 || len(rawSender) < 1+1 {
 		return nil, nil, txs, false
 	}
@@ -187,13 +188,13 @@ func poolsFromFuzzBytes(rawTxNonce, rawValues, rawTips, rawFeeCap, rawSender []b
 	}
 
 	sendersInfo = map[uint64]*sender{}
-	senderIDs = map[string]uint64{}
+	senderIDs = map[common.Address]uint64{}
 	senders := make(types.Addresses, 20*len(senderNonce))
 	for i := 0; i < len(senderNonce); i++ {
 		senderID := uint64(i + 1) //non-zero expected
 		binary.BigEndian.PutUint64(senders.At(i%senders.Len()), senderID)
 		sendersInfo[senderID] = newSender(senderNonce[i], senderBalance[i%len(senderBalance)])
-		senderIDs[string(senders.At(i%senders.Len()))] = senderID
+		senderIDs[senders.AddressAt(i%senders.Len())] = senderID
 	}
 	txs.Txs = make([]*types.TxSlot, len(txNonce))
 	parseCtx := types.NewTxParseContext(*u256.N1)
@@ -315,7 +316,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		assert.NoError(err)
 		pool.senders.senderIDs = senderIDs
 		for addr, id := range senderIDs {
-			pool.senders.senderID2Addr[id] = []byte(addr)
+			pool.senders.senderID2Addr[id] = addr
 		}
 		pool.senders.senderID = uint64(len(senderIDs))
 		check := func(unwindTxs, minedTxs types.TxSlots, msg string) {
@@ -476,8 +477,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 			},
 		}
 		for id, sender := range senders {
-			var addr [20]byte
-			copy(addr[:], pool.senders.senderID2Addr[id])
+			addr := pool.senders.senderID2Addr[id]
 			v := make([]byte, types.EncodeSenderLengthForStorage(sender.nonce, sender.balance))
 			types.EncodeSender(sender.nonce, sender.balance, v)
 			change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{

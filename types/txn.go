@@ -633,6 +633,12 @@ func (a Announcements) Copy() Announcements {
 
 type Addresses []byte // flatten list of 20-byte addresses
 
+// AddressAt returns an address at the given index in the flattened list.
+// Use this method if you want to reduce memory allocations
+func (h Addresses) AddressAt(i int) common.Address {
+	return *(*[20]byte)(h[i*length.Addr : (i+1)*length.Addr])
+}
+
 func (h Addresses) At(i int) []byte { return h[i*length.Addr : (i+1)*length.Addr] }
 func (h Addresses) Len() int        { return len(h) / length.Addr }
 
