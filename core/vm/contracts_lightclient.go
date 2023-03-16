@@ -3,6 +3,8 @@ package vm
 import (
 	"encoding/binary"
 	"fmt"
+	"net/url"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
 	cmn "github.com/tendermint/tendermint/libs/common"
@@ -169,6 +171,8 @@ func (c *iavlMerkleProofValidatePlanck) Run(input []byte) (result []byte, err er
 		multiStoreOpVerifier,
 		forbiddenSimpleValueOpVerifier,
 	}
+	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
+	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
 	return c.basicIavlMerkleProofValidate.Run(input)
 }
 
@@ -179,6 +183,8 @@ func successfulMerkleResult() []byte {
 }
 
 type basicIavlMerkleProofValidate struct {
+	keyVerifier  lightclient.KeyVerifier
+	opsVerifier  merkle.ProofOpsVerifier
 	verifiers    []merkle.ProofOpVerifier
 	proofRuntime *merkle.ProofRuntime
 }
@@ -210,6 +216,9 @@ func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err err
 		kvmp.SetProofRuntime(c.proofRuntime)
 	}
 	kvmp.SetVerifiers(c.verifiers)
+	kvmp.SetOpsVerifier(c.opsVerifier)
+	kvmp.SetKeyVerifier(c.keyVerifier)
+
 	valid := kvmp.Validate()
 	if !valid {
 		return nil, fmt.Errorf("invalid merkle proof")
@@ -267,6 +276,49 @@ func singleValueOpVerifier(op merkle.ProofOperator) error {
 				return cmn.NewError("both right and left hash exit!")
 			}
 		}
+	}
+	return nil
+}
+
+func proofOpsVerifier(poz merkle.ProofOperators) error {
+	if len(poz) != 2 {
+		return cmn.NewError("proof ops should be 2")
+	}
+
+	// for legacy proof type
+	if _, ok := poz[1].(lightclient.MultiStoreProofOp); ok {
+		if _, ok := poz[0].(iavl.IAVLValueOp); !ok {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	// for ics23 proof type
+	if op2, ok := poz[1].(lightclient.CommitmentOp); ok {
+		if op2.Type != lightclient.ProofOpSimpleMerkleCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+
+		op1, ok := poz[0].(lightclient.CommitmentOp)
+		if !ok {
+			return cmn.NewError("invalid proof op")
+		}
+
+		if op1.Type != lightclient.ProofOpIAVLCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	return cmn.NewError("invalid proof type")
+}
+
+func keyVerifier(key string) error {
+	// https://github.com/bnb-chain/tendermint/blob/72375a6f3d4a72831cc65e73363db89a0073db38/crypto/merkle/proof_key_path.go#L88
+	// since the upper function is ambiguous, `x:00` can be decoded to both kind of key type
+	// we check the key here to make sure the key will not start from `x:`
+	if strings.HasPrefix(url.PathEscape(key), "x:") {
+		return cmn.NewError("key should not start with x:")
 	}
 	return nil
 }

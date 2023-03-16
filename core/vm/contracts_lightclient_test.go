@@ -6,10 +6,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tendermint/tendermint/crypto/merkle"
+	cmn "github.com/tendermint/tendermint/libs/common"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/vm/lightclient"
+	"github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
 )
 
 const (
@@ -232,4 +235,79 @@ func TestMultiStore(t *testing.T) {
 
 	err = multiStoreOpVerifier(badProof)
 	assert.Error(t, err, "duplicated store")
+}
+
+func TestProofOpsVerifier(t *testing.T) {
+	tests := []struct {
+		ops merkle.ProofOperators
+		err error
+	}{
+		{
+			merkle.ProofOperators{
+				iavl.IAVLValueOp{},
+			},
+			cmn.NewError("proof ops should be 2"),
+		},
+		{
+			merkle.ProofOperators{
+				lightclient.MultiStoreProofOp{},
+				lightclient.MultiStoreProofOp{},
+			},
+			cmn.NewError("invalid proof op"),
+		},
+		{
+			merkle.ProofOperators{
+				iavl.IAVLValueOp{},
+				lightclient.MultiStoreProofOp{},
+			},
+			nil,
+		},
+		{
+			merkle.ProofOperators{
+				lightclient.CommitmentOp{Type: lightclient.ProofOpIAVLCommitment},
+				lightclient.CommitmentOp{Type: lightclient.ProofOpSimpleMerkleCommitment},
+			},
+			nil,
+		},
+		{
+			merkle.ProofOperators{
+				lightclient.CommitmentOp{Type: lightclient.ProofOpSimpleMerkleCommitment},
+				lightclient.CommitmentOp{Type: lightclient.ProofOpSimpleMerkleCommitment},
+			},
+			cmn.NewError("invalid proof op"),
+		},
+		{
+			merkle.ProofOperators{
+				lightclient.MultiStoreProofOp{},
+				iavl.IAVLValueOp{},
+			},
+			cmn.NewError("invalid proof type"),
+		},
+	}
+
+	for _, testCase := range tests {
+		err := proofOpsVerifier(testCase.ops)
+		assert.Equal(t, err, testCase.err)
+	}
+}
+
+func TestKeyVerifier(t *testing.T) {
+	tests := []struct {
+		key string
+		err error
+	}{
+		{
+			"x:sdfdfdsd",
+			cmn.NewError("key should not start with x:"),
+		},
+		{
+			"sdfxdfxs",
+			nil,
+		},
+	}
+
+	for _, testCase := range tests {
+		err := keyVerifier(testCase.key)
+		assert.Equal(t, err, testCase.err)
+	}
 }
