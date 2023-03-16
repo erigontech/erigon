@@ -156,7 +156,7 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
-var PrecompiledContractsBohr = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractsPlanck = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
 	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -168,11 +168,11 @@ var PrecompiledContractsBohr = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{9}): &blake2F{},
 
 	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
-	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateBohr{},
+	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidatePlanck{},
 }
 
 var (
-	PrecompiledAddressesBohr           []libcommon.Address
+	PrecompiledAddressesPlanck           []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address
@@ -204,16 +204,16 @@ func init() {
 	for k := range PrecompiledContractsIsMoran {
 		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
 	}
-	for k := range PrecompiledContractsBohr {
-		PrecompiledAddressesBohr = append(PrecompiledAddressesBohr, k)
+	for k := range PrecompiledContractsPlanck {
+		PrecompiledAddressesPlanck = append(PrecompiledAddressesPlanck, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
-	case rules.IsBohr:
-		return PrecompiledAddressesBohr
+	case rules.IsPlanck:
+		return PrecompiledAddressesPlanck
 	case rules.IsMoran:
 		return PrecompiledAddressesMoran
 	case rules.IsNano:

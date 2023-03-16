@@ -153,15 +153,15 @@ func (c *iavlMerkleProofValidateMoran) Run(input []byte) (result []byte, err err
 	return c.basicIavlMerkleProofValidate.Run(input)
 }
 
-type iavlMerkleProofValidateBohr struct {
+type iavlMerkleProofValidatePlanck struct {
 	basicIavlMerkleProofValidate
 }
 
-func (c *iavlMerkleProofValidateBohr) RequiredGas(_ []byte) uint64 {
+func (c *iavlMerkleProofValidatePlanck) RequiredGas(_ []byte) uint64 {
 	return params.IAVLMerkleProofValidateGas
 }
 
-func (c *iavlMerkleProofValidateBohr) Run(input []byte) (result []byte, err error) {
+func (c *iavlMerkleProofValidatePlanck) Run(input []byte) (result []byte, err error) {
 	c.basicIavlMerkleProofValidate.proofRuntime = lightclient.Ics23CompatibleProofRuntime()
 	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
 		forbiddenAbsenceOpVerifier,

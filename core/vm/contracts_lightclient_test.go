@@ -143,7 +143,7 @@ func TestIcs23Proof(t *testing.T) {
 
 	input := append(totalLengthPrefix, merkleProofInput...)
 
-	validator := iavlMerkleProofValidateBohr{}
+	validator := iavlMerkleProofValidatePlanck{}
 	success, err := validator.Run(input)
 	require.NoError(t, err)
 	expectedResult := make([]byte, 32)
