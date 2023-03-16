@@ -220,7 +220,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return fmt.Errorf("override state: %v", err)
 		}
 	}
-	if realMsg, ok := msg.(types.Message); ok && config.GasOverride != nil {
+	if realMsg, ok := msg.(types.Message); ok &&
+		config != nil && config.GasOverride != nil {
 		realMsg.ChangeGas(api.GasCap, *config.GasOverride)
 		msg = realMsg
 	}
