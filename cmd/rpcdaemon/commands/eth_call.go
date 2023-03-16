@@ -5,11 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -21,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -329,13 +326,13 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	}
 	defer tx.Rollback()
 
-	blockNr, blockHash, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		return nil, err
 	}
 
-	header := rawdb.ReadHeader(tx, blockHash, blockNr)
-	if header == nil {
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr)
+	if err != nil {
 		return nil, err
 	}
 
@@ -346,7 +343,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 
 	if latestBlock < blockNr {
 		// shouldn't happen, but check anyway
-		return nil, fmt.Errorf("block number is in the future")
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
 	}
 
 	if len(storageKeys) != 0 {
@@ -366,25 +363,18 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		if latestBlock-blockNr > maxGetProofRewindBlockCount {
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
 		}
-		tmpDir, err := os.MkdirTemp("", "eth_getHash")
-		if err != nil {
-			return nil, err
-		}
-		defer os.RemoveAll(tmpDir)
-		dirs := datadir.New(tmpDir)
-
-		batch := memdb.NewMemoryBatch(tx, dirs.Tmp)
+		batch := memdb.NewMemoryBatch(tx, api.dirs.Tmp)
 		defer batch.Rollback()
 
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
-		hashStageCfg := stagedsync.StageHashStateCfg(nil, dirs, api.historyV3(batch), api._agg)
+		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
 		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
 			return nil, err
 		}
 
-		interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
+		interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
 		loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done())
 		if err != nil {
 			return nil, err
