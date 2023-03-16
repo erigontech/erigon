@@ -63,3 +63,11 @@ func GetLatestExecutedBlockNumber(tx kv.Tx) (uint64, error) {
 	}
 	return blockNum, err
 }
+
+func GetLatestIndexedBlockNumber(tx kv.Tx) (uint64, error) {
+	blockNum, err := stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		return 0, err
+	}
+	return blockNum, err
+}

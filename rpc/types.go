@@ -73,6 +73,7 @@ type BlockNumber int64
 type Timestamp uint64
 
 const (
+	LatestIndexedBlockNumber  = BlockNumber(-6)
 	LatestExecutedBlockNumber = BlockNumber(-5)
 	FinalizedBlockNumber      = BlockNumber(-4)
 	SafeBlockNumber           = BlockNumber(-3)
@@ -120,6 +121,9 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 		return nil
 	case "latestExecuted":
 		*bn = LatestExecutedBlockNumber
+		return nil
+	case "latestIndexed":
+		*bn = LatestIndexedBlockNumber
 		return nil
 	case "null":
 		*bn = LatestBlockNumber
