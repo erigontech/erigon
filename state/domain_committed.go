@@ -25,6 +25,7 @@ import (
 	"hash"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/log/v3"
@@ -81,6 +82,9 @@ type DomainCommitted struct {
 	keccak       hash.Hash
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
+
+	comKeys uint64
+	comTook time.Duration
 }
 
 func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
@@ -351,7 +355,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		return
 	}
 
-	valuesFiles := oldFiles.commitment
+	domainFiles := oldFiles.commitment
 	indexFiles := oldFiles.commitmentIdx
 	historyFiles := oldFiles.commitmentHist
 
@@ -407,14 +411,15 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			index:             r.index}, workers); err != nil {
 		return nil, nil, nil, err
 	}
+
 	if r.values {
 		datPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep))
-		if comp, err = compress.NewCompressor(context.Background(), "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s history compressor: %w", d.filenameBase, err)
+		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 		}
 		var cp CursorHeap
 		heap.Init(&cp)
-		for _, item := range valuesFiles {
+		for _, item := range domainFiles {
 			g := item.decompressor.MakeGetter()
 			g.Reset(0)
 			if g.HasNext() {
@@ -465,8 +470,23 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 			}
 			// For the rest of types, empty value means deletion
 			skip := r.valuesStartTxNum == 0 && len(lastVal) == 0
-			//}
 			if !skip {
+				if keyBuf != nil {
+					if err = comp.AddUncompressedWord(keyBuf); err != nil {
+						return nil, nil, nil, err
+					}
+					keyCount++ // Only counting keys, not values
+					switch d.compressVals {
+					case true:
+						if err = comp.AddWord(valBuf); err != nil {
+							return nil, nil, nil, err
+						}
+					default:
+						if err = comp.AddUncompressedWord(valBuf); err != nil {
+							return nil, nil, nil, err
+						}
+					}
+				}
 				keyBuf = append(keyBuf[:0], lastKey...)
 				valBuf = append(valBuf[:0], lastVal...)
 			}
@@ -506,16 +526,10 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		}
 
 		btPath := strings.TrimSuffix(idxPath, "kvi") + "bt"
-		err = BuildBtreeIndexWithDecompressor(btPath, valuesIn.decompressor)
+		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+			return nil, nil, nil, fmt.Errorf("create btindex %s [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
-
-		bt, err := OpenBtreeIndexWithDecompressor(btPath, 2048, valuesIn.decompressor)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("merge %s btindex2 [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-		}
-		valuesIn.bindex = bt
 	}
 	closeItem = false
 	d.stats.MergesCount++
@@ -525,7 +539,11 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 
 // Evaluates commitment for processed state. Commit=true - store trie state after evaluation
 func (d *DomainCommitted) ComputeCommitment(trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
+
 	touchedKeys, hashedKeys, updates := d.TouchedKeyList()
+	d.comKeys = uint64(len(touchedKeys))
+
 	if len(touchedKeys) == 0 {
 		rootHash, err = d.patriciaTrie.RootHash()
 		return rootHash, nil, err
@@ -558,9 +576,9 @@ var keyCommitmentState = []byte("state")
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
-func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (uint64, error) {
+func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (blockNum, txNum uint64, err error) {
 	if d.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
-		return 0, fmt.Errorf("state storing is only supported hex patricia trie")
+		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 	// todo add support of bin state dumping
 
@@ -580,7 +598,7 @@ func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (uint64, error
 
 		s, err := ctx.Get(keyCommitmentState, stepbuf[:], d.tx)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if len(s) < 8 {
 			break
@@ -597,18 +615,18 @@ func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (uint64, error
 
 	var latest commitmentState
 	if err := latest.Decode(latestState); err != nil {
-		return 0, nil
+		return 0, 0, nil
 	}
 
 	if hext, ok := d.patriciaTrie.(*commitment.HexPatriciaHashed); ok {
 		if err := hext.SetState(latest.trieState); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 	} else {
-		return 0, fmt.Errorf("state storing is only supported hex patricia trie")
+		return 0, 0, fmt.Errorf("state storing is only supported hex patricia trie")
 	}
 
-	return latest.txNum, nil
+	return latest.blockNum, latest.txNum, nil
 }
 
 type commitmentState struct {

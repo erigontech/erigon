@@ -109,7 +109,10 @@ type DomainStats struct {
 	MergesCount          uint64
 	LastCollationTook    time.Duration
 	LastPruneTook        time.Duration
+	LastPruneHistTook    time.Duration
 	LastFileBuildingTook time.Duration
+	LastCollationSize    uint64
+	LastPruneSize        uint64
 
 	HistoryQueries atomic2.Uint64
 	TotalQueries   atomic2.Uint64
@@ -833,6 +836,45 @@ func (d *Domain) collator(valuesComp *compress.Compressor, pairs chan kvpair) (c
 	return count, nil
 }
 
+//nolint
+func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64, tx kv.Tx, logEvery *time.Ticker, collated chan struct{}) (err error) {
+	mxRunningCollations.Inc()
+	start := time.Now()
+	collation, err := d.collateStream(ctx, step, txFrom, txTo, tx, logEvery)
+	mxRunningCollations.Dec()
+	mxCollateTook.UpdateDuration(start)
+
+	close(collated)
+
+	mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+	mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+
+	if err != nil {
+		collation.Close()
+		//return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+		return err
+	}
+
+	mxRunningMerges.Inc()
+
+	start = time.Now()
+	sf, err := d.buildFiles(ctx, step, collation)
+	collation.Close()
+	defer sf.Close()
+
+	if err != nil {
+		sf.Close()
+		mxRunningMerges.Dec()
+		return
+	}
+
+	mxRunningMerges.Dec()
+
+	d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
+	d.stats.LastFileBuildingTook = time.Since(start)
+	return nil
+}
+
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
@@ -1246,10 +1288,9 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // [txFrom; txTo)
 func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
-	start := time.Now()
-	defer func() {
-		d.stats.LastPruneTook = time.Since(start)
-	}()
+	defer func(t time.Time) {
+		d.stats.LastPruneTook = time.Since(t)
+	}(time.Now())
 
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1287,12 +1328,15 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 		return fmt.Errorf("%s vals cursor: %w", d.filenameBase, err)
 	}
 	defer valsCursor.Close()
+
 	var i uint64
+	d.stats.LastPruneSize = 0
 	for k, s := range keyMaxSteps {
 		i++
 		if s <= step {
 			continue
 		}
+		d.stats.LastPruneSize++
 
 		select {
 		case <-logEvery.C:
@@ -1314,6 +1358,8 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 	if err != nil {
 		return fmt.Errorf("iterate over %s vals: %w", d.filenameBase, err)
 	}
+
+	defer func(t time.Time) { d.stats.LastPruneHistTook = time.Since(t) }(time.Now())
 
 	if err = d.History.prune(ctx, txFrom, txTo, limit, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
@@ -1383,6 +1429,8 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 	return d.History.warmup(ctx, txFrom, limit, tx)
 }
 
+var COMPARE_INDEXES = false // if true, will compare values from Btree and INvertedIndex
+
 func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte, bool) {
 	var val []byte
 	var found bool
@@ -1404,6 +1452,23 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 		if bytes.Equal(cur.Key(), filekey) {
 			val = cur.Value()
 			found = true
+
+			if COMPARE_INDEXES {
+				rd := recsplit.NewIndexReader(dc.files[i].src.index)
+				oft := rd.Lookup(filekey)
+				gt := dc.statelessGetter(i)
+				gt.Reset(oft)
+				var k, v []byte
+				if gt.HasNext() {
+					k, _ = gt.Next(nil)
+					v, _ = gt.Next(nil)
+				}
+				fmt.Printf("key: %x, val: %x\n", k, v)
+				if !bytes.Equal(v, val) {
+					panic("not equal")
+				}
+
+			}
 			break
 		}
 	}
