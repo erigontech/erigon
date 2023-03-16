@@ -1,0 +1,21 @@
+name: Trigger After Release
+
+on:
+  workflow_run:
+    workflows: ["release"]
+    types:
+      - completed
+
+jobs:
+  after_release:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Publish downloads
+        run: |
+          cd cmd/release 
+          docker buildx build --push --platform linux/amd64 --build-arg GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" -t thorax/download:latest .
