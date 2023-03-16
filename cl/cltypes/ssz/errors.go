@@ -1,4 +1,4 @@
-package ssz_utils
+package ssz
 
 import "errors"
 

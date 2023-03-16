@@ -2,25 +2,27 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // ProcessEffectiveBalanceUpdates updates the effective balance of validators. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#effective-balances-updates
-func (s *StateTransistor) ProcessEffectiveBalanceUpdates() error {
+func ProcessEffectiveBalanceUpdates(state *state.BeaconState) error {
+	beaconConfig := state.BeaconConfig()
 	// Define non-changing constants to avoid recomputation.
-	histeresisIncrement := s.beaconConfig.EffectiveBalanceIncrement / s.beaconConfig.HysteresisQuotient
-	downwardThreshold := histeresisIncrement * s.beaconConfig.HysteresisDownwardMultiplier
-	upwardThreshold := histeresisIncrement * s.beaconConfig.HysteresisUpwardMultiplier
+	histeresisIncrement := beaconConfig.EffectiveBalanceIncrement / beaconConfig.HysteresisQuotient
+	downwardThreshold := histeresisIncrement * beaconConfig.HysteresisDownwardMultiplier
+	upwardThreshold := histeresisIncrement * beaconConfig.HysteresisUpwardMultiplier
 	// Iterate over validator set and compute the diff of each validator.
-	for index, validator := range s.state.Validators() {
-		balance, err := s.state.ValidatorBalance(index)
+	for index, validator := range state.Validators() {
+		balance, err := state.ValidatorBalance(index)
 		if err != nil {
 			return err
 		}
 		if balance+downwardThreshold < validator.EffectiveBalance ||
 			validator.EffectiveBalance+upwardThreshold < balance {
 			// Set new effective balance
-			validator.EffectiveBalance = utils.Min64(balance-(balance%s.beaconConfig.EffectiveBalanceIncrement), s.beaconConfig.MaxEffectiveBalance)
-			if err := s.state.SetValidatorAt(index, validator); err != nil {
+			validator.EffectiveBalance = utils.Min64(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
+			if err := state.SetValidatorAt(index, validator); err != nil {
 				return err
 			}
 		}

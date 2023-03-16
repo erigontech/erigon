@@ -718,3 +718,69 @@ func SerialiseV3(a *Account) []byte {
 	}
 	return value
 }
+
+func SerialiseV3Len(a *Account) (l int) {
+	l++
+	if a.Nonce > 0 {
+		l += (bits.Len64(a.Nonce) + 7) / 8
+	}
+	l++
+	if !a.Balance.IsZero() {
+		l += a.Balance.ByteLen()
+	}
+	l++
+	if !a.IsEmptyCodeHash() {
+		l += 32
+	}
+	l++
+	if a.Incarnation > 0 {
+		l += (bits.Len64(a.Incarnation) + 7) / 8
+	}
+	return l
+}
+func SerialiseV3To(a *Account, value []byte) {
+	pos := 0
+	if a.Nonce == 0 {
+		value[pos] = 0
+		pos++
+	} else {
+		nonceBytes := (bits.Len64(a.Nonce) + 7) / 8
+		value[pos] = byte(nonceBytes)
+		var nonce = a.Nonce
+		for i := nonceBytes; i > 0; i-- {
+			value[pos+i] = byte(nonce)
+			nonce >>= 8
+		}
+		pos += nonceBytes + 1
+	}
+	if a.Balance.IsZero() {
+		value[pos] = 0
+		pos++
+	} else {
+		balanceBytes := a.Balance.ByteLen()
+		value[pos] = byte(balanceBytes)
+		pos++
+		a.Balance.WriteToSlice(value[pos : pos+balanceBytes])
+		pos += balanceBytes
+	}
+	if a.IsEmptyCodeHash() {
+		value[pos] = 0
+		pos++
+	} else {
+		value[pos] = 32
+		pos++
+		copy(value[pos:pos+32], a.CodeHash[:])
+		pos += 32
+	}
+	if a.Incarnation == 0 {
+		value[pos] = 0
+	} else {
+		incBytes := (bits.Len64(a.Incarnation) + 7) / 8
+		value[pos] = byte(incBytes)
+		var inc = a.Incarnation
+		for i := incBytes; i > 0; i-- {
+			value[pos+i] = byte(inc)
+			inc >>= 8
+		}
+	}
+}

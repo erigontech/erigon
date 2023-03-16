@@ -1,0 +1,42 @@
+version: "3"
+
+services:
+  traefik:
+    image: traefik:latest
+    restart: always
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=max.revitt@gateway.fm"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - traefik
+
+  download:
+    image: thorax/download:latest
+    restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.frontend.rule=Host:download.erigon.ch"
+      - "traefik.frontend.redirect.entryPoint=https"
+      - "traefik.http.routers.app.rule=Host(`download.erigon.ch`)"
+      - "traefik.http.routers.app.entrypoints=web,websecure"
+      - "traefik.http.routers.app.tls=true"
+      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
+    networks:
+      - traefik
+
+networks:
+  traefik:
+    name: traefik

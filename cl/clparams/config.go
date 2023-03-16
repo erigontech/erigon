@@ -24,7 +24,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/params/networkname"
 )
@@ -373,11 +373,14 @@ type BeaconChainConfig struct {
 	ProportionalSlashingMultiplier uint64 `yaml:"PROPORTIONAL_SLASHING_MULTIPLIER" spec:"true"` // ProportionalSlashingMultiplier is used as a multiplier on slashed penalties.
 
 	// Max operations per block constants.
-	MaxProposerSlashings uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"` // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
-	MaxAttesterSlashings uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"` // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
-	MaxAttestations      uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`       // MaxAttestations defines the maximum allowed attestations in a beacon block.
-	MaxDeposits          uint64 `yaml:"MAX_DEPOSITS" spec:"true"`           // MaxDeposits defines the maximum number of validator deposits in a block.
-	MaxVoluntaryExits    uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`    // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxProposerSlashings             uint64 `yaml:"MAX_PROPOSER_SLASHINGS" spec:"true"`               // MaxProposerSlashings defines the maximum number of slashings of proposers possible in a block.
+	MaxAttesterSlashings             uint64 `yaml:"MAX_ATTESTER_SLASHINGS" spec:"true"`               // MaxAttesterSlashings defines the maximum number of casper FFG slashings possible in a block.
+	MaxAttestations                  uint64 `yaml:"MAX_ATTESTATIONS" spec:"true"`                     // MaxAttestations defines the maximum allowed attestations in a beacon block.
+	MaxDeposits                      uint64 `yaml:"MAX_DEPOSITS" spec:"true"`                         // MaxDeposits defines the maximum number of validator deposits in a block.
+	MaxVoluntaryExits                uint64 `yaml:"MAX_VOLUNTARY_EXITS" spec:"true"`                  // MaxVoluntaryExits defines the maximum number of validator exits in a block.
+	MaxWithdrawalsPerPayload         uint64 `yaml:"MAX_WITHDRAWALS_PER_PAYLOAD" spec:"true"`          // MaxWithdrawalsPerPayload defines the maximum number of withdrawals in a block.
+	MaxBlsToExecutionChanges         uint64 `yaml:"MAX_BLS_TO_EXECUTION_CHANGES" spec:"true"`         // MaxBlsToExecutionChanges defines the maximum number of BLS-to-execution-change objects in a block.
+	MaxValidatorsPerWithdrawalsSweep uint64 `yaml:"MAX_VALIDATORS_PER_WITHDRAWALS_SWEEP" spec:"true"` //MaxValidatorsPerWithdrawalsSweep bounds the size of the sweep searching for withdrawals per slot.
 
 	// BLS domain values.
 	DomainBeaconProposer              [4]byte `yaml:"DOMAIN_BEACON_PROPOSER" spec:"true"`                // DomainBeaconProposer defines the BLS signature domain for beacon proposal verification.
@@ -420,14 +423,14 @@ type BeaconChainConfig struct {
 
 	// Fork-related values.
 	GenesisForkVersion   uint32 `yaml:"GENESIS_FORK_VERSION" spec:"true"`   // GenesisForkVersion is used to track fork version between state transitions.
-	AltairForkVersion    uint32 `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for altair.
-	AltairForkEpoch      uint64 `yaml:"ALTAIR_FORK_EPOCH" spec:"true"`      // AltairForkEpoch is used to represent the assigned fork epoch for altair.
-	BellatrixForkVersion uint32 `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for bellatrix.
-	BellatrixForkEpoch   uint64 `yaml:"BELLATRIX_FORK_EPOCH" spec:"true"`   // BellatrixForkEpoch is used to represent the assigned fork epoch for bellatrix.
-	ShardingForkVersion  uint32 `yaml:"SHARDING_FORK_VERSION" spec:"true"`  // ShardingForkVersion is used to represent the fork version for sharding.
-	ShardingForkEpoch    uint64 `yaml:"SHARDING_FORK_EPOCH" spec:"true"`    // ShardingForkEpoch is used to represent the assigned fork epoch for sharding.
-	CapellaForkVersion   uint32 `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for capella.
-	CapellaForkEpoch     uint64 `yaml:"CAPELLA_FORK_EPOCH" spec:"true"`     // CapellaForkEpoch is used to represent the assigned fork epoch for capella.
+	AltairForkVersion    uint32 `yaml:"ALTAIR_FORK_VERSION" spec:"true"`    // AltairForkVersion is used to represent the fork version for Altair.
+	AltairForkEpoch      uint64 `yaml:"ALTAIR_FORK_EPOCH" spec:"true"`      // AltairForkEpoch is used to represent the assigned fork epoch for Altair.
+	BellatrixForkVersion uint32 `yaml:"BELLATRIX_FORK_VERSION" spec:"true"` // BellatrixForkVersion is used to represent the fork version for Bellatrix.
+	BellatrixForkEpoch   uint64 `yaml:"BELLATRIX_FORK_EPOCH" spec:"true"`   // BellatrixForkEpoch is used to represent the assigned fork epoch for Bellatrix.
+	CapellaForkVersion   uint32 `yaml:"CAPELLA_FORK_VERSION" spec:"true"`   // CapellaForkVersion is used to represent the fork version for Capella.
+	CapellaForkEpoch     uint64 `yaml:"CAPELLA_FORK_EPOCH" spec:"true"`     // CapellaForkEpoch is used to represent the assigned fork epoch for Capella.
+	DenebForkVersion     uint32 `yaml:"DENEB_FORK_VERSION" spec:"true"`     // DenebForkVersion is used to represent the fork version for Deneb.
+	DenebForkEpoch       uint64 `yaml:"DENEB_FORK_EPOCH" spec:"true"`       // DenebForkEpoch is used to represent the assigned fork epoch for Deneb.
 
 	ForkVersionSchedule map[[VersionLength]byte]uint64 // Schedule of fork epochs by version.
 	ForkVersionNames    map[[VersionLength]byte]string // Human-readable names of fork versions.
@@ -617,11 +620,14 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ProportionalSlashingMultiplier: 1,
 
 	// Max operations per block constants.
-	MaxProposerSlashings: 16,
-	MaxAttesterSlashings: 2,
-	MaxAttestations:      128,
-	MaxDeposits:          16,
-	MaxVoluntaryExits:    16,
+	MaxProposerSlashings:             16,
+	MaxAttesterSlashings:             2,
+	MaxAttestations:                  128,
+	MaxDeposits:                      16,
+	MaxVoluntaryExits:                16,
+	MaxWithdrawalsPerPayload:         16,
+	MaxBlsToExecutionChanges:         16,
+	MaxValidatorsPerWithdrawalsSweep: 16384,
 
 	// BLS domain values.
 	DomainBeaconProposer:              utils.Uint32ToBytes4(0x00000000),
@@ -673,8 +679,8 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	BellatrixForkEpoch:   144869,
 	CapellaForkVersion:   0x03000000,
 	CapellaForkEpoch:     math.MaxUint64,
-	ShardingForkVersion:  0x04000000,
-	ShardingForkEpoch:    math.MaxUint64,
+	DenebForkVersion:     0x04000000,
+	DenebForkEpoch:       math.MaxUint64,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -747,7 +753,7 @@ func ParseGenesisSSZToGenesisConfig(genesisFile string) (GenesisConfig, error) {
 		return GenesisConfig{}, nil
 	}
 	// Read first 2 fields of SSZ
-	cfg.GenesisTime = ssz_utils.UnmarshalUint64SSZ(b)
+	cfg.GenesisTime = ssz.UnmarshalUint64SSZ(b)
 	copy(cfg.GenesisValidatorRoot[:], b[8:])
 	return cfg, nil
 }
@@ -786,10 +792,11 @@ func goerliConfig() BeaconChainConfig {
 	cfg.DepositNetworkID = uint64(GoerliNetwork)
 	cfg.AltairForkEpoch = 36660
 	cfg.AltairForkVersion = 0x1001020
-	cfg.CapellaForkVersion = 0x03001020
-	cfg.ShardingForkVersion = 0x40001020
 	cfg.BellatrixForkEpoch = 112260
 	cfg.BellatrixForkVersion = 0x02001020
+	cfg.CapellaForkEpoch = 162304
+	cfg.CapellaForkVersion = 0x03001020
+	cfg.DenebForkVersion = 0x40001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
@@ -856,6 +863,8 @@ func (b *BeaconChainConfig) GetMinSlashingPenaltyQuotient(version StateVersion) 
 		return b.MinSlashingPenaltyQuotientAltair
 	case BellatrixVersion:
 		return b.MinSlashingPenaltyQuotientBellatrix
+	case CapellaVersion:
+		return b.MinSlashingPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")
 	}
@@ -868,6 +877,8 @@ func (b *BeaconChainConfig) GetPenaltyQuotient(version StateVersion) uint64 {
 	case AltairVersion:
 		return b.InactivityPenaltyQuotientAltair
 	case BellatrixVersion:
+		return b.InactivityPenaltyQuotientBellatrix
+	case CapellaVersion:
 		return b.InactivityPenaltyQuotientBellatrix
 	default:
 		panic("not implemented")

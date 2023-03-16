@@ -101,6 +101,7 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
+	DropUselessPeers: false,
 }
 
 func init() {
@@ -249,6 +250,8 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverrideShanghaiTime *big.Int `toml:",omitempty"`
+
+	DropUselessPeers bool
 }
 
 type Sync struct {

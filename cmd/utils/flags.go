@@ -504,6 +504,11 @@ var (
 		Name:  "sentry.log-peer-info",
 		Usage: "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
 	}
+	SentryDropUselessPeers = cli.BoolFlag{
+		Name:  "sentry.drop-useless-peers",
+		Usage: "Drop useless peers, those returning empty body or header responses",
+		Value: false,
+	}
 	DownloaderAddrFlag = cli.StringFlag{
 		Name:  "downloader.api.addr",
 		Usage: "downloader address '<host>:<port>'",
@@ -667,6 +672,11 @@ var (
 		Name:  "torrent.download.slots",
 		Value: 3,
 		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+	}
+	TorrentStaticPeersFlag = cli.StringFlag{
+		Name:  "torrent.staticpeers",
+		Usage: "Comma separated enode URLs to connect to",
+		Value: "",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
@@ -899,6 +909,7 @@ func NewP2PConfig(
 	port uint,
 	protocol uint,
 	allowedPorts []uint,
+	metricsEnabled bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -929,6 +940,7 @@ func NewP2PConfig(
 		NodeDatabase:    enodeDBPath,
 		AllowedPorts:    allowedPorts,
 		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1090,6 +1102,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 
 	if ctx.IsSet(DiscoveryV5Flag.Name) {
 		cfg.DiscoveryV5 = ctx.Bool(DiscoveryV5Flag.Name)
+	}
+
+	if ctx.IsSet(MetricsEnabledFlag.Name) {
+		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
 	}
 
 	ethPeers := cfg.MaxPeers
@@ -1474,7 +1490,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
@@ -1581,7 +1597,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	} else {
 		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
 	}
+
 	nodeConfig.Http.InternalCL = !cfg.ExternalCL
+
+	if ctx.IsSet(SentryDropUselessPeers.Name) {
+		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
+	}
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

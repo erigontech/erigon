@@ -7,7 +7,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -45,7 +45,7 @@ func NewForwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P) *For
 }
 
 // Start begins the gossip listening process.
-func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz_utils.Unmarshaler) {
+func (f *ForwardBeaconDownloader) ReceiveGossip(obj ssz.Unmarshaler) {
 	signedBlock := obj.(*cltypes.SignedBeaconBlock)
 	if signedBlock.Block.ParentRoot == f.highestBlockRootProcessed {
 		f.addSegment(signedBlock)

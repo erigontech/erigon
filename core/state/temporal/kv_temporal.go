@@ -343,15 +343,19 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	case StorageHistory:
-		it = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	case CodeHistory:
-		it = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := it.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return it, err
 }

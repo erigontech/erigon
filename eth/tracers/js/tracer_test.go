@@ -233,7 +233,7 @@ func TestNoStepExec(t *testing.T) {
 }
 
 func TestIsPrecompile(t *testing.T) {
-	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, DAOForkSupport: false, TangerineWhistleBlock: big.NewInt(0), TangerineWhistleHash: libcommon.Hash{}, SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
+	chaincfg := &chain.Config{ChainID: big.NewInt(1), HomesteadBlock: big.NewInt(0), DAOForkBlock: nil, TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(0), ByzantiumBlock: big.NewInt(100), ConstantinopleBlock: big.NewInt(0), PetersburgBlock: big.NewInt(0), IstanbulBlock: big.NewInt(200), MuirGlacierBlock: big.NewInt(0), BerlinBlock: big.NewInt(300), LondonBlock: big.NewInt(0), TerminalTotalDifficulty: nil, Ethash: new(chain.EthashConfig), Clique: nil}
 	chaincfg.ByzantiumBlock = big.NewInt(100)
 	chaincfg.IstanbulBlock = big.NewInt(200)
 	chaincfg.BerlinBlock = big.NewInt(300)

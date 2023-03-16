@@ -140,12 +140,12 @@ db-tools:
 	rm -rf vendor
 	@echo "Run \"$(GOBIN)/mdbx_stat -h\" to get info about mdbx db file."
 
-## test:                              run unit tests with a 50s timeout
+## test:                              run unit tests with a 100s timeout
 test:
-	$(GOTEST) --timeout 50s
+	$(GOTEST) --timeout 100s
 
 test3:
-	$(GOTEST) --timeout 50s -tags $(BUILD_TAGS),erigon3
+	$(GOTEST) --timeout 100s -tags $(BUILD_TAGS),erigon3
 
 ## test-integration:                  run integration tests with a 30m timeout
 test-integration:
@@ -166,7 +166,7 @@ lintci:
 ## lintci-deps:                       (re)installs golangci-lint to build/bin/golangci-lint
 lintci-deps:
 	rm -f ./build/bin/golangci-lint
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.51.1
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b ./build/bin v1.51.2
 
 ## clean:                             cleans the go cache, build dir, libmdbx db dir
 clean:
@@ -181,10 +181,10 @@ devtools:
 	# Notice! If you adding new binary - add it also to cmd/hack/binary-deps/main.go file
 	$(GOBUILD) -o $(GOBIN)/go-bindata github.com/kevinburke/go-bindata/go-bindata
 	$(GOBUILD) -o $(GOBIN)/gencodec github.com/fjl/gencodec
-	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	$(GOBUILD) -o $(GOBIN)/abigen ./cmd/abigen
+	$(GOBUILD) -o $(GOBIN)/codecgen github.com/ugorji/go/codec/codecgen
 	PATH=$(GOBIN):$(PATH) go generate ./common
-	PATH=$(GOBIN):$(PATH) go generate ./core/types
+#	PATH=$(GOBIN):$(PATH) go generate ./core/types
 	PATH=$(GOBIN):$(PATH) go generate ./consensus/aura/...
 	#PATH=$(GOBIN):$(PATH) go generate ./eth/ethconfig/...
 	@type "npm" 2> /dev/null || echo 'Please install node.js and npm'

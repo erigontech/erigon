@@ -189,7 +189,7 @@ func TestBlockStorage(t *testing.T) {
 	if err := WriteBlock(tx, block); err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if _, _, err := DeleteAncientBlocks(tx, 0, 1); err != nil {
+	if err := DeleteAncientBlocks(tx, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -551,7 +551,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err := WriteBlock(tx, block); err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if _, _, err := DeleteAncientBlocks(tx, 0, 1); err != nil {
+	if err := DeleteAncientBlocks(tx, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 }

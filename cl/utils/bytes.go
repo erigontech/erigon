@@ -15,9 +15,10 @@ package utils
 
 import (
 	"encoding/binary"
+	"math/bits"
 
 	"github.com/golang/snappy"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 )
 
 func Uint32ToBytes4(n uint32) (ret [4]byte) {
@@ -55,7 +56,7 @@ func CompressSnappy(data []byte) []byte {
 	return snappy.Encode(nil, data)
 }
 
-func EncodeSSZSnappy(data ssz_utils.Marshaler) ([]byte, error) {
+func EncodeSSZSnappy(data ssz.Marshaler) ([]byte, error) {
 	var (
 		enc = make([]byte, 0, data.EncodingSizeSSZ())
 		err error
@@ -68,7 +69,7 @@ func EncodeSSZSnappy(data ssz_utils.Marshaler) ([]byte, error) {
 	return snappy.Encode(nil, enc), nil
 }
 
-func DecodeSSZSnappy(dst ssz_utils.Unmarshaler, src []byte) error {
+func DecodeSSZSnappy(dst ssz.Unmarshaler, src []byte) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
@@ -82,7 +83,7 @@ func DecodeSSZSnappy(dst ssz_utils.Unmarshaler, src []byte) error {
 	return nil
 }
 
-func DecodeSSZSnappyWithVersion(dst ssz_utils.Unmarshaler, src []byte, version int) error {
+func DecodeSSZSnappyWithVersion(dst ssz.Unmarshaler, src []byte, version int) error {
 	dec, err := snappy.Decode(nil, src)
 	if err != nil {
 		return err
@@ -104,4 +105,24 @@ func IsSliceSortedSet(vals []uint64) bool {
 		}
 	}
 	return true
+}
+
+// getBitlistLength return the amount of bits in given bitlist.
+func GetBitlistLength(b []byte) int {
+	if len(b) == 0 {
+		return 0
+	}
+	// The most significant bit is present in the last byte in the array.
+	last := b[len(b)-1]
+
+	// Determine the position of the most significant bit.
+	msb := bits.Len8(last)
+	if msb == 0 {
+		return 0
+	}
+
+	// The absolute position of the most significant bit will be the number of
+	// bits in the preceding bytes plus the position of the most significant
+	// bit. Subtract this value by 1 to determine the length of the bitlist.
+	return 8*(len(b)-1) + msb - 1
 }

@@ -1,29 +1,27 @@
-package main
+package consensustests
 
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
-func finalityTestFunction() error {
-	testState, err := decodeStateFromFile("pre.ssz_snappy")
+func finalityTestFunction(context testContext) error {
+	testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
 	if err != nil {
 		return err
 	}
-	expectedState, err := decodeStateFromFile("post.ssz_snappy")
+	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 	if err != nil {
 		return err
 	}
-	blocks, err := testBlocks()
+	blocks, err := testBlocks(context)
 	if err != nil {
 		return err
 	}
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 	startSlot := testState.Slot()
 	for _, block := range blocks {
-		if err := transistor.TransitionState(block); err != nil {
+		if err := transition.TransitionState(testState, block, true); err != nil {
 			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 		}
 	}

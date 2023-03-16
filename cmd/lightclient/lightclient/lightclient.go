@@ -94,7 +94,6 @@ func (l *LightClient) Start() {
 	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
 
-	updateStatusSentinel := time.NewTicker(2 * time.Minute)
 	go l.chainTip.StartLoop()
 	for {
 		start := time.Now()
@@ -219,14 +218,6 @@ func (l *LightClient) Start() {
 				continue
 			}
 			log.Info("[LightClient] P2P", "peers", peers)
-		case <-updateStatusSentinel.C:
-			if err := l.updateStatus(); err != nil {
-				if errors.Is(err, context.Canceled) {
-					return
-				}
-				log.Error("Could not update sentinel status", "err", err)
-				return
-			}
 		case <-l.ctx.Done():
 			return
 		}
@@ -250,7 +241,7 @@ func (l *LightClient) importBlockIfPossible() {
 	}
 
 	if (curr.Slot+1)%l.beaconConfig.SlotsPerEpoch == 0 {
-		l.finalizedEth1Hash = curr.Body.ExecutionPayload.Header.BlockHashCL
+		l.finalizedEth1Hash = curr.Body.ExecutionPayload.BlockHash
 	}
 
 	if l.lastEth2ParentRoot != l.highestProcessedRoot && l.highestProcessedRoot != curr.ParentRoot {
@@ -260,12 +251,12 @@ func (l *LightClient) importBlockIfPossible() {
 	l.lastEth2ParentRoot = curr.ParentRoot
 	l.highestProcessedRoot = currentRoot
 
-	eth1Number := curr.Body.ExecutionPayload.NumberU64()
+	eth1Number := curr.Body.ExecutionPayload.BlockNumber
 	if l.highestSeen != 0 && (l.highestSeen > safetyRange && eth1Number < l.highestSeen-safetyRange) {
 		return
 	}
 	if l.verbose {
-		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.NumberU64())
+		log.Info("Processed block", "slot", curr.Body.ExecutionPayload.BlockNumber)
 	}
 
 	// If all of the above is gud then do the push
@@ -274,16 +265,4 @@ func (l *LightClient) importBlockIfPossible() {
 	} else {
 		l.highestSeen = eth1Number
 	}
-}
-
-func (l *LightClient) updateStatus() error {
-	finalizedRoot, err := l.store.finalizedHeader.HashSSZ()
-	if err != nil {
-		return err
-	}
-	headRoot, err := l.store.optimisticHeader.HashSSZ()
-	if err != nil {
-		return err
-	}
-	return l.rpc.SetStatus(finalizedRoot, l.store.finalizedHeader.Slot/32, headRoot, l.store.optimisticHeader.Slot)
 }

@@ -1,20 +1,21 @@
-package main
+package consensustests
 
 import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
-func testSanityFunction() error {
-	testState, err := decodeStateFromFile("pre.ssz_snappy")
+func testSanityFunction(context testContext) error {
+	testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
 	if err != nil {
 		return err
 	}
+	testState.HashSSZ()
 	var expectedError bool
-	expectedState, err := decodeStateFromFile("post.ssz_snappy")
+	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 	if os.IsNotExist(err) {
 		expectedError = true
 		err = nil
@@ -22,13 +23,14 @@ func testSanityFunction() error {
 	if err != nil {
 		return err
 	}
-	blocks, err := testBlocks()
+	blocks, err := testBlocks(context)
 	if err != nil {
 		return err
 	}
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
-	for _, block := range blocks {
-		err = transistor.TransitionState(block)
+	startSlot := testState.Slot()
+	var block *cltypes.SignedBeaconBlock
+	for _, block = range blocks {
+		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
 		}
@@ -41,7 +43,7 @@ func testSanityFunction() error {
 		if expectedError {
 			return nil
 		}
-		return err
+		return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 	}
 	expectedRoot, err := expectedState.HashSSZ()
 	if err != nil {
@@ -57,18 +59,17 @@ func testSanityFunction() error {
 	return nil
 }
 
-func testSanityFunctionSlot() error {
-	testState, err := decodeStateFromFile("pre.ssz_snappy")
+func testSanityFunctionSlot(context testContext) error {
+	testState, err := decodeStateFromFile(context, "pre.ssz_snappy")
 	if err != nil {
 		return err
 	}
-	expectedState, err := decodeStateFromFile("post.ssz_snappy")
+	expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 	if err != nil {
 		return err
 	}
 
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
-	if err := transistor.ProcessSlots(expectedState.Slot()); err != nil {
+	if err := transition.ProcessSlots(testState, expectedState.Slot()); err != nil {
 		return err
 	}
 

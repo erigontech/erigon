@@ -45,7 +45,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, time uint64) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	case config.IsSharding(time):
+	case config.IsCancun(time):
 		// TODO: make sure this part is correct
 		signer.protected = true
 		signer.accesslist = true

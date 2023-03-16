@@ -3,8 +3,8 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 const maxEth1Votes = 2048
@@ -25,6 +25,9 @@ func (b *BeaconState) SetSlot(slot uint64) {
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
 	b.proposerIndex = nil
+	if b.slot%b.beaconConfig.SlotsPerEpoch == 0 {
+		b.totalActiveBalanceCache = nil
+	}
 }
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
@@ -59,7 +62,7 @@ func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 
 func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
 	if index >= len(b.validators) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 	b.validators[index] = validator
 	b.touchedLeaves[ValidatorsLeafIndex] = true
@@ -113,7 +116,7 @@ func (b *BeaconState) SetBalances(balances []uint64) {
 
 func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	if index >= len(b.balances) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 
 	b.touchedLeaves[BalancesLeafIndex] = true
@@ -171,7 +174,7 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 	b.nextSyncCommittee = nextSyncCommittee
 }
 
-func (b *BeaconState) SetLatestExecutionPayloadHeader(header *types.Header) {
+func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	b.latestExecutionPayloadHeader = header
 }
@@ -187,7 +190,7 @@ func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 }
 
 func (b *BeaconState) AddHistoricalSummary(summary *cltypes.HistoricalSummary) {
-	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	b.touchedLeaves[HistoricalSummariesLeafIndex] = true
 	b.historicalSummaries = append(b.historicalSummaries, summary)
 }
 
@@ -203,7 +206,7 @@ func (b *BeaconState) AddInactivityScore(score uint64) {
 
 func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error {
 	if index >= len(b.inactivityScores) {
-		return InvalidValidatorIndex
+		return ErrInvalidValidatorIndex
 	}
 	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores[index] = score
@@ -211,11 +214,49 @@ func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error
 }
 
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	if b.version == clparams.Phase0Version {
+		panic("cannot call AddCurrentEpochParticipationFlags on phase0")
+	}
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
+	if b.version == clparams.Phase0Version {
+		panic("cannot call AddPreviousEpochParticipationFlags on phase0")
+	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
+}
+
+func (b *BeaconState) AddCurrentEpochAtteastation(attestation *cltypes.PendingAttestation) {
+	if b.version != clparams.Phase0Version {
+		panic("can call AddCurrentEpochAtteastation only on phase0")
+	}
+	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
+	b.currentEpochAttestations = append(b.currentEpochAttestations, attestation)
+}
+
+func (b *BeaconState) AddPreviousEpochAtteastation(attestation *cltypes.PendingAttestation) {
+	if b.version != clparams.Phase0Version {
+		panic("can call AddPreviousEpochAtteastation only on phase0")
+	}
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
+	b.previousEpochAttestations = append(b.previousEpochAttestations, attestation)
+}
+
+func (b *BeaconState) SetCurrentEpochAtteastations(attestations []*cltypes.PendingAttestation) {
+	if b.version != clparams.Phase0Version {
+		panic("can call SetCurrentEpochAtteastations only on phase0")
+	}
+	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
+	b.currentEpochAttestations = attestations
+}
+
+func (b *BeaconState) SetPreviousEpochAtteastations(attestations []*cltypes.PendingAttestation) {
+	if b.version != clparams.Phase0Version {
+		panic("can call SetPreviousEpochAtteastations only on phase0")
+	}
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
+	b.previousEpochAttestations = attestations
 }

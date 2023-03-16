@@ -754,15 +754,8 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		}
 	}
 
-	bn := hexutil.Uint64(blockNum)
-
-	parentNr := bn
-	if parentNr > 0 {
-		parentNr -= 1
-	}
-
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), int(txnIndex), types.MakeSigner(chainConfig, blockNum, block.Time()), chainConfig.Rules(blockNum, block.Time()))
+	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, int(txnIndex), types.MakeSigner(chainConfig, blockNum, block.Time()), chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -818,10 +811,6 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	parentNr := blockNumber
-	if parentNr > 0 {
-		parentNr -= 1
-	}
 	// Extract transactions from block
 	block, bErr := api.blockByNumberWithSenders(tx, blockNumber)
 	if bErr != nil {
@@ -845,7 +834,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 	}
 
 	// Returns an array of trace arrays, one trace array for each transaction
-	traces, err := api.callManyTransactions(ctx, tx, block.Transactions(), traceTypes, block.ParentHash(), rpc.BlockNumber(parentNr), block.Header(), -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber, block.Time()), chainConfig.Rules(blockNumber, block.Time()))
+	traces, err := api.callManyTransactions(ctx, tx, block, traceTypes, -1 /* all tx indices */, types.MakeSigner(chainConfig, blockNumber, block.Time()), chainConfig)
 	if err != nil {
 		return nil, err
 	}

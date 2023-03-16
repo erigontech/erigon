@@ -205,8 +205,12 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 // getModifiedAccountsV3 returns a list of addresses that were modified in the block range
 // [startNum:endNum)
 func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
+	it, err := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
+	if err != nil {
+		return nil, err
+	}
+
 	changedAddrs := make(map[common.Address]struct{})
-	it, _ := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
 	for it.HasNext() {
 		k, _, err := it.Next()
 		if err != nil {

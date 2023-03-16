@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/clonable"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -40,6 +40,11 @@ type Withdrawal struct {
 	Validator uint64            `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   libcommon.Address `json:"address"`        // target address for withdrawn ether
 	Amount    uint64            `json:"amount"`         // value of withdrawal in GWei
+}
+
+func (obj *Withdrawal) Equal(other *Withdrawal) bool {
+	return obj.Index == other.Index && obj.Validator == other.Validator &&
+		obj.Address == other.Address && obj.Amount == other.Amount
 }
 
 func (obj *Withdrawal) EncodingSize() int {
@@ -81,10 +86,10 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 
 func (obj *Withdrawal) EncodeSSZ() []byte {
 	buf := make([]byte, obj.EncodingSizeSSZ())
-	ssz_utils.MarshalUint64SSZ(buf, obj.Index)
-	ssz_utils.MarshalUint64SSZ(buf[8:], obj.Validator)
+	ssz.MarshalUint64SSZ(buf, obj.Index)
+	ssz.MarshalUint64SSZ(buf[8:], obj.Validator)
 	copy(buf[16:], obj.Address[:])
-	ssz_utils.MarshalUint64SSZ(buf[36:], obj.Amount)
+	ssz.MarshalUint64SSZ(buf[36:], obj.Amount)
 	return buf
 }
 
@@ -94,12 +99,12 @@ func (obj *Withdrawal) DecodeSSZWithVersion(buf []byte, _ int) error {
 
 func (obj *Withdrawal) DecodeSSZ(buf []byte) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
-	obj.Index = ssz_utils.UnmarshalUint64SSZ(buf)
-	obj.Validator = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	obj.Index = ssz.UnmarshalUint64SSZ(buf)
+	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
 	copy(obj.Address[:], buf[16:])
-	obj.Amount = ssz_utils.UnmarshalUint64SSZ(buf[36:])
+	obj.Amount = ssz.UnmarshalUint64SSZ(buf[36:])
 	return nil
 }
 

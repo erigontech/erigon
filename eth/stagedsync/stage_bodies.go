@@ -82,6 +82,7 @@ func BodiesForward(
 	if _, _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
 	}
+	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
@@ -126,7 +127,7 @@ func BodiesForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
-	noProgressCount := 0 // How many time the progress was printed without actual progress
+	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
 	loopBody := func() (bool, error) {
@@ -310,8 +311,6 @@ func BodiesForward(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-	} else {
-		cfg.bd.ClearBodyCache()
 	}
 
 	if stopped {

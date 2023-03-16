@@ -1,16 +1,16 @@
 package state
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 
-	lru "github.com/hashicorp/golang-lru"
+	"github.com/minio/sha256-simd"
+
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -50,23 +50,27 @@ type BeaconState struct {
 	currentSyncCommittee        *cltypes.SyncCommittee
 	nextSyncCommittee           *cltypes.SyncCommittee
 	// Bellatrix
-	latestExecutionPayloadHeader *types.Header
+	latestExecutionPayloadHeader *cltypes.Eth1Header
 	// Capella
 	nextWithdrawalIndex          uint64
 	nextWithdrawalValidatorIndex uint64
 	historicalSummaries          []*cltypes.HistoricalSummary
+	// Phase0: genesis fork. these 2 fields replace participation bits.
+	previousEpochAttestations []*cltypes.PendingAttestation
+	currentEpochAttestations  []*cltypes.PendingAttestation
 	// Internals
 	version           clparams.StateVersion   // State version
 	leaves            [32][32]byte            // Pre-computed leaves.
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru.Cache
-	committeeCache              *lru.Cache
-	shuffledSetsCache           *lru.Cache
+	activeValidatorsCache       *lru2.Cache[uint64, []uint64]
+	committeeCache              *lru2.Cache[[16]byte, []uint64]
+	shuffledSetsCache           *lru2.Cache[libcommon.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
+	previousStateRoot           libcommon.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 }
@@ -146,6 +150,77 @@ func (b *BeaconState) _updateProposerIndex() (err error) {
 	return
 }
 
+// _initializeValidatorsPhase0 initializes the validators matching flags based on previous/current attestations
+func (b *BeaconState) _initializeValidatorsPhase0() error {
+	// Previous Pending attestations
+	if b.slot == 0 {
+		return nil
+	}
+	previousEpochRoot, err := b.GetBlockRoot(b.PreviousEpoch())
+	if err != nil {
+		return err
+	}
+	for _, attestation := range b.previousEpochAttestations {
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		if err != nil {
+			return err
+		}
+		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		if err != nil {
+			return err
+		}
+		for _, index := range indicies {
+			if b.validators[index].MinPreviousInclusionDelayAttestation == nil || b.validators[index].MinPreviousInclusionDelayAttestation.InclusionDelay > attestation.InclusionDelay {
+				b.validators[index].MinPreviousInclusionDelayAttestation = attestation
+			}
+			b.validators[index].IsPreviousMatchingSourceAttester = true
+			if attestation.Data.Target.Root != previousEpochRoot {
+				continue
+			}
+			b.validators[index].IsPreviousMatchingTargetAttester = true
+
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				b.validators[index].IsPreviousMatchingHeadAttester = true
+			}
+		}
+	}
+
+	// Current Pending attestations
+	if len(b.currentEpochAttestations) == 0 {
+		return nil
+	}
+	currentEpochRoot, err := b.GetBlockRoot(b.Epoch())
+	if err != nil {
+		return err
+	}
+	for _, attestation := range b.currentEpochAttestations {
+		slotRoot, err := b.GetBlockRootAtSlot(attestation.Data.Slot)
+		if err != nil {
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		indicies, err := b.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
+		if err != nil {
+			return err
+		}
+		for _, index := range indicies {
+			if b.validators[index].MinCurrentInclusionDelayAttestation == nil || b.validators[index].MinCurrentInclusionDelayAttestation.InclusionDelay > attestation.InclusionDelay {
+				b.validators[index].MinCurrentInclusionDelayAttestation = attestation
+			}
+			b.validators[index].IsCurrentMatchingSourceAttester = true
+			if attestation.Data.Target.Root == currentEpochRoot {
+				b.validators[index].IsCurrentMatchingTargetAttester = true
+			}
+			if attestation.Data.BeaconBlockHash == slotRoot {
+				b.validators[index].IsCurrentMatchingHeadAttester = true
+			}
+		}
+	}
+	return nil
+}
+
 func (b *BeaconState) initBeaconState() error {
 	if b.touchedLeaves == nil {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
@@ -156,17 +231,20 @@ func (b *BeaconState) initBeaconState() error {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
 	var err error
-	if b.activeValidatorsCache, err = lru.New(5); err != nil {
+	if b.activeValidatorsCache, err = lru2.New[uint64, []uint64](5); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru.New(25); err != nil {
+	if b.shuffledSetsCache, err = lru2.New[libcommon.Hash, []uint64](25); err != nil {
 		return err
 	}
-	if b.committeeCache, err = lru.New(256); err != nil {
+	if b.committeeCache, err = lru2.New[[16]byte, []uint64](256); err != nil {
 		return err
 	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
+	}
+	if b.version >= clparams.Phase0Version {
+		return b._initializeValidatorsPhase0()
 	}
 	return nil
 }

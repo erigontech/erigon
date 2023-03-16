@@ -121,6 +121,7 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
+	withConfig(stateStages)
 	withDataDir2(stateStages)
 	withReferenceChaindata(stateStages)
 	withUnwind(stateStages)
@@ -131,24 +132,23 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-
 	rootCmd.AddCommand(stateStages)
 
+	withConfig(loopIhCmd)
 	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
 	withHeimdall(loopIhCmd)
-
 	rootCmd.AddCommand(loopIhCmd)
 
+	withConfig(loopExecCmd)
 	withDataDir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-
 	rootCmd.AddCommand(loopExecCmd)
 }
 

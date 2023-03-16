@@ -34,7 +34,7 @@ import (
 	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	ssz_utils "github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"

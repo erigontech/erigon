@@ -7,12 +7,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 var (
 	// Error for missing validator
-	InvalidValidatorIndex = errors.New("invalid validator index")
+	ErrInvalidValidatorIndex = errors.New("invalid validator index")
 )
 
 // Just a bunch of simple getters.
@@ -72,11 +71,11 @@ func (b *BeaconState) Validators() []*cltypes.Validator {
 	return b.validators
 }
 
-func (b *BeaconState) ValidatorAt(index int) (cltypes.Validator, error) {
+func (b *BeaconState) ValidatorAt(index int) (*cltypes.Validator, error) {
 	if index >= len(b.validators) {
-		return cltypes.Validator{}, InvalidValidatorIndex
+		return nil, ErrInvalidValidatorIndex
 	}
-	return *b.validators[index], nil
+	return b.validators[index], nil
 }
 
 func (b *BeaconState) Balances() []uint64 {
@@ -85,7 +84,7 @@ func (b *BeaconState) Balances() []uint64 {
 
 func (b *BeaconState) ValidatorBalance(index int) (uint64, error) {
 	if index >= len(b.balances) {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return b.balances[index], nil
 }
@@ -128,7 +127,7 @@ func (b *BeaconState) InactivityScores() []uint64 {
 
 func (b *BeaconState) ValidatorInactivityScore(index int) (uint64, error) {
 	if len(b.inactivityScores) <= index {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
 	return b.inactivityScores[index], nil
 }
@@ -145,12 +144,16 @@ func (b *BeaconState) NextSyncCommittee() *cltypes.SyncCommittee {
 	return b.nextSyncCommittee
 }
 
-func (b *BeaconState) LatestExecutionPayloadHeader() *types.Header {
+func (b *BeaconState) LatestExecutionPayloadHeader() *cltypes.Eth1Header {
 	return b.latestExecutionPayloadHeader
 }
 
 func (b *BeaconState) NextWithdrawalIndex() uint64 {
 	return b.nextWithdrawalIndex
+}
+
+func (b *BeaconState) CurrentEpochAttestations() []*cltypes.PendingAttestation {
+	return b.currentEpochAttestations
 }
 
 func (b *BeaconState) NextWithdrawalValidatorIndex() uint64 {
@@ -168,4 +171,15 @@ func (b *BeaconState) Version() clparams.StateVersion {
 func (b *BeaconState) ValidatorIndexByPubkey(key [48]byte) (uint64, bool) {
 	val, ok := b.publicKeyIndicies[key]
 	return val, ok
+}
+
+func (b *BeaconState) BeaconConfig() *clparams.BeaconChainConfig {
+	return b.beaconConfig
+}
+
+// PreviousStateRoot gets the previously saved state root and then deletes it.
+func (b *BeaconState) PreviousStateRoot() libcommon.Hash {
+	ret := b.previousStateRoot
+	b.previousStateRoot = libcommon.Hash{}
+	return ret
 }

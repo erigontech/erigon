@@ -3,16 +3,16 @@ module github.com/ledgerwatch/erigon
 go 1.18
 
 require (
-	github.com/ledgerwatch/erigon-lib v0.0.0-20230301065635-fc6d2d0b39ad
-	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230224032817-e29f5ad218a2
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230316033808-b3d75ec0c1d3
+	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0 // indirect
-	github.com/torquem-ch/mdbx-go v0.27.8
+	github.com/torquem-ch/mdbx-go v0.27.10
 )
 
 require (
-	github.com/99designs/gqlgen v0.17.25
+	github.com/99designs/gqlgen v0.17.26
 	github.com/Giulio2002/bls v0.0.0-20230217173148-c87a29266b6c
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.1
@@ -27,7 +27,7 @@ require (
 	github.com/crate-crypto/go-ipa v0.0.0-20221111143132-9aa5d42120bc
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
-	github.com/deckarep/golang-set/v2 v2.1.0
+	github.com/deckarep/golang-set/v2 v2.2.0
 	github.com/docker/docker v20.10.17+incompatible
 	github.com/dop251/goja v0.0.0-20220405120441-9037c2b61cbf
 	github.com/edsrzf/mmap-go v1.1.0
@@ -45,7 +45,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/hashicorp/golang-lru v0.5.5-0.20210104140557-80c98217689d
-	github.com/hashicorp/golang-lru/v2 v2.0.1
+	github.com/hashicorp/golang-lru/v2 v2.0.2
 	github.com/holiman/uint256 v1.2.1
 	github.com/huandu/xstrings v1.4.0
 	github.com/huin/goupnp v1.1.0
@@ -57,6 +57,7 @@ require (
 	github.com/libp2p/go-libp2p-pubsub v0.9.1-0.20230221111042-3dbc2fd5baca
 	github.com/maticnetwork/crand v1.0.2
 	github.com/maticnetwork/polyproto v0.0.2
+	github.com/minio/sha256-simd v1.0.0
 	github.com/multiformats/go-multiaddr v0.8.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
@@ -64,7 +65,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.0.7
 	github.com/pion/stun v0.4.0
 	github.com/protolambda/eth2-shuffle v1.1.0
-	github.com/prysmaticlabs/fastssz v0.0.0-20220628121656-93dfe28febab
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/gohashtree v0.0.2-alpha
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
@@ -78,21 +78,21 @@ require (
 	github.com/tidwall/btree v1.6.0
 	github.com/ugorji/go/codec v1.1.13
 	github.com/ugorji/go/codec/codecgen v1.1.13
-	github.com/urfave/cli/v2 v2.24.4
+	github.com/urfave/cli/v2 v2.25.0
 	github.com/valyala/fastjson v1.6.4
 	github.com/vektah/gqlparser/v2 v2.5.1
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/atomic v1.10.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.6.0
-	golang.org/x/exp v0.0.0-20230224173230-c95f2b4c22f2
-	golang.org/x/net v0.7.0
+	golang.org/x/crypto v0.7.0
+	golang.org/x/exp v0.0.0-20230314191032-db074128a8ec
+	golang.org/x/net v0.8.0
 	golang.org/x/sync v0.1.0
-	golang.org/x/sys v0.5.0
+	golang.org/x/sys v0.6.0
 	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.53.0
-	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.2.0
-	google.golang.org/protobuf v1.28.1
+	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
+	google.golang.org/protobuf v1.29.1
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/yaml.v2 v2.4.0
 	modernc.org/sqlite v1.21.0
@@ -189,7 +189,6 @@ require (
 	github.com/miekg/dns v1.1.50 // indirect
 	github.com/mikioh/tcpinfo v0.0.0-20190314235526-30a79bb1804b // indirect
 	github.com/mikioh/tcpopt v0.0.0-20190314235656-172688c1accc // indirect
-	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -253,9 +252,9 @@ require (
 	go.uber.org/dig v1.16.1 // indirect
 	go.uber.org/fx v1.19.1 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	golang.org/x/mod v0.8.0 // indirect
-	golang.org/x/text v0.7.0 // indirect
-	golang.org/x/tools v0.6.0 // indirect
+	golang.org/x/mod v0.9.0 // indirect
+	golang.org/x/text v0.8.0 // indirect
+	golang.org/x/tools v0.7.0 // indirect
 	google.golang.org/genproto v0.0.0-20230202175211-008b39050e57 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -275,4 +274,4 @@ require (
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
 
-replace github.com/ledgerwatch/erigon-lib => github.com/racytech/erigon-lib v0.0.0-20230302074902-a8887902d4e3
+replace github.com/ledgerwatch/erigon-lib => github.com/racytech/erigon-lib v0.0.0-20230316103312-a35e57fb1769
