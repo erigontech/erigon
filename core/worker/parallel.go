@@ -1,4 +1,4 @@
-package stagedsync
+package worker
 
 import (
 	"context"
@@ -51,7 +51,9 @@ func SpawnWorkers(ctx context.Context, logPrefix string, start, end uint64, numP
 	go func() {
 		defer close(doneCh)
 		doneCh <- g.Wait()
-		cleanup()
+		if cleanup != nil {
+			cleanup()
+		}
 	}()
 	return ret
 }

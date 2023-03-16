@@ -69,14 +69,26 @@ func (rl *RetainList) AddKey(key []byte) {
 	rl.AddKeyWithMarker(key, false)
 }
 
+func (rl *RetainList) GetNibbles(i int) []byte {
+	return rl.hexes[i]
+}
+
+func (rl *RetainList) GetMarker(i int) bool {
+	return rl.markers[i]
+}
+
+func (rl *RetainList) AddNibblesWithMarker(nibbles []byte, marker bool) {
+	rl.AddHex(nibbles)
+	rl.markers = append(rl.markers, marker)
+}
+
 func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) {
 	var nibbles = make([]byte, 2*len(key))
 	for i, b := range key {
 		nibbles[i*2] = b / 16
 		nibbles[i*2+1] = b % 16
 	}
-	rl.AddHex(nibbles)
-	rl.markers = append(rl.markers, marker)
+	rl.AddNibblesWithMarker(nibbles, marker)
 }
 
 // AddHex adds a new key (in HEX encoding) to the list

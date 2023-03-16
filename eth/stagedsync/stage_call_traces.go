@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/worker"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
@@ -137,7 +138,7 @@ func promoteCallTraces(logPrefix string, db kv.RwDB, tx kv.RwTx, startBlock, end
 		}
 		resChan := make(chan blockPart, 10_000)
 		ctx := context.Background()
-		g := SpawnWorkersWithRoTx(ctx, logPrefix, db, startBlock, endBlock, CallTraceIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+		g := worker.SpawnWorkersWithRoTx(ctx, logPrefix, db, startBlock, endBlock, CallTraceIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
 			traceCursor, err := roTx.CursorDupSort(kv.CallTraceSet)
 			if err != nil {
 				return fmt.Errorf("failed to create cursor: %w", err)

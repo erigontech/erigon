@@ -113,7 +113,7 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 			return trie.EmptyRoot, err
 		}
 	} else {
-		if root, err = incrementIntermediateHashes(logPrefix, s, tx, to, cfg, expectedRootHash, ctx); err != nil {
+		if root, err = incrementIntermediateHashes(logPrefix, s, cfg.db, tx, to, cfg, expectedRootHash, ctx, !useExternalTx); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
@@ -184,11 +184,12 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 }
 
 type HashPromoter struct {
-	tx               kv.RwTx
-	ChangeSetBufSize uint64
-	TempDir          string
-	logPrefix        string
-	quitCh           <-chan struct{}
+	tx                   kv.RwTx
+	ChangeSetBufSize     uint64
+	TempDir              string
+	logPrefix            string
+	quitCh               <-chan struct{}
+	DeletedAccountHashes map[libcommon.Hash]struct{}
 }
 
 func NewHashPromoter(db kv.RwTx, tempDir string, quitCh <-chan struct{}, logPrefix string) *HashPromoter {
@@ -329,8 +330,11 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 		return err
 	}
 
-	if !storage { // delete Intermediate hashes of deleted accounts
+	if !storage && len(deletedAccounts) > 0 { // delete Intermediate hashes of deleted accounts
 		slices.SortFunc(deletedAccounts, func(a, b []byte) bool { return bytes.Compare(a, b) < 0 })
+		if p.DeletedAccountHashes == nil {
+			p.DeletedAccountHashes = make(map[libcommon.Hash]struct{}, len(deletedAccounts))
+		}
 		for _, k := range deletedAccounts {
 			if err := p.tx.ForPrefix(kv.TrieOfStorage, k, func(k, v []byte) error {
 				if err := p.tx.Delete(kv.TrieOfStorage, k); err != nil {
@@ -340,7 +344,9 @@ func (p *HashPromoter) Promote(logPrefix string, from, to uint64, storage bool, 
 			}); err != nil {
 				return err
 			}
+			p.DeletedAccountHashes[*(*libcommon.Hash)(k)] = struct{}{}
 		}
+		log.Info(fmt.Sprintf("[%s] Deleted accounts", logPrefix), "numAccounts", len(deletedAccounts))
 		return nil
 	}
 	return nil
@@ -521,12 +527,13 @@ func (p *HashPromoter) Unwind(logPrefix string, s *StageState, u *UnwindState, s
 	return nil
 }
 
-func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to uint64, cfg TrieCfg, expectedRootHash libcommon.Hash, ctx context.Context) (libcommon.Hash, error) {
+func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwDB, tx kv.RwTx, to uint64, cfg TrieCfg, expectedRootHash libcommon.Hash,
+	ctx context.Context, parallel bool) (libcommon.Hash, error) {
 	quit := ctx.Done()
-	p := NewHashPromoter(db, cfg.tmpDir, quit, logPrefix)
+	p := NewHashPromoter(tx, cfg.tmpDir, quit, logPrefix)
 	rl := trie.NewRetainList(0)
 	if cfg.historyV3 {
-		cfg.agg.SetTx(db)
+		cfg.agg.SetTx(tx)
 		collect := func(k, v []byte) error {
 			if len(k) == 32 {
 				rl.AddKeyWithMarker(k, len(v) == 0)
@@ -579,11 +586,24 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 	defer stTrieCollector.Close()
 	stTrieCollectorFunc := storageTrieCollector(stTrieCollector)
 
-	loader := trie.NewFlatDBTrieLoader(logPrefix)
-	if err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false); err != nil {
-		return trie.EmptyRoot, err
+	initLoader := func() (*trie.FlatDBTrieLoader, error) {
+		loader := trie.NewFlatDBTrieLoader(logPrefix)
+		err := loader.Reset(rl, accTrieCollectorFunc, stTrieCollectorFunc, false)
+		return loader, err
 	}
-	hash, err := loader.CalcTrieRoot(db, []byte{}, ctx)
+	var hash libcommon.Hash
+	var err error
+	if parallel {
+		log.Info("Retain list", "size", rl.Len())
+		hash, err = trie.CalcTrieRootParallel(initLoader, logPrefix, db, tx, []byte{}, ctx)
+	} else {
+		var loader *trie.FlatDBTrieLoader
+		loader, err = initLoader()
+		if err != nil {
+			return trie.EmptyRoot, err
+		}
+		hash, err = loader.CalcTrieRoot(tx, []byte{}, ctx)
+	}
 	if err != nil {
 		return trie.EmptyRoot, err
 	}
@@ -592,10 +612,10 @@ func incrementIntermediateHashes(logPrefix string, s *StageState, db kv.RwTx, to
 		return hash, nil
 	}
 
-	if err := accTrieCollector.Load(db, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := accTrieCollector.Load(tx, kv.TrieOfAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
-	if err := stTrieCollector.Load(db, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := stTrieCollector.Load(tx, kv.TrieOfStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return trie.EmptyRoot, err
 	}
 	return hash, nil

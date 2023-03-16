@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/worker"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
@@ -156,7 +157,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 			logs     types.Logs
 		}
 		resChan := make(chan txLogPart, 10_000)
-		g := SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, endBlock, LogIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+		g := worker.SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, endBlock, LogIndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
 			logs, err := roTx.Cursor(kv.Log)
 			if err != nil {
 				return err

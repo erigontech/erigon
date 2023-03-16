@@ -18,7 +18,10 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/core/worker"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -322,6 +325,120 @@ func (l *FlatDBTrieLoader) CalcTrieRoot(tx kv.Tx, prefix []byte, ctx context.Con
 		return EmptyRoot, err
 	}
 	return r.Root(), nil
+}
+
+const merkleBranchWidth = 16
+
+// CalcTrieRootParallel calculates the root hash of the trie in parallel, if possible.
+// We can only parallelize the execution if the root nibble is of BRANCH type, otherwise we fallback to sequential computation.
+// Determining the type of the root nibble is done by visiting TrieOfAccounts table, which also means if there is no history,
+// there is no parallelization.  Therefore, this can be only used when computing trie hash incrementally.
+// Since we depend on the history, we may be wrong if accounts are getting deleted in the current state, making root nibble no longer of BRANCH type.
+// If this happens, we fallback to the sequential loader.  This is not a problem, because the rarity of this event is low.
+func CalcTrieRootParallel(initLoaderFunc func() (*FlatDBTrieLoader, error),
+	logPrefix string, db kv.RwDB, tx kv.Tx, prefix []byte,
+	ctx context.Context) (libcommon.Hash, error) {
+	if len(prefix) > 0 {
+		return EmptyRoot, fmt.Errorf("prefix is not supported for parallel loader")
+	}
+	fallback := func() (libcommon.Hash, error) {
+		l, err := initLoaderFunc()
+		if err != nil {
+			return EmptyRoot, err
+		}
+		return l.CalcTrieRoot(tx, prefix, ctx)
+	}
+
+	startTime := time.Now()
+	trieAccC, err := tx.Cursor(kv.TrieOfAccounts)
+	if err != nil {
+		return EmptyRoot, err
+	}
+	defer trieAccC.Close()
+	var numBranches int
+	for i := 0; i < merkleBranchWidth; i++ {
+		k, _, err := trieAccC.Seek([]byte{byte(i)})
+		if err != nil {
+			return EmptyRoot, err
+		}
+		if len(k) != 1 || k[0] != byte(i) {
+			continue
+		}
+		numBranches++
+	}
+	if numBranches <= 1 {
+		return fallback()
+	}
+	probeTook := time.Since(startTime)
+
+	results := make([][]byte, merkleBranchWidth)
+	startTime = time.Now()
+	g := worker.SpawnWorkersWithRoTx(ctx, logPrefix, db, 0, merkleBranchWidth-1, merkleBranchWidth, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+		i := start
+		l, err := initLoaderFunc()
+		if err != nil {
+			return err
+		}
+		l.rd = makeRetainListByPrefix(byte(i), l.rd.(*RetainList))
+		subTrieHash, err := l.CalcTrieRoot(roTx, []byte{byte(i)}, gctx)
+		if err != nil {
+			return err
+		}
+		if subTrieHash == EmptyRoot {
+			results[i] = append(results[i], byte(rlp.EmptyStringCode))
+		} else {
+			results[i] = append(results[i], byte(0x80+length2.Hash))
+			results[i] = append(results[i], subTrieHash[:]...)
+		}
+		return nil
+	}, nil)
+	if err := <-g.Done; err != nil {
+		log.Info("Parallel worker error", "err", err)
+		return EmptyRoot, err
+	}
+
+	var topHashes []byte
+	for i := 0; i < merkleBranchWidth; i++ {
+		topHashes = append(topHashes, results[i]...)
+	}
+	// There is no embedded value in the root nibble, so we need to add an empty string.
+	topHashes = append(topHashes, byte(rlp.EmptyStringCode))
+
+	if len(topHashes) <= merkleBranchWidth+1+length2.Hash {
+		// If we did assumed wrong, fallback to the sequential computation.
+		return fallback()
+	}
+	log.Info(fmt.Sprintf("[%s] Parallel computed sub-trie hash", logPrefix), "numBranches", numBranches, "hashLen", len(topHashes),
+		"probeTook", probeTook, "computeTook", time.Since(startTime))
+
+	var hash libcommon.Hash
+	sha := sha3.NewLegacyKeccak256().(keccakState)
+	sha.Reset()
+	prefixLen := make([]byte, 4)
+	pt := rlphacks.GenerateStructLen(prefixLen, len(topHashes))
+	if _, err := sha.Write(prefixLen[:pt]); err != nil {
+		panic(err)
+	}
+	if _, err := sha.Write(topHashes); err != nil {
+		panic(err)
+	}
+	if _, err := sha.Read(hash[:]); err != nil {
+		panic(err)
+	}
+
+	return hash, nil
+}
+
+func makeRetainListByPrefix(prefix byte, rl *RetainList) *RetainList {
+	newRl := NewRetainList(0)
+	for i := 0; i < rl.Len(); i++ {
+		nibbles := rl.GetNibbles(i)
+		if nibbles[0] == prefix {
+			// Assuming the underlying byte buffer will not be modified.
+			newRl.AddNibblesWithMarker(nibbles, rl.GetMarker(i))
+		}
+	}
+	return newRl
 }
 
 func (l *FlatDBTrieLoader) logProgress(accountKey, ihK []byte) {

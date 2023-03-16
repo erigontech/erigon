@@ -82,9 +82,6 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	} else {
-		if useExternalTx {
-			log.Info(fmt.Sprintf("[%s] Parallel execution disabled (external tx)", logPrefix), "from", s.BlockNumber, "to", to)
-		}
 		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet, !useExternalTx); err != nil {
 			return err
 		}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/worker"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
@@ -169,7 +170,7 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		}
 		resChan := make(chan changeSetPart, 10_000)
 		ctx := context.Background()
-		g := SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, stop-1, IndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
+		g := worker.SpawnWorkersWithRoTx(ctx, logPrefix, cfg.db, start, stop-1, IndexParallelWorkers, func(start, end uint64, partition int, gctx context.Context, roTx kv.Tx) error {
 			return changeset.ForRange(roTx, changesetBucket, start, end+1, func(blockN uint64, k, v []byte) error {
 				if err := libcommon.Stopped(quit); err != nil {
 					return err
