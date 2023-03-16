@@ -207,11 +207,6 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 			}
 			return nil
 		}
-		if bucket == "PlainState" {
-			if len(v) == 0 {
-				fmt.Printf("etl load: empty val: %x, %x, %d, %t\n", k, v, c.bufType, v == nil)
-			}
-		}
 		if canUseAppend {
 			if isDupSort {
 				if err := cursor.(kv.RwCursorDupSort).AppendDup(k, v); err != nil {
