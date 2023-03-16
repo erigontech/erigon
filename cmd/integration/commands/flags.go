@@ -48,6 +48,10 @@ func must(err error) {
 	}
 }
 
+func withConfig(cmd *cobra.Command) {
+	cmd.Flags().String("config", "", "yaml/toml config file location")
+}
+
 func withMining(cmd *cobra.Command) {
 	cmd.Flags().Bool("mine", false, "Enable mining")
 	cmd.Flags().StringArray("miner.notify", nil, "Comma separated HTTP URL list to notify of new work packages")

@@ -74,7 +74,7 @@ func (hb *HashBuilder) Reset() {
 }
 
 func (hb *HashBuilder) SetProofReturn(accProofResult *accounts.AccProofResult) {
-	accProofResult.AccountProof = make([]string, 0)
+	accProofResult.AccountProof = make([]hexutil.Bytes, 0)
 	accProofResult.StorageProof = make([]accounts.StorProofResult, 0)
 	hb.accProofResult = accProofResult
 }
@@ -202,7 +202,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 
 	if hb.collectNode {
 		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
-		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
+		hb.accProofResult.AccountProof = append(hb.accProofResult.AccountProof, nodeBytes)
 		hb.collectNode = false
 	}
 
@@ -465,7 +465,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 
 	if hb.accProofResult != nil {
 		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
-		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
+		hb.accProofResult.AccountProof = append(hb.accProofResult.AccountProof, nodeBytes)
 	}
 
 	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + length2.Hash
@@ -581,7 +581,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 
 	if hb.collectNode {
 		nodeBytes := hexutil.Bytes(proofBuf.Bytes())
-		hb.accProofResult.AccountProof = append([]string{nodeBytes.String()}, hb.accProofResult.AccountProof...)
+		hb.accProofResult.AccountProof = append(hb.accProofResult.AccountProof, nodeBytes)
 		hb.collectNode = false
 	}
 

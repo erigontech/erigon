@@ -1,6 +1,7 @@
 package cltypes_test
 
 import (
+	_ "embed"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -10,8 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/common"
-
-	_ "embed"
 )
 
 var testAttData = &cltypes.AttestationData{
