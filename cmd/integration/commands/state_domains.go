@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"math/bits"
 	"path/filepath"
 	"runtime"
@@ -36,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -329,8 +331,9 @@ func (b *blockProcessor) applyBlock(
 
 	header := block.Header()
 	b.vmConfig.Debug = true
-	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas()
+	gp := new(core.GasPool).AddGas(block.GasLimit()).AddDataGas(params.MaxDataGasPerBlock)
 	usedGas := new(uint64)
+	usedDataGas := new(uint64)
 	var receipts types.Receipts
 	rules := b.chainConfig.Rules(block.NumberU64(), block.Time())
 
@@ -350,6 +353,13 @@ func (b *blockProcessor) applyBlock(
 		}
 	}
 
+	var excessDataGas *big.Int
+	parentHeader, err := b.blockReader.HeaderByHash(ctx, b.reader.roTx, block.ParentHash())
+	if parentHeader != nil {
+		return nil, fmt.Errorf("Can not read HeaderByHash: %w", err)
+	}
+	excessDataGas = parentHeader.ExcessDataGas
+
 	b.txNum++ // Pre-block transaction
 	mxTxProcessed.Inc()
 	b.writer.w.SetTxNum(b.txNum)
@@ -365,7 +375,7 @@ func (b *blockProcessor) applyBlock(
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, excessDataGas, tx, usedGas, usedDataGas, b.vmConfig)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}

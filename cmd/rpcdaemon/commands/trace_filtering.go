@@ -968,7 +968,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	var excessDataGas *big.Int
 	parentBlock, err := api.blockByRPCNumber(parentNo, dbtx)
 	if err != nil {
-		// TODO: make
+		// TODO: log.Debug()?
 		return nil, err
 	}
 	if parentBlock != nil {
