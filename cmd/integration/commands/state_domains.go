@@ -323,7 +323,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 			if err != nil {
 				log.Error("failed to compute commitment", "err", err)
 			}
-			log.Info("commitment: state root computed", "root", rh)
+			log.Info("commitment: state root computed", "root", hex.EncodeToString(rh))
 			if err := agg.Flush(ctx); err != nil {
 				log.Error("failed to flush aggregator", "err", err)
 			}
