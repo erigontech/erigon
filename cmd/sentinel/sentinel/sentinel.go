@@ -209,7 +209,10 @@ func New(
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
 
 	// removed IdDelta in recent version of libp2p
-	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
+	host.SetStreamHandler("/p2p/id/delta/1.0.0", func(s network.Stream) {
+		//fmt.Println("Called delta")
+		s.Close()
+	})
 	s.host = host
 	s.peers = peers.New(s.host)
 
