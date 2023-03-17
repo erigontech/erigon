@@ -75,7 +75,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, blockNrOrHa
 	}
 
 	if len(result.ReturnData) > api.ReturnDataLimit {
-		return nil, fmt.Errorf("call returned result on length %d exceeding limit %d", len(result.ReturnData), api.ReturnDataLimit)
+		return nil, fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), api.ReturnDataLimit)
 	}
 
 	// If the result contains a revert reason, try to unpack and return it.
