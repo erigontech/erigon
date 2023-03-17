@@ -51,7 +51,7 @@ func init() {
 	withDataDir(erigon4Cmd)
 	withChain(erigon4Cmd)
 
-	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 25000, "how many blocks to skip between calculating commitment")
+	erigon4Cmd.Flags().IntVar(&commitmentFrequency, "commfreq", 125000, "how many blocks to skip between calculating commitment")
 	erigon4Cmd.Flags().BoolVar(&commitments, "commitments", false, "set to true to calculate commitments")
 	erigon4Cmd.Flags().StringVar(&commitmentMode, "commitments.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment")
 	erigon4Cmd.Flags().Uint64Var(&startTxNumFrom, "tx", 0, "tx number to start from")
@@ -160,7 +160,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 	agg.StartWrites()
 	defer agg.FinishWrites()
 
-	latestTx, err := agg.SeekCommitment()
+	latestBlock, latestTx, err := agg.SeekCommitment()
 	if err != nil && startTxNum != 0 {
 		return fmt.Errorf("failed to seek commitment to tx %d: %w", startTxNum, err)
 	}
@@ -197,7 +197,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 	}
 
-	logger.Info("Initialised chain configuration", "startTxNum", startTxNum, "config", chainConfig)
+	logger.Info("Initialised chain configuration", "startTxNum", startTxNum, "block", latestBlock, "config", chainConfig)
 
 	var (
 		blockNum uint64
@@ -206,6 +206,11 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		txNum    uint64 = 2 // Consider that each block contains at least first system tx and enclosing transactions, except for Clique consensus engine
 		started         = time.Now()
 	)
+
+	if startTxNum != 0 {
+		txNum = startTxNum
+		blockNum = latestBlock
+	}
 
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
@@ -295,6 +300,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 		}
 		agg.SetTx(rwTx)
 		agg.SetTxNum(txNum)
+		agg.SetBlockNum(blockNum)
 
 		if txNum, _, err = processBlock23(startTxNum, trace, txNum, readWrapper, writeWrapper, chainConfig, engine, getHeader, b, vmConfig); err != nil {
 			log.Error("processing error", "block", blockNum, "err", err)
@@ -309,7 +315,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 				log.Error("aggregator flush", "err", err)
 			}
 
-			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", txNum))
+			log.Info(fmt.Sprintf("interrupted, please wait for cleanup, next time start with --tx %d", agg.Stats().TxCount))
 			if err := commitFn(txNum); err != nil {
 				log.Error("db commit", "err", err)
 			}
@@ -490,7 +496,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *Reader
 	txNum++ // Post-block transaction
 	ww.w.SetTxNum(txNum)
 	if txNum >= startTxNum {
-		if commitments && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
+		if commitments && commitmentFrequency > 0 && block.Number().Uint64()%uint64(commitmentFrequency) == 0 {
 			rootHash, err := ww.w.ComputeCommitment(true, trace)
 			if err != nil {
 				return 0, nil, err

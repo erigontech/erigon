@@ -11,6 +11,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/secp256k1"
+	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
+
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -21,10 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/secp256k1"
-	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -1239,7 +1240,7 @@ func getBlockReader(db kv.RoDB) (blockReader services.FullBlockReader) {
 var openDomainsOnce sync.Once
 var _aggDomainSingleton *libstate.Aggregator
 
-func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, trie commitment.TrieVariant) (*snapshotsync.RoSnapshots, *libstate.Aggregator) {
+func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant) (*snapshotsync.RoSnapshots, *libstate.Aggregator) {
 	openDomainsOnce.Do(func() {
 		var useSnapshots bool
 		_ = db.View(context.Background(), func(tx kv.Tx) error {
@@ -1253,7 +1254,7 @@ func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, t
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 
 		var err error
-		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, ethconfig.HistoryV3AggregationStep, mode, trie)
+		_aggDomainSingleton, err = libstate.NewAggregator(filepath.Join(dirs.DataDir, "state"), dirs.Tmp, stepSize, mode, trie)
 		if err != nil {
 			panic(err)
 		}
@@ -1278,7 +1279,7 @@ func allDomains(ctx context.Context, db kv.RoDB, mode libstate.CommitmentMode, t
 	return _allSnapshotsSingleton, _aggDomainSingleton
 }
 
-func newDomains(ctx context.Context, db kv.RwDB, mode libstate.CommitmentMode, trie commitment.TrieVariant) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
+func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	//events := shards.NewEvents()
 	genesis := core.DefaultGenesisBlockByChainName(chain)
@@ -1310,7 +1311,7 @@ func newDomains(ctx context.Context, db kv.RwDB, mode libstate.CommitmentMode, t
 	//}
 	cfg.Dirs = datadir.New(datadirCli)
 
-	allSn, agg := allDomains(ctx, db, mode, trie)
+	allSn, agg := allDomains(ctx, db, stepSize, mode, trie)
 	cfg.Snapshot = allSn.Cfg()
 
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
