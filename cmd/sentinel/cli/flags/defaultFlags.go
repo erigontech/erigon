@@ -39,4 +39,5 @@ var LCDefaultFlags = []cli.Flag{
 	&CheckpointSyncUrlFlag,
 	&SentinelStaticPeersFlag,
 	&ErigonPrivateApiFlag,
+	&TransitionChainFlag,
 }

@@ -88,4 +88,8 @@ var (
 		Usage: "connect to comma-separated Consensus static peers",
 		Value: "",
 	}
+	TransitionChainFlag = cli.BoolFlag{
+		Name:  "transition-chain",
+		Usage: "enable chain transition",
+	}
 )

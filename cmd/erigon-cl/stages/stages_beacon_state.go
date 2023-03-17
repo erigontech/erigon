@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -14,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -24,7 +22,6 @@ type triggerExecutionFunc func(*cltypes.SignedBeaconBlock) error
 
 type StageBeaconStateCfg struct {
 	db               kv.RwDB
-	genesisCfg       *clparams.GenesisConfig
 	beaconCfg        *clparams.BeaconChainConfig
 	state            *state.BeaconState
 	clearEth1Data    bool // Whether we want to discard eth1 data.
@@ -32,11 +29,10 @@ type StageBeaconStateCfg struct {
 	executionClient  *execution_client.ExecutionClient
 }
 
-func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
+func StageBeaconState(db kv.RwDB,
 	beaconCfg *clparams.BeaconChainConfig, state *state.BeaconState, triggerExecution triggerExecutionFunc, clearEth1Data bool, executionClient *execution_client.ExecutionClient) StageBeaconStateCfg {
 	return StageBeaconStateCfg{
 		db:               db,
-		genesisCfg:       genesisCfg,
 		beaconCfg:        beaconCfg,
 		state:            state,
 		clearEth1Data:    clearEth1Data,
@@ -46,7 +42,7 @@ func StageBeaconState(db kv.RwDB, genesisCfg *clparams.GenesisConfig,
 }
 
 // SpawnStageBeaconForward spawn the beacon forward stage
-func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageBeaconState(cfg StageBeaconStateCfg, tx kv.RwTx, ctx context.Context) error {
 	useExternalTx := tx != nil
 	var err error
 	if !useExternalTx {
@@ -83,7 +79,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 				return err
 			}
 			// validate fully only in current epoch.
-			fullValidate := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) == cfg.state.Epoch()
+			fullValidate := utils.GetCurrentEpoch(cfg.state.GenesisTime(), cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) == cfg.state.Epoch()
 			if err := transition.TransitionState(cfg.state, block, fullValidate); err != nil {
 				log.Info("Found epoch, so stopping now...", "count", slot-(fromSlot+1), "slot", slot)
 				return err
@@ -129,7 +125,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		}
 	}
 
-	log.Info(fmt.Sprintf("[%s] Finished transitioning state", s.LogPrefix()), "from", fromSlot, "to", endSlot)
+	log.Info("[BeaconState] Finished transitioning state", "from", fromSlot, "to", endSlot)
 	if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
