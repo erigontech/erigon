@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	maxSubscribers = 100 // only 100 lightclients per sentinel
+	maxSubscribers = 100 // only 100 clients per sentinel
 )
 
 type gossipObject struct {

@@ -103,6 +103,35 @@ func ComputeForkDigest(
 	return ComputeForkDigestForVersion(currentForkVersion, genesisConfig.GenesisValidatorRoot)
 }
 
+func ComputeNextForkDigest(
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
+) ([4]byte, error) {
+	if genesisConfig.GenesisTime == 0 {
+		return [4]byte{}, errors.New("genesis time is not set")
+	}
+	if genesisConfig.GenesisValidatorRoot == (libcommon.Hash{}) {
+		return [4]byte{}, errors.New("genesis validators root is not set")
+	}
+
+	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
+	// Retrieve next fork version.
+	nextForkIndex := 0
+	forkList := forkList(beaconConfig.ForkVersionSchedule)
+	for _, fork := range forkList {
+		if currentEpoch >= fork.epoch {
+			nextForkIndex++
+			continue
+		}
+		break
+	}
+	if nextForkIndex != len(forkList)-1 {
+		nextForkIndex++
+	}
+
+	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
+}
+
 type fork struct {
 	epoch   uint64
 	version [4]byte

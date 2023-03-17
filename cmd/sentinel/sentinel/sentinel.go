@@ -20,7 +20,6 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
@@ -53,7 +52,6 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
-	gossipTopics   []GossipTopic
 }
 
 func (s *Sentinel) createLocalNode(
@@ -209,10 +207,7 @@ func New(
 	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
 
 	// removed IdDelta in recent version of libp2p
-	host.SetStreamHandler("/p2p/id/delta/1.0.0", func(s network.Stream) {
-		//fmt.Println("Called delta")
-		s.Close()
-	})
+	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")
 	s.host = host
 	s.peers = peers.New(s.host)
 
@@ -222,10 +217,6 @@ func New(
 	}
 
 	return s, nil
-}
-
-func (s *Sentinel) ChainConfigs() (clparams.BeaconChainConfig, clparams.GenesisConfig) {
-	return *s.cfg.BeaconConfig, *s.cfg.GenesisConfig
 }
 
 func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
@@ -265,7 +256,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientFinalityUpdateTopic))
+	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())
