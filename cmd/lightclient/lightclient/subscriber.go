@@ -60,7 +60,7 @@ Retry:
 				continue Retry
 			}
 
-			log.Warn("[Lightclient] could not read gossip :/", "reason", err)
+			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
 			time.Sleep(time.Second)
 		}
 	}
@@ -79,8 +79,9 @@ func (c *ChainTipSubscriber) subscribeGossip() error {
 			return err
 		}
 		if err := c.handleGossipData(data); err != nil {
-			log.Warn("could not process new gossip",
+			log.Debug("could not process new gossip",
 				"gossipType", data.Type, "reason", err)
+
 		}
 	}
 }
@@ -96,6 +97,9 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	case sentinel.GossipType_BeaconBlockGossipType:
 		block := &cltypes.SignedBeaconBlock{}
 		if err := block.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if _, err := c.sentinel.BanPeer(c.ctx, data.Peer); err != nil {
+				return err
+			}
 			return fmt.Errorf("could not unmarshall block: %s", err)
 		}
 
@@ -104,6 +108,9 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 	case sentinel.GossipType_LightClientFinalityUpdateGossipType:
 		finalityUpdate := &cltypes.LightClientFinalityUpdate{}
 		if err := finalityUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if _, err := c.sentinel.BanPeer(c.ctx, data.Peer); err != nil {
+				return err
+			}
 			return fmt.Errorf("could not unmarshall finality update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
@@ -123,6 +130,9 @@ func (c *ChainTipSubscriber) handleGossipData(data *sentinel.GossipData) error {
 
 		optimisticUpdate := &cltypes.LightClientOptimisticUpdate{}
 		if err := optimisticUpdate.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
+			if _, err := c.sentinel.BanPeer(c.ctx, data.Peer); err != nil {
+				return err
+			}
 			return fmt.Errorf("could not unmarshall optimistic update: %s", err)
 		}
 		c.lastUpdate = &cltypes.LightClientUpdate{
