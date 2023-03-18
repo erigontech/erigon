@@ -99,7 +99,9 @@ func DecodeDynamicList[T Unmarshaler](bytes []byte, start, end uint32, max uint6
 			return nil, ErrBadOffset
 		}
 		objs[i] = objs[i].Clone().(T)
-		objs[i].DecodeSSZ(buf[currentOffset:endOffset])
+		if err := objs[i].DecodeSSZ(buf[currentOffset:endOffset]); err != nil {
+			return nil, err
+		}
 		currentOffset = endOffset
 	}
 	return objs, nil
@@ -121,7 +123,9 @@ func DecodeStaticList[T Unmarshaler](bytes []byte, start, end, bytesPerElement u
 	objs := make([]T, elementsNum)
 	for i := range objs {
 		objs[i] = objs[i].Clone().(T)
-		objs[i].DecodeSSZ(buf[i*int(bytesPerElement):])
+		if err := objs[i].DecodeSSZ(buf[i*int(bytesPerElement):]); err != nil {
+			return nil, err
+		}
 	}
 	return objs, nil
 }
