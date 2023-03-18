@@ -24,14 +24,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 )
 
 const (
@@ -53,7 +51,6 @@ type LightClient struct {
 	lastEth2ParentRoot   common2.Hash // Last ETH2 Parent root.
 	finalizedEth1Hash    common2.Hash
 	recentHashesCache    *lru.Cache
-	db                   kv.RwDB
 	rpc                  *rpc.BeaconRpcP2P
 	// Either execution server or client
 	execution       remote.ETHBACKENDServer
@@ -61,9 +58,10 @@ type LightClient struct {
 	store           *LightClientStore
 }
 
-func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
+func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig,
 	execution remote.ETHBACKENDServer, executionClient remote.ETHBACKENDClient, sentinel sentinel.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
+
 	recentHashesCache, err := lru.New(maxRecentHashes)
 	rpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	return &LightClient{
@@ -76,22 +74,16 @@ func NewLightClient(ctx context.Context, db kv.RwDB, genesisConfig *clparams.Gen
 		execution:         execution,
 		verbose:           verbose,
 		highestSeen:       highestSeen,
-		db:                db,
 		executionClient:   executionClient,
 	}, err
 }
 
 func (l *LightClient) Start() {
+	var err error
 	if l.store == nil {
 		log.Error("No trusted setup")
 		return
 	}
-	tx, err := l.db.BeginRw(l.ctx)
-	if err != nil {
-		log.Error("Could not open MDBX transaction", "err", err)
-		return
-	}
-	defer tx.Rollback()
 	logPeers := time.NewTicker(time.Minute)
 
 	go l.chainTip.StartLoop()
@@ -159,41 +151,6 @@ func (l *LightClient) Start() {
 				log.Warn("could not compute root", "err", err)
 				continue
 			}
-			// Save to Database
-			if lastValidated.HasNextSyncCommittee() {
-				if err := rawdb.WriteLightClientUpdate(tx, lastValidated); err != nil {
-					log.Warn("Could not write lightclient update to db", "err", err)
-				}
-			}
-			if lastValidated.IsFinalityUpdate() {
-				if err := rawdb.WriteLightClientFinalityUpdate(tx, &cltypes.LightClientFinalityUpdate{
-					AttestedHeader:  lastValidated.AttestedHeader,
-					FinalizedHeader: lastValidated.FinalizedHeader,
-					FinalityBranch:  lastValidated.FinalityBranch,
-					SyncAggregate:   lastValidated.SyncAggregate,
-					SignatureSlot:   lastValidated.SignatureSlot,
-				}); err != nil {
-					log.Warn("Could not write finality lightclient update to db", "err", err)
-				}
-			}
-			if err := rawdb.WriteLightClientOptimisticUpdate(tx, &cltypes.LightClientOptimisticUpdate{
-				AttestedHeader: lastValidated.AttestedHeader,
-				SyncAggregate:  lastValidated.SyncAggregate,
-				SignatureSlot:  lastValidated.SignatureSlot,
-			}); err != nil {
-				log.Warn("Could not write optimistic lightclient update to db", "err", err)
-			}
-
-			if err := tx.Commit(); err != nil {
-				log.Error("[LightClient] could not commit to database", "err", err)
-				return
-			}
-			tx, err = l.db.BeginRw(l.ctx)
-			if err != nil {
-				log.Error("[LightClient] could not begin database transaction", "err", err)
-				return
-			}
-			defer tx.Rollback()
 
 			if l.verbose {
 				var m runtime.MemStats

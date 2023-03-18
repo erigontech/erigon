@@ -49,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
@@ -586,7 +585,7 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 			return nil, err
 		}
 
-		lc, err := lightclient.NewLightClient(ctx, memdb.New(tmpdir), genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
+		lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
 		if err != nil {
 			return nil, err
 		}
