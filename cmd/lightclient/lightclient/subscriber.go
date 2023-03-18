@@ -60,7 +60,7 @@ Retry:
 				continue Retry
 			}
 
-			log.Warn("[Lightclient] could not read gossip :/", "reason", err)
+			log.Debug("[Lightclient] could not read gossip :/", "reason", err)
 			time.Sleep(time.Second)
 		}
 	}
@@ -79,7 +79,7 @@ func (c *ChainTipSubscriber) subscribeGossip() error {
 			return err
 		}
 		if err := c.handleGossipData(data); err != nil {
-			log.Warn("could not process new gossip",
+			log.Debug("could not process new gossip",
 				"gossipType", data.Type, "reason", err)
 
 		}
