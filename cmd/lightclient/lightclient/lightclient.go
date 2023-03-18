@@ -145,7 +145,7 @@ func (l *LightClient) Start() {
 		for _, update := range updates {
 			err := l.processLightClientUpdate(update)
 			if err != nil {
-				log.Warn("Could not validate update", "err", err)
+				log.Debug("Could not validate update", "err", err)
 				updates = []*cltypes.LightClientUpdate{}
 				break
 			}
