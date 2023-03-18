@@ -33,6 +33,7 @@ type SentinelClient interface {
 	SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error)
 	SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error)
 	GetPeers(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*PeerCount, error)
+	BanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 }
 
 type sentinelClient struct {
@@ -102,6 +103,15 @@ func (c *sentinelClient) GetPeers(ctx context.Context, in *EmptyMessage, opts ..
 	return out, nil
 }
 
+func (c *sentinelClient) BanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, "/sentinel.Sentinel/BanPeer", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentinelServer is the server API for Sentinel service.
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
@@ -110,6 +120,7 @@ type SentinelServer interface {
 	SendRequest(context.Context, *RequestData) (*ResponseData, error)
 	SetStatus(context.Context, *Status) (*EmptyMessage, error)
 	GetPeers(context.Context, *EmptyMessage) (*PeerCount, error)
+	BanPeer(context.Context, *Peer) (*EmptyMessage, error)
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -128,6 +139,9 @@ func (UnimplementedSentinelServer) SetStatus(context.Context, *Status) (*EmptyMe
 }
 func (UnimplementedSentinelServer) GetPeers(context.Context, *EmptyMessage) (*PeerCount, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetPeers not implemented")
+}
+func (UnimplementedSentinelServer) BanPeer(context.Context, *Peer) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BanPeer not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
 
@@ -217,6 +231,24 @@ func _Sentinel_GetPeers_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentinel_BanPeer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Peer)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).BanPeer(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/sentinel.Sentinel/BanPeer",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).BanPeer(ctx, req.(*Peer))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentinel_ServiceDesc is the grpc.ServiceDesc for Sentinel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -235,6 +267,10 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetPeers",
 			Handler:    _Sentinel_GetPeers_Handler,
+		},
+		{
+			MethodName: "BanPeer",
+			Handler:    _Sentinel_BanPeer_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
