@@ -35,7 +35,7 @@ import (
 const (
 	maxRecentHashes   = 5  // 0.16 KB
 	safetyRange       = 16 // 16 block of safety
-	maxChainExtension = 8  // 8 blocks of chain extension
+	maxChainExtension = 32 // 32 blocks of chain extension
 )
 
 type LightClient struct {
