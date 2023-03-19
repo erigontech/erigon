@@ -33,7 +33,7 @@ jobs:
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
         with:
-          go-version: 1.18.x
+          go-version: 1.19.x
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
@@ -84,7 +84,7 @@ jobs:
       - run: git submodule update --init --recursive --force
       - uses: actions/setup-go@v3
         with:
-          go-version: 1.18.x
+          go-version: 1.19.x
 
       - uses: actions/cache@v3
         with:
