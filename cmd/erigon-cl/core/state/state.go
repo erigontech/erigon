@@ -222,9 +222,11 @@ func (b *BeaconState) _initializeValidatorsPhase0() error {
 }
 
 func (b *BeaconState) initBeaconState() error {
+
 	if b.touchedLeaves == nil {
 		b.touchedLeaves = make(map[StateLeafIndex]bool)
 	}
+
 	b.publicKeyIndicies = make(map[[48]byte]uint64)
 	b._refreshActiveBalances()
 	for i, validator := range b.validators {

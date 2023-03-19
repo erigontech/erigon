@@ -446,6 +446,6 @@ func (b *BeaconState) EncodingSizeSSZ() (size int) {
 	return
 }
 
-func (*BeaconState) Clone() clonable.Clonable {
-	return &BeaconState{}
+func (b *BeaconState) Clone() clonable.Clonable {
+	return &BeaconState{beaconConfig: b.beaconConfig}
 }
