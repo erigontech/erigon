@@ -24,13 +24,13 @@ type DepositData struct {
 	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
-func (d *DepositData) EncodeSSZ(dst []byte) []byte {
+func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, d.PubKey[:]...)
 	buf = append(buf, d.WithdrawalCredentials[:]...)
 	buf = append(buf, ssz.Uint64SSZ(d.Amount)...)
 	buf = append(buf, d.Signature[:]...)
-	return buf
+	return buf, nil
 }
 
 func (d *DepositData) DecodeSSZ(buf []byte) error {
@@ -39,6 +39,10 @@ func (d *DepositData) DecodeSSZ(buf []byte) error {
 	d.Amount = ssz.UnmarshalUint64SSZ(buf[80:])
 	copy(d.Signature[:], buf[88:])
 	return nil
+}
+
+func (d *DepositData) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return d.DecodeSSZ(buf)
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -83,14 +87,13 @@ type Deposit struct {
 	Data  *DepositData
 }
 
-func (d *Deposit) EncodeSSZ(dst []byte) []byte {
+func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 
 	buf := dst
 	for _, proofSeg := range d.Proof {
 		buf = append(buf, proofSeg[:]...)
 	}
-	buf = d.Data.EncodeSSZ(buf)
-	return buf
+	return d.Data.EncodeSSZ(buf)
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte) error {

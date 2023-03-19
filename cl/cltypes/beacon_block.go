@@ -166,7 +166,7 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(b.AttesterSlashings) > MaxAttesterSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many attester slashings")
 	}
-	if len(b.ProposerSlashings) > MaxAttesterSlashings {
+	if len(b.ProposerSlashings) > MaxProposerSlashings {
 		return nil, fmt.Errorf("Encode(SSZ): too many proposer slashings")
 	}
 	if len(b.Attestations) > MaxAttestations {
@@ -196,7 +196,9 @@ func (b *BeaconBody) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 
 	for _, deposit := range b.Deposits {
-		buf = deposit.EncodeSSZ(buf)
+		if buf, err = deposit.EncodeSSZ(buf); err != nil {
+			return nil, err
+		}
 	}
 
 	for _, exit := range b.VoluntaryExits {
@@ -251,6 +253,10 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 		}
 	}
 	return
+}
+
+func (b *BeaconBody) DecodeSSZ(buf []byte) error {
+	panic("yo")
 }
 
 func (b *BeaconBody) DecodeSSZWithVersion(buf []byte, version int) error {

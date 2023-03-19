@@ -10,6 +10,10 @@ func (*PendingAttestation) Clone() clonable.Clonable {
 	return &PendingAttestation{}
 }
 
+func (*BeaconBody) Clone() clonable.Clonable {
+	return &BeaconBody{}
+}
+
 func (*Eth1Block) Clone() clonable.Clonable {
 	return &Eth1Block{}
 }
@@ -36,6 +40,14 @@ func (*Validator) Clone() clonable.Clonable {
 
 func (*Attestation) Clone() clonable.Clonable {
 	return &Attestation{}
+}
+
+func (*Checkpoint) Clone() clonable.Clonable {
+	return &Checkpoint{}
+}
+
+func (*DepositData) Clone() clonable.Clonable {
+	return &DepositData{}
 }
 
 func (*Status) Clone() clonable.Clonable {
