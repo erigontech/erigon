@@ -139,6 +139,9 @@ func (s *Sentinel) getTopics(topic GossipTopic) []string {
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
+	if nextDigest == ([4]byte{}) {
+		return []string{fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)}
+	}
 	return []string{
 		fmt.Sprintf("/eth2/%x/%s/%s", nextDigest, topic.Name, topic.CodecStr),
 		fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr),
