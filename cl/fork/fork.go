@@ -125,9 +125,11 @@ func ComputeNextForkDigest(
 		}
 		break
 	}
-	if nextForkIndex != len(forkList)-1 {
-		nextForkIndex++
+	nextForkIndex--
+	if nextForkIndex == len(forkList)-1 {
+		return [4]byte{}, nil
 	}
+	nextForkIndex++
 
 	return ComputeForkDigestForVersion(forkList[nextForkIndex].version, genesisConfig.GenesisValidatorRoot)
 }

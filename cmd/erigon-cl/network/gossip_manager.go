@@ -59,31 +59,31 @@ func (g *GossipManager) Loop() {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlock{}
 			if err := object.DecodeSSZWithVersion(common.CopyBytes(data.Data), int(clparams.BellatrixVersion)); err != nil {
-				log.Warn("[Beacon Gossip] Failure in decoding block", "err", err)
+				log.Debug("[Beacon Gossip] Failure in decoding block", "err", err)
 				continue
 			}
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
-				log.Warn("[Beacon Gossip] Failure in decoding exit", "err", err)
+				log.Debug("[Beacon Gossip] Failure in decoding exit", "err", err)
 				continue
 			}
 		case sentinel.GossipType_ProposerSlashingGossipType:
 			object = &cltypes.ProposerSlashing{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
-				log.Warn("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
+				log.Debug("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
 				continue
 			}
 		case sentinel.GossipType_AttesterSlashingGossipType:
 			object = &cltypes.AttesterSlashing{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
-				log.Warn("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
+				log.Debug("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
 				continue
 			}
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
-				log.Warn("[Beacon Gossip] Failure in decoding proof", "err", err)
+				log.Debug("[Beacon Gossip] Failure in decoding proof", "err", err)
 				continue
 			}
 		}
