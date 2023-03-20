@@ -25,12 +25,12 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	blockNum, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return 0, fmt.Errorf("getting latest block number: %w", err)
+	headHash := rawdb.ReadHeadBlockHash(tx)
+	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
+	if headNumber == nil {
+		return 0, fmt.Errorf("getting latest block number: head is not set")
 	}
-
-	return blockNum, nil
+	return *headNumber, nil
 }
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
