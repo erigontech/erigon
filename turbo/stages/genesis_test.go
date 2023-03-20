@@ -93,7 +93,7 @@ func TestSetupGenesis(t *testing.T) {
 			name: "custom block in DB, genesis == sepolia",
 			fn: func(db kv.RwDB) (*chain.Config, *types.Block, error) {
 				customg.MustCommit(db, tmpdir)
-				return core.CommitGenesisBlock(db, core.DefaultSepoliaGenesisBlock(), tmpdir)
+				return core.CommitGenesisBlock(db, core.SepoliaGenesisBlock(), tmpdir)
 			},
 			wantErr:    &core.GenesisMismatchError{Stored: customghash, New: params.SepoliaGenesisHash},
 			wantHash:   params.SepoliaGenesisHash,

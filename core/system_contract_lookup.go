@@ -19,7 +19,7 @@ func init() {
 		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
-		genesisBlock := DefaultGenesisBlockByChainName(chainName)
+		genesisBlock := GenesisBlockByChainName(chainName)
 		for addr, alloc := range genesisBlock.Alloc {
 			if len(alloc.Code) > 0 {
 				list := byChain[addr]
