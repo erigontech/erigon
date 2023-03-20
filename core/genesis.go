@@ -763,6 +763,17 @@ func ChiadoGenesisBlock() *Genesis {
 	}
 }
 
+func GnosisWithdrawalsDevnet2GenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.GnosisWithdrawalsDevnet2ChainConfig,
+		Timestamp:  0,
+		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   0x989680,
+		Difficulty: big.NewInt(0x20000),
+		Alloc:      readPrealloc("allocs/gnosis_withdrawals_devnet_2.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -829,6 +840,8 @@ func GenesisBlockByChainName(chain string) *Genesis {
 		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
 		return ChiadoGenesisBlock()
+	case networkname.GnosisWithdrawalsDevnet2Name:
+		return GnosisWithdrawalsDevnet2GenesisBlock()
 	default:
 		return nil
 	}

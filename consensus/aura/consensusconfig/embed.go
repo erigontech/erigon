@@ -15,6 +15,9 @@ var Gnosis []byte
 //go:embed poachiado.json
 var Chiado []byte
 
+//go:embed gnosis_withdrawals_devnet_2.json
+var GnosisWithdrawalsDevnet2 []byte
+
 //go:embed test.json
 var Test []byte
 
@@ -26,6 +29,8 @@ func GetConfigByChain(chainName string) []byte {
 		return Gnosis
 	case networkname.ChiadoChainName:
 		return Chiado
+	case networkname.GnosisWithdrawalsDevnet2Name:
+		return GnosisWithdrawalsDevnet2
 	default:
 		return Test
 	}
