@@ -1548,7 +1548,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	switch chain {
 	default:
-		genesis := core.DefaultGenesisBlockByChainName(chain)
+		genesis := core.GenesisBlockByChainName(chain)
 		genesisHash := params.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)

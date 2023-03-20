@@ -761,7 +761,7 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	cfg := stagedsync.StageExecuteBlocksCfg(db, pm, batchSize, nil, chainConfig, engine, vmConfig, nil,
 		/*stateStream=*/ false,
 		/*badBlockHalt=*/ false, historyV3, dirs, getBlockReader(db), nil, genesis, syncCfg, agg)
@@ -1282,7 +1282,7 @@ func allDomains(ctx context.Context, db kv.RoDB, stepSize uint64, mode libstate.
 func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.CommitmentMode, trie commitment.TrieVariant) (consensus.Engine, ethconfig.Config, *snapshotsync.RoSnapshots, *libstate.Aggregator) {
 	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
 	//events := shards.NewEvents()
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
 	_ = genesisBlock // TODO apply if needed here
@@ -1305,7 +1305,7 @@ func newDomains(ctx context.Context, db kv.RwDB, stepSize uint64, mode libstate.
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.DefaultGenesisBlockByChainName(chain)
+	cfg.Genesis = core.GenesisBlockByChainName(chain)
 	//if miningConfig != nil {
 	//	cfg.Miner = *miningConfig
 	//}
@@ -1325,7 +1325,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 
 	events := shards.NewEvents()
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "")
 	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
 		panic(genesisErr)
@@ -1345,7 +1345,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	cfg.Prune = pm
 	cfg.BatchSize = batchSize
 	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.DefaultGenesisBlockByChainName(chain)
+	cfg.Genesis = core.GenesisBlockByChainName(chain)
 	if miningConfig != nil {
 		cfg.Miner = *miningConfig
 	}
