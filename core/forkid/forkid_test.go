@@ -112,8 +112,8 @@ func TestCreation(t *testing.T) {
 				{4460644, 1616045391, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // First Berlin block
 				{5062604, 1625109564, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // Last Berlin block
 				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // First London block
-				{8671878, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // Last pre-Shanghai block (approx height)
-				{8671879, 1678832736, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // First Shanghai block (approx height)
+				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // Last pre-Shanghai block
+				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // First Shanghai block
 			},
 		},
 		// Sepolia test cases
