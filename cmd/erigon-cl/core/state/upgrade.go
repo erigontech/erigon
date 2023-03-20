@@ -29,9 +29,10 @@ func (b *BeaconState) UpgradeToAltair() error {
 		if err != nil {
 			return err
 		}
+
 		for _, index := range indicies {
 			for _, flagIndex := range flags {
-				b.previousEpochParticipation[index].Add(int(flagIndex))
+				b.previousEpochParticipation[index] = b.previousEpochParticipation[index].Add(int(flagIndex))
 			}
 		}
 	}

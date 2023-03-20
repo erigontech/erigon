@@ -49,6 +49,9 @@ var (
 // transitionCoreTest
 var finality = "finality/finality"
 
+// fork
+var fork = "fork/fork"
+
 // sanity
 var sanityBlocks = "sanity/blocks"
 var sanitySlots = "sanity/slots"
@@ -111,6 +114,7 @@ var handlers map[string]testFunc = map[string]testFunc{
 	path.Join(sszDivision, signedBeaconBlockCase):                        getSSZStaticConsensusTest(&cltypes.SignedBeaconBlock{}),
 	path.Join(sszDivision, beaconBlockCase):                              getSSZStaticConsensusTest(&cltypes.BeaconBlock{}),
 	path.Join(sszDivision, beaconBodyCase):                               getSSZStaticConsensusTest(&cltypes.BeaconBody{}),
+	fork:                                                                 forkTest,
 	transitionCore:                                                       transitionTestFunction,
 	sanityBlocks:                                                         testSanityFunction,
 	sanitySlots:                                                          testSanityFunctionSlot,
