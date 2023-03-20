@@ -19,7 +19,6 @@ package forkid
 import (
 	"bytes"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -32,6 +31,8 @@ import (
 
 // TestCreation tests that different genesis and fork rule combinations result in
 // the correct fork ID.
+// Forks before Shanghai are triggered by the block number,
+// while Shanghai and later forks are triggered by the block time.
 func TestCreation(t *testing.T) {
 	type testcase struct {
 		head uint64
@@ -48,32 +49,34 @@ func TestCreation(t *testing.T) {
 			params.MainnetChainConfig,
 			params.MainnetGenesisHash,
 			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},         // Unsynced
-				{1149999, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},   // Last Frontier block
-				{1150000, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},   // First Homestead block
-				{1919999, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},   // Last Homestead block
-				{1920000, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},   // First DAO block
-				{2462999, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},   // Last DAO block
-				{2463000, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},   // First Tangerine block
-				{2674999, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},   // Last Tangerine block
-				{2675000, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},   // First Spurious block
-				{4369999, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},   // Last Spurious block
-				{4370000, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // First Byzantium block
-				{7279999, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // Last Byzantium block
-				{7280000, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // First and last Constantinople, first Petersburg block
-				{9068999, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // Last Petersburg block
-				{9069000, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},   // First Istanbul block
-				{9199999, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},   // Last Istanbul block
-				{9200000, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},  // First Muir Glacier block
-				{12243999, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}}, // Last Muir Glacier block
-				{12244000, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}}, // First Berlin block
-				{12964999, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}}, // Last Berlin block
-				{12965000, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}}, // First London block
-				{13772999, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}}, // Last London block
-				{13773000, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}}, // First Arrow Glacier block
-				{15049999, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}}, // Last Arrow Glacier block
-				{15050000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // First Gray Glacier block
-				{20000000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // Future Gray Glacier block
+				{0, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},                    // Unsynced
+				{1149999, 1457981342, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},     // Last Frontier block
+				{1150000, 1457981393, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},     // First Homestead block
+				{1919999, 1469020838, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},     // Last Homestead block
+				{1920000, 1469020840, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},     // First DAO block
+				{2462999, 1476796747, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},     // Last DAO block
+				{2463000, 1476796771, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},     // First Tangerine block
+				{2674999, 1479831337, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},     // Last Tangerine block
+				{2675000, 1479831344, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},     // First Spurious block
+				{4369999, 1508131303, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},     // Last Spurious block
+				{4370000, 1508131331, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},     // First Byzantium block
+				{7279999, 1551383501, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},     // Last Byzantium block
+				{7280000, 1551383524, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},     // First and last Constantinople, first Petersburg block
+				{9068999, 1575764708, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},     // Last Petersburg block
+				{9069000, 1575764709, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},     // First Istanbul block
+				{9199999, 1577953806, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},     // Last Istanbul block
+				{9200000, 1577953849, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},    // First Muir Glacier block
+				{12243999, 1618481214, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},   // Last Muir Glacier block
+				{12244000, 1618481223, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}},   // First Berlin block
+				{12964999, 1628166812, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}},   // Last Berlin block
+				{12965000, 1628166822, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}},   // First London block
+				{13772999, 1639079715, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}},   // Last London block
+				{13773000, 1639079723, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // First Arrow Glacier block
+				{15049999, 1656586434, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
+				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
+				{17037484, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block (approx)
+				{17037485, 1681338455, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block (approx)
+				{19000000, 1700000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
 		// Rinkeby test cases
@@ -112,8 +115,9 @@ func TestCreation(t *testing.T) {
 				{4460644, 1616045391, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // First Berlin block
 				{5062604, 1625109564, ID{Hash: checksumToBytes(0x757a1c47), Next: 5062605}},    // Last Berlin block
 				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // First London block
-				{8671878, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // Last pre-Shanghai block (approx height)
-				{8671879, 1678832736, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // First Shanghai block (approx height)
+				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}}, // Last pre-Shanghai block
+				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // First Shanghai block
+				{9900000, 1700000000, ID{Hash: checksumToBytes(0xf9843abf), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
 		// Sepolia test cases
@@ -126,6 +130,7 @@ func TestCreation(t *testing.T) {
 				{1735371, 1661130108, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // First MergeNetsplit block
 				{2990907, 1677557076, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // Last pre-Shanghai block
 				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // First Shanghai block
+				{5000000, 1700000000, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // Future Shanghai block (mock)
 			},
 		},
 		// Gnosis test cases
@@ -155,104 +160,6 @@ func TestCreation(t *testing.T) {
 			params.ChiadoGenesisHash,
 			[]testcase{
 				{0, 0, ID{Hash: checksumToBytes(0x50d39d7b), Next: 0}}, // Unsynced, last Frontier, Homestead, Tangerine, Spurious, Byzantium, Constantinople, Petersburg, Istanbul, Berlin and first London block
-			},
-		},
-	}
-	for i, tt := range tests {
-		for j, ttt := range tt.cases {
-			if have := NewID(tt.config, tt.genesis, ttt.head, ttt.time); have != ttt.want {
-				t.Errorf("test %d, case %d: fork ID mismatch: have %x, want %x", i, j, have, ttt.want)
-			}
-		}
-	}
-}
-
-// TestCreationWithTimestamps tests that different genesis and fork rule combinations result in
-// the correct fork ID even for time based forks.
-func TestCreationWithTimestamps(t *testing.T) {
-	mergeConfig := *params.MainnetChainConfig
-	mergeConfig.MergeNetsplitBlock = big.NewInt(18000000)
-
-	withdrawalConfig := *params.MainnetChainConfig
-	withdrawalConfig.MergeNetsplitBlock = big.NewInt(18000000)
-	withdrawalConfig.ShanghaiTime = big.NewInt(1668000000)
-	type testcase struct {
-		head uint64
-		time uint64
-		want ID
-	}
-	tests := []struct {
-		config  *chain.Config
-		genesis libcommon.Hash
-		cases   []testcase
-	}{
-		// Mainnet test cases
-		{
-			params.MainnetChainConfig,
-			params.MainnetGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},         // Unsynced
-				{1149999, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},   // Last Frontier block
-				{1150000, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},   // First Homestead block
-				{1919999, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},   // Last Homestead block
-				{1920000, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},   // First DAO block
-				{2462999, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},   // Last DAO block
-				{2463000, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},   // First Tangerine block
-				{2674999, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},   // Last Tangerine block
-				{2675000, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},   // First Spurious block
-				{4369999, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},   // Last Spurious block
-				{4370000, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // First Byzantium block
-				{7279999, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},   // Last Byzantium block
-				{7280000, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // First and last Constantinople, first Petersburg block
-				{9068999, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},   // Last Petersburg block
-				{9069000, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},   // First Istanbul and first Muir Glacier block
-				{9199999, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},   // Last Istanbul and first Muir Glacier block
-				{9200000, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},  // First Muir Glacier block
-				{12243999, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}}, // Last Muir Glacier block
-				{12244000, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}}, // First Berlin block
-				{12964999, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}}, // Last Berlin block
-				{12965000, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}}, // First London block
-				{13772999, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}}, // Last London block
-				{13773000, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}}, // First Arrow Glacier block
-				{15049999, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}}, // Last Arrow Glacier block
-				{15050000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // First Gray Glacier block
-				{20000000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 0}},        // Future Gray Glacier block
-			},
-		},
-		// Withdrawal test cases
-		{
-			&withdrawalConfig,
-			params.MainnetGenesisHash,
-			[]testcase{
-				{0, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},           // Unsynced
-				{1149999, 0, ID{Hash: checksumToBytes(0xfc64ec04), Next: 1150000}},     // Last Frontier block
-				{1150000, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},     // First Homestead block
-				{1919999, 0, ID{Hash: checksumToBytes(0x97c2c34c), Next: 1920000}},     // Last Homestead block
-				{1920000, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},     // First DAO block
-				{2462999, 0, ID{Hash: checksumToBytes(0x91d1f948), Next: 2463000}},     // Last DAO block
-				{2463000, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},     // First Tangerine block
-				{2674999, 0, ID{Hash: checksumToBytes(0x7a64da13), Next: 2675000}},     // Last Tangerine block
-				{2675000, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},     // First Spurious block
-				{4369999, 0, ID{Hash: checksumToBytes(0x3edd5b10), Next: 4370000}},     // Last Spurious block
-				{4370000, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},     // First Byzantium block
-				{7279999, 0, ID{Hash: checksumToBytes(0xa00bc324), Next: 7280000}},     // Last Byzantium block
-				{7280000, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},     // First and last Constantinople, first Petersburg block
-				{9068999, 0, ID{Hash: checksumToBytes(0x668db0af), Next: 9069000}},     // Last Petersburg block
-				{9069000, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},     // First Istanbul and first Muir Glacier block
-				{9199999, 0, ID{Hash: checksumToBytes(0x879d6e30), Next: 9200000}},     // Last Istanbul and first Muir Glacier block
-				{9200000, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},    // First Muir Glacier block
-				{12243999, 0, ID{Hash: checksumToBytes(0xe029e991), Next: 12244000}},   // Last Muir Glacier block
-				{12244000, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}},   // First Berlin block
-				{12964999, 0, ID{Hash: checksumToBytes(0x0eb440f6), Next: 12965000}},   // Last Berlin block
-				{12965000, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}},   // First London block
-				{13772999, 0, ID{Hash: checksumToBytes(0xb715077d), Next: 13773000}},   // Last London block
-				{13773000, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // First Arrow Glacier block
-				{15049999, 0, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
-				{15050000, 0, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 18000000}},   // First Gray Glacier block
-				{18000000, 0, ID{Hash: checksumToBytes(0x4fb8a872), Next: 1668000000}}, // First Merge Start block
-				{20000000, 0, ID{Hash: checksumToBytes(0x4fb8a872), Next: 1668000000}}, // Last Merge Start block
-				{20000000, 1668000000, ID{Hash: checksumToBytes(0xc1fdf181), Next: 0}}, // First Merge Start block
-				{20000000, 2668000000, ID{Hash: checksumToBytes(0xc1fdf181), Next: 0}}, // Future Merge Start block
 			},
 		},
 	}
