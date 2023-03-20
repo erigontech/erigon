@@ -95,7 +95,7 @@ var readDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		var readFromDomain string
@@ -220,7 +220,7 @@ var stateDomains = &cobra.Command{
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 
 		dirs := datadir.New(datadirCli)
@@ -309,7 +309,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	go proc.PrintStatsLoop(ctx, 30*time.Second)
 
 	if proc.startTxNum == 0 {
-		genesis := core.DefaultGenesisBlockByChainName(chain)
+		genesis := core.GenesisBlockByChainName(chain)
 		if err := proc.ApplyGenesis(genesis); err != nil {
 			return err
 		}

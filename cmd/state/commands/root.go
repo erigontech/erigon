@@ -75,9 +75,9 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 
 func getChainGenesisAndConfig() (genesis *core.Genesis, chainConfig *chain2.Config) {
 	if chain == "" {
-		genesis, chainConfig = core.DefaultGenesisBlock(), params.MainnetChainConfig
+		genesis, chainConfig = core.MainnetGenesisBlock(), params.MainnetChainConfig
 	} else {
-		genesis, chainConfig = core.DefaultGenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
+		genesis, chainConfig = core.GenesisBlockByChainName(chain), params.ChainConfigByChainName(chain)
 	}
 	return genesis, chainConfig
 }

@@ -58,7 +58,7 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
@@ -195,7 +195,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	changesAcc := shards.NewAccumulator()
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
@@ -525,7 +525,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
