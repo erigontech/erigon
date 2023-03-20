@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-func TestDefaultGenesisBlockHashes(t *testing.T) {
+func TestGenesisBlockHashes(t *testing.T) {
 	db := memdb.NewTestDB(t)
 	check := func(network string) {
 		genesis := core.DefaultGenesisBlockByChainName(network)
@@ -42,7 +42,7 @@ func TestDefaultGenesisBlockHashes(t *testing.T) {
 	}
 }
 
-func TestDefaultGenesisBlockRoots(t *testing.T) {
+func TestGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
 
