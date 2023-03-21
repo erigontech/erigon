@@ -67,6 +67,7 @@ var (
 )
 
 type Aggregator struct {
+	db              kv.RwDB
 	aggregationStep uint64
 	accounts        *Domain
 	storage         *Domain
@@ -148,6 +149,8 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 	a.seekTxNum = a.EndTxNumMinimax()
 	return a, nil
 }
+
+func (a *Aggregator) SetDB(db kv.RwDB) { a.db = db }
 
 func (a *Aggregator) ReopenFolder() error {
 	var err error
@@ -414,7 +417,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
-		mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
 		mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 		if err != nil {
@@ -453,7 +456,6 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
 		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
-		mxPruneSize.Set(d.stats.LastPruneSize)
 	}
 
 	// when domain files are build and db is pruned, we can merge them
@@ -825,13 +827,11 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		saveStateAfter = false
 	}
 
-	mxCommitmentKeys.Set(a.commitment.comKeys)
+	mxCommitmentKeys.Add(int(a.commitment.comKeys))
 	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
-	mxCommitmentUpdates.Set(uint64(len(branchNodeUpdates)))
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 
-	var applied uint64
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
 
@@ -839,7 +839,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		if err != nil {
 			return nil, err
 		}
-
+		mxCommitmentUpdates.Inc()
 		stated := commitment.BranchData(stateValue)
 		merged, err := a.commitment.branchMerger.Merge(stated, update)
 		if err != nil {
@@ -854,9 +854,8 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		if err = a.UpdateCommitmentData(prefix, merged); err != nil {
 			return nil, err
 		}
-		applied++
+		mxCommitmentUpdatesApplied.Inc()
 	}
-	mxCommitmentUpdatesApplied.Set(applied)
 
 	if saveStateAfter {
 		if err := a.commitment.storeCommitmentState(a.blockNum, a.txNum); err != nil {
