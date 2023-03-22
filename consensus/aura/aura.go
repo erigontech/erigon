@@ -1434,6 +1434,9 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	}
 
 	_, err = syscall(*c.cfg.WithdrawalContractAddress, packed)
+	if err != nil {
+		log.Warn("ExecuteSystemWithdrawals", "err", err)
+	}
 	return err
 }
 
