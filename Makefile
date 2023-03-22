@@ -214,7 +214,7 @@ git-submodules:
 	@git submodule update --quiet --init --recursive --force || true
 
 PACKAGE_NAME          := github.com/maticnetwork/erigon
-GOLANG_CROSS_VERSION  ?= v1.19.5
+GOLANG_CROSS_VERSION  ?= v1.18.1
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules
@@ -228,8 +228,8 @@ release-dry-run: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate --skip-publish
+		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--rm-dist --skip-validate --skip-publish
 
 .PHONY: release
 release: git-submodules
@@ -243,11 +243,8 @@ release: git-submodules
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-v `pwd`:/go/src/$(PACKAGE_NAME) \
 		-w /go/src/$(PACKAGE_NAME) \
-		ghcr.io/goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
-		--clean --skip-validate
-
-	@docker image push --all-tags thorax/erigon
-	@docker image push --all-tags ghcr.io/ledgerwatch/erigon
+		goreleaser/goreleaser-cross:${GOLANG_CROSS_VERSION} \
+		--rm-dist --skip-validate
 
 # since DOCKER_UID, DOCKER_GID are default initialized to the current user uid/gid,
 # we need separate envvars to facilitate creation of the erigon user on the host OS.
