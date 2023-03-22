@@ -223,7 +223,6 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
-		//TODO: seems MergePairs can't handle "amount" request
 		return iter.UnionKV(it11, it3, limit), nil
 	case CodeDomain:
 		panic("not implemented yet")
