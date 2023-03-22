@@ -366,7 +366,7 @@ func applyFiltersV3(tx kv.TemporalTx, begin, end uint64, crit filters.FilterCrit
 		if out == nil {
 			out = addrBitmap
 		} else {
-			out = iter.Intersect[uint64](out, addrBitmap)
+			out = iter.Intersect[uint64](out, addrBitmap, -1)
 		}
 	}
 	if out == nil {
@@ -558,7 +558,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 			res = topicsUnion
 			continue
 		}
-		res = iter.Intersect[uint64](res, topicsUnion)
+		res = iter.Intersect[uint64](res, topicsUnion, -1)
 	}
 	return res, nil
 }

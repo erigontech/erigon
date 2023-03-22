@@ -312,7 +312,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo)
+		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo, -1)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
