@@ -217,7 +217,9 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 
 	if storage {
 		compositeKey := make([]byte, length.Hash+length.Hash)
-		if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		sc := agg.Storage().MakeContext()
+		defer sc.Close()
+		if err := sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
@@ -241,7 +243,9 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 		return nil
 	}
 
-	if err := agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	ac := agg.Accounts().MakeContext()
+	defer ac.Close()
+	if err := ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -358,7 +362,9 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 	var deletedAccounts [][]byte
 
 	if storage {
-		if err = agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		sc := agg.Storage().MakeContext()
+		defer sc.Close()
+		if err = sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
@@ -385,7 +391,10 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		}
 		return nil
 	}
-	if err = agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+
+	ac := agg.Accounts().MakeContext()
+	defer ac.Close()
+	if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
