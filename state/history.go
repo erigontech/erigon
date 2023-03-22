@@ -1512,9 +1512,9 @@ func (hc *HistoryContext) getNoStateFromDB(key []byte, txNum uint64, tx kv.Tx) (
 	return val[8:], true, nil
 }
 
-func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, amount int) iter.KV {
+func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.Tx, limit int) iter.KV {
 	hi := &StateAsOfIterF{
-		from: from, to: to, limit: amount,
+		from: from, to: to, limit: limit,
 
 		hc:           hc,
 		compressVals: hc.h.compressVals,
@@ -1544,7 +1544,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 			indexTable:   hc.h.indexTable,
 			idxKeysTable: hc.h.indexKeysTable,
 			valsTable:    hc.h.historyValsTable,
-			from:         from, to: to, limit: amount,
+			from:         from, to: to, limit: limit,
 
 			hc:         hc,
 			startTxNum: startTxNum,
@@ -1560,7 +1560,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 			indexTable:   hc.h.indexTable,
 			idxKeysTable: hc.h.indexKeysTable,
 			valsTable:    hc.h.historyValsTable,
-			from:         from, to: to, limit: amount,
+			from:         from, to: to, limit: limit,
 
 			hc:         hc,
 			startTxNum: startTxNum,
@@ -1571,7 +1571,7 @@ func (hc *HistoryContext) WalkAsOf(startTxNum uint64, from, to []byte, roTx kv.T
 		}
 		dbit = dbi
 	}
-	return iter.UnionKV(hi, dbit)
+	return iter.UnionKV(hi, dbit, limit)
 }
 
 // StateAsOfIter - returns state range at given time in history
@@ -1955,7 +1955,7 @@ func (hc *HistoryContext) IterateChanged(fromTxNum, toTxNum int, asc order.By, l
 		return nil, err
 	}
 
-	return iter.UnionKV(itOnFiles, itOnDB), nil
+	return iter.UnionKV(itOnFiles, itOnDB, limit), nil
 }
 
 type HistoryChangesIterF struct {

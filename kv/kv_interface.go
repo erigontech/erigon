@@ -53,7 +53,6 @@ const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
-	ErrUnknownBucket                      = errors.New("unknown bucket. add it to dbutils.ChaindataTables")
 
 	DbSize    = metrics.NewCounter(`db_size`)    //nolint
 	TxLimit   = metrics.NewCounter(`tx_limit`)   //nolint
@@ -70,37 +69,39 @@ var (
 	DbCommitEnding      = metrics.GetOrCreateSummary(`db_commit_seconds{phase="ending"}`)        //nolint
 	DbCommitTotal       = metrics.GetOrCreateSummary(`db_commit_seconds{phase="total"}`)         //nolint
 
-	DbPgopsNewly    = metrics.NewCounter(`db_pgops{phase="newly"}`)    //nolint
-	DbPgopsCow      = metrics.NewCounter(`db_pgops{phase="cow"}`)      //nolint
-	DbPgopsClone    = metrics.NewCounter(`db_pgops{phase="clone"}`)    //nolint
-	DbPgopsSplit    = metrics.NewCounter(`db_pgops{phase="split"}`)    //nolint
-	DbPgopsMerge    = metrics.NewCounter(`db_pgops{phase="merge"}`)    //nolint
-	DbPgopsSpill    = metrics.NewCounter(`db_pgops{phase="spill"}`)    //nolint
-	DbPgopsUnspill  = metrics.NewCounter(`db_pgops{phase="unspill"}`)  //nolint
-	DbPgopsWops     = metrics.NewCounter(`db_pgops{phase="wops"}`)     //nolint
-	DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
-	DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
-	DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
-	DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
-	DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
+	DbPgopsNewly   = metrics.NewCounter(`db_pgops{phase="newly"}`)   //nolint
+	DbPgopsCow     = metrics.NewCounter(`db_pgops{phase="cow"}`)     //nolint
+	DbPgopsClone   = metrics.NewCounter(`db_pgops{phase="clone"}`)   //nolint
+	DbPgopsSplit   = metrics.NewCounter(`db_pgops{phase="split"}`)   //nolint
+	DbPgopsMerge   = metrics.NewCounter(`db_pgops{phase="merge"}`)   //nolint
+	DbPgopsSpill   = metrics.NewCounter(`db_pgops{phase="spill"}`)   //nolint
+	DbPgopsUnspill = metrics.NewCounter(`db_pgops{phase="unspill"}`) //nolint
+	DbPgopsWops    = metrics.NewCounter(`db_pgops{phase="wops"}`)    //nolint
+	/*
+		DbPgopsPrefault = metrics.NewCounter(`db_pgops{phase="prefault"}`) //nolint
+		DbPgopsMinicore = metrics.NewCounter(`db_pgops{phase="minicore"}`) //nolint
+		DbPgopsMsync    = metrics.NewCounter(`db_pgops{phase="msync"}`)    //nolint
+		DbPgopsFsync    = metrics.NewCounter(`db_pgops{phase="fsync"}`)    //nolint
+		DbMiLastPgNo    = metrics.NewCounter(`db_mi_last_pgno`)            //nolint
 
-	DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
-	DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
-	DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
-	DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
-	DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
-	DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
-	DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
-	DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
-	DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
-	DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
-	DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
-	DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
-	DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
-	DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
-	DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
-	DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
-	DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
+		DbGcWorkRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_rtime"}`) //nolint
+		DbGcWorkRsteps   = metrics.NewCounter(`db_gc{phase="work_rsteps"}`)                //nolint
+		DbGcWorkRxpages  = metrics.NewCounter(`db_gc{phase="work_rxpages"}`)               //nolint
+		DbGcSelfRtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_rtime"}`) //nolint
+		DbGcSelfXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="self_xtime"}`) //nolint
+		DbGcWorkXtime    = metrics.GetOrCreateSummary(`db_gc_seconds{phase="work_xtime"}`) //nolint
+		DbGcSelfRsteps   = metrics.NewCounter(`db_gc{phase="self_rsteps"}`)                //nolint
+		DbGcWloops       = metrics.NewCounter(`db_gc{phase="wloop"}`)                      //nolint
+		DbGcCoalescences = metrics.NewCounter(`db_gc{phase="coalescences"}`)               //nolint
+		DbGcWipes        = metrics.NewCounter(`db_gc{phase="wipes"}`)                      //nolint
+		DbGcFlushes      = metrics.NewCounter(`db_gc{phase="flushes"}`)                    //nolint
+		DbGcKicks        = metrics.NewCounter(`db_gc{phase="kicks"}`)                      //nolint
+		DbGcWorkMajflt   = metrics.NewCounter(`db_gc{phase="work_majflt"}`)                //nolint
+		DbGcSelfMajflt   = metrics.NewCounter(`db_gc{phase="self_majflt"}`)                //nolint
+		DbGcWorkCounter  = metrics.NewCounter(`db_gc{phase="work_counter"}`)               //nolint
+		DbGcSelfCounter  = metrics.NewCounter(`db_gc{phase="self_counter"}`)               //nolint
+		DbGcSelfXpages   = metrics.NewCounter(`db_gc{phase="self_xpages"}`)                //nolint
+	*/
 
 	//DbGcWorkPnlMergeTime   = metrics.GetOrCreateSummary(`db_gc_pnl_seconds{phase="work_merge_time"}`) //nolint
 	//DbGcWorkPnlMergeVolume = metrics.NewCounter(`db_gc_pnl{phase="work_merge_volume"}`)               //nolint
@@ -449,8 +450,6 @@ type RwCursorDupSort interface {
 	AppendDup(key, value []byte) error    // AppendDup - same as Append, but for sorted dup data
 }
 
-var ErrNotSupported = errors.New("not supported")
-
 // ---- Temporal part
 type (
 	Domain      string
@@ -476,7 +475,7 @@ type TemporalTx interface {
 	// Example: IndexRange("IndexName", -1, -1, order.Asc, 10)
 	IndexRange(name InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error)
 	HistoryRange(name History, fromTs, toTs int, asc order.By, limit int) (it iter.KV, err error)
-	DomainRange(name Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error)
+	DomainRange(name Domain, k1, k2 []byte, ts uint64, asc order.By, limit int) (it iter.KV, err error)
 }
 
 type TemporalRwDB interface {

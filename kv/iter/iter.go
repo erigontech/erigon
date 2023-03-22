@@ -95,10 +95,11 @@ type UnionKVIter struct {
 	xHasNext, yHasNext bool
 	xNextK, xNextV     []byte
 	yNextK, yNextV     []byte
+	limit              int
 	err                error
 }
 
-func UnionKV(x, y KV) KV {
+func UnionKV(x, y KV, limit int) KV {
 	if x == nil && y == nil {
 		return EmptyKV
 	}
@@ -108,12 +109,14 @@ func UnionKV(x, y KV) KV {
 	if y == nil {
 		return x
 	}
-	m := &UnionKVIter{x: x, y: y}
+	m := &UnionKVIter{x: x, y: y, limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
-func (m *UnionKVIter) HasNext() bool { return m.xHasNext || m.yHasNext }
+func (m *UnionKVIter) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHasNext) || (m.limit != 0 && m.yHasNext)
+}
 func (m *UnionKVIter) advanceX() {
 	if m.err != nil {
 		return
@@ -136,6 +139,7 @@ func (m *UnionKVIter) Next() ([]byte, []byte, error) {
 	if m.err != nil {
 		return nil, nil, m.err
 	}
+	m.limit--
 	if m.xHasNext && m.yHasNext {
 		cmp := bytes.Compare(m.xNextK, m.yNextK)
 		if cmp < 0 {
