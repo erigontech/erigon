@@ -3,7 +3,7 @@ package parlia
 import (
 	"math/rand"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 )
 
 func backOffTime(snap *Snapshot, val libcommon.Address) uint64 {

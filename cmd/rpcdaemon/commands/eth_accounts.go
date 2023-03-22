@@ -5,14 +5,14 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/common/hexutility"
+	"github.com/chainstack/erigon-lib/gointerfaces"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	txpool_proto "github.com/chainstack/erigon-lib/gointerfaces/txpool"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"

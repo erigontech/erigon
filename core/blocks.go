@@ -17,7 +17,7 @@
 package core
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 )
 
 // BadHashes represent a set of manually tracked bad hashes (usually hard forks)

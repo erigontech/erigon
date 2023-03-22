@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/gointerfaces"
+	"github.com/chainstack/erigon-lib/gointerfaces/remote"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"

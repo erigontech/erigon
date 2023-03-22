@@ -167,6 +167,8 @@ github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/chainstack/erigon-lib v0.0.0-20230322081954-d9dc1fc2b51b h1:OaVfefWGTiS3tjObUopObi+BD5bZTFjQKsS6gY88k9g=
+github.com/chainstack/erigon-lib v0.0.0-20230322081954-d9dc1fc2b51b/go.mod h1:RoN/r3LyCYSbX5Jpt4rg6UjreCAeQBxLOywc/euiB8g=
 github.com/cilium/ebpf v0.2.0/go.mod h1:To2CFviqOWL/M0gIMsvSMlqe7em/l1ALkX1PyjrX2Qs=
 github.com/clbanning/x2j v0.0.0-20191024224557-825249438eec/go.mod h1:jMjuTZXRI4dUb/I5gc9Hdhagfvm9+RyrPryS/auMzxE=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=
@@ -519,8 +521,6 @@ github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/kylelemons/godebug v0.0.0-20170224010052-a616ab194758 h1:0D5M2HQSGD3PYPwICLl+/9oulQauOuETfgFvhBDffs0=
 github.com/leanovate/gopter v0.2.9 h1:fQjYxZaynp97ozCzfOyOuAGOU4aU/z37zf/tOujFk7c=
 github.com/leanovate/gopter v0.2.9/go.mod h1:U2L/78B+KVFIx2VmW6onHJQzXtFb+p5y3y2Sh+Jxxv8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20230322070724-03ec6600f1e3 h1:lYaUIn8v3LeV85Z0QUJuyJZZvMbmbud7ERwiC9NQDp8=
-github.com/ledgerwatch/erigon-lib v0.0.0-20230322070724-03ec6600f1e3/go.mod h1:I+1Oys00tH9C8Ow1u5atjh3XasMPE4VoAG5lq8Bi1Zs=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3 h1:tfzawK1gIIgRjVZeANXOr0Ziu+kqCIBuKMe0TXfl5Aw=
 github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/log/v3 v3.7.0 h1:aFPEZdwZx4jzA3+/Pf8wNDN5tCI0cIolq/kfvgcM+og=

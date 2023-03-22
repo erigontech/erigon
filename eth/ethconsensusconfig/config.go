@@ -3,8 +3,8 @@ package ethconsensusconfig
 import (
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/chain"
+	"github.com/chainstack/erigon-lib/kv"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"

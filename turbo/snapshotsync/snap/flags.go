@@ -1,7 +1,7 @@
 package snap
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
