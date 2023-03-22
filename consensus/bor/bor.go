@@ -15,12 +15,13 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
-	"go.uber.org/atomic"
 )
 
 const (
@@ -127,11 +127,11 @@ var (
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru.ARCCache, c *chain.BorConfig) (libcommon.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address], c *chain.BorConfig) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigcache.Get(hash); known {
-		return address.(libcommon.Address), nil
+		return address, nil
 	}
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
@@ -230,8 +230,8 @@ type Bor struct {
 	config      *chain.BorConfig // Consensus engine configuration parameters for bor consensus
 	DB          kv.RwDB          // Database to store and retrieve snapshot checkpoints
 
-	recents    *lru.ARCCache // Snapshots for recent block to speed up reorgs
-	signatures *lru.ARCCache // Signatures of recent blocks to speed up mining
+	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
 
 	authorizedSigner atomic.Pointer[signer] // Ethereum address and sign function of the signing key
 
@@ -271,8 +271,8 @@ func New(
 	}
 
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru.NewARC(inmemorySnapshots)
-	signatures, _ := lru.NewARC(inmemorySignatures)
+	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](inmemorySnapshots)
+	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
 	c := &Bor{
 		chainConfig:            chainConfig,
 		config:                 borConfig,
@@ -402,11 +402,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, gasCap)
 	}
 
-	// If all checks passed, validate any special fields for hard forks
-	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
-		return err
-	}
-
 	// All basic checks passed, verify cascading fields
 	return c.verifyCascadingFields(chain, header, parents)
 }
@@ -514,7 +509,7 @@ func (c *Bor) snapshot(chain consensus.ChainHeaderReader, number uint64, hash li
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := c.recents.Get(hash); ok {
-			snap = s.(*Snapshot)
+			snap = s
 
 			break
 		}

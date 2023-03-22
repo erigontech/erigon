@@ -1,11 +1,8 @@
 package state
 
 import (
-	"math/big"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func GetEmptyBeaconState() *BeaconState {
@@ -19,15 +16,12 @@ func GetEmptyBeaconState() *BeaconState {
 		nextSyncCommittee: &cltypes.SyncCommittee{
 			PubKeys: make([][48]byte, 512),
 		},
-		previousJustifiedCheckpoint: &cltypes.Checkpoint{},
-		currentJustifiedCheckpoint:  &cltypes.Checkpoint{},
-		finalizedCheckpoint:         &cltypes.Checkpoint{},
-		latestExecutionPayloadHeader: &types.Header{
-			BaseFee: big.NewInt(0),
-			Number:  big.NewInt(0),
-		},
-		version:      clparams.BellatrixVersion,
-		beaconConfig: &clparams.MainnetBeaconConfig,
+		previousJustifiedCheckpoint:  &cltypes.Checkpoint{},
+		currentJustifiedCheckpoint:   &cltypes.Checkpoint{},
+		finalizedCheckpoint:          &cltypes.Checkpoint{},
+		latestExecutionPayloadHeader: cltypes.NewEth1Header(clparams.BellatrixVersion),
+		version:                      clparams.BellatrixVersion,
+		beaconConfig:                 &clparams.MainnetBeaconConfig,
 	}
 	b.initBeaconState()
 	return b

@@ -140,7 +140,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	ibs := rw.ibs
 
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
+	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
@@ -178,6 +178,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				//txTask.TraceTos = rw.callTracer.Tos()
 				txTask.TraceTos = map[libcommon.Address]struct{}{}
 				txTask.TraceTos[txTask.Coinbase] = struct{}{}
 				for _, uncle := range txTask.Uncles {

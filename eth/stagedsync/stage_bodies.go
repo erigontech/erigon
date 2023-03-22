@@ -127,7 +127,7 @@ func BodiesForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
-	noProgressCount := 0 // How many time the progress was printed without actual progress
+	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
 	loopBody := func() (bool, error) {

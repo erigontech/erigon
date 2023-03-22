@@ -154,7 +154,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, limit, tx)
 		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
 		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
 		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
@@ -181,7 +181,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 			}
 			return k[:20], v, nil
 		})
-		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1) // don't apply limit, because need filter
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +190,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 			return len(k) == 20
 		})
 		//TODO: seems UnionKV can't handle "amount" request
-		return iter.UnionKV(histStateIt2, latestStateIt2), nil
+		return iter.UnionKV(histStateIt2, latestStateIt2, limit), nil
 	case StorageDomain:
 		toKey, _ := kv.NextSubtree(k1)
 		fromKey2 := append(common.Copy(k1), k2...)
@@ -223,8 +223,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
-		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionKV(it11, it3), nil
+		return iter.UnionKV(it11, it3, limit), nil
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
@@ -343,15 +342,19 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	case StorageHistory:
-		it = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	case CodeHistory:
-		it = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
-		return it, nil
+		it, err = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if closer, ok := it.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+	return it, err
 }

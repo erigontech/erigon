@@ -30,10 +30,8 @@ func (s *Sentinel) SendRequestRaw(data []byte, topic string) ([]byte, bool, erro
 	s.peers.PeerDoRequest(pid)
 	defer s.peers.PeerFinishRequest(pid)
 	data, isError, err := communication.SendRequestRawToPeer(s.ctx, s.host, data, topic, pid)
-	if err != nil || isError {
+	if err != nil {
 		s.peers.Penalize(pid)
-	} else {
-		s.peers.Forgive(pid)
 	}
 	return data, isError, err
 }

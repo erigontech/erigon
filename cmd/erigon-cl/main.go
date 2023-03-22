@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/rpc"
@@ -20,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
+
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
@@ -58,12 +60,8 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Could load beacon data configuration", "err", err)
 		return err
 	}
-	// Fetch the checkpoint state.
-	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
-	if err != nil {
-		log.Error("Could not get checkpoint", "err", err)
-		return err
-	}
+
+	tmpdir := "/tmp"
 	var executionClient *execution_client.ExecutionClient
 	if cfg.ELEnabled {
 		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
@@ -73,8 +71,24 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		}
 	}
 
+	if cfg.TransitionChain {
+		state, err := initial_state.GetGenesisState(cfg.NetworkType)
+		if err != nil {
+			return err
+		}
+		// Execute from genesis to whatever we have.
+		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, nil, true, executionClient), nil, ctx)
+	}
+
+	fmt.Println(cfg.CheckpointUri)
+	// Fetch the checkpoint state.
+	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
+	if err != nil {
+		log.Error("Could not get checkpoint", "err", err)
+		return err
+	}
+
 	log.Info("Starting sync from checkpoint.")
-	tmpdir := "/tmp"
 	// Start the sentinel service
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)

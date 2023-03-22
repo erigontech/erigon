@@ -62,8 +62,6 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 		protocol.ID(communication.MetadataProtocolV2):            c.metadataV2Handler,
 		protocol.ID(communication.BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
 		protocol.ID(communication.BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
-		protocol.ID(communication.LightClientFinalityUpdateV1):   c.lightClientFinalityUpdateHandler,
-		protocol.ID(communication.LightClientOptimisticUpdateV1): c.lightClientOptimisticUpdateHandler,
 	}
 	return c
 }

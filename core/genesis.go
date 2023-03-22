@@ -179,7 +179,7 @@ func (e *GenesisMismatchError) Error() string {
 //
 //	                     genesis == nil       genesis != nil
 //	                  +------------------------------------------
-//	db has no genesis |  main-net default  |  genesis
+//	db has no genesis |  main-net          |  genesis
 //	db has genesis    |  from DB           |  genesis (if compatible)
 //
 // The stored chain configuration will be updated if it is compatible (i.e. does not
@@ -235,8 +235,8 @@ func WriteGenesisBlock(db kv.RwTx, genesis *Genesis, overrideShanghaiTime *big.I
 	if (storedHash == libcommon.Hash{}) {
 		custom := true
 		if genesis == nil {
-			log.Info("Writing default main-net genesis block")
-			genesis = DefaultGenesisBlock()
+			log.Info("Writing main-net genesis block")
+			genesis = MainnetGenesisBlock()
 			custom = false
 		}
 		applyOverrides(genesis.Config)
@@ -590,8 +590,8 @@ func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, tmpDir string) *types.Bl
 	return block
 }
 
-// DefaultGenesisBlock returns the Ethereum main net genesis block.
-func DefaultGenesisBlock() *Genesis {
+// MainnetGenesisBlock returns the Ethereum main net genesis block.
+func MainnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.MainnetChainConfig,
 		Nonce:      66,
@@ -602,8 +602,8 @@ func DefaultGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
-func DefaultSepoliaGenesisBlock() *Genesis {
+// SepoliaGenesisBlock returns the Sepolia network genesis block.
+func SepoliaGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.SepoliaChainConfig,
 		Nonce:      0,
@@ -615,8 +615,8 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultRinkebyGenesisBlock returns the Rinkeby network genesis block.
-func DefaultRinkebyGenesisBlock() *Genesis {
+// RinkebyGenesisBlock returns the Rinkeby network genesis block.
+func RinkebyGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.RinkebyChainConfig,
 		Timestamp:  1492009146,
@@ -627,8 +627,8 @@ func DefaultRinkebyGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultGoerliGenesisBlock returns the Görli network genesis block.
-func DefaultGoerliGenesisBlock() *Genesis {
+// GoerliGenesisBlock returns the Görli network genesis block.
+func GoerliGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.GoerliChainConfig,
 		Timestamp:  1548854791,
@@ -639,7 +639,7 @@ func DefaultGoerliGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultSokolGenesisBlock() *Genesis {
+func SokolGenesisBlock() *Genesis {
 	/*
 		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 	*/
@@ -653,7 +653,7 @@ func DefaultSokolGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultBSCGenesisBlock() *Genesis {
+func BSCGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.BSCChainConfig,
 		Nonce:      0x00,
@@ -669,7 +669,7 @@ func DefaultBSCGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultChapelGenesisBlock() *Genesis {
+func ChapelGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.ChapelChainConfig,
 		Nonce:      0x00,
@@ -685,7 +685,7 @@ func DefaultChapelGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultRialtoGenesisBlock() *Genesis {
+func RialtoGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.RialtoChainConfig,
 		Nonce:      0x00,
@@ -701,7 +701,7 @@ func DefaultRialtoGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultMumbaiGenesisBlock() *Genesis {
+func MumbaiGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.MumbaiChainConfig,
 		Nonce:      0,
@@ -714,8 +714,8 @@ func DefaultMumbaiGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultBorMainnet returns the Bor Mainnet network gensis block.
-func DefaultBorMainnetGenesisBlock() *Genesis {
+// BorMainnetGenesisBlock returns the Bor Mainnet network genesis block.
+func BorMainnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.BorMainnetChainConfig,
 		Nonce:      0,
@@ -728,7 +728,7 @@ func DefaultBorMainnetGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultBorDevnetGenesisBlock() *Genesis {
+func BorDevnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.BorDevnetChainConfig,
 		Nonce:      0,
@@ -741,7 +741,7 @@ func DefaultBorDevnetGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultGnosisGenesisBlock() *Genesis {
+func GnosisGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.GnosisChainConfig,
 		Timestamp:  0,
@@ -752,7 +752,7 @@ func DefaultGnosisGenesisBlock() *Genesis {
 	}
 }
 
-func DefaultChiadoGenesisBlock() *Genesis {
+func ChiadoGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.ChiadoChainConfig,
 		Timestamp:  0,
@@ -801,34 +801,34 @@ func readPrealloc(filename string) GenesisAlloc {
 	return ga
 }
 
-func DefaultGenesisBlockByChainName(chain string) *Genesis {
+func GenesisBlockByChainName(chain string) *Genesis {
 	switch chain {
 	case networkname.MainnetChainName:
-		return DefaultGenesisBlock()
+		return MainnetGenesisBlock()
 	case networkname.SepoliaChainName:
-		return DefaultSepoliaGenesisBlock()
+		return SepoliaGenesisBlock()
 	case networkname.RinkebyChainName:
-		return DefaultRinkebyGenesisBlock()
+		return RinkebyGenesisBlock()
 	case networkname.GoerliChainName:
-		return DefaultGoerliGenesisBlock()
+		return GoerliGenesisBlock()
 	case networkname.SokolChainName:
-		return DefaultSokolGenesisBlock()
+		return SokolGenesisBlock()
 	case networkname.BSCChainName:
-		return DefaultBSCGenesisBlock()
+		return BSCGenesisBlock()
 	case networkname.ChapelChainName:
-		return DefaultChapelGenesisBlock()
+		return ChapelGenesisBlock()
 	case networkname.RialtoChainName:
-		return DefaultRialtoGenesisBlock()
+		return RialtoGenesisBlock()
 	case networkname.MumbaiChainName:
-		return DefaultMumbaiGenesisBlock()
+		return MumbaiGenesisBlock()
 	case networkname.BorMainnetChainName:
-		return DefaultBorMainnetGenesisBlock()
+		return BorMainnetGenesisBlock()
 	case networkname.BorDevnetChainName:
-		return DefaultBorDevnetGenesisBlock()
+		return BorDevnetGenesisBlock()
 	case networkname.GnosisChainName:
-		return DefaultGnosisGenesisBlock()
+		return GnosisGenesisBlock()
 	case networkname.ChiadoChainName:
-		return DefaultChiadoGenesisBlock()
+		return ChiadoGenesisBlock()
 	default:
 		return nil
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 // StateStages are all stages necessary for basic unwind and stage computation, it is primarly used to process side forks and memory execution.
-func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg, beaconIndexes StageBeaconIndexesCfg) []*stagedsync.Stage {
+func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReconstructionCfg, beaconsBlocks StageBeaconsBlockCfg, beaconState StageBeaconStateCfg) []*stagedsync.Stage {
 	return []*stagedsync.Stage{
 		{
 			ID:          stages.BeaconHistoryReconstruction,
@@ -40,17 +40,7 @@ func ConsensusStages(ctx context.Context, historyReconstruction StageHistoryReco
 			ID:          stages.BeaconState,
 			Description: "Execute Consensus Layer transition",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnStageBeaconState(beaconState, s, tx, ctx)
-			},
-			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
-				return nil
-			},
-		},
-		{
-			ID:          stages.BeaconIndexes,
-			Description: "Compute beacon indexes",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stagedsync.StageState, u stagedsync.Unwinder, tx kv.RwTx, quiet bool) error {
-				return SpawnStageBeaconIndexes(beaconIndexes, s, tx, ctx)
+				return SpawnStageBeaconState(beaconState, tx, ctx)
 			},
 			Unwind: func(firstCycle bool, u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx) error {
 				return nil
@@ -87,8 +77,7 @@ func NewConsensusStagedSync(ctx context.Context,
 			ctx,
 			StageHistoryReconstruction(db, backwardDownloader, genesisCfg, beaconCfg, beaconDBCfg, state, tmpdir, executionClient),
 			StageBeaconsBlock(db, forwardDownloader, genesisCfg, beaconCfg, state, executionClient),
-			StageBeaconState(db, genesisCfg, beaconCfg, state, triggerExecution, clearEth1Data, executionClient),
-			StageBeaconIndexes(db, tmpdir),
+			StageBeaconState(db, beaconCfg, state, triggerExecution, clearEth1Data, executionClient),
 		),
 		ConsensusUnwindOrder,
 		ConsensusPruneOrder,

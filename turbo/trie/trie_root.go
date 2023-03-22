@@ -93,6 +93,9 @@ type FlatDBTrieLoader struct {
 	defaultReceiver *RootHashAggregator
 	hc              HashCollector2
 	shc             StorageHashCollector2
+
+	// Optionally construct an Account Proof for an account key specified in 'rd'
+	accProofResult *accounts.AccProofResult
 }
 
 // RootHashAggregator - calculates Merkle trie root hash from incoming data stream
@@ -125,6 +128,10 @@ type RootHashAggregator struct {
 	a              accounts.Account
 	leafData       GenStructStepLeafData
 	accData        GenStructStepAccountData
+
+	// Used to construct an Account proof while calculating the tree root.
+	proofMatch RetainDecider
+	cutoff     bool
 }
 
 type StreamReceiver interface {
@@ -169,7 +176,14 @@ func (l *FlatDBTrieLoader) Reset(rd RetainDeciderWithMarker, hc HashCollector2, 
 		fmt.Printf("----------\n")
 		fmt.Printf("CalcTrieRoot\n")
 	}
+	l.accProofResult = nil
 	return nil
+}
+
+func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
+	l.accProofResult = accProofResult
+	l.defaultReceiver.proofMatch = l.rd
+	l.defaultReceiver.hb.SetProofReturn(accProofResult)
 }
 
 func (l *FlatDBTrieLoader) SetStreamReceiver(receiver StreamReceiver) {
@@ -349,6 +363,7 @@ func (r *RootHashAggregator) Reset(hc HashCollector2, shc StorageHashCollector2,
 	r.root = libcommon.Hash{}
 	r.trace = trace
 	r.hb.trace = trace
+	r.proofMatch = nil
 }
 
 func (r *RootHashAggregator) Receive(itemType StreamItem,
@@ -482,6 +497,10 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 				r.accData.FieldSet |= AccountFieldStorageOnly
 			}
 		}
+
+		// Used for optional GetProof calculation to trigger inclusion of the top-level node
+		r.cutoff = true
+
 		if r.curr.Len() > 0 {
 			if err := r.genStructAccount(); err != nil {
 				return err
@@ -634,14 +653,21 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.currStorage.Reset()
 	r.succStorage.Reset()
 	var err error
-	if r.groups, r.hasTree, r.hasHash, err = GenStructStep(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+
+	var wantProof func(_ []byte) bool
+	if r.proofMatch != nil {
+		wantProof = r.proofMatch.Retain
+	}
+	if r.groups, r.hasTree, r.hasHash, err = GenStructStepEx(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.hc == nil {
 			return nil
 		}
 		return r.hc(keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groups, r.hasTree, r.hasHash,
-		false,
-		//r.trace,
+		//false,
+		r.trace,
+		wantProof,
+		r.cutoff,
 	); err != nil {
 		return err
 	}

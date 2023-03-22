@@ -4,15 +4,16 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math/big"
+	"os/exec"
+	"strconv"
+	"strings"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/devnet/models"
 	"github.com/ledgerwatch/erigon/cmd/rpctest/rpctest"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/crypto"
-	"math/big"
-	"os/exec"
-	"strconv"
-	"strings"
 )
 
 // ClearDevDB cleans up the dev folder used for the operations
@@ -157,6 +158,10 @@ func GenerateTopic(signature string) []libcommon.Hash {
 
 // RandomNumberInRange returns a random number between min and max NOT inclusive
 func RandomNumberInRange(min, max uint64) (uint64, error) {
+	if max <= min {
+		return 0, fmt.Errorf("Invalid range: upper bound %d less or equal than lower bound %d", max, min)
+	}
+
 	diff := int64(max - min)
 
 	n, err := rand.Int(rand.Reader, big.NewInt(diff))

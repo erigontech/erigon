@@ -71,7 +71,7 @@ var LightClientGPO = gasprice.Config{
 var Defaults = Config{
 	Sync: Sync{
 		UseSnapshots:               false,
-		ExecWorkerCount:            2,
+		ExecWorkerCount:            estimate.ReconstituteState.WorkersHalf(), //only half of CPU, other half will spend for snapshots build/merge/prune
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 30,
@@ -101,6 +101,7 @@ var Defaults = Config{
 		KeepBlocks: false,
 		Produce:    true,
 	},
+	DropUselessPeers: false,
 }
 
 func init() {
@@ -249,6 +250,8 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverrideShanghaiTime *big.Int `toml:",omitempty"`
+
+	DropUselessPeers bool
 }
 
 type Sync struct {

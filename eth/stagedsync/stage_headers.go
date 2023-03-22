@@ -797,10 +797,11 @@ func HeadersPOW(
 	cfg.hd.SetHeaderReader(&ChainReaderImpl{config: &cfg.chainConfig, tx: tx, blockReader: cfg.blockReader})
 
 	stopped := false
+	var noProgressCounter uint = 0
 	prevProgress := headerProgress
-	var noProgressCounter int
 	var wasProgress bool
 	var lastSkeletonTime time.Time
+	var peer [64]byte
 	var sentToPeer bool
 Loop:
 	for !stopped {
@@ -816,10 +817,10 @@ Loop:
 			break
 		}
 
+		sentToPeer = false
 		currentTime := time.Now()
 		req, penalties := cfg.hd.RequestMoreHeaders(currentTime)
 		if req != nil {
-			var peer [64]byte
 			peer, sentToPeer = cfg.headerReqSend(ctx, req)
 			if sentToPeer {
 				cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -833,7 +834,6 @@ Loop:
 		for req != nil && sentToPeer && maxRequests > 0 {
 			req, penalties = cfg.hd.RequestMoreHeaders(currentTime)
 			if req != nil {
-				var peer [64]byte
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, false /* skeleton */, peer)
@@ -850,7 +850,6 @@ Loop:
 		if time.Since(lastSkeletonTime) > 1*time.Second {
 			req = cfg.hd.RequestSkeleton()
 			if req != nil {
-				var peer [64]byte
 				peer, sentToPeer = cfg.headerReqSend(ctx, req)
 				if sentToPeer {
 					cfg.hd.UpdateStats(req, true /* skeleton */, peer)
@@ -892,15 +891,17 @@ Loop:
 			stats := cfg.hd.ExtractStats()
 			if prevProgress == progress {
 				noProgressCounter++
-				if noProgressCounter >= 5 {
-					log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
-						"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
-						"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
-					cfg.hd.LogAnchorState()
-					if wasProgress {
-						log.Warn("Looks like chain is not progressing, moving to the next stage")
-						break Loop
-					}
+			} else {
+				noProgressCounter = 0 // Reset, there was progress
+			}
+			if noProgressCounter >= 5 {
+				log.Info("Req/resp stats", "req", stats.Requests, "reqMin", stats.ReqMinBlock, "reqMax", stats.ReqMaxBlock,
+					"skel", stats.SkeletonRequests, "skelMin", stats.SkeletonReqMinBlock, "skelMax", stats.SkeletonReqMaxBlock,
+					"resp", stats.Responses, "respMin", stats.RespMinBlock, "respMax", stats.RespMaxBlock, "dups", stats.Duplicates)
+				cfg.hd.LogAnchorState()
+				if wasProgress {
+					log.Warn("Looks like chain is not progressing, moving to the next stage")
+					break Loop
 				}
 			}
 			prevProgress = progress

@@ -33,13 +33,14 @@ import (
 	"bytes"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
 	"math/big"
 	"os"
 	"testing"
+
+	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/crypto"
 )

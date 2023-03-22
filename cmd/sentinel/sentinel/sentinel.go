@@ -20,7 +20,6 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
@@ -53,7 +52,6 @@ type Sentinel struct {
 	discoverConfig discover.Config
 	pubsub         *pubsub.PubSub
 	subManager     *GossipManager
-	gossipTopics   []GossipTopic
 }
 
 func (s *Sentinel) createLocalNode(
@@ -152,7 +150,6 @@ func (s *Sentinel) pubsubOptions() []pubsub.Option {
 	gsp := pubsub.DefaultGossipSubParams()
 	psOpts := []pubsub.Option{
 		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
 		pubsub.WithMessageIdFn(func(pmsg *pubsub_pb.Message) string {
 			return fork.MsgID(pmsg, s.cfg.NetworkConfig, s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 		}), pubsub.WithNoAuthor(),
@@ -221,10 +218,6 @@ func New(
 	return s, nil
 }
 
-func (s *Sentinel) ChainConfigs() (clparams.BeaconChainConfig, clparams.GenesisConfig) {
-	return *s.cfg.BeaconConfig, *s.cfg.GenesisConfig
-}
-
 func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
 	return s.subManager.Recv()
 }
@@ -262,7 +255,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientFinalityUpdateTopic))
+	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())

@@ -28,103 +28,202 @@ import (
 )
 
 const CodeSizeTable = "CodeSize"
+const StorageTable = "Storage"
 
 type StateV3 struct {
-	lock         sync.RWMutex
+	lock           sync.RWMutex
+	sizeEstimate   int
+	chCode         map[string][]byte
+	chAccs         map[string][]byte
+	chStorage      *btree2.Map[string, []byte]
+	chIncs         map[string][]byte
+	chContractCode map[string][]byte
+
 	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
-	queue        exec22.TxTaskQueue
-	queueLock    sync.Mutex
-	changes      map[string]*btree2.Map[string, []byte]
-	sizeEstimate int
-	txsDone      *atomic2.Uint64
-	finished     atomic2.Bool
+
+	queue     exec22.TxTaskQueue
+	queueLock sync.Mutex
+
+	txsDone  *atomic2.Uint64
+	finished atomic2.Bool
+
+	tmpdir              string
+	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
+	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
-func NewStateV3() *StateV3 {
+func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
-		triggers:     map[uint64]*exec22.TxTask{},
-		senderTxNums: map[common.Address]uint64{},
-		changes: map[string]*btree2.Map[string, []byte]{
-			kv.PlainState:        btree2.NewMap[string, []byte](128),
-			kv.Code:              btree2.NewMap[string, []byte](128),
-			kv.IncarnationMap:    btree2.NewMap[string, []byte](128),
-			kv.PlainContractCode: btree2.NewMap[string, []byte](128),
-		},
+		tmpdir:         tmpdir,
+		triggers:       map[uint64]*exec22.TxTask{},
+		senderTxNums:   map[common.Address]uint64{},
+		chCode:         map[string][]byte{},
+		chAccs:         map[string][]byte{},
+		chStorage:      btree2.NewMap[string, []byte](128),
+		chIncs:         map[string][]byte{},
+		chContractCode: map[string][]byte{},
+
 		txsDone: atomic2.NewUint64(0),
+
+		applyPrevAccountBuf: make([]byte, 256),
+		addrIncBuf:          make([]byte, 20+8),
 	}
 	rs.receiveWork = sync.NewCond(&rs.queueLock)
 	return rs
 }
 
 func (rs *StateV3) put(table string, key, val []byte) {
-	old, ok := rs.changes[table].Set(string(key), val)
-	if ok {
-		rs.sizeEstimate += len(val) - len(old)
-	} else {
-		rs.sizeEstimate += len(key) + len(val)
-	}
+	rs.puts(table, string(key), val)
 }
 
 func (rs *StateV3) puts(table string, key string, val []byte) {
-	old, ok := rs.changes[table].Set(key, val)
-	if ok {
-		rs.sizeEstimate += len(val) - len(old)
-	} else {
-		rs.sizeEstimate += len(key) + len(val)
+	switch table {
+	case StorageTable:
+		if old, ok := rs.chStorage.Set(key, val); ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+	case kv.PlainState:
+		if old, ok := rs.chAccs[key]; ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+		rs.chAccs[key] = val
+	case kv.Code:
+		if old, ok := rs.chCode[key]; ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+		rs.chCode[key] = val
+	case kv.IncarnationMap:
+		if old, ok := rs.chIncs[key]; ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+		rs.chIncs[key] = val
+	case kv.PlainContractCode:
+		if old, ok := rs.chContractCode[key]; ok {
+			rs.sizeEstimate += len(val) - len(old)
+		} else {
+			rs.sizeEstimate += len(key) + len(val)
+		}
+		rs.chContractCode[key] = val
+	default:
+		panic(table)
 	}
 }
 
-func (rs *StateV3) Get(table string, key []byte) []byte {
+func (rs *StateV3) Get(table string, key []byte) (v []byte, ok bool) {
 	rs.lock.RLock()
-	v := rs.get(table, key)
+	v, ok = rs.get(table, key)
 	rs.lock.RUnlock()
-	return v
+	return v, ok
 }
 
-func (rs *StateV3) get(table string, key []byte) (v []byte) {
-	v, _ = rs.changes[table].Get(*(*string)(unsafe.Pointer(&key)))
-	return v
+func (rs *StateV3) get(table string, key []byte) (v []byte, ok bool) {
+	keyS := *(*string)(unsafe.Pointer(&key))
+	switch table {
+	case StorageTable:
+		v, ok = rs.chStorage.Get(keyS)
+	case kv.PlainState:
+		v, ok = rs.chAccs[keyS]
+	case kv.Code:
+		v, ok = rs.chCode[keyS]
+	case kv.IncarnationMap:
+		v, ok = rs.chIncs[keyS]
+	case kv.PlainContractCode:
+		v, ok = rs.chContractCode[keyS]
+	default:
+		panic(table)
+	}
+	return v, ok
+}
+
+func (rs *StateV3) flushMap(ctx context.Context, rwTx kv.RwTx, table string, m map[string][]byte, logPrefix string, logEvery *time.Ticker) error {
+	collector := etl.NewCollector(logPrefix, "", etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer collector.Close()
+
+	var count int
+	total := len(m)
+	for k, v := range m {
+		if err := collector.Collect([]byte(k), v); err != nil {
+			return err
+		}
+		count++
+		select {
+		default:
+		case <-logEvery.C:
+			progress := fmt.Sprintf("%.1fM/%.1fM", float64(count)/1_000_000, float64(total)/1_000_000)
+			log.Info("Write to db", "progress", progress, "current table", table)
+			rwTx.CollectMetrics()
+		}
+	}
+	if err := collector.Load(rwTx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	return nil
+}
+func (rs *StateV3) flushBtree(ctx context.Context, rwTx kv.RwTx, table string, m *btree2.Map[string, []byte], logPrefix string, logEvery *time.Ticker) error {
+	c, err := rwTx.RwCursor(table)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	iter := m.Iter()
+	for ok := iter.First(); ok; ok = iter.Next() {
+		if len(iter.Value()) == 0 {
+			if err = c.Delete([]byte(iter.Key())); err != nil {
+				return err
+			}
+		} else {
+			if err = c.Put([]byte(iter.Key()), iter.Value()); err != nil {
+				return err
+			}
+		}
+
+		select {
+		case <-logEvery.C:
+			log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	return nil
 }
 
 func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, logEvery *time.Ticker) error {
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
-	for table, t := range rs.changes {
-		c, err := rwTx.RwCursor(table)
-		if err != nil {
-			return err
-		}
 
-		iter := t.Iter()
-		for ok := iter.First(); ok; ok = iter.Next() {
-			if len(iter.Value()) == 0 {
-				if err = c.Delete([]byte(iter.Key())); err != nil {
-					return err
-				}
-				//fmt.Printf("Flush [%x]=>\n", item.key)
-			} else {
-				if err = c.Put([]byte(iter.Key()), iter.Value()); err != nil {
-					return err
-				}
-				//fmt.Printf("Flush [%x]=>[%x]\n", item.key, item.val)
-			}
-
-			select {
-			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[%s] Flush", logPrefix), "table", table, "current_prefix", hex.EncodeToString([]byte(iter.Key())[:4]))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-		}
-		if err != nil {
-			return err
-		}
-		t.Clear()
+	if err := rs.flushMap(ctx, rwTx, kv.PlainState, rs.chAccs, logPrefix, logEvery); err != nil {
+		return err
 	}
+	rs.chAccs = map[string][]byte{}
+	if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chStorage.Clear()
+	if err := rs.flushMap(ctx, rwTx, kv.Code, rs.chCode, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chCode = map[string][]byte{}
+	if err := rs.flushMap(ctx, rwTx, kv.PlainContractCode, rs.chContractCode, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chContractCode = map[string][]byte{}
+	if err := rs.flushMap(ctx, rwTx, kv.IncarnationMap, rs.chIncs, logPrefix, logEvery); err != nil {
+		return err
+	}
+	rs.chIncs = map[string][]byte{}
+
 	rs.sizeEstimate = 0
 	return nil
 }
@@ -230,7 +329,7 @@ func (rs *StateV3) Finish() {
 	rs.receiveWork.Broadcast()
 }
 
-func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -240,20 +339,20 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			return err
 		}
 		defer cursor.Close()
-		addr1 := make([]byte, 20+8)
-		psChanges := rs.changes[kv.PlainState]
+		addr1 := rs.addrIncBuf
 		for addrS, original := range txTask.AccountDels {
 			addr := []byte(addrS)
 			copy(addr1, addr)
 			binary.BigEndian.PutUint64(addr1[len(addr):], original.Incarnation)
 
-			prev := accounts.SerialiseV3(original)
+			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
+			accounts.SerialiseV3To(original, prev)
 			if err := agg.AddAccountPrev(addr, prev); err != nil {
 				return err
 			}
 			codeHashBytes := original.CodeHash.Bytes()
-			codePrev := rs.get(kv.Code, codeHashBytes)
-			if codePrev == nil {
+			codePrev, ok := rs.get(kv.Code, codeHashBytes)
+			if !ok || codePrev == nil {
 				var err error
 				codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
 				if err != nil {
@@ -273,28 +372,26 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 			if !bytes.HasPrefix(k, addr1) {
 				k = nil
 			}
-			if psChanges != nil {
-				//TODO: try full-scan, then can replace btree by map
-				iter := psChanges.Iter()
-				for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
-					key := []byte(iter.Key())
-					if !bytes.HasPrefix(key, addr1) {
-						break
-					}
-					for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
-						if !bytes.Equal(k, key) {
-							// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-							if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-								return e
-							}
+			//TODO: try full-scan, then can replace btree by map
+			iter := rs.chStorage.Iter()
+			for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
+				key := []byte(iter.Key())
+				if !bytes.HasPrefix(key, addr1) {
+					break
+				}
+				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
+					if !bytes.Equal(k, key) {
+						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+							return e
 						}
 					}
-					if e != nil {
-						return e
-					}
-					if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
-						break
-					}
+				}
+				if e != nil {
+					return e
+				}
+				if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
+					break
 				}
 			}
 			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
@@ -308,14 +405,14 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 		}
 	}
 
-	k := make([]byte, 20+8)
+	k := rs.addrIncBuf
 	for addrS, incarnation := range txTask.CodePrevs {
 		addr := []byte(addrS)
 		copy(k, addr)
 		binary.BigEndian.PutUint64(k[20:], incarnation)
 
-		codeHash := rs.get(kv.PlainContractCode, k)
-		if codeHash == nil {
+		codeHash, ok := rs.get(kv.PlainContractCode, k)
+		if !ok || codeHash == nil {
 			var err error
 			codeHash, err = roTx.GetOne(kv.PlainContractCode, k)
 			if err != nil {
@@ -324,8 +421,8 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 		}
 		var codePrev []byte
 		if codeHash != nil {
-			codePrev = rs.get(kv.Code, codeHash)
-			if codePrev == nil {
+			codePrev, ok = rs.get(kv.Code, codeHash)
+			if !ok || codePrev == nil {
 				var err error
 				codePrev, err = roTx.GetOne(kv.Code, codeHash)
 				if err != nil {
@@ -340,7 +437,7 @@ func (rs *StateV3) appplyState1(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate
 	return nil
 }
 
-func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -348,8 +445,8 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	for addr, increase := range txTask.BalanceIncreaseSet {
 		increase := increase
 		addrBytes := addr.Bytes()
-		enc0 := rs.get(kv.PlainState, addrBytes)
-		if enc0 == nil {
+		enc0, ok := rs.get(kv.PlainState, addrBytes)
+		if !ok {
 			var err error
 			enc0, err = roTx.GetOne(kv.PlainState, addrBytes)
 			if err != nil {
@@ -367,7 +464,7 @@ func (rs *StateV3) appplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 		a.Balance.Add(&a.Balance, &increase)
 		var enc1 []byte
 		if emptyRemoval && a.Nonce == 0 && a.Balance.IsZero() && a.IsEmptyCodeHash() {
-			enc1 = []byte{}
+			enc1 = nil
 		} else {
 			enc1 = make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(enc1)
@@ -392,10 +489,10 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	if err := rs.appplyState1(roTx, txTask, agg); err != nil {
+	if err := rs.writeStateHistory(roTx, txTask, agg); err != nil {
 		return err
 	}
-	if err := rs.appplyState(roTx, txTask, agg); err != nil {
+	if err := rs.applyState(roTx, txTask, agg); err != nil {
 		return err
 	}
 
@@ -551,35 +648,66 @@ func (rs *StateV3) SizeEstimate() uint64 {
 	rs.lock.RLock()
 	r := rs.sizeEstimate
 	rs.lock.RUnlock()
-	return uint64(r)
+	return uint64(r) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
-	var t *btree2.Map[string, []byte]
-
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
-	//fmt.Printf("ValidReads\n")
 	for table, list := range readLists {
-		//fmt.Printf("Table %s\n", table)
-		var ok bool
-		if table == CodeSizeTable {
-			t, ok = rs.changes[kv.Code]
-		} else {
-			t, ok = rs.changes[table]
+		switch table {
+		case kv.PlainState:
+			if !rs.readsValidMap(table, list, rs.chAccs) {
+				return false
+			}
+		case CodeSizeTable:
+			if !rs.readsValidMap(table, list, rs.chCode) {
+				return false
+			}
+		case StorageTable:
+			if !rs.readsValidBtree(table, list, rs.chStorage) {
+				return false
+			}
+		case kv.Code:
+			if !rs.readsValidMap(table, list, rs.chCode) {
+				return false
+			}
+		case kv.IncarnationMap:
+			if !rs.readsValidMap(table, list, rs.chIncs) {
+				return false
+			}
 		}
-		if !ok {
-			continue
-		}
+	}
+	return true
+}
+
+func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
+	switch table {
+	case CodeSizeTable:
 		for i, key := range list.Keys {
-			if val, ok := t.Get(key); ok {
-				if table == CodeSizeTable {
-					if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
-						return false
-					}
-				} else if !bytes.Equal(list.Vals[i], val) {
+			if val, ok := m[key]; ok {
+				if binary.BigEndian.Uint64(list.Vals[i]) != uint64(len(val)) {
 					return false
 				}
+			}
+		}
+	default:
+		for i, key := range list.Keys {
+			if val, ok := m[key]; ok {
+				if !bytes.Equal(list.Vals[i], val) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
+	for i, key := range list.Keys {
+		if val, ok := m.Get(key); ok {
+			if !bytes.Equal(list.Vals[i], val) {
+				return false
 			}
 		}
 	}
@@ -661,7 +789,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addressBytes := address.Bytes()
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
-	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, []byte{})
+	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, nil)
 	if original.Incarnation > 0 {
 		var b [8]byte
 		binary.BigEndian.PutUint64(b[:], original.Incarnation)
@@ -683,8 +811,8 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	}
 	composite := dbutils.PlainGenerateCompositeStorageKey(address[:], incarnation, key.Bytes())
 	cmpositeS := string(composite)
-	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, cmpositeS)
-	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value.Bytes())
+	w.writeLists[StorageTable].Keys = append(w.writeLists[StorageTable].Keys, cmpositeS)
+	w.writeLists[StorageTable].Vals = append(w.writeLists[StorageTable].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
 	if w.storagePrevs == nil {
 		w.storagePrevs = map[string][]byte{}
@@ -724,8 +852,8 @@ func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newR
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
-	enc := r.rs.Get(kv.PlainState, addr)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.PlainState, addr)
+	if !ok {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, addr)
 		if err != nil {
@@ -752,8 +880,8 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc := r.rs.Get(kv.PlainState, composite)
-	if enc == nil {
+	enc, ok := r.rs.Get(StorageTable, composite)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.PlainState, composite)
 		if err != nil {
@@ -761,8 +889,8 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 	if !r.discardReadList {
-		r.readLists[kv.PlainState].Keys = append(r.readLists[kv.PlainState].Keys, string(composite))
-		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
+		r.readLists[StorageTable].Keys = append(r.readLists[StorageTable].Keys, string(composite))
+		r.readLists[StorageTable].Vals = append(r.readLists[StorageTable].Vals, enc)
 	}
 	if r.trace {
 		if enc == nil {
@@ -779,8 +907,8 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
-	enc := r.rs.Get(kv.Code, codeHashBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
@@ -799,8 +927,8 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
 	codeHashBytes := codeHash.Bytes()
-	enc := r.rs.Get(kv.Code, codeHashBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.Code, codeHashBytes)
 		if err != nil {
@@ -822,8 +950,8 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 
 func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, error) {
 	addrBytes := address[:]
-	enc := r.rs.Get(kv.IncarnationMap, addrBytes)
-	if enc == nil {
+	enc, ok := r.rs.Get(kv.IncarnationMap, addrBytes)
+	if !ok || enc == nil {
 		var err error
 		enc, err = r.tx.GetOne(kv.IncarnationMap, addrBytes)
 		if err != nil {
@@ -844,6 +972,7 @@ var writeListPool = sync.Pool{
 	New: func() any {
 		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
+			StorageTable:         {},
 			kv.Code:              {},
 			kv.PlainContractCode: {},
 			kv.IncarnationMap:    {},
@@ -871,6 +1000,7 @@ var readListPool = sync.Pool{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
+			StorageTable:      {},
 			kv.IncarnationMap: {},
 		}
 	},

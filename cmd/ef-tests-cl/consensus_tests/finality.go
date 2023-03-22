@@ -3,7 +3,6 @@ package consensustests
 import (
 	"fmt"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -20,10 +19,9 @@ func finalityTestFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	transistor := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
 	startSlot := testState.Slot()
 	for _, block := range blocks {
-		if err := transistor.TransitionState(block); err != nil {
+		if err := transition.TransitionState(testState, block, true); err != nil {
 			return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 		}
 	}

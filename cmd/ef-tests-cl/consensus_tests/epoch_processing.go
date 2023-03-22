@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
-func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFunc {
+func getTestEpochProcessing(f func(s *state.BeaconState) error) testFunc {
 	return func(context testContext) (err error) {
 		defer func() {
 			// recover from panic if one occured. Set err to nil otherwise.
@@ -29,19 +29,16 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 		expectedState, err := decodeStateFromFile(context, "post.ssz_snappy")
 		if os.IsNotExist(err) {
 			isErrExpected = true
-		} else {
+		} else if err != nil {
 			return err
 		}
-
 		// Make up state transistor
-		s := transition.New(testState, &clparams.MainnetBeaconConfig, nil, false)
-		if err := f(s); err != nil {
+		if err := f(testState); err != nil {
 			if isErrExpected {
 				return nil
 			}
 			return err
 		}
-
 		if isErrExpected && err == nil {
 			return fmt.Errorf("expected an error got none")
 		}
@@ -60,51 +57,56 @@ func getTestEpochProcessing(f func(s *transition.StateTransistor) error) testFun
 	}
 }
 
-var effectiveBalancesUpdateTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessEffectiveBalanceUpdates()
+var effectiveBalancesUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessEffectiveBalanceUpdates(s)
 })
 
-var eth1DataResetTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	s.ProcessEth1DataReset()
+var eth1DataResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessEth1DataReset(s)
 	return nil
 })
 
-var historicalRootsUpdateTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	s.ProcessHistoricalRootsUpdate()
+var historicalRootsUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessHistoricalRootsUpdate(s)
 	return nil
 })
 
-var inactivityUpdateTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessInactivityScores()
+var inactivityUpdateTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessInactivityScores(s)
 })
 
-var justificationFinalizationTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessJustificationBitsAndFinality()
+var justificationFinalizationTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessJustificationBitsAndFinality(s)
 })
 
-var participationFlagUpdatesTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	s.ProcessParticipationFlagUpdates()
+var participationFlagUpdatesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessParticipationFlagUpdates(s)
 	return nil
 })
 
-var randaoMixesTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	s.ProcessRandaoMixesReset()
+var randaoMixesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessRandaoMixesReset(s)
 	return nil
 })
 
-var registryUpdatesTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessRegistryUpdates()
+var registryUpdatesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessRegistryUpdates(s)
 })
 
-var rewardsAndPenaltiesTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessRewardsAndPenalties()
+var rewardsAndPenaltiesTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessRewardsAndPenalties(s)
 })
 
-var slashingsTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	return s.ProcessSlashings()
+var slashingsTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	return transition.ProcessSlashings(s)
 })
 
-var slashingsResetTest = getTestEpochProcessing(func(s *transition.StateTransistor) error {
-	s.ProcessSlashingsReset()
+var slashingsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessSlashingsReset(s)
+	return nil
+})
+
+var recordsResetTest = getTestEpochProcessing(func(s *state.BeaconState) error {
+	transition.ProcessParticipationRecordUpdates(s)
 	return nil
 })

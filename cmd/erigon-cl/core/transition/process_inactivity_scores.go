@@ -2,29 +2,30 @@ package transition
 
 import (
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
 // ProcessInactivityScores will updates the inactivity registry of each validator.
-func (s *StateTransistor) ProcessInactivityScores() error {
-	if s.state.Epoch() == s.beaconConfig.GenesisEpoch {
+func ProcessInactivityScores(state *state.BeaconState) error {
+	if state.Epoch() == state.BeaconConfig().GenesisEpoch {
 		return nil
 	}
-	previousEpoch := s.state.PreviousEpoch()
-	for _, validatorIndex := range s.state.EligibleValidatorsIndicies() {
+	previousEpoch := state.PreviousEpoch()
+	for _, validatorIndex := range state.EligibleValidatorsIndicies() {
 		// retrieve validator inactivity score index.
-		score, err := s.state.ValidatorInactivityScore(int(validatorIndex))
+		score, err := state.ValidatorInactivityScore(int(validatorIndex))
 		if err != nil {
 			return err
 		}
-		if s.state.IsUnslashedParticipatingIndex(previousEpoch, validatorIndex, int(s.beaconConfig.TimelyTargetFlagIndex)) {
+		if state.IsUnslashedParticipatingIndex(previousEpoch, validatorIndex, int(state.BeaconConfig().TimelyTargetFlagIndex)) {
 			score -= utils.Min64(1, score)
 		} else {
-			score += s.beaconConfig.InactivityScoreBias
+			score += state.BeaconConfig().InactivityScoreBias
 		}
-		if !s.state.InactivityLeaking() {
-			score -= utils.Min64(s.beaconConfig.InactivityScoreRecoveryRate, score)
+		if !state.InactivityLeaking() {
+			score -= utils.Min64(state.BeaconConfig().InactivityScoreRecoveryRate, score)
 		}
-		if err := s.state.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
+		if err := state.SetValidatorInactivityScore(int(validatorIndex), score); err != nil {
 			return err
 		}
 	}

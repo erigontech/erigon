@@ -797,7 +797,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 	blockHeight := header.Number.Uint64()
 	var ch libcommon.Hash
 	if fromCache, ok := hi.canonicalCache.Get(blockHeight - 1); ok {
-		ch = fromCache.(libcommon.Hash)
+		ch = fromCache
 	} else {
 		if ch, err = hi.headerReader.CanonicalHash(context.Background(), db, blockHeight-1); err != nil {
 			return 0, fmt.Errorf("reading canonical hash for height %d: %w", blockHeight-1, err)
@@ -811,7 +811,7 @@ func (hi *HeaderInserter) ForkingPoint(db kv.StatelessRwTx, header, parent *type
 		ancestorHeight := blockHeight - 2
 		// Look in the cache first
 		for fromCache, ok := hi.canonicalCache.Get(ancestorHeight); ok; fromCache, ok = hi.canonicalCache.Get(ancestorHeight) {
-			ch = fromCache.(libcommon.Hash)
+			ch = fromCache
 			if ch == ancestorHash {
 				break
 			}

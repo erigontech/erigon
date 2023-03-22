@@ -24,11 +24,11 @@ import (
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
-func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error {
+func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(val.EncodingSizeSSZ()))
@@ -52,7 +52,7 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
 	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -66,7 +66,7 @@ func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ, b *clparams.BeaconCh
 	return DecodeAndReadNoForkDigest(r, val, version)
 }
 
-func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ, version clparams.StateVersion) error {
+func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
@@ -108,7 +108,7 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
 	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)

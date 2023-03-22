@@ -741,7 +741,12 @@ func (ss *GrpcServer) startSync(ctx context.Context, bestHash libcommon.Hash, pe
 func (ss *GrpcServer) PenalizePeer(_ context.Context, req *proto_sentry.PenalizePeerRequest) (*emptypb.Empty, error) {
 	//log.Warn("Received penalty", "kind", req.GetPenalty().Descriptor().FullName, "from", fmt.Sprintf("%s", req.GetPeerId()))
 	peerID := ConvertH512ToPeerID(req.PeerId)
-	ss.removePeer(peerID)
+	peerInfo := ss.getPeer(peerID)
+	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
+		ss.removePeer(peerID)
+		printablePeerID := hex.EncodeToString(peerID[:])[:8]
+		log.Debug("[p2p] Penalized peer", "peerId", printablePeerID, "name", peerInfo.peer.Name())
+	}
 	return &emptypb.Empty{}, nil
 }
 
@@ -749,17 +754,6 @@ func (ss *GrpcServer) PeerMinBlock(_ context.Context, req *proto_sentry.PeerMinB
 	peerID := ConvertH512ToPeerID(req.PeerId)
 	if peerInfo := ss.getPeer(peerID); peerInfo != nil {
 		peerInfo.SetIncreasedHeight(req.MinBlock)
-	}
-	return &emptypb.Empty{}, nil
-}
-
-func (ss *GrpcServer) PeerUseless(_ context.Context, req *proto_sentry.PeerUselessRequest) (*emptypb.Empty, error) {
-	peerID := ConvertH512ToPeerID(req.PeerId)
-	peerInfo := ss.getPeer(peerID)
-	if ss.statusData != nil && peerInfo != nil && !peerInfo.peer.Info().Network.Static && !peerInfo.peer.Info().Network.Trusted {
-		ss.removePeer(peerID)
-		printablePeerID := hex.EncodeToString(peerID[:])[:8]
-		log.Debug("[p2p] Removed useless peer", "peerId", printablePeerID, "name", peerInfo.peer.Name())
 	}
 	return &emptypb.Empty{}, nil
 }

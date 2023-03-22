@@ -6,7 +6,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -24,21 +24,25 @@ type DepositData struct {
 	Root                  libcommon.Hash // Ignored if not for hashing
 }
 
-func (d *DepositData) EncodeSSZ(dst []byte) []byte {
+func (d *DepositData) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, d.PubKey[:]...)
 	buf = append(buf, d.WithdrawalCredentials[:]...)
-	buf = append(buf, ssz_utils.Uint64SSZ(d.Amount)...)
+	buf = append(buf, ssz.Uint64SSZ(d.Amount)...)
 	buf = append(buf, d.Signature[:]...)
-	return buf
+	return buf, nil
 }
 
 func (d *DepositData) DecodeSSZ(buf []byte) error {
 	copy(d.PubKey[:], buf)
 	copy(d.WithdrawalCredentials[:], buf[48:])
-	d.Amount = ssz_utils.UnmarshalUint64SSZ(buf[80:])
+	d.Amount = ssz.UnmarshalUint64SSZ(buf[80:])
 	copy(d.Signature[:], buf[88:])
 	return nil
+}
+
+func (d *DepositData) DecodeSSZWithVersion(buf []byte, _ int) error {
+	return d.DecodeSSZ(buf)
 }
 
 func (d *DepositData) EncodingSizeSSZ() int {
@@ -83,14 +87,13 @@ type Deposit struct {
 	Data  *DepositData
 }
 
-func (d *Deposit) EncodeSSZ(dst []byte) []byte {
+func (d *Deposit) EncodeSSZ(dst []byte) ([]byte, error) {
 
 	buf := dst
 	for _, proofSeg := range d.Proof {
 		buf = append(buf, proofSeg[:]...)
 	}
-	buf = d.Data.EncodeSSZ(buf)
-	return buf
+	return d.Data.EncodeSSZ(buf)
 }
 
 func (d *Deposit) DecodeSSZ(buf []byte) error {
@@ -138,12 +141,12 @@ type VoluntaryExit struct {
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) []byte {
-	return append(buf, append(ssz_utils.Uint64SSZ(e.Epoch), ssz_utils.Uint64SSZ(e.ValidatorIndex)...)...)
+	return append(buf, append(ssz.Uint64SSZ(e.Epoch), ssz.Uint64SSZ(e.ValidatorIndex)...)...)
 }
 
 func (e *VoluntaryExit) DecodeSSZ(buf []byte) error {
-	e.Epoch = ssz_utils.UnmarshalUint64SSZ(buf)
-	e.ValidatorIndex = ssz_utils.UnmarshalUint64SSZ(buf[8:])
+	e.Epoch = ssz.UnmarshalUint64SSZ(buf)
+	e.ValidatorIndex = ssz.UnmarshalUint64SSZ(buf[8:])
 	return nil
 }
 
@@ -225,7 +228,7 @@ func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 // DecodeSSZ ssz unmarshals the SyncCommittee object
 func (s *SyncCommittee) DecodeSSZ(buf []byte) error {
 	if len(buf) < 24624 {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 
 	s.PubKeys = make([][48]byte, SyncCommitteeSize)
@@ -294,8 +297,38 @@ type Validator struct {
 	ActivationEpoch            uint64
 	ExitEpoch                  uint64
 	WithdrawableEpoch          uint64
+	// This is all stuff used by phase0 state transition. It makes many operations faster.
+	// Source attesters
+	IsCurrentMatchingSourceAttester  bool
+	IsPreviousMatchingSourceAttester bool
+	// Target Attesters
+	IsCurrentMatchingTargetAttester  bool
+	IsPreviousMatchingTargetAttester bool
+	// Head attesters
+	IsCurrentMatchingHeadAttester  bool
+	IsPreviousMatchingHeadAttester bool
+	// MinInclusionDelay
+	MinCurrentInclusionDelayAttestation  *PendingAttestation
+	MinPreviousInclusionDelayAttestation *PendingAttestation
 }
 
+// DutiesAttested returns how many of its duties the validator attested and missed
+func (v *Validator) DutiesAttested() (attested, missed uint64) {
+	if v.Slashed {
+		return 0, 3
+	}
+	if v.IsPreviousMatchingSourceAttester {
+		attested++
+	}
+	if v.IsPreviousMatchingTargetAttester {
+		attested++
+	}
+	if v.IsPreviousMatchingHeadAttester {
+		attested++
+	}
+	missed = 3 - attested
+	return
+}
 func (v *Validator) IsSlashable(epoch uint64) bool {
 	return !v.Slashed && (v.ActivationEpoch <= epoch) && (epoch < v.WithdrawableEpoch)
 }
@@ -304,12 +337,12 @@ func (v *Validator) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, v.PublicKey[:]...)
 	buf = append(buf, v.WithdrawalCredentials[:]...)
-	buf = append(buf, ssz_utils.Uint64SSZ(v.EffectiveBalance)...)
-	buf = append(buf, ssz_utils.BoolSSZ(v.Slashed))
-	buf = append(buf, ssz_utils.Uint64SSZ(v.ActivationEligibilityEpoch)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(v.ActivationEpoch)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(v.ExitEpoch)...)
-	buf = append(buf, ssz_utils.Uint64SSZ(v.WithdrawableEpoch)...)
+	buf = append(buf, ssz.Uint64SSZ(v.EffectiveBalance)...)
+	buf = append(buf, ssz.BoolSSZ(v.Slashed))
+	buf = append(buf, ssz.Uint64SSZ(v.ActivationEligibilityEpoch)...)
+	buf = append(buf, ssz.Uint64SSZ(v.ActivationEpoch)...)
+	buf = append(buf, ssz.Uint64SSZ(v.ExitEpoch)...)
+	buf = append(buf, ssz.Uint64SSZ(v.WithdrawableEpoch)...)
 	return buf, nil
 }
 
@@ -319,16 +352,16 @@ func (v *Validator) DecodeSSZWithVersion(buf []byte, _ int) error {
 
 func (v *Validator) DecodeSSZ(buf []byte) error {
 	if len(buf) < v.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 	copy(v.PublicKey[:], buf)
 	copy(v.WithdrawalCredentials[:], buf[48:])
-	v.EffectiveBalance = ssz_utils.UnmarshalUint64SSZ(buf[80:])
+	v.EffectiveBalance = ssz.UnmarshalUint64SSZ(buf[80:])
 	v.Slashed = buf[88] == 1
-	v.ActivationEligibilityEpoch = ssz_utils.UnmarshalUint64SSZ(buf[89:])
-	v.ActivationEpoch = ssz_utils.UnmarshalUint64SSZ(buf[97:])
-	v.ExitEpoch = ssz_utils.UnmarshalUint64SSZ(buf[105:])
-	v.WithdrawableEpoch = ssz_utils.UnmarshalUint64SSZ(buf[113:])
+	v.ActivationEligibilityEpoch = ssz.UnmarshalUint64SSZ(buf[89:])
+	v.ActivationEpoch = ssz.UnmarshalUint64SSZ(buf[97:])
+	v.ExitEpoch = ssz.UnmarshalUint64SSZ(buf[105:])
+	v.WithdrawableEpoch = ssz.UnmarshalUint64SSZ(buf[113:])
 	return nil
 }
 

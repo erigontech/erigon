@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	maxBadPeers       = 50
+	maxBadPeers       = 50000
 	maxPeerRecordSize = 1000
 	DefaultMaxPeers   = 33
 	MaxBadResponses   = 50

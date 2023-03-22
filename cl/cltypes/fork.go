@@ -2,7 +2,7 @@ package cltypes
 
 import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 )
 
@@ -17,17 +17,17 @@ func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, f.PreviousVersion[:]...)
 	buf = append(buf, f.CurrentVersion[:]...)
-	buf = append(buf, ssz_utils.Uint64SSZ(f.Epoch)...)
+	buf = append(buf, ssz.Uint64SSZ(f.Epoch)...)
 	return buf, nil
 }
 
 func (f *Fork) DecodeSSZ(buf []byte) error {
 	if len(buf) < f.EncodingSizeSSZ() {
-		return ssz_utils.ErrLowBufferSize
+		return ssz.ErrLowBufferSize
 	}
 	copy(f.PreviousVersion[:], buf)
 	copy(f.CurrentVersion[:], buf[clparams.VersionLength:])
-	f.Epoch = ssz_utils.UnmarshalUint64SSZ(buf[clparams.VersionLength*2:])
+	f.Epoch = ssz.UnmarshalUint64SSZ(buf[clparams.VersionLength*2:])
 	return nil
 }
 

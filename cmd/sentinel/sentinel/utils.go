@@ -34,11 +34,11 @@ func convertToInterfacePubkey(pubkey *ecdsa.PublicKey) (crypto.PubKey, error) {
 	xVal, yVal := new(btcec.FieldVal), new(btcec.FieldVal)
 	overflows := xVal.SetByteSlice(pubkey.X.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("X value overflows")
+		return nil, fmt.Errorf("x value overflows")
 	}
 	overflows = yVal.SetByteSlice(pubkey.Y.Bytes())
 	if overflows {
-		return nil, fmt.Errorf("Y value overflows")
+		return nil, fmt.Errorf("y value overflows")
 	}
 	newKey := crypto.PubKey((*crypto.Secp256k1PublicKey)(btcec.NewPublicKey(xVal, yVal)))
 	// Zero out temporary values.
@@ -140,7 +140,6 @@ func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error
 
 		node := validPeerList[index]
 		if !isPeerWhitelisted(node, validPeerList) {
-
 			continue
 		}
 
