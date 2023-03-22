@@ -63,7 +63,6 @@ type History struct {
 	roFiles atomic2.Pointer[[]ctxItem]
 
 	historyValsTable        string // key1+key2+txnNum -> oldValue , stores values BEFORE change
-	settingsTable           string
 	compressWorkers         int
 	compressVals            bool
 	integrityFileExtensions []string
@@ -72,23 +71,13 @@ type History struct {
 	wal *historyWAL
 }
 
-func NewHistory(
-	dir, tmpdir string,
-	aggregationStep uint64,
-	filenameBase string,
-	indexKeysTable string,
-	indexTable string,
-	historyValsTable string,
-	settingsTable string,
-	compressVals bool,
-	integrityFileExtensions []string,
-	largeValues bool,
-) (*History, error) {
+func NewHistory(dir, tmpdir string, aggregationStep uint64,
+	filenameBase, indexKeysTable, indexTable, historyValsTable string,
+	compressVals bool, integrityFileExtensions []string, largeValues bool) (*History, error) {
 	h := History{
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		roFiles:                 *atomic2.NewPointer(&[]ctxItem{}),
 		historyValsTable:        historyValsTable,
-		settingsTable:           settingsTable,
 		compressVals:            compressVals,
 		compressWorkers:         1,
 		integrityFileExtensions: integrityFileExtensions,

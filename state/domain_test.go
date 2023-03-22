@@ -56,7 +56,7 @@ func testDbAndDomain(t *testing.T) (string, kv.RwDB, *Domain) {
 		}
 	}).MustOpen()
 	t.Cleanup(db.Close)
-	d, err := NewDomain(path, path, 16 /* aggregationStep */, "base" /* filenameBase */, keysTable, valsTable, historyKeysTable, historyValsTable, settingsTable, indexTable, true /* compressVals */, false)
+	d, err := NewDomain(path, path, 16, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, true, false)
 	require.NoError(t, err)
 	t.Cleanup(d.Close)
 	return path, db, d

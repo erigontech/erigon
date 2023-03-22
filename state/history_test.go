@@ -53,7 +53,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *Histor
 			settingsTable: kv.TableCfgItem{},
 		}
 	}).MustOpen()
-	h, err := NewHistory(path, path, 16 /* aggregationStep */, "hist" /* filenameBase */, keysTable, indexTable, valsTable, settingsTable, false /* compressVals */, nil, false)
+	h, err := NewHistory(path, path, 16, "hist", keysTable, indexTable, valsTable, false, nil, false)
 	require.NoError(tb, err)
 	tb.Cleanup(db.Close)
 	tb.Cleanup(h.Close)

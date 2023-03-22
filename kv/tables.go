@@ -371,28 +371,24 @@ const (
 	AccountVals        = "AccountVals"
 	AccountHistoryKeys = "AccountHistoryKeys"
 	AccountHistoryVals = "AccountHistoryVals"
-	AccountSettings    = "AccountSettings"
 	AccountIdx         = "AccountIdx"
 
 	StorageKeys        = "StorageKeys"
 	StorageVals        = "StorageVals"
 	StorageHistoryKeys = "StorageHistoryKeys"
 	StorageHistoryVals = "StorageHistoryVals"
-	StorageSettings    = "StorageSettings"
 	StorageIdx         = "StorageIdx"
 
 	CodeKeys        = "CodeKeys"
 	CodeVals        = "CodeVals"
 	CodeHistoryKeys = "CodeHistoryKeys"
 	CodeHistoryVals = "CodeHistoryVals"
-	CodeSettings    = "CodeSettings"
 	CodeIdx         = "CodeIdx"
 
 	CommitmentKeys        = "CommitmentKeys"
 	CommitmentVals        = "CommitmentVals"
 	CommitmentHistoryKeys = "CommitmentHistoryKeys"
 	CommitmentHistoryVals = "CommitmentHistoryVals"
-	CommitmentSettings    = "CommitmentSettings"
 	CommitmentIdx         = "CommitmentIdx"
 
 	LogAddressKeys = "LogAddressKeys"
@@ -537,28 +533,24 @@ var ChaindataTables = []string{
 	AccountVals,
 	AccountHistoryKeys,
 	AccountHistoryVals,
-	AccountSettings,
 	AccountIdx,
 
 	StorageKeys,
 	StorageVals,
 	StorageHistoryKeys,
 	StorageHistoryVals,
-	StorageSettings,
 	StorageIdx,
 
 	CodeKeys,
 	CodeVals,
 	CodeHistoryKeys,
 	CodeHistoryVals,
-	CodeSettings,
 	CodeIdx,
 
 	CommitmentKeys,
 	CommitmentVals,
 	CommitmentHistoryKeys,
 	CommitmentHistoryVals,
-	CommitmentSettings,
 	CommitmentIdx,
 
 	LogAddressKeys,

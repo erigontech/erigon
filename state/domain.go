@@ -145,19 +145,9 @@ type Domain struct {
 	mergesCount uint64
 }
 
-func NewDomain(
-	dir, tmpdir string,
-	aggregationStep uint64,
-	filenameBase string,
-	keysTable string,
-	valsTable string,
-	indexKeysTable string,
-	historyValsTable string,
-	settingsTable string,
-	indexTable string,
-	compressVals bool,
-	largeValues bool,
-) (*Domain, error) {
+func NewDomain(dir, tmpdir string, aggregationStep uint64,
+	filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string,
+	compressVals, largeValues bool) (*Domain, error) {
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
@@ -166,7 +156,7 @@ func NewDomain(
 	}
 
 	var err error
-	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, settingsTable, compressVals, []string{"kv"}, largeValues); err != nil {
+	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues); err != nil {
 		return nil, err
 	}
 
