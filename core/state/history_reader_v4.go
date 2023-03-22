@@ -10,16 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
-}
-
 // HistoryReaderV4 Implements StateReader and StateWriter
 type HistoryReaderV4 struct {
 	ac    *libstate.AggregatorContext
