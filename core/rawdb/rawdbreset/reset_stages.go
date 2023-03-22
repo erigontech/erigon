@@ -149,6 +149,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
+		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV4Buckets...)
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -224,6 +225,10 @@ var stateHistoryV3Buckets = []string{
 	kv.LogTopicsKeys, kv.LogTopicsIdx,
 	kv.TracesFromKeys, kv.TracesFromIdx,
 	kv.TracesToKeys, kv.TracesToIdx,
+}
+var stateHistoryV4Buckets = []string{
+	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys,
+	kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentSettings, kv.CommitmentIdx,
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
