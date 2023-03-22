@@ -2594,5 +2594,5 @@ func (hc *HistoryContext) IdxRange(key []byte, startTxNum, endTxNum int, asc ord
 	if err != nil {
 		return nil, err
 	}
-	return iter.Union[uint64](frozenIt, recentIt, asc), nil
+	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }

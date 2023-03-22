@@ -175,13 +175,14 @@ func (m *UnionKVIter) Close() {
 // UnionUnary
 type UnionUnary[T constraints.Ordered] struct {
 	x, y           Unary[T]
-	asc            order.By
+	asc            bool
 	xHas, yHas     bool
 	xNextK, yNextK T
 	err            error
+	limit          int
 }
 
-func Union[T constraints.Ordered](x, y Unary[T], asc order.By) Unary[T] {
+func Union[T constraints.Ordered](x, y Unary[T], asc order.By, limit int) Unary[T] {
 	if x == nil && y == nil {
 		return &EmptyUnary[T]{}
 	}
@@ -197,14 +198,14 @@ func Union[T constraints.Ordered](x, y Unary[T], asc order.By) Unary[T] {
 	if !y.HasNext() {
 		return x
 	}
-	m := &UnionUnary[T]{x: x, y: y, asc: asc}
+	m := &UnionUnary[T]{x: x, y: y, asc: bool(asc), limit: limit}
 	m.advanceX()
 	m.advanceY()
 	return m
 }
 
 func (m *UnionUnary[T]) HasNext() bool {
-	return m.err != nil || m.xHas || m.yHas
+	return m.err != nil || (m.limit != 0 && m.xHas) || (m.limit != 0 && m.yHas)
 }
 func (m *UnionUnary[T]) advanceX() {
 	if m.err != nil {
@@ -226,13 +227,14 @@ func (m *UnionUnary[T]) advanceY() {
 }
 
 func (m *UnionUnary[T]) less() bool {
-	return (bool(m.asc) && m.xNextK < m.yNextK) || (!bool(m.asc) && m.xNextK > m.yNextK)
+	return (m.asc && m.xNextK < m.yNextK) || (!m.asc && m.xNextK > m.yNextK)
 }
 
 func (m *UnionUnary[T]) Next() (res T, err error) {
 	if m.err != nil {
 		return res, m.err
 	}
+	m.limit--
 	if m.xHas && m.yHas {
 		if m.less() {
 			k, err := m.xNextK, m.err
@@ -271,18 +273,21 @@ type IntersectIter[T constraints.Ordered] struct {
 	x, y               Unary[T]
 	xHasNext, yHasNext bool
 	xNextK, yNextK     T
+	limit              int
 	err                error
 }
 
-func Intersect[T constraints.Ordered](x, y Unary[T]) Unary[T] {
+func Intersect[T constraints.Ordered](x, y Unary[T], limit int) Unary[T] {
 	if x == nil || y == nil || !x.HasNext() || !y.HasNext() {
 		return &EmptyUnary[T]{}
 	}
-	m := &IntersectIter[T]{x: x, y: y}
+	m := &IntersectIter[T]{x: x, y: y, limit: limit}
 	m.advance()
 	return m
 }
-func (m *IntersectIter[T]) HasNext() bool { return m.xHasNext && m.yHasNext }
+func (m *IntersectIter[T]) HasNext() bool {
+	return m.err != nil || (m.limit != 0 && m.xHasNext && m.yHasNext)
+}
 func (m *IntersectIter[T]) advance() {
 	m.advanceX()
 	m.advanceY()
@@ -322,6 +327,10 @@ func (m *IntersectIter[T]) advanceY() {
 	}
 }
 func (m *IntersectIter[T]) Next() (T, error) {
+	if m.err != nil {
+		return m.xNextK, m.err
+	}
+	m.limit--
 	k, err := m.xNextK, m.err
 	m.advance()
 	return k, err

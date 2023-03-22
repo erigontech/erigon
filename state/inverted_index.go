@@ -594,7 +594,7 @@ func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum in
 	if err != nil {
 		return nil, err
 	}
-	return iter.Union[uint64](frozenIt, recentIt, asc), nil
+	return iter.Union[uint64](frozenIt, recentIt, asc, limit), nil
 }
 
 func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
