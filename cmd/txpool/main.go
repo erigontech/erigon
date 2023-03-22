@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"os"
 	"path/filepath"
 	"time"
@@ -50,6 +52,8 @@ var (
 	priceLimit   uint64
 	accountSlots uint64
 	priceBump    uint64
+
+	commitEvery time.Duration
 )
 
 func init() {
@@ -71,6 +75,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpool.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
+	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
@@ -131,7 +136,12 @@ func doTxpool(ctx context.Context) error {
 	dirs := datadir.New(datadirCli)
 
 	cfg.DBDir = dirs.TxPool
-	cfg.CommitEvery = 30 * time.Second
+
+	randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(2*time.Second)))
+	if err != nil {
+		return fmt.Errorf("generating random additional value for --txpool.commit.every: %w", err)
+	}
+	cfg.CommitEvery = commitEvery + time.Duration(randDuration.Int64())
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit

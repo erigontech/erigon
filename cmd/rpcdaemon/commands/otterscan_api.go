@@ -275,7 +275,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, -1)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)

@@ -148,13 +148,13 @@ const (
 	TracesToIdx   kv.InvertedIdx = "TracesToIdx"
 )
 
-func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
+func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, asc order.By, limit int) (it iter.KV, err error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	switch name {
 	case AccountsDomain:
-		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, k1, nil, -1, tx)
+		histStateIt := tx.agg.AccountHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
 		// TODO: somehow avoid common.Copy(k) - WalkAsOfIter is not zero-copy
 		// Is histStateIt possible to increase keys lifetime to: 2 .Next() calls??
 		histStateIt2 := iter.TransformKV(histStateIt, func(k, v []byte) ([]byte, []byte, error) {
@@ -181,7 +181,7 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 			}
 			return k[:20], v, nil
 		})
-		lastestStateIt, err := tx.RangeAscend(kv.PlainState, k1, nil, -1)
+		lastestStateIt, err := tx.RangeAscend(kv.PlainState, fromKey, toKey, -1) // don't apply limit, because need filter
 		if err != nil {
 			return nil, err
 		}
@@ -189,17 +189,14 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 		latestStateIt2 := iter.FilterKV(lastestStateIt, func(k, v []byte) bool {
 			return len(k) == 20
 		})
-		//TODO: seems UnionKV can't handle "amount" request
-		return iter.UnionKV(histStateIt2, latestStateIt2), nil
+		it = iter.UnionKV(histStateIt2, latestStateIt2, limit)
 	case StorageDomain:
-		toKey, _ := kv.NextSubtree(k1)
-		fromKey2 := append(common.Copy(k1), k2...)
-		it := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey2, toKey, limit, tx)
-		it11 := iter.TransformKV(it, func(k, v []byte) ([]byte, []byte, error) {
+		storageIt := tx.agg.StorageHistoricalStateRange(asOfTs, fromKey, toKey, limit, tx)
+		storageIt1 := iter.TransformKV(storageIt, func(k, v []byte) ([]byte, []byte, error) {
 			return k, v, nil
 		})
 
-		accData, err := tx.GetOne(kv.PlainState, k1)
+		accData, err := tx.GetOne(kv.PlainState, fromKey[:20])
 		if err != nil {
 			return nil, err
 		}
@@ -208,12 +205,12 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 			return nil, err
 		}
 		startkey := make([]byte, length.Addr+length.Incarnation+length.Hash)
-		copy(startkey, k1)
+		copy(startkey, fromKey[:20])
 		binary.BigEndian.PutUint64(startkey[length.Addr:], inc)
-		copy(startkey[length.Addr+length.Incarnation:], k2)
+		copy(startkey[length.Addr+length.Incarnation:], fromKey[20:])
 
 		toPrefix := make([]byte, length.Addr+length.Incarnation)
-		copy(toPrefix, k1)
+		copy(toPrefix, fromKey[:20])
 		binary.BigEndian.PutUint64(toPrefix[length.Addr:], inc+1)
 
 		it2, err := tx.RangeAscend(kv.PlainState, startkey, toPrefix, limit)
@@ -223,13 +220,18 @@ func (tx *Tx) DomainRange(name kv.Domain, k1, k2 []byte, asOfTs uint64, asc orde
 		it3 := iter.TransformKV(it2, func(k, v []byte) ([]byte, []byte, error) {
 			return append(append([]byte{}, k[:20]...), k[28:]...), v, nil
 		})
-		//TODO: seems MergePairs can't handle "amount" request
-		return iter.UnionKV(it11, it3), nil
+		it = iter.UnionKV(storageIt1, it3, limit)
 	case CodeDomain:
 		panic("not implemented yet")
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
+
+	if closer, ok := it.(kv.Closer); ok {
+		tx.resourcesToClose = append(tx.resourcesToClose, closer)
+	}
+
+	return it, nil
 }
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {

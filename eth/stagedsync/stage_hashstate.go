@@ -562,7 +562,9 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	defer collector.Close()
 
 	if storage {
-		if err := agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
+		sc := agg.Storage().MakeContext()
+		defer sc.Close()
+		if err := sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
 			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
@@ -600,7 +602,9 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	codeCollector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
 
-	if err := agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
+	ac := agg.Accounts().MakeContext()
+	defer ac.Close()
+	if err := ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
 		newV, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
@@ -714,7 +718,9 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 
 	acc := accounts.NewAccount()
 	if codes {
-		if err = agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		ac := agg.Accounts().MakeContext()
+		defer ac.Close()
+		if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			if len(v) == 0 {
 				return nil
 			}
@@ -747,7 +753,9 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 	}
 
 	if storage {
-		if err = agg.Storage().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		sc := agg.Storage().MakeContext()
+		defer sc.Close()
+		if err = sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 			val, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
@@ -772,7 +780,9 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 		return collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 	}
 
-	if err = agg.Accounts().MakeContext().IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	ac := agg.Accounts().MakeContext()
+	defer ac.Close()
+	if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
