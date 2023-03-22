@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/erigon/core/vm/lightclient/iavl"
 	cmn "github.com/tendermint/tendermint/libs/common"
+	"net/url"
+	"strings"
 
 	"github.com/ledgerwatch/erigon/core/vm/lightclient"
 	"github.com/ledgerwatch/erigon/params"
@@ -152,8 +154,32 @@ func (c *iavlMerkleProofValidateMoran) Run(input []byte) (result []byte, err err
 	return c.basicIavlMerkleProofValidate.Run(input)
 }
 
+type iavlMerkleProofValidatePlanck struct {
+	basicIavlMerkleProofValidate
+}
+
+func (c *iavlMerkleProofValidatePlanck) RequiredGas(_ []byte) uint64 {
+	return params.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidatePlanck) Run(input []byte) (result []byte, err error) {
+	c.basicIavlMerkleProofValidate.proofRuntime = lightclient.Ics23CompatibleProofRuntime()
+	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
+		forbiddenAbsenceOpVerifier,
+		singleValueOpVerifier,
+		multiStoreOpVerifier,
+		forbiddenSimpleValueOpVerifier,
+	}
+	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
+	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
 type basicIavlMerkleProofValidate struct {
-	verifiers []merkle.ProofOpVerifier
+	keyVerifier  lightclient.KeyVerifier
+	opsVerifier  merkle.ProofOpsVerifier
+	proofRuntime *merkle.ProofRuntime
+	verifiers    []merkle.ProofOpVerifier
 }
 
 func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
@@ -176,8 +202,15 @@ func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err err
 	if err != nil {
 		return nil, err
 	}
-
+	if c.proofRuntime == nil {
+		kvmp.SetProofRuntime(lightclient.DefaultProofRuntime())
+	} else {
+		kvmp.SetProofRuntime(c.proofRuntime)
+	}
 	kvmp.SetVerifiers(c.verifiers)
+	kvmp.SetOpsVerifier(c.opsVerifier)
+	kvmp.SetKeyVerifier(c.keyVerifier)
+
 	valid := kvmp.Validate()
 	if !valid {
 		return nil, fmt.Errorf("invalid merkle proof")
@@ -237,6 +270,49 @@ func singleValueOpVerifier(op merkle.ProofOperator) error {
 				return cmn.NewError("both right and left hash exit!")
 			}
 		}
+	}
+	return nil
+}
+
+func proofOpsVerifier(poz merkle.ProofOperators) error {
+	if len(poz) != 2 {
+		return cmn.NewError("proof ops should be 2")
+	}
+
+	// for legacy proof type
+	if _, ok := poz[1].(lightclient.MultiStoreProofOp); ok {
+		if _, ok := poz[0].(iavl.IAVLValueOp); !ok {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	// for ics23 proof type
+	if op2, ok := poz[1].(lightclient.CommitmentOp); ok {
+		if op2.Type != lightclient.ProofOpSimpleMerkleCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+
+		op1, ok := poz[0].(lightclient.CommitmentOp)
+		if !ok {
+			return cmn.NewError("invalid proof op")
+		}
+
+		if op1.Type != lightclient.ProofOpIAVLCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	return cmn.NewError("invalid proof type")
+}
+
+func keyVerifier(key string) error {
+	// https://github.com/bnb-chain/tendermint/blob/72375a6f3d4a72831cc65e73363db89a0073db38/crypto/merkle/proof_key_path.go#L88
+	// since the upper function is ambiguous, `x:00` can be decoded to both kind of key type
+	// we check the key here to make sure the key will not start from `x:`
+	if strings.HasPrefix(url.PathEscape(key), "x:") {
+		return cmn.NewError("key should not start with x:")
 	}
 	return nil
 }
