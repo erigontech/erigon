@@ -19,12 +19,14 @@ package utils
 
 import (
 	"crypto/ecdsa"
+	"crypto/rand"
 	"fmt"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -192,6 +194,11 @@ var (
 		Name:  "txpool.trace.senders",
 		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
 		Value: "",
+	}
+	TxPoolCommitEveryFlag = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpool.DefaultConfig.CommitEvery,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -1261,6 +1268,14 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 			sender := libcommon.HexToAddress(senderHex)
 			cfg.TracedSenders[i] = string(sender[:])
 		}
+	}
+	if ctx.IsSet(TxPoolCommitEveryFlag.Name) {
+		cfg.CommitEvery = ctx.Duration(TxPoolCommitEveryFlag.Name)
+		randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(2*time.Second)))
+		if err != nil {
+			Fatalf("Generating random additional value for --txpool.commit.every: %s", err)
+		}
+		cfg.CommitEvery += time.Duration(randDuration.Int64())
 	}
 }
 

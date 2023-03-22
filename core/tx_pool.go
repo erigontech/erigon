@@ -77,6 +77,7 @@ type TxPoolConfig struct {
 	Lifetime      time.Duration // Maximum amount of time non-executable transaction are queued
 	StartOnInit   bool
 	TracedSenders []string // List of senders for which tx pool should print out debugging info
+	CommitEvery   time.Duration
 }
 
 // DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
@@ -105,6 +106,7 @@ var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpool.Config {
 	cfg.LogEvery = 1 * time.Minute
 	cfg.CommitEvery = 5 * time.Minute
 	cfg.TracedSenders = pool1Cfg.TracedSenders
+	cfg.CommitEvery = pool1Cfg.CommitEvery
 
 	return cfg
 }
