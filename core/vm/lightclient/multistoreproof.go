@@ -136,3 +136,14 @@ func DefaultProofRuntime() (prt *merkle.ProofRuntime) {
 	prt.RegisterOpDecoder(ProofOpMultiStore, MultiStoreProofOpDecoder)
 	return
 }
+
+func Ics23CompatibleProofRuntime() (prt *merkle.ProofRuntime) {
+	prt = merkle.NewProofRuntime()
+	prt.RegisterOpDecoder(merkle.ProofOpSimpleValue, merkle.SimpleValueOpDecoder)
+	prt.RegisterOpDecoder(iavl2.ProofOpIAVLValue, iavl2.IAVLValueOpDecoder)
+	prt.RegisterOpDecoder(iavl2.ProofOpIAVLAbsence, iavl2.IAVLAbsenceOpDecoder)
+	prt.RegisterOpDecoder(ProofOpMultiStore, MultiStoreProofOpDecoder)
+	prt.RegisterOpDecoder(ProofOpIAVLCommitment, CommitmentOpDecoder)
+	prt.RegisterOpDecoder(ProofOpSimpleMerkleCommitment, CommitmentOpDecoder)
+	return
+}
