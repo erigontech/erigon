@@ -555,33 +555,6 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		return nil
 	}
 
-	/*
-		lk := len(key1) + len(key2)
-		historyKey := make([]byte, lk+8)
-		copy(historyKey, key1)
-		if len(key2) > 0 {
-			copy(historyKey[len(key1):], key2)
-		}
-		if len(original) > 0 {
-			val, err := h.h.tx.GetOne(h.h.settingsTable, historyValCountKey)
-			if err != nil {
-				return err
-			}
-			var valNum uint64
-			if len(val) > 0 {
-				valNum = binary.BigEndian.Uint64(val)
-			}
-			valNum++
-			binary.BigEndian.PutUint64(historyKey[lk:], valNum)
-			if err = h.h.tx.Put(h.h.settingsTable, historyValCountKey, historyKey[lk:]); err != nil {
-				return err
-			}
-			if err = h.h.tx.Put(h.h.historyValsTable, historyKey[lk:], original); err != nil {
-				return err
-			}
-		}
-	*/
-
 	ii := h.h.InvertedIndex
 	if h.largeValues {
 		lk := len(key1) + len(key2)
