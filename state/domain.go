@@ -28,7 +28,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -207,6 +206,7 @@ func (d *Domain) openList(fNames []string) error {
 
 func (d *Domain) OpenFolder() error {
 	eg, ctx := errgroup.WithContext(context.Background())
+	eg.SetLimit(32)
 	if err := d.BuildMissedIndices(ctx, eg); err != nil {
 		return err
 	}
@@ -931,22 +931,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 		return err
 	})
 
-	var done = make(chan struct{}, 1)
-	defer close(done)
-
-	go func(done chan struct{}) {
-		for {
-			select {
-			case <-done:
-				return
-			case <-logEvery.C:
-				log.Info("[snapshots] collate domain", "name", d.filenameBase,
-					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-					"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
-			}
-		}
-	}(done)
-
 	var (
 		stepBytes = make([]byte, 8)
 		keySuffix = make([]byte, 256+8)
@@ -967,6 +951,16 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 			v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
 			if err != nil {
 				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return Collation{}, ctx.Err()
+			case <-logEvery.C:
+				log.Info("[snapshots] collate domain", "name", d.filenameBase,
+					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+					"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
+			default:
 			}
 
 			pairs <- kvpair{k: k, v: v}
@@ -1301,26 +1295,9 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	var (
 		_state    = "scan steps"
-		pos       uint64
+		pos       atomic2.Uint64
 		totalKeys uint64
-		done      = make(chan struct{}, 1)
 	)
-
-	defer close(done)
-
-	go func(done chan struct{}) {
-		for {
-			select {
-			case <-done:
-				return
-			case <-logEvery.C:
-				log.Info("[snapshots] prune domain", "name", d.filenameBase,
-					"stage", _state,
-					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-					"progress", fmt.Sprintf("%.2f%%", (float64(atomic.LoadUint64(&pos))/float64(totalKeys))*100))
-			}
-		}
-	}(done)
 
 	keysCursor, err := d.tx.RwCursorDupSort(d.keysTable)
 	if err != nil {
@@ -1366,11 +1343,22 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 				}
 			}
 		}
-		atomic.AddUint64(&pos, 1)
+		pos.Inc()
 
 		if ctx.Err() != nil {
 			log.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
 			return ctx.Err()
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("[snapshots] prune domain", "name", d.filenameBase,
+				"stage", _state,
+				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+				"progress", fmt.Sprintf("%.2f%%", (float64(pos.Load())/float64(totalKeys))*100))
+		default:
 		}
 	}
 	if err != nil {
@@ -1378,7 +1366,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 	}
 
 	_state = "delete vals"
-	atomic.StoreUint64(&pos, 0)
+	pos.Store(0)
 	// It is important to clean up tables in a specific order
 	// First keysTable, because it is the first one access in the `get` function, i.e. if the record is deleted from there, other tables will not be accessed
 	var valsCursor kv.RwCursor
@@ -1402,12 +1390,19 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			}
 			mxPruneSize.Inc()
 		}
-		atomic.AddUint64(&pos, 1)
-		if ctx.Err() != nil {
-			log.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
-			return ctx.Err()
-		}
+		pos.Inc()
 		//_prog = 100 * (float64(pos) / float64(totalKeys))
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-logEvery.C:
+			log.Info("[snapshots] prune domain", "name", d.filenameBase,
+				"stage", _state,
+				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+				"progress", fmt.Sprintf("%.2f%%", (float64(pos.Load())/float64(totalKeys))*100))
+		default:
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("iterate over %s vals: %w", d.filenameBase, err)
@@ -1475,6 +1470,12 @@ func (d *Domain) warmup(ctx context.Context, txFrom, limit uint64, tx kv.Tx) err
 		}
 		_, _, _ = valsC.Seek(v[len(v)-8:])
 		_, _ = idxC.SeekBothRange(v[:len(v)-8], k)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	if err != nil {
 		return fmt.Errorf("iterate over %s domain keys: %w", d.filenameBase, err)
