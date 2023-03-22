@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
@@ -1535,92 +1534,53 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.HistoryQueries.Inc()
 
-	var foundTxNum uint64
-	var foundEndTxNum uint64
-	var foundStartTxNum uint64
-	var found bool
-	var anyItem bool // Whether any filesItem has been looked at in the loop below
+	v, found, err := dc.hc.GetNoState(key, txNum)
+	if err != nil {
+		return nil, false, err
+	}
+	if found {
+		return v, true, nil
+	}
+
+	var anyItem bool
 	var topState ctxItem
 	for _, item := range dc.hc.ic.files {
 		if item.endTxNum < txNum {
 			continue
 		}
+		anyItem = true
 		topState = item
 		break
 	}
-	for _, item := range dc.hc.ic.files {
-		if item.endTxNum < txNum {
-			continue
-		}
-		anyItem = true
-		reader := dc.hc.ic.statelessIdxReader(item.i)
-		offset := reader.Lookup(key)
-		g := dc.hc.ic.statelessGetter(item.i)
-		g.Reset(offset)
-		if k, _ := g.NextUncompressed(); bytes.Equal(k, key) {
-			eliasVal, _ := g.NextUncompressed()
-			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
-			//start := time.Now()
-			n, ok := ef.Search(txNum)
-			//d.stats.EfSearchTime += time.Since(start)
-			if ok {
-				foundTxNum = n
-				foundEndTxNum = item.endTxNum
-				foundStartTxNum = item.startTxNum
-				found = true
-				break
-			} else if item.endTxNum > txNum && item.endTxNum >= topState.endTxNum {
-				break
+	if anyItem {
+		// If there were no changes but there were history files, the value can be obtained from value files
+		var val []byte
+		for i := len(dc.files) - 1; i >= 0; i-- {
+			if dc.files[i].startTxNum > topState.startTxNum {
+				continue
 			}
-		}
-	}
-	if !found {
-		if anyItem {
-			// If there were no changes but there were history files, the value can be obtained from value files
-			var val []byte
-			for i := len(dc.files) - 1; i >= 0; i-- {
-				if dc.files[i].startTxNum > topState.startTxNum {
-					continue
-				}
-				reader := dc.statelessBtree(i)
-				if reader.Empty() {
-					continue
-				}
-				cur, err := reader.Seek(key)
-				if err != nil {
-					log.Warn("failed to read history before from file", "key", key, "err", err)
-					continue
-				}
+			reader := dc.statelessBtree(i)
+			if reader.Empty() {
+				continue
+			}
+			cur, err := reader.Seek(key)
+			if err != nil {
+				log.Warn("failed to read history before from file", "key", key, "err", err)
+				continue
+			}
 
-				if bytes.Equal(cur.Key(), key) {
-					val = cur.Value()
-					break
-				}
+			if bytes.Equal(cur.Key(), key) {
+				val = cur.Value()
+				break
 			}
-			return val, true, nil
 		}
-		// Value not found in history files, look in the recent history
-		if roTx == nil {
-			return nil, false, fmt.Errorf("roTx is nil")
-		}
-		return dc.hc.getNoStateFromDB(key, txNum, roTx)
+		return val, true, nil
 	}
-	var txKey [8]byte
-	binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-	historyItem, ok := dc.hc.getFile(foundStartTxNum, foundEndTxNum)
-	if !ok {
-		return nil, false, fmt.Errorf("no %s file found for [%x]", dc.d.filenameBase, key)
+	// Value not found in history files, look in the recent history
+	if roTx == nil {
+		return nil, false, fmt.Errorf("roTx is nil")
 	}
-	reader := dc.hc.statelessIdxReader(historyItem.i)
-	offset := reader.Lookup2(txKey[:], key)
-	g := dc.hc.statelessGetter(historyItem.i)
-	g.Reset(offset)
-	if dc.d.compressVals {
-		v, _ := g.Next(nil)
-		return v, true, nil
-	}
-	v, _ := g.NextUncompressed()
-	return v, true, nil
+	return dc.hc.getNoStateFromDB(key, txNum, roTx)
 }
 
 // GetBeforeTxNum does not always require usage of roTx. If it is possible to determine
