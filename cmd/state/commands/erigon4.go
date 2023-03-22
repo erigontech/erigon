@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/bits"
 	"os"
 	"os/signal"
 	"path"
@@ -535,30 +534,8 @@ func (rw *ReaderWrapper23) ReadAccountData(address libcommon.Address) (*accounts
 		return nil, nil
 	}
 	var a accounts.Account
-	a.Reset()
-	pos := 0
-	nonceBytes := int(enc[pos])
-	pos++
-	if nonceBytes > 0 {
-		a.Nonce = bytesToUint64(enc[pos : pos+nonceBytes])
-		pos += nonceBytes
-	}
-	balanceBytes := int(enc[pos])
-	pos++
-	if balanceBytes > 0 {
-		a.Balance.SetBytes(enc[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	codeHashBytes := int(enc[pos])
-	pos++
-	if codeHashBytes > 0 {
-		copy(a.CodeHash[:], enc[pos:pos+codeHashBytes])
-		pos += codeHashBytes
-	}
-	incBytes := int(enc[pos])
-	pos++
-	if incBytes > 0 {
-		a.Incarnation = bytesToUint64(enc[pos : pos+incBytes])
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
 	}
 	return &a, nil
 }
@@ -590,69 +567,7 @@ func (rw *ReaderWrapper23) ReadAccountIncarnation(address libcommon.Address) (ui
 }
 
 func (ww *WriterWrapper23) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
-	var l int
-	l++
-	if account.Nonce > 0 {
-		l += (bits.Len64(account.Nonce) + 7) / 8
-	}
-	l++
-	if !account.Balance.IsZero() {
-		l += account.Balance.ByteLen()
-	}
-	l++
-	if !account.IsEmptyCodeHash() {
-		l += 32
-	}
-	l++
-	if account.Incarnation > 0 {
-		l += (bits.Len64(account.Incarnation) + 7) / 8
-	}
-	value := make([]byte, l)
-	pos := 0
-
-	if account.Nonce == 0 {
-		value[pos] = 0
-		pos++
-	} else {
-		nonceBytes := (bits.Len64(account.Nonce) + 7) / 8
-		value[pos] = byte(nonceBytes)
-		var nonce = account.Nonce
-		for i := nonceBytes; i > 0; i-- {
-			value[pos+i] = byte(nonce)
-			nonce >>= 8
-		}
-		pos += nonceBytes + 1
-	}
-	if account.Balance.IsZero() {
-		value[pos] = 0
-		pos++
-	} else {
-		balanceBytes := account.Balance.ByteLen()
-		value[pos] = byte(balanceBytes)
-		pos++
-		account.Balance.WriteToSlice(value[pos : pos+balanceBytes])
-		pos += balanceBytes
-	}
-	if account.IsEmptyCodeHash() {
-		value[pos] = 0
-		pos++
-	} else {
-		value[pos] = 32
-		pos++
-		copy(value[pos:pos+32], account.CodeHash[:])
-		pos += 32
-	}
-	if account.Incarnation == 0 {
-		value[pos] = 0
-	} else {
-		incBytes := (bits.Len64(account.Incarnation) + 7) / 8
-		value[pos] = byte(incBytes)
-		var inc = account.Incarnation
-		for i := incBytes; i > 0; i-- {
-			value[pos+i] = byte(inc)
-			inc >>= 8
-		}
-	}
+	value := accounts.SerialiseV3(account)
 	if err := ww.w.UpdateAccountData(address.Bytes(), value); err != nil {
 		return err
 	}
@@ -703,14 +618,4 @@ func initConsensusEngine(cc *chain2.Config, snapshots *snapshotsync.RoSnapshots)
 		consensusConfig = &config.Ethash
 	}
 	return ethconsensusconfig.CreateConsensusEngine(cc, l, consensusConfig, config.Miner.Notify, config.Miner.Noverify, config.HeimdallgRPCAddress, config.HeimdallURL, config.WithoutHeimdall, datadirCli, snapshots, true /* readonly */)
-}
-
-func bytesToUint64(buf []byte) (x uint64) {
-	for i, b := range buf {
-		x = x<<8 + uint64(b)
-		if i == 7 {
-			return
-		}
-	}
-	return
 }
