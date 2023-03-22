@@ -5,10 +5,10 @@ import (
 	"context"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/gointerfaces"
+	"github.com/chainstack/erigon-lib/gointerfaces/txpool"
+	"github.com/chainstack/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"

@@ -19,8 +19,8 @@ package vm
 import (
 	"fmt"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"

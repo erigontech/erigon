@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	sentinelrpc "github.com/chainstack/erigon-lib/gointerfaces/sentinel"
+	"github.com/chainstack/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

@@ -21,8 +21,8 @@ import (
 	"reflect"
 	"testing"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/davecgh/go-spew/spew"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // typeWithoutStringer is a alias for the Type type which simply doesn't implement

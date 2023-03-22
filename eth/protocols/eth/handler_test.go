@@ -20,10 +20,10 @@ import (
 	"math/big"
 	"testing"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/gointerfaces/sentry"
+	"github.com/chainstack/erigon-lib/kv"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core"

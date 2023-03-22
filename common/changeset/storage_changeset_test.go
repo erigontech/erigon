@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	historyv22 "github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/kv/memdb"
+	historyv22 "github.com/chainstack/erigon-lib/kv/temporal/historyv2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 

@@ -17,8 +17,8 @@
 package vm
 
 import (
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // ContractRef is a reference to the contract's backing object

@@ -1,7 +1,7 @@
 package state
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )

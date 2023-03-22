@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/chainstack/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core"
 )
 

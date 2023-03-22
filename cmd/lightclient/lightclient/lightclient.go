@@ -19,11 +19,11 @@ import (
 	"runtime"
 	"time"
 
+	common2 "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/common/dbg"
+	"github.com/chainstack/erigon-lib/gointerfaces/remote"
+	"github.com/chainstack/erigon-lib/gointerfaces/sentinel"
 	lru "github.com/hashicorp/golang-lru"
-	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"

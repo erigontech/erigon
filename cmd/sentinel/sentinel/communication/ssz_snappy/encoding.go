@@ -21,8 +21,8 @@ import (
 	"io"
 
 	"github.com/c2h5oh/datasize"
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/golang/snappy"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/fork"

@@ -23,7 +23,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/chainstack/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 )
