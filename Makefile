@@ -42,8 +42,8 @@ default: all
 
 ## go-version:                        print and verify go version
 go-version:
-	@if [ $(shell $(GO) version | cut -c 16-17) -lt 18 ]; then \
-		echo "minimum required Golang version is 1.18"; \
+	@if [ $(shell $(GO) version | cut -c 16-17) -lt 19 ]; then \
+		echo "minimum required Golang version is 1.19"; \
 		exit 1 ;\
 	fi
 
