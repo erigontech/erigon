@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/stretchr/testify/require"
@@ -25,7 +26,7 @@ func TestEmptyQuery(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, datadir.New(t.TempDir())), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest})
@@ -45,7 +46,7 @@ func TestCoinbaseBalance(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, datadir.New(t.TempDir())), m.DB, &httpcfg.HttpCfg{})
 	// Call GetTransactionReceipt for transaction which is not in the database
 	var latest = rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
@@ -75,7 +76,7 @@ func TestReplayTransaction(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, datadir.New(t.TempDir())), m.DB, &httpcfg.HttpCfg{})
 	var txnHash libcommon.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
 		b, err := rawdb.ReadBlockByNumber(tx, 6)
@@ -106,7 +107,7 @@ func TestReplayBlockTransactions(t *testing.T) {
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, &httpcfg.HttpCfg{})
+	api := NewTraceAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, datadir.New(t.TempDir())), m.DB, &httpcfg.HttpCfg{})
 
 	// Call GetTransactionReceipt for transaction which is not in the database
 	n := rpc.BlockNumber(6)
