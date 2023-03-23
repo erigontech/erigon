@@ -7,6 +7,8 @@ on:
       - stable
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
+  workflow_dispatch:
+
 jobs:
   tests:
     strategy:
