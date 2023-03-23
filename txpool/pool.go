@@ -29,6 +29,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -38,7 +39,6 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -464,7 +464,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.pending.appendAddedTo(&p.promoted)
 	p.baseFee.appendAddedTo(&p.promoted)
 
-	if p.started.CAS(false, true) {
+	if p.started.CompareAndSwap(false, true) {
 		log.Info("[txpool] Started")
 	}
 
@@ -918,7 +918,7 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 		if err := p.fromDB(ctx, tx, coreTx); err != nil {
 			return nil, fmt.Errorf("loading txs from DB: %w", err)
 		}
-		if p.started.CAS(false, true) {
+		if p.started.CompareAndSwap(false, true) {
 			log.Info("[txpool] Started")
 		}
 	}

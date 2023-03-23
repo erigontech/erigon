@@ -23,12 +23,12 @@ import (
 	"hash"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
-	"go.uber.org/atomic"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -318,7 +318,7 @@ func (c *Coherent) OnNewBlock(stateChanges *remote.StateChangeBatch) {
 		}
 	}
 
-	switched := r.readyChanClosed.CAS(false, true)
+	switched := r.readyChanClosed.CompareAndSwap(false, true)
 	if switched {
 		close(r.ready) //broadcast
 	}
@@ -356,7 +356,7 @@ func (c *Coherent) View(ctx context.Context, tx kv.Tx) (CacheView, error) {
 		return nil, fmt.Errorf("kvcache rootNum=%x, %w", tx.ViewID(), ctx.Err())
 	case <-time.After(c.cfg.NewBlockWait): //TODO: switch to timer to save resources
 		c.timeout.Inc()
-		c.waitExceededCount.Inc()
+		c.waitExceededCount.Add(1)
 		//log.Info("timeout", "db_id", id, "has_btree", r.cache != nil)
 	}
 	return &CoherentView{stateVersionID: id, tx: tx, cache: c}, nil

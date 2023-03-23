@@ -418,17 +418,6 @@ func TestInvIndexScanFiles(t *testing.T) {
 	checkRanges(t, db, ii, txs)
 }
 
-func BenchmarkName(b *testing.B) {
-	_, db, ii, txs := filledInvIndex(b)
-	mergeInverted(b, db, ii, txs)
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		ic := ii.MakeContext()
-		ic.Close()
-	}
-}
-
 func TestChangedKeysIterator(t *testing.T) {
 	_, db, ii, txs := filledInvIndex(t)
 	ctx := context.Background()

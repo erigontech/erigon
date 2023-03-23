@@ -20,14 +20,14 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	btree2 "github.com/tidwall/btree"
-	"go.uber.org/atomic"
 )
 
 // Progress - tracks background job progress
 type Progress struct {
-	Name             atomic.String
+	Name             atomic.Pointer[string]
 	Processed, Total atomic.Uint64
 	i                int
 }
@@ -69,7 +69,7 @@ func (s *ProgressSet) String() string {
 	var sb strings.Builder
 	var i int
 	s.list.Scan(func(_ int, p *Progress) bool {
-		sb.WriteString(fmt.Sprintf("%s=%d%%", p.Name.Load(), p.percent()))
+		sb.WriteString(fmt.Sprintf("%s=%d%%", *p.Name.Load(), p.percent()))
 		i++
 		if i != s.list.Len() {
 			sb.WriteString(", ")

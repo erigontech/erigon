@@ -28,11 +28,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/log/v3"
@@ -56,12 +56,12 @@ type filesItem struct {
 	// Frozen: file of size StepsInBiggestFile. Completely immutable.
 	// Cold: file of size < StepsInBiggestFile. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool           // immutable, don't need atomic
-	refcount atomic2.Uint64 // only for `frozen=false`
+	frozen   bool         // immutable, don't need atomic
+	refcount atomic.Int32 // only for `frozen=false`
 
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
 	// other processes (which also reading files, may have same logic)
-	canDelete atomic2.Bool
+	canDelete atomic.Bool
 }
 
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
@@ -113,8 +113,8 @@ type DomainStats struct {
 	LastCollationSize    uint64
 	LastPruneSize        uint64
 
-	HistoryQueries atomic2.Uint64
-	TotalQueries   atomic2.Uint64
+	HistoryQueries *atomic.Uint64
+	TotalQueries   *atomic.Uint64
 	EfSearchTime   time.Duration
 	DataSize       uint64
 	IndexSize      uint64
@@ -137,7 +137,7 @@ type Domain struct {
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
-	roFiles     atomic2.Pointer[[]ctxItem]
+	roFiles     atomic.Pointer[[]ctxItem]
 	defaultDc   *DomainContext
 	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable   string // key + invertedStep -> values
@@ -152,8 +152,9 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		keysTable: keysTable,
 		valsTable: valsTable,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		roFiles:   *atomic2.NewPointer(&[]ctxItem{}),
+		stats:     DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
+	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues); err != nil {
@@ -420,7 +421,7 @@ func (d *Domain) Close() {
 
 func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
 	//var invertedStep [8]byte
-	dc.d.stats.TotalQueries.Inc()
+	dc.d.stats.TotalQueries.Add(1)
 
 	invertedStep := dc.numBuf
 	binary.BigEndian.PutUint64(invertedStep[:], ^(fromTxNum / dc.d.aggregationStep))
@@ -434,7 +435,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		dc.d.stats.HistoryQueries.Inc()
+		dc.d.stats.HistoryQueries.Add(1)
 		v, found := dc.readFromFiles(key, fromTxNum)
 		return v, found, nil
 	}
@@ -677,7 +678,7 @@ func (d *Domain) MakeContext() *DomainContext {
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
-			item.src.refcount.Inc()
+			item.src.refcount.Add(1)
 		}
 	}
 
@@ -689,7 +690,7 @@ func (dc *DomainContext) Close() {
 		if item.src.frozen {
 			continue
 		}
-		refCnt := item.src.refcount.Dec()
+		refCnt := item.src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
 			item.src.closeFilesAndRemove()
@@ -703,7 +704,7 @@ func (dc *DomainContext) Close() {
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
-	dc.d.stats.HistoryQueries.Inc()
+	dc.d.stats.HistoryQueries.Add(1)
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -1284,7 +1285,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	var (
 		_state    = "scan steps"
-		pos       atomic2.Uint64
+		pos       atomic.Uint64
 		totalKeys uint64
 	)
 
@@ -1332,7 +1333,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 				}
 			}
 		}
-		pos.Inc()
+		pos.Add(1)
 
 		if ctx.Err() != nil {
 			log.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
@@ -1379,7 +1380,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			}
 			mxPruneSize.Inc()
 		}
-		pos.Inc()
+		pos.Add(1)
 		//_prog = 100 * (float64(pos) / float64(totalKeys))
 
 		select {
@@ -1522,7 +1523,7 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.HistoryQueries.Inc()
+	dc.d.stats.HistoryQueries.Add(1)
 
 	v, found, err := dc.hc.GetNoState(key, txNum)
 	if err != nil {

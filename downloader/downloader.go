@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -317,7 +317,7 @@ func (d *Downloader) verify() error {
 	defer logEvery.Stop()
 
 	wg := &sync.WaitGroup{}
-	j := atomic.NewInt64(0)
+	j := atomic.Int64{}
 
 	for _, t := range d.torrentClient.Torrents() {
 		wg.Add(1)
@@ -325,7 +325,7 @@ func (d *Downloader) verify() error {
 			defer wg.Done()
 			<-t.GotInfo()
 			for i := 0; i < t.NumPieces(); i++ {
-				j.Inc()
+				j.Add(1)
 				t.Piece(i).VerifyData()
 
 				select {
@@ -360,7 +360,7 @@ func (d *Downloader) addSegments() error {
 	}
 	files = append(files, files2...)
 	wg := &sync.WaitGroup{}
-	i := atomic.NewInt64(0)
+	i := atomic.Int64{}
 	for _, f := range files {
 		wg.Add(1)
 		go func(f string) {
@@ -371,10 +371,10 @@ func (d *Downloader) addSegments() error {
 				return
 			}
 
-			i.Inc()
+			i.Add(1)
 			select {
 			case <-logEvery.C:
-				log.Info("[snpshots] initializing", "files", fmt.Sprintf("%s/%d", i.String(), len(files)))
+				log.Info("[snpshots] initializing", "files", fmt.Sprintf("%d/%d", i.Load(), len(files)))
 			default:
 			}
 		}(f)

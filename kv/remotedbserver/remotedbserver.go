@@ -24,12 +24,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -131,7 +131,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	if errBegin != nil {
 		return 0, errBegin
 	}
-	id = s.txIdGen.Inc()
+	id = s.txIdGen.Add(1)
 	s.txs[id] = &threadSafeTx{Tx: tx}
 	return id, nil
 }

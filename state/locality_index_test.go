@@ -4,10 +4,26 @@ import (
 	"context"
 	"encoding/binary"
 	"math"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func BenchmarkName2(b *testing.B) {
+	b.Run("1", func(b *testing.B) {
+		j := atomic.Int32{}
+		for i := 0; i < b.N; i++ {
+			j.Add(1)
+		}
+	})
+	b.Run("2", func(b *testing.B) {
+		j := &atomic.Int32{}
+		for i := 0; i < b.N; i++ {
+			j.Add(1)
+		}
+	})
+}
 
 func TestLocality(t *testing.T) {
 	ctx, require := context.Background(), require.New(t)

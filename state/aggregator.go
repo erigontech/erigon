@@ -211,7 +211,7 @@ func (a *Aggregator) ReopenList(fNames []string) error {
 }
 
 func (a *Aggregator) GetAndResetStats() DomainStats {
-	stats := DomainStats{}
+	stats := DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	stats.Accumulate(a.accounts.GetAndResetStats())
 	stats.Accumulate(a.storage.GetAndResetStats())
 	stats.Accumulate(a.code.GetAndResetStats())
