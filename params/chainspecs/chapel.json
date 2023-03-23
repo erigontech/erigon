@@ -18,6 +18,7 @@
   "gibbsBlock": 22800220,
   "nanoBlock": 23482428,
   "moranBlock": 23603940,
+  "planckBlock": 28196022,
   "parlia": {
     "DBPath": "",
     "InMemory": false,
