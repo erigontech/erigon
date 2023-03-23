@@ -21,8 +21,8 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/chainstack/erigon-lib/chain"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"

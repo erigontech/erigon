@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/etl"
+	"github.com/chainstack/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 

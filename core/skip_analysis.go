@@ -19,7 +19,7 @@ package core
 import (
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/chainstack/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/params/networkname"
 )

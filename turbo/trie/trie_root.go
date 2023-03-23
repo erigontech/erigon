@@ -8,9 +8,9 @@ import (
 	"math/bits"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	length2 "github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	length2 "github.com/chainstack/erigon-lib/common/length"
+	"github.com/chainstack/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"

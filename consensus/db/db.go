@@ -1,8 +1,8 @@
 package db
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/chainstack/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 )
 

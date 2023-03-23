@@ -23,9 +23,9 @@ import (
 
 	"github.com/minio/sha256-simd"
 
+	"github.com/chainstack/erigon-lib/chain"
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -128,6 +128,21 @@ var PrecompiledContractsIsMoran = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidateMoran{},
 }
 
+var PrecompiledContractsPlanck = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}): &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}): &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}): &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}): &bigModExp{},
+	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}): &blake2F{},
+
+	libcommon.BytesToAddress([]byte{100}): &tmHeaderValidate{},
+	libcommon.BytesToAddress([]byte{101}): &iavlMerkleProofValidatePlanck{},
+}
+
 // PrecompiledContractsBerlin contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsBerlin = map[libcommon.Address]PrecompiledContract{
@@ -157,6 +172,7 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesPlanck         []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address
@@ -188,11 +204,16 @@ func init() {
 	for k := range PrecompiledContractsIsMoran {
 		PrecompiledAddressesMoran = append(PrecompiledAddressesMoran, k)
 	}
+	for k := range PrecompiledContractsPlanck {
+		PrecompiledAddressesPlanck = append(PrecompiledAddressesPlanck, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsPlanck:
+		return PrecompiledAddressesPlanck
 	case rules.IsMoran:
 		return PrecompiledAddressesMoran
 	case rules.IsNano:

@@ -21,7 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/chainstack/erigon-lib/chain"
 )
 
 func TestCheckCompatible(t *testing.T) {

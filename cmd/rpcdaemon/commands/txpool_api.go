@@ -5,10 +5,10 @@ import (
 	"context"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/gointerfaces"
+	proto_txpool "github.com/chainstack/erigon-lib/gointerfaces/txpool"
+	"github.com/chainstack/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"

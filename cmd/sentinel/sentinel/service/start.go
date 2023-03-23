@@ -6,8 +6,8 @@ import (
 	"net"
 	"time"
 
-	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	sentinelrpc "github.com/chainstack/erigon-lib/gointerfaces/sentinel"
+	"github.com/chainstack/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"

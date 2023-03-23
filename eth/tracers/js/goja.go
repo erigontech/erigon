@@ -22,10 +22,10 @@ import (
 	"fmt"
 	"math/big"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/common/hexutility"
 	"github.com/dop251/goja"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"

@@ -20,8 +20,8 @@ import (
 	"errors"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/txpool"
 )
 
 var (

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

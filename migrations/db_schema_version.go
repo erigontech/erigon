@@ -3,8 +3,8 @@ package migrations
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/common/datadir"
+	"github.com/chainstack/erigon-lib/kv"
 )
 
 var dbSchemaVersion5 = Migration{

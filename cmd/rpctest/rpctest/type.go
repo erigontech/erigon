@@ -3,7 +3,7 @@ package rpctest
 import (
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/state"

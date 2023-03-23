@@ -1,7 +1,7 @@
 package trie
 
 import (
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 )
 
 var emptyHash [32]byte

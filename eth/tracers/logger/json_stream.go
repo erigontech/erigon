@@ -5,9 +5,9 @@ import (
 	"encoding/hex"
 	"sort"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/vm"

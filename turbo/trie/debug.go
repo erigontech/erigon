@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"io"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/chainstack/erigon-lib/common"
 )
 
 func (t *Trie) Print(w io.Writer) {

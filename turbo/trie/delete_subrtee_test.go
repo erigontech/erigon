@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"testing"
 
+	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/common/length"
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types/accounts"

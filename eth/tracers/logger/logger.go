@@ -10,9 +10,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chainstack/erigon-lib/chain"
+	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"

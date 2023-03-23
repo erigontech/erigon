@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 	"syscall"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	chain2 "github.com/chainstack/erigon-lib/chain"
+	libcommon "github.com/chainstack/erigon-lib/common"
+	datadir2 "github.com/chainstack/erigon-lib/common/datadir"
+	"github.com/chainstack/erigon-lib/kv"
+	kv2 "github.com/chainstack/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 

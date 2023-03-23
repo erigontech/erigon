@@ -2,27 +2,26 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
-	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/chainstack/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/common/datadir"
+	"github.com/chainstack/erigon-lib/direct"
+	"github.com/chainstack/erigon-lib/gointerfaces"
+	"github.com/chainstack/erigon-lib/gointerfaces/grpcutil"
+	"github.com/chainstack/erigon-lib/gointerfaces/remote"
+	proto_sentry "github.com/chainstack/erigon-lib/gointerfaces/sentry"
+	"github.com/chainstack/erigon-lib/kv/kvcache"
+	"github.com/chainstack/erigon-lib/kv/remotedb"
+	"github.com/chainstack/erigon-lib/kv/remotedbserver"
+	"github.com/chainstack/erigon-lib/txpool"
+	"github.com/chainstack/erigon-lib/txpool/txpooluitl"
+	"github.com/chainstack/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
@@ -137,11 +136,7 @@ func doTxpool(ctx context.Context) error {
 
 	cfg.DBDir = dirs.TxPool
 
-	randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(2*time.Second)))
-	if err != nil {
-		return fmt.Errorf("generating random additional value for --txpool.commit.every: %w", err)
-	}
-	cfg.CommitEvery = commitEvery + time.Duration(randDuration.Int64())
+	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit

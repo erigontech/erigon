@@ -9,17 +9,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chainstack/erigon-lib/chain"
+	libcommon "github.com/chainstack/erigon-lib/common"
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/chainstack/erigon-lib/kv"
+	"github.com/chainstack/erigon-lib/kv/memdb"
+	"github.com/chainstack/erigon-lib/txpool"
+	types2 "github.com/chainstack/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/rlp"

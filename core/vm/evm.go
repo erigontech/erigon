@@ -21,8 +21,8 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/chainstack/erigon-lib/chain"
+	libcommon "github.com/chainstack/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -37,6 +37,8 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsPlanck:
+		precompiles = PrecompiledContractsPlanck
 	case evm.chainRules.IsMoran:
 		precompiles = PrecompiledContractsIsMoran
 	case evm.chainRules.IsNano:
