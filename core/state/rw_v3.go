@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -24,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
 )
 
 const CodeSizeTable = "CodeSize"
@@ -47,8 +47,8 @@ type StateV3 struct {
 	queue     exec22.TxTaskQueue
 	queueLock sync.Mutex
 
-	txsDone  *atomic2.Uint64
-	finished atomic2.Bool
+	txsDone  atomic.Uint64
+	finished atomic.Bool
 
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -65,8 +65,6 @@ func NewStateV3(tmpdir string) *StateV3 {
 		chStorage:      btree2.NewMap[string, []byte](128),
 		chIncs:         map[string][]byte{},
 		chContractCode: map[string][]byte{},
-
-		txsDone: atomic2.NewUint64(0),
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
