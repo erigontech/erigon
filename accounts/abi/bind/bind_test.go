@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -1793,7 +1792,7 @@ var bindTests = []struct {
 // the requested tester run against it.
 func TestGolangBindings(t *testing.T) {
 	// Skip the test if no Go command can be found
-	gocmd := runtime.GOROOT() + "/bin/go"
+	gocmd := "go"
 	if !dir.FileExist(gocmd) {
 		t.Skip("go sdk not found for testing")
 	}
