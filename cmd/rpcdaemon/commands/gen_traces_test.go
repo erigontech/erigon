@@ -32,7 +32,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewPrivateDebugAPI(baseApi, m.DB, 0)
 	var buf bytes.Buffer
 	stream := jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096)
@@ -120,7 +120,7 @@ func TestGeneratedTraceApi(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Block(context.Background(), rpc.BlockNumber(1))
 	if err != nil {
@@ -279,7 +279,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine)
+	baseApi := NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	api := NewTraceAPI(baseApi, m.DB, &httpcfg.HttpCfg{})
 	traces, err := api.Transaction(context.Background(), common.HexToHash("0xb2b9fa4c999c1c8370ce1fbd1c4315a9ce7f8421fe2ebed8a9051ff2e4e7e3da"))
 	if err != nil {

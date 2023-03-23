@@ -63,7 +63,7 @@ Bear in mind that SSD performance deteriorates when close to capacity.
 
 RAM: >=16GB, 64-bit architecture.
 
-[Golang version >= 1.18](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
+[Golang version >= 1.19](https://golang.org/doc/install); GCC 10+ or Clang; On Linux: kernel > v4
 
 <code>🔬 more details on disk storage [here](https://erigon.substack.com/p/disk-footprint-changes-in-new-erigon?s=r)
 and [here](https://ledgerwatch.github.io/turbo_geth_release.html#Disk-space).</code>
@@ -202,7 +202,7 @@ Windows users may run erigon in 3 possible ways:
   build on windows :
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
-    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.18
+    * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.19
     * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)

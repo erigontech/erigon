@@ -35,6 +35,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -192,6 +193,11 @@ var (
 		Name:  "txpool.trace.senders",
 		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
 		Value: "",
+	}
+	TxPoolCommitEveryFlag = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpool.DefaultConfig.CommitEvery,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -1262,6 +1268,8 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
+
+	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {

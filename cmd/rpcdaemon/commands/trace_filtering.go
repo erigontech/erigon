@@ -294,7 +294,7 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			allBlocks = iter.Union[uint64](allBlocks, it, order.Asc)
+			allBlocks = iter.Union[uint64](allBlocks, it, order.Asc, -1)
 			fromAddresses[*addr] = struct{}{}
 		}
 	}
@@ -305,18 +305,18 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 			if errors.Is(err, ethdb.ErrKeyNotFound) {
 				continue
 			}
-			blocksTo = iter.Union[uint64](blocksTo, it, order.Asc)
+			blocksTo = iter.Union[uint64](blocksTo, it, order.Asc, -1)
 			toAddresses[*addr] = struct{}{}
 		}
 	}
 
 	switch req.Mode {
 	case TraceFilterModeIntersection:
-		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo)
+		allBlocks = iter.Intersect[uint64](allBlocks, blocksTo, -1)
 	case TraceFilterModeUnion:
 		fallthrough
 	default:
-		allBlocks = iter.Union[uint64](allBlocks, blocksTo, order.Asc)
+		allBlocks = iter.Union[uint64](allBlocks, blocksTo, order.Asc, -1)
 	}
 
 	// Special case - if no addresses specified, take all traces

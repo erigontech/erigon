@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
@@ -50,6 +51,8 @@ var (
 	priceLimit   uint64
 	accountSlots uint64
 	priceBump    uint64
+
+	commitEvery time.Duration
 )
 
 func init() {
@@ -71,6 +74,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpool.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpool.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpool.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
+	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
 	rootCmd.Flags().StringSliceVar(&traceSenders, utils.TxPoolTraceSendersFlag.Name, []string{}, utils.TxPoolTraceSendersFlag.Usage)
 }
 
@@ -131,7 +135,8 @@ func doTxpool(ctx context.Context) error {
 	dirs := datadir.New(datadirCli)
 
 	cfg.DBDir = dirs.TxPool
-	cfg.CommitEvery = 30 * time.Second
+
+	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
@@ -29,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/torquem-ch/mdbx-go/mdbx"
-	atomic2 "go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
@@ -133,7 +133,7 @@ func ExecV3(ctx context.Context,
 
 	var block, stageProgress uint64
 	var maxTxNum uint64
-	var outputTxNum = atomic2.NewUint64(0)
+	outputTxNum := atomic.Uint64{}
 	var inputTxNum uint64
 	if execStage.BlockNumber > 0 {
 		stageProgress = execStage.BlockNumber
@@ -158,7 +158,7 @@ func ExecV3(ctx context.Context,
 				return err
 			}
 			outputTxNum.Store(_outputTxNum)
-			outputTxNum.Inc()
+			outputTxNum.Add(1)
 			inputTxNum = outputTxNum.Load()
 		}
 	} else {
@@ -174,7 +174,7 @@ func ExecV3(ctx context.Context,
 					return err
 				}
 				outputTxNum.Store(_outputTxNum)
-				outputTxNum.Inc()
+				outputTxNum.Add(1)
 				inputTxNum = outputTxNum.Load()
 			}
 			return nil
@@ -185,10 +185,10 @@ func ExecV3(ctx context.Context,
 	agg.SetTxNum(inputTxNum)
 
 	var outputBlockNum = syncMetrics[stages.Execution]
-	var inputBlockNum = atomic2.NewUint64(0)
+	inputBlockNum := &atomic.Uint64{}
 	var count uint64
-	var repeatCount, triggerCount = atomic2.NewUint64(0), atomic2.NewUint64(0)
-	var resultsSize = atomic2.NewInt64(0)
+	var repeatCount, triggerCount = &atomic.Uint64{}, &atomic.Uint64{}
+	resultsSize := &atomic.Int64{}
 	var lock sync.RWMutex
 
 	queueSize := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
@@ -658,7 +658,7 @@ Loop:
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
-				outputTxNum.Inc()
+				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
@@ -768,7 +768,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount *atomic2.Uint64, rwsCond *sync.Cond, applyWorker *exec3.Worker) (resultSize int64, outputTxNum, conflicts, processedBlockNum uint64, err error) {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount *atomic.Uint64, rwsCond *sync.Cond, applyWorker *exec3.Worker) (resultSize int64, outputTxNum, conflicts, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
@@ -1120,7 +1120,7 @@ func reconstituteStep(last bool,
 	var transposedKey []byte
 
 	if err = db.View(ctx, func(roTx kv.Tx) error {
-		clear := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateR, nil, math.MaxUint32)
+		clear := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.PlainStateR, nil, math.MaxUint32)
 		defer clear()
 		if err = roTx.ForEach(kv.PlainStateR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
@@ -1129,7 +1129,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear2 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainStateD, nil, math.MaxUint32)
+		clear2 := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.PlainStateD, nil, math.MaxUint32)
 		defer clear2()
 		if err = roTx.ForEach(kv.PlainStateD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)
@@ -1138,7 +1138,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear3 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeR, nil, math.MaxUint32)
+		clear3 := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.CodeR, nil, math.MaxUint32)
 		defer clear3()
 		if err = roTx.ForEach(kv.CodeR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
@@ -1147,7 +1147,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear4 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.CodeD, nil, math.MaxUint32)
+		clear4 := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.CodeD, nil, math.MaxUint32)
 		defer clear4()
 		if err = roTx.ForEach(kv.CodeD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)
@@ -1156,7 +1156,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear5 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractR, nil, math.MaxUint32)
+		clear5 := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.PlainContractR, nil, math.MaxUint32)
 		defer clear5()
 		if err = roTx.ForEach(kv.PlainContractR, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], k[8:]...)
@@ -1165,7 +1165,7 @@ func reconstituteStep(last bool,
 		}); err != nil {
 			return err
 		}
-		clear6 := kv.ReadAhead(ctx, db, atomic2.NewBool(false), kv.PlainContractD, nil, math.MaxUint32)
+		clear6 := kv.ReadAhead(ctx, db, &atomic.Bool{}, kv.PlainContractD, nil, math.MaxUint32)
 		defer clear6()
 		if err = roTx.ForEach(kv.PlainContractD, nil, func(k, v []byte) error {
 			transposedKey = append(transposedKey[:0], v...)

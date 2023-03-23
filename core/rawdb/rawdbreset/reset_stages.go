@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -149,6 +149,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
+		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV4Buckets...)
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -214,16 +215,20 @@ var stateHistoryBuckets = []string{
 	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
-	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-	kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageSettings, kv.StorageIdx,
-	kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeSettings, kv.CodeIdx,
-	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, kv.AccountSettings,
-	kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals, kv.StorageSettings,
-	kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals, kv.CodeSettings,
+	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals,
+	kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx,
+	kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx,
+	kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals,
+	kv.StorageHistoryKeys, kv.StorageIdx, kv.StorageHistoryVals,
+	kv.CodeHistoryKeys, kv.CodeIdx, kv.CodeHistoryVals,
 	kv.LogAddressKeys, kv.LogAddressIdx,
 	kv.LogTopicsKeys, kv.LogTopicsIdx,
 	kv.TracesFromKeys, kv.TracesFromIdx,
 	kv.TracesToKeys, kv.TracesToIdx,
+}
+var stateHistoryV4Buckets = []string{
+	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys,
+	kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
@@ -237,7 +242,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 	if total < 10_000 {
 		return
 	}
-	progress := atomic.NewInt64(0)
+	progress := atomic.Int64{}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -259,7 +264,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 						if err != nil {
 							return err
 						}
-						progress.Inc()
+						progress.Add(1)
 						select {
 						case <-ctx.Done():
 							return ctx.Err()
