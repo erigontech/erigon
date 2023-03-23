@@ -23,11 +23,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var bindTests = []struct {
@@ -1792,12 +1792,12 @@ var bindTests = []struct {
 // the requested tester run against it.
 func TestGolangBindings(t *testing.T) {
 	// Skip the test if no Go command can be found
-	gocmd := runtime.GOROOT() + "/bin/go"
+	gocmd := "go"
 	if !dir.FileExist(gocmd) {
 		t.Skip("go sdk not found for testing")
 	}
 	// Create a temporary workspace for the test suite
-	ws := t.TempDir()
+	ws := "" //t.TempDir()
 
 	pkg := filepath.Join(ws, "bindtest")
 	if err := os.MkdirAll(pkg, 0700); err != nil {
@@ -1843,6 +1843,14 @@ func TestGolangBindings(t *testing.T) {
 		t.Fatalf("failed to convert binding test to modules: %v\n%s", err, out)
 	}
 	pwd, _ := os.Getwd()
+	replacer2 := exec.Command(gocmd, "version")
+	replacer2.Dir = pkg
+	if out, err := replacer2.CombinedOutput(); err != nil {
+		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
+	} else {
+		log.Warn("go version", "v", string(out), "gocmd", gocmd)
+	}
+
 	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/ledgerwatch/erigon="+filepath.Join(pwd, "..", "..", "..")) // Repo root
 	replacer.Dir = pkg
 	if out, err := replacer.CombinedOutput(); err != nil {
@@ -1859,8 +1867,8 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := tidier.CombinedOutput(); err != nil {
 		t.Fatalf("failed to tidy Go module file: %v\n%s", err, out)
 	}
-	// Test the entire package and report any failures
-	cmd := exec.Command(gocmd, "test", "-v", "-count", "1", "-tags", "mdbx")
+	//Test the entire package and report any failures
+	cmd := exec.Command(gocmd, "test", "-v", "-count", "1")
 	cmd.Dir = pkg
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("failed to run binding test: %v\n%s", err, out)
