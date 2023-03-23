@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/bits"
+	"sync/atomic"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -150,9 +150,9 @@ func RegenerateIntermediateHashes(logPrefix string, db kv.RwTx, cfg TrieCfg, exp
 	defer log.Info(fmt.Sprintf("[%s] Regeneration ended", logPrefix))
 	_ = db.ClearBucket(kv.TrieOfAccounts)
 	_ = db.ClearBucket(kv.TrieOfStorage)
-	clean := kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.HashedAccounts, nil, math.MaxUint32)
+	clean := kv.ReadAhead(ctx, cfg.db, &atomic.Bool{}, kv.HashedAccounts, nil, math.MaxUint32)
 	defer clean()
-	clean2 := kv.ReadAhead(ctx, cfg.db, atomic.NewBool(false), kv.HashedStorage, nil, math.MaxUint32)
+	clean2 := kv.ReadAhead(ctx, cfg.db, &atomic.Bool{}, kv.HashedStorage, nil, math.MaxUint32)
 	defer clean2()
 
 	accTrieCollector := etl.NewCollector(logPrefix, cfg.tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize))

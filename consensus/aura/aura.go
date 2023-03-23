@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -33,7 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
-	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/common"
@@ -97,7 +97,7 @@ type EpochTransition struct {
 
 type Step struct {
 	calibrate bool // whether calibration is enabled.
-	inner     *atomic.Uint64
+	inner     atomic.Uint64
 	// Planned durations of steps.
 	durations []StepDurationInfo
 }
@@ -138,7 +138,7 @@ func (s *Step) optCalibrate() bool {
 
 type PermissionedStep struct {
 	inner      *Step
-	canPropose *atomic.Bool
+	canPropose atomic.Bool
 }
 
 type ReceivedStepHashes map[uint64]map[libcommon.Address]libcommon.Hash //BTreeMap<(u64, Address), H256>
@@ -420,10 +420,10 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 		durations = append(durations, durInfo)
 	}
 	step := &Step{
-		inner:     atomic.NewUint64(initialStep),
 		calibrate: auraParams.StartStep == nil,
 		durations: durations,
 	}
+	step.inner.Store(initialStep)
 	step.doCalibrate()
 
 	/*
@@ -449,12 +449,13 @@ func NewAuRa(config *chain.AuRaConfig, db kv.RwDB, ourSigningAddress libcommon.A
 	c := &AuRa{
 		db:                 db,
 		exitCh:             exitCh,
-		step:               PermissionedStep{inner: step, canPropose: atomic.NewBool(true)},
+		step:               PermissionedStep{inner: step},
 		OurSigningAddress:  ourSigningAddress,
 		cfg:                auraParams,
 		receivedStepHashes: ReceivedStepHashes{},
 		EpochManager:       NewEpochManager(),
 	}
+	c.step.canPropose.Store(true)
 	_ = config
 
 	return c, nil
