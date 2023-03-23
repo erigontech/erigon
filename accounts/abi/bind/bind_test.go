@@ -1848,7 +1848,7 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := replacer2.CombinedOutput(); err != nil {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
 	} else {
-		log.Warn("go version", "v", out, "gocmd", gocmd)
+		log.Warn("go version", "v", string(out), "gocmd", gocmd)
 	}
 
 	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/ledgerwatch/erigon="+filepath.Join(pwd, "..", "..", "..")) // Repo root
