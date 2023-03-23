@@ -91,7 +91,7 @@ func (p *Parlia) backOffTime(snap *Snapshot, header *types.Header, val libcommon
 		}
 
 		s := rand.NewSource(int64(snap.Number))
-		r := rand.New(s)
+		r := rand.New(s) // nolint: gosec
 		n := len(validators)
 		backOffSteps := make([]uint64, 0, n)
 
