@@ -160,7 +160,7 @@ func TestDomainGCReadAfterRemoveFile(t *testing.T) {
 			hc := h.MakeContext()
 			lastOnFs, _ := h.files.Max()
 			require.False(lastOnFs.frozen) // prepared dataset must have some non-frozen files. or it's bad dataset.
-			h.integrateMergedFiles(nil, []*filesItem{lastOnFs}, nil, nil, nil, nil)
+			h.integrateMergedFiles([]*filesItem{lastOnFs}, nil, nil, nil, nil, nil)
 
 			require.NotNil(lastOnFs.decompressor)
 			hc.Close()
