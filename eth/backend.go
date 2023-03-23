@@ -610,16 +610,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
+	{
 		baseFee := uint64(0)
 		if currentBlock.BaseFee() != nil {
 			baseFee = currentBlock.BaseFee().Uint64()
 		}
 		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
 		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
-
-	}()
+	}
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()

@@ -19,14 +19,12 @@ package utils
 
 import (
 	"crypto/ecdsa"
-	"crypto/rand"
 	"fmt"
 	"math/big"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -37,6 +35,7 @@ import (
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -1269,14 +1268,8 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
-	if ctx.IsSet(TxPoolCommitEveryFlag.Name) {
-		cfg.CommitEvery = ctx.Duration(TxPoolCommitEveryFlag.Name)
-		randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(2*time.Second)))
-		if err != nil {
-			Fatalf("Generating random additional value for --txpool.commit.every: %s", err)
-		}
-		cfg.CommitEvery += time.Duration(randDuration.Int64())
-	}
+
+	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {

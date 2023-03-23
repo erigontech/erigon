@@ -7,6 +7,8 @@ on:
       - stable
   schedule:
     - cron: '20 16 * * *' # daily at 16:20 UTC
+  workflow_dispatch:
+
 jobs:
   tests:
     strategy:
@@ -17,21 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: 1.19.x
+          go-version: '1.19'
       - name: Install dependencies on Linux
         if: runner.os == 'Linux'
         run: sudo apt update && sudo apt install build-essential
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/Library/Caches/go-build
-            ~/go/pkg/mod
-          key: go-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ matrix.os }}-
 
       - name: test-integration
         run: make test-integration
@@ -48,9 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - run: git submodule update --init --recursive --force
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: 1.19.x
+          go-version: '1.19'
 
       - uses: actions/cache@v3
         with:
@@ -62,14 +55,6 @@ jobs:
         run: |
           choco upgrade mingw -y --no-progress --version 11.2.0.07112021
           choco install cmake -y --no-progress --version 3.23.1
-
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~\AppData\Local\go-build
-            ~\go\pkg\mod
-          key: go-${{ matrix.os }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: go-${{ matrix.os }}-
 
       - name: test-integration
         run: .\wmake.ps1 test-integration

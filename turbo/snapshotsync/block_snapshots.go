@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -44,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
@@ -1372,7 +1372,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 
 	firstIDSaved := false
 
-	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, atomic.NewBool(false), atomic.NewBool(false)
+	doWarmup, warmupTxs, warmupSenders := blockTo-blockFrom >= 100_000 && workers > 4, &atomic.Bool{}, &atomic.Bool{}
 	from := hexutility.EncodeTs(blockFrom)
 	var lastBody types.BodyForStorage
 	if err := kv.BigChunks(db, kv.HeaderCanonical, from, func(tx kv.Tx, k, v []byte) (bool, error) {
@@ -1679,7 +1679,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if uint64(d.Count()) != expectedCount {
 		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
 	}
-	p.Name.Store(segFileName)
+	p.Name.Store(&segFileName)
 	p.Total.Store(uint64(d.Count() * 2))
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1731,7 +1731,7 @@ RETRY:
 	}
 
 	for g.HasNext() {
-		p.Processed.Inc()
+		p.Processed.Add(1)
 		word, nextPos = g.Next(word[:0])
 		select {
 		case <-ctx.Done():
@@ -1816,14 +1816,14 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegm
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.Name.Store(fname)
+	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
 
 	hasher := crypto.NewKeccakState()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common2.Hash
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.Processed.Inc()
+		p.Processed.Add(1)
 		headerRlp := word[1:]
 		hasher.Reset()
 		hasher.Write(headerRlp)
@@ -1855,11 +1855,11 @@ func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegme
 	defer d.Close()
 
 	_, fname := filepath.Split(segmentFilePath)
-	p.Name.Store(fname)
+	p.Name.Store(&fname)
 	p.Total.Store(uint64(d.Count()))
 
 	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
-		p.Processed.Inc()
+		p.Processed.Add(1)
 		n := binary.PutUvarint(num, i)
 		if err := idx.AddKey(num[:n], offset); err != nil {
 			return err

@@ -26,7 +26,8 @@ func TestPendingBlock(t *testing.T) {
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
-	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, engine), nil, nil, nil, mining, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, engine,
+		m.Dirs), nil, nil, nil, mining, 5000000, 100_000)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(int64(expect))}))
 	require.NoError(t, err)

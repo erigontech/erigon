@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/consensus"
@@ -242,7 +242,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 	if total < 10_000 {
 		return
 	}
-	progress := atomic.NewInt64(0)
+	progress := atomic.Int64{}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -264,7 +264,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 						if err != nil {
 							return err
 						}
-						progress.Inc()
+						progress.Add(1)
 						select {
 						case <-ctx.Done():
 							return ctx.Err()

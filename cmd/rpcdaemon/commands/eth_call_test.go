@@ -47,7 +47,7 @@ func TestEstimateGas(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, stages.Mock(t))
 	mining := txpool.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, nil, nil, mining, func() {})
-	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(ff, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
@@ -63,7 +63,7 @@ func TestEthCallNonCanonical(t *testing.T) {
 	agg := m.HistoryV3Components()
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 	var from = libcommon.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = libcommon.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
@@ -88,7 +88,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 
 	callData := hexutil.MustDecode("0x2e64cec1")
 	callDataBytes := hexutil.Bytes(callData)
@@ -250,17 +250,18 @@ func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts
 }
 
 func TestGetProof(t *testing.T) {
-	pruneTo := uint64(3)
+	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
 	m, bankAddress, _ := chainWithDeployedContract(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
-	doPrune(t, m.DB, pruneTo)
-
+	if m.HistoryV3 {
+		t.Skip("not supported by Erigon3")
+	}
 	agg := m.HistoryV3Components()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil, nil, nil, 5000000, 100_000)
+	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 
 	tests := []struct {
 		name        string
@@ -270,18 +271,22 @@ func TestGetProof(t *testing.T) {
 	}{
 		{
 			name:     "currentBlock",
-			blockNum: 2,
+			blockNum: 3,
 		},
 		{
 			name:        "withState",
-			blockNum:    2,
+			blockNum:    3,
 			storageKeys: []libcommon.Hash{{1}},
 			expectedErr: "the method is currently not implemented: eth_getProof with storageKeys",
 		},
 		{
-			name:        "olderBlock",
+			name:     "olderBlock",
+			blockNum: 2,
+		},
+		{
+			name:        "tooOldBlock",
 			blockNum:    1,
-			expectedErr: "the method is currently not implemented: eth_getProof for block != latest",
+			expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
 		},
 	}
 
@@ -298,15 +303,14 @@ func TestGetProof(t *testing.T) {
 				require.Nil(t, proof)
 				return
 			}
+			require.NoError(t, err)
+			require.NotNil(t, proof)
 
 			tx, err := m.DB.BeginRo(context.Background())
 			assert.NoError(t, err)
 			defer tx.Rollback()
 			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
-
-			require.NoError(t, err)
-			require.NotNil(t, proof)
 
 			require.Equal(t, bankAddress, proof.Address)
 			verifyAccountProof(t, header.Root, proof)
@@ -336,7 +340,7 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
@@ -374,7 +378,7 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	oldestBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
@@ -416,7 +420,7 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	latestBlock := rawdb.ReadCurrentBlock(tx)
 
@@ -455,7 +459,7 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	currentHeader := rawdb.ReadCurrentHeader(tx)
 	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
@@ -489,7 +493,6 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	if err != nil {
 		t.Errorf("couldn't retrieve block %v", err)
 	}
-
 	if block["timestamp"] != response["timestamp"] || block["hash"] != response["hash"] {
 		t.Errorf("Retrieved the wrong block.\nexpected block hash: %s expected timestamp: %d\nblock hash retrieved: %s timestamp retrieved: %d", response["hash"], response["timestamp"], block["hash"], block["timestamp"])
 	}
@@ -507,7 +510,7 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	defer tx.Rollback()
 
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine), m.DB, nil)
+	api := NewErigonAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil)
 
 	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
 	pickedBlock, err := rawdb.ReadBlockByNumber(tx, highestBlockNumber.Uint64()/3)
@@ -558,7 +561,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 
 	var contractAddr libcommon.Address
 
-	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *core.BlockGen) {
+	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 3, func(i int, block *core.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -566,7 +569,7 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			contractAddr = crypto.CreateAddress(bankAddress, nonce)
-		case 1:
+		case 1, 2:
 			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 90000, new(uint256.Int), nil), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
