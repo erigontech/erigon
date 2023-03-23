@@ -201,7 +201,7 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 		file: li.roFiles.Load(),
 		bm:   li.roBmFile.Load(),
 	}
-	if x.file.src != nil {
+	if x.file != nil && x.file.src != nil {
 		x.file.src.refcount.Add(1)
 	}
 	return x
