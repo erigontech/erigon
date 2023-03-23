@@ -325,6 +325,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 	defer tx.Rollback()
+	if api.historyV3(tx) {
+		return nil, fmt.Errorf("not supported by Erigon3")
+	}
 
 	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
