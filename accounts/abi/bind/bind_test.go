@@ -1797,7 +1797,7 @@ func TestGolangBindings(t *testing.T) {
 		t.Skip("go sdk not found for testing")
 	}
 	// Create a temporary workspace for the test suite
-	ws := "" //t.TempDir()
+	ws := t.TempDir()
 
 	pkg := filepath.Join(ws, "bindtest")
 	if err := os.MkdirAll(pkg, 0700); err != nil {
