@@ -264,7 +264,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 						if err != nil {
 							return err
 						}
-						progress.Inc()
+						progress.Add(1)
 						select {
 						case <-ctx.Done():
 							return ctx.Err()
