@@ -2,10 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
+	common2 "github.com/ledgerwatch/erigon/common"
 	"os"
 	"path/filepath"
 	"time"
@@ -137,11 +136,7 @@ func doTxpool(ctx context.Context) error {
 
 	cfg.DBDir = dirs.TxPool
 
-	randDuration, err := rand.Int(rand.Reader, big.NewInt(int64(2*time.Second)))
-	if err != nil {
-		return fmt.Errorf("generating random additional value for --txpool.commit.every: %w", err)
-	}
-	cfg.CommitEvery = commitEvery + time.Duration(randDuration.Int64())
+	cfg.CommitEvery = common2.RandomizeDuration(commitEvery)
 	cfg.PendingSubPoolLimit = pendingPoolLimit
 	cfg.BaseFeeSubPoolLimit = baseFeePoolLimit
 	cfg.QueuedSubPoolLimit = queuedPoolLimit
