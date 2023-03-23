@@ -27,7 +27,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var bindTests = []struct {
@@ -1843,14 +1842,6 @@ func TestGolangBindings(t *testing.T) {
 		t.Fatalf("failed to convert binding test to modules: %v\n%s", err, out)
 	}
 	pwd, _ := os.Getwd()
-	replacer2 := exec.Command(gocmd, "version")
-	replacer2.Dir = pkg
-	if out, err := replacer2.CombinedOutput(); err != nil {
-		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
-	} else {
-		log.Warn("go version", "v", string(out), "gocmd", gocmd)
-	}
-
 	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/ledgerwatch/erigon="+filepath.Join(pwd, "..", "..", "..")) // Repo root
 	replacer.Dir = pkg
 	if out, err := replacer.CombinedOutput(); err != nil {
