@@ -55,7 +55,7 @@ jobs:
         if: runner.os == 'Linux'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.51
+          version: v1.52
 
       - name: Test
         run: make test
