@@ -208,7 +208,7 @@ func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
 }
 
 func (out *ctxLocalityIdx) Close() {
-	if out == nil || out.file.src == nil {
+	if out == nil || out.file == nil || out.file.src == nil {
 		return
 	}
 	refCnt := out.file.src.refcount.Add(-1)
