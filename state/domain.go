@@ -1021,6 +1021,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
 	}
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
+		if err != nil {
+			return Collation{}, err
+		}
 		pos++
 		select {
 		case <-logEvery.C:
