@@ -1153,6 +1153,10 @@ type EpochReaderImpl struct {
 	tx kv.RwTx
 }
 
+func NewEpochReader(tx kv.RwTx) EpochReaderImpl {
+	return EpochReaderImpl{tx: tx}
+}
+
 func (cr EpochReaderImpl) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
 	return rawdb.ReadEpoch(cr.tx, number, hash)
 }
