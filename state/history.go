@@ -1093,8 +1093,6 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 				}
 
 				select {
-				case <-ctx.Done():
-					return nil
 				case <-logEvery.C:
 					log.Info("[snapshots] prune history", "name", h.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(h.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
 				default:
@@ -1128,8 +1126,6 @@ func (h *History) prune(ctx context.Context, txFrom, txTo, limit uint64, logEver
 				}
 
 				select {
-				case <-ctx.Done():
-					return nil
 				case <-logEvery.C:
 					log.Info("[snapshots] prune history", "name", h.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(h.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
 				default:
