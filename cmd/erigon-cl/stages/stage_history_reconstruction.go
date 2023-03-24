@@ -147,7 +147,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	})
 	prevProgress := cfg.downloader.Progress()
 
-	logInterval := time.NewTicker(30 * time.Second)
+	logInterval := time.NewTicker(logIntervalTime)
 	finishCh := make(chan struct{})
 	// Start logging thread
 	go func() {
@@ -156,7 +156,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			case <-logInterval.C:
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
+				speed := float64(prevProgress-currProgress) / float64(logIntervalTime/time.Second)
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
