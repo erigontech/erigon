@@ -95,9 +95,14 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		slot := blk.Block.Slot
+		blockRoot, err := blk.Block.HashSSZ()
+		if err != nil {
+			return false, err
+		}
+		key := append(rawdb.EncodeNumber(slot), blockRoot[:]...)
 		// Collect attestations
 		encodedAttestations := cltypes.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
-		if err := attestationsCollector.Collect(rawdb.EncodeNumber(slot), encodedAttestations); err != nil {
+		if err := attestationsCollector.Collect(key, encodedAttestations); err != nil {
 			return false, err
 		}
 		// Collect beacon blocks
@@ -105,12 +110,8 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		if err != nil {
 			return false, err
 		}
-		blockRoot, err := blk.Block.HashSSZ()
-		if err != nil {
-			return false, err
-		}
 		slotBytes := rawdb.EncodeNumber(slot)
-		if err := beaconBlocksCollector.Collect(slotBytes, encodedBeaconBlock); err != nil {
+		if err := beaconBlocksCollector.Collect(key, encodedBeaconBlock); err != nil {
 			return false, err
 		}
 		// Collect hashes
