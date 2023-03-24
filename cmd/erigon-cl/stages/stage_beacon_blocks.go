@@ -51,14 +51,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 		defer tx.Rollback()
 	}
-	progress := s.BlockNumber
-	var lastRoot libcommon.Hash
-	if progress == 0 {
-		progress = cfg.state.LatestBlockHeader().Slot
-		lastRoot, err = cfg.state.BlockRoot()
-	} else {
-		lastRoot, err = rawdb.ReadFinalizedBlockRoot(tx, progress)
-	}
+	progress := cfg.state.LatestBlockHeader().Slot
+	lastRoot, err := cfg.state.BlockRoot()
 	if err != nil {
 		return err
 	}
