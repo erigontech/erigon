@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -74,7 +75,7 @@ func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	if err != nil {
 		return nil, err
 	}
-	tx := &Tx{Tx: kvTx, db: db}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
 
 	tx.agg = db.agg.MakeContext()
 	return tx, nil
@@ -101,8 +102,52 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
+func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
+	kvTx, err := db.RwDB.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
+
+	tx.agg = db.agg.MakeContext()
+	return tx, nil
+}
+func (db *DB) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	return db.BeginTemporalRw(ctx)
+}
+func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	tx, err := db.BeginTemporalRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
+
+func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
+	kvTx, err := db.RwDB.BeginRwNosync(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tx := &Tx{MdbxTx: kvTx.(*mdbx.MdbxTx), db: db}
+
+	tx.agg = db.agg.MakeContext()
+	return tx, nil
+}
+func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+	return db.BeginTemporalRwNosync(ctx)
+}
+func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+	tx, err := db.BeginTemporalRwNosync(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	return f(tx)
+}
+
 type Tx struct {
-	kv.Tx
+	*mdbx.MdbxTx
 	db               *DB
 	agg              *state.AggregatorV3Context
 	resourcesToClose []kv.Closer
@@ -115,14 +160,14 @@ func (tx *Tx) Rollback() {
 	if tx.agg != nil {
 		tx.agg.Close()
 	}
-	tx.Tx.Rollback()
+	tx.MdbxTx.Rollback()
 }
 
 func (tx *Tx) Commit() error {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
 	}
-	return tx.Tx.Commit()
+	return tx.MdbxTx.Commit()
 }
 
 const (
@@ -175,7 +220,7 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 					force = &hash
 				}
 			}
-			v, err = tx.db.restoreCodeHash(tx.Tx, k, v, force)
+			v, err = tx.db.restoreCodeHash(tx.MdbxTx, k, v, force)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -273,7 +318,7 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, 
 func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsHistory:
-		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.Tx)
+		v, ok, err = tx.agg.ReadAccountDataNoStateWithRecent(key, ts, tx.MdbxTx)
 		if err != nil {
 			return nil, false, err
 		}
@@ -294,15 +339,15 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 				force = &hash
 			}
 		}
-		v, err = tx.db.restoreCodeHash(tx.Tx, key, v, force)
+		v, err = tx.db.restoreCodeHash(tx.MdbxTx, key, v, force)
 		if err != nil {
 			return nil, false, err
 		}
 		return v, true, nil
 	case StorageHistory:
-		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.Tx)
+		return tx.agg.ReadAccountStorageNoStateWithRecent2(key, ts, tx.MdbxTx)
 	case CodeHistory:
-		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.Tx)
+		return tx.agg.ReadAccountCodeNoStateWithRecent(key, ts, tx.MdbxTx)
 	default:
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
@@ -311,19 +356,19 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
-		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.AccountHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case StorageHistoryIdx:
-		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.StorageHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case CodeHistoryIdx:
-		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.CodeHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogAddrRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceFromRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceToRange(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
@@ -345,11 +390,11 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it, err = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
 	case StorageHistory:
-		it, err = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
 	case CodeHistory:
-		it, err = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}

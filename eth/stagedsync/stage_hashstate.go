@@ -17,9 +17,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -562,9 +564,16 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	defer collector.Close()
 
 	if storage {
-		sc := agg.Storage().MakeContext()
-		defer sc.Close()
-		if err := sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, _, err := it.Next()
+			if err != nil {
+				return err
+			}
+
 			accBytes, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
@@ -576,7 +585,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 					return err
 				}
 				if incarnation == 0 {
-					return nil
+					continue
 				}
 			}
 			plainKey := dbutils.PlainGenerateCompositeStorageKey(k[:20], incarnation, k[20:])
@@ -588,10 +597,9 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 			if err != nil {
 				return err
 			}
-
-			return collector.Collect(newK, newV)
-		}); err != nil {
-			return err
+			if err := collector.Collect(newK, newV); err != nil {
+				return err
+			}
 		}
 		if err := collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
 			return err
@@ -602,9 +610,15 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 	codeCollector := etl.NewCollector(logPrefix, p.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer codeCollector.Close()
 
-	ac := agg.Accounts().MakeContext()
-	defer ac.Close()
-	if err := ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k, _ []byte) error {
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return err
+		}
 		newV, err := p.tx.GetOne(kv.PlainState, k)
 		if err != nil {
 			return err
@@ -620,14 +634,14 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 
 		//code
 		if len(newV) == 0 {
-			return nil
+			continue
 		}
 		incarnation, err := accounts.DecodeIncarnationFromStorage(newV)
 		if err != nil {
 			return err
 		}
 		if incarnation == 0 {
-			return nil
+			continue
 		}
 		plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 		var codeHash []byte
@@ -636,7 +650,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 			return fmt.Errorf("getFromPlainCodesAndLoad for %x, inc %d: %w", plainKey, incarnation, err)
 		}
 		if codeHash == nil {
-			return nil
+			continue
 		}
 		newCodeK, err := transformContractCodeKey(plainKey)
 		if err != nil {
@@ -645,11 +659,7 @@ func (p *Promoter) PromoteOnHistoryV3(logPrefix string, agg *state.AggregatorV3,
 		if err = codeCollector.Collect(newCodeK, newV); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
-
 	if err := collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()}); err != nil {
 		return err
 	}
@@ -718,11 +728,18 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 
 	acc := accounts.NewAccount()
 	if codes {
-		ac := agg.Accounts().MakeContext()
-		defer ac.Close()
-		if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
+
 			if len(v) == 0 {
-				return nil
+				continue
 			}
 			if err := accounts.DeserialiseV3(&acc, v); err != nil {
 				return err
@@ -730,7 +747,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 
 			incarnation := acc.Incarnation
 			if incarnation == 0 {
-				return nil
+				continue
 			}
 			plainKey := dbutils.PlainGenerateStoragePrefix(k, incarnation)
 			codeHash, err := p.tx.GetOne(kv.PlainContractCode, plainKey)
@@ -744,18 +761,21 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 			if err = collector.Collect(newK, codeHash); err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			return err
 		}
 
 		return collector.Load(p.tx, kv.ContractCode, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 	}
 
 	if storage {
-		sc := agg.Storage().MakeContext()
-		defer sc.Close()
-		if err = sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
 			val, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
 				return err
@@ -773,16 +793,19 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 			if err := collector.Collect(newK, v); err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			return err
 		}
 		return collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 	}
 
-	ac := agg.Accounts().MakeContext()
-	defer ac.Close()
-	if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -792,7 +815,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 			if err = collector.Collect(newK, nil); err != nil {
 				return err
 			}
-			return nil
+			continue
 		}
 		if err := accounts.DeserialiseV3(&acc, v); err != nil {
 			return err
@@ -810,10 +833,6 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 		if err := collector.Collect(newK, value); err != nil {
 			return err
 		}
-
-		return nil
-	}); err != nil {
-		return err
 	}
 	return collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 }
