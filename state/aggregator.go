@@ -1211,19 +1211,19 @@ func (ac *AggregatorContext) storageFn(plainKey []byte, cell *commitment.Cell) e
 }
 
 func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.logAddrs.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.logTopics.IdxRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.tracesFrom.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.tracesTo.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) Close() {

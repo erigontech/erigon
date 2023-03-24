@@ -472,7 +472,7 @@ func TestIterateChanged(t *testing.T) {
 		ic := h.MakeContext()
 		defer ic.Close()
 
-		it, err := ic.IterateChanged(2, 20, order.Asc, -1, tx)
+		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
 		require.NoError(err)
 		for it.HasNext() {
 			k, v, err := it.Next()
@@ -520,7 +520,7 @@ func TestIterateChanged(t *testing.T) {
 			"",
 			"",
 			""}, vals)
-		it, err = ic.IterateChanged(995, 1000, order.Asc, -1, tx)
+		it, err = ic.HistoryRange(995, 1000, order.Asc, -1, tx)
 		require.NoError(err)
 		keys, vals = keys[:0], vals[:0]
 		for it.HasNext() {
@@ -551,6 +551,45 @@ func TestIterateChanged(t *testing.T) {
 			"ff0000000000006e",
 			"ff00000000000052",
 			"ff00000000000024"}, vals)
+
+		// no upper bound
+		it, err = ic.HistoryRange(995, -1, order.Asc, -1, tx)
+		require.NoError(err)
+		keys, vals = keys[:0], vals[:0]
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+			keys = append(keys, fmt.Sprintf("%x", k))
+			vals = append(vals, fmt.Sprintf("%x", v))
+		}
+		require.Equal([]string{"0100000000000001", "0100000000000002", "0100000000000003", "0100000000000004", "0100000000000005", "0100000000000006", "0100000000000008", "0100000000000009", "010000000000000a", "010000000000000c", "0100000000000014", "0100000000000019", "010000000000001b"}, keys)
+		require.Equal([]string{"ff000000000003e2", "ff000000000001f1", "ff0000000000014b", "ff000000000000f8", "ff000000000000c6", "ff000000000000a5", "ff0000000000007c", "ff0000000000006e", "ff00000000000063", "ff00000000000052", "ff00000000000031", "ff00000000000027", "ff00000000000024"}, vals)
+
+		// no upper bound, limit=2
+		it, err = ic.HistoryRange(995, -1, order.Asc, 2, tx)
+		require.NoError(err)
+		keys, vals = keys[:0], vals[:0]
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+			keys = append(keys, fmt.Sprintf("%x", k))
+			vals = append(vals, fmt.Sprintf("%x", v))
+		}
+		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
+		require.Equal([]string{"ff000000000003e2", "ff000000000001f1"}, vals)
+
+		// no lower bound, limit=2
+		it, err = ic.HistoryRange(-1, 1000, order.Asc, 2, tx)
+		require.NoError(err)
+		keys, vals = keys[:0], vals[:0]
+		for it.HasNext() {
+			k, v, err := it.Next()
+			require.NoError(err)
+			keys = append(keys, fmt.Sprintf("%x", k))
+			vals = append(vals, fmt.Sprintf("%x", v))
+		}
+		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
+		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		_, db, h, txs := filledHistory(t, true)
@@ -587,11 +626,14 @@ func TestIterateChanged2(t *testing.T) {
 			hc, require := h.MakeContext(), require.New(t)
 			defer hc.Close()
 
-			err := hc.IterateRecentlyChanged(2, 20, roTx, func(k, v []byte) error {
+			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
+			require.NoError(err)
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
-				return nil
-			})
+			}
 			require.NoError(err)
 			require.Equal([]string{
 				"0100000000000001",
@@ -634,11 +676,15 @@ func TestIterateChanged2(t *testing.T) {
 				"",
 				""}, vals)
 			keys, vals = keys[:0], vals[:0]
-			err = hc.IterateRecentlyChanged(995, 1000, roTx, func(k, v []byte) error {
+
+			it, err = hc.HistoryRange(995, 1000, order.Asc, -1, roTx)
+			require.NoError(err)
+			for it.HasNext() {
+				k, v, err := it.Next()
+				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
-				return nil
-			})
+			}
 			require.NoError(err)
 			require.Equal([]string{
 				"0100000000000001",
@@ -688,10 +734,13 @@ func TestIterateChanged2(t *testing.T) {
 			defer hc.Close()
 
 			keys = keys[:0]
-			err = hc.IterateRecentlyChanged(2, 20, roTx, func(k, _ []byte) error {
+			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
+			require.NoError(err)
+			for it.HasNext() {
+				k, _, err := it.Next()
+				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
-				return nil
-			})
+			}
 			require.NoError(err)
 			require.Equal([]string{
 				"0100000000000001",

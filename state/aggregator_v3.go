@@ -1269,28 +1269,28 @@ func (a *AggregatorV3) EnableMadvNormal() *AggregatorV3 {
 }
 
 // -- range
-func (ac *AggregatorV3Context) LogAddrIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
-	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) LogAddrRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+	return ac.logAddrs.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) LogTopicIterator(topic []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
-	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) LogTopicRange(topic []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+	return ac.logTopics.IdxRange(topic, startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) TraceFromIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
-	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) TraceFromRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+	return ac.tracesFrom.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) TraceToIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
-	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) TraceToRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+	return ac.tracesTo.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
-func (ac *AggregatorV3Context) AccountHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+func (ac *AggregatorV3Context) AccountHistoyIdxRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
 	return ac.accounts.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
-func (ac *AggregatorV3Context) StorageHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+func (ac *AggregatorV3Context) StorageHistoyIdxRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
 	return ac.storage.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
-func (ac *AggregatorV3Context) CodeHistoyIdxIterator(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
+func (ac *AggregatorV3Context) CodeHistoyIdxRange(addr []byte, startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.U64, error) {
 	return ac.code.IdxRange(addr, startTxNum, endTxNum, asc, limit, tx)
 }
 
@@ -1351,16 +1351,16 @@ func (ac *AggregatorV3Context) ReadAccountCodeSizeNoState(addr []byte, txNum uin
 	return len(code), noState, nil
 }
 
-func (ac *AggregatorV3Context) AccountHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.accounts.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+	return ac.accounts.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) StorageHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.storage.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+	return ac.storage.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
-func (ac *AggregatorV3Context) CodeHistoryIterateChanged(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.code.IterateChanged(startTxNum, endTxNum, asc, limit, tx)
+func (ac *AggregatorV3Context) CodeHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
+	return ac.code.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
 }
 
 func (ac *AggregatorV3Context) AccountHistoricalStateRange(startTxNum uint64, from, to []byte, limit int, tx kv.Tx) iter.KV {
