@@ -24,8 +24,6 @@ type Snapshot struct {
 	Recents      map[uint64]libcommon.Address `json:"recents"`      // Set of recent signers for spam protections
 }
 
-const BorSeparate = "BorSeparate"
-
 // signersAscending implements the sort interface to allow sorting a list of addresses
 // type signersAscending []libcommon.Address
 
@@ -51,6 +49,7 @@ func newSnapshot(
 		ValidatorSet: valset.NewValidatorSet(validators),
 		Recents:      make(map[uint64]libcommon.Address),
 	}
+
 	return snap
 }
 
