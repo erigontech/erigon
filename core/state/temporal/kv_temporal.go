@@ -356,19 +356,19 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
-		timestamps, err = tx.agg.AccountHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.AccountHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case StorageHistoryIdx:
-		timestamps, err = tx.agg.StorageHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.StorageHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case CodeHistoryIdx:
-		timestamps, err = tx.agg.CodeHistoyIdxIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.CodeHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
-		timestamps, err = tx.agg.LogTopicIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:
-		timestamps, err = tx.agg.LogAddrIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.LogAddrRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesFromIdx:
-		timestamps, err = tx.agg.TraceFromIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceFromRange(k, fromTs, toTs, asc, limit, tx)
 	case TracesToIdx:
-		timestamps, err = tx.agg.TraceToIterator(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.TraceToRange(k, fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
@@ -390,11 +390,11 @@ func (tx *Tx) HistoryRange(name kv.History, fromTs, toTs int, asc order.By, limi
 	}
 	switch name {
 	case AccountsHistory:
-		it, err = tx.agg.AccountHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.AccountHistoryRange(fromTs, toTs, asc, limit, tx)
 	case StorageHistory:
-		it, err = tx.agg.StorageHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.StorageHistoryRange(fromTs, toTs, asc, limit, tx)
 	case CodeHistory:
-		it, err = tx.agg.CodeHistoryIterateChanged(fromTs, toTs, asc, limit, tx)
+		it, err = tx.agg.CodeHistoryRange(fromTs, toTs, asc, limit, tx)
 	default:
 		return nil, fmt.Errorf("unexpected history name: %s", name)
 	}
