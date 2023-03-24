@@ -17,6 +17,7 @@
 package common
 
 import (
+	"bytes"
 	"fmt"
 )
 
@@ -51,6 +52,21 @@ func Copy(b []byte) []byte {
 	c := make([]byte, len(b))
 	copy(c, b)
 	return c
+}
+
+func AppendInto(dst []byte, src ...[]byte) {
+	d := bytes.NewBuffer(dst)
+	for _, s := range src {
+		d.Write(s)
+	}
+}
+
+func Append(data ...[]byte) []byte {
+	s := new(bytes.Buffer)
+	for _, d := range data {
+		s.Write(d)
+	}
+	return s.Bytes()
 }
 
 func EnsureEnoughSize(in []byte, size int) []byte {

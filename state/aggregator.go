@@ -629,6 +629,15 @@ type SelectedStaticFiles struct {
 	commitmentI    int
 }
 
+func (sf SelectedStaticFiles) FillV3(s *SelectedStaticFilesV3) SelectedStaticFiles {
+	sf.accounts, sf.accountsIdx, sf.accountsHist = s.accounts, s.accountsIdx, s.accountsHist
+	sf.storage, sf.storageIdx, sf.storageHist = s.storage, s.storageIdx, s.storageHist
+	sf.code, sf.codeIdx, sf.codeHist = s.code, s.codeIdx, s.codeHist
+	sf.commitment, sf.commitmentIdx, sf.commitmentHist = s.commitment, s.commitmentIdx, s.commitmentHist
+	sf.codeI, sf.accountsI, sf.storageI, sf.commitmentI = s.codeI, s.accountsI, s.storageI, s.commitmentI
+	return sf
+}
+
 func (sf SelectedStaticFiles) Close() {
 	for _, group := range [][]*filesItem{
 		sf.accounts, sf.accountsIdx, sf.accountsHist,
@@ -678,6 +687,14 @@ type MergedFiles struct {
 	codeIdx, codeHist             *filesItem
 	commitment                    *filesItem
 	commitmentIdx, commitmentHist *filesItem
+}
+
+func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
+	mf.accounts, mf.accountsIdx, mf.accountsHist = m.accounts, m.accountsIdx, m.accountsHist
+	mf.storage, mf.storageIdx, mf.storageHist = m.storage, m.storageIdx, m.storageHist
+	mf.code, mf.codeIdx, mf.codeHist = m.code, m.codeIdx, m.codeHist
+	mf.commitment, mf.commitmentIdx, mf.commitmentHist = m.commitment, m.commitmentIdx, m.commitmentHist
+	return mf
 }
 
 func (mf MergedFiles) Close() {

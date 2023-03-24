@@ -24,6 +24,7 @@ type Trie interface {
 	// Reset Drops everything from the trie
 	Reset()
 
+	// Reads updates from storage
 	ReviewKeys(pk, hk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
 
 	ProcessUpdates(pk, hk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)

@@ -87,6 +87,18 @@ type DomainCommitted struct {
 	comTook time.Duration
 }
 
+func (d *DomainCommitted) ResetFns(
+	 branchFn func(prefix []byte) ([]byte, error),
+	 accountFn func(plainKey []byte, cell *commitment.Cell) error,
+	 storageFn func(plainKey []byte, cell *commitment.Cell) error,
+) {
+	d.patriciaTrie.ResetFns(branchFn, accountFn, storageFn)
+}
+
+func (d *DomainCommitted) Hasher() hash.Hash {
+	return d.keccak
+}
+
 func NewCommittedDomain(d *Domain, mode CommitmentMode, trieVariant commitment.TrieVariant) *DomainCommitted {
 	return &DomainCommitted{
 		Domain:       d,
@@ -533,7 +545,6 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	}
 	closeItem = false
 	d.stats.MergesCount++
-	d.mergesCount++
 	return
 }
 
