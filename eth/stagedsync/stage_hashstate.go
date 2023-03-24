@@ -797,9 +797,15 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 		return collector.Load(p.tx, kv.HashedStorage, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 	}
 
-	ac := agg.Accounts().MakeContext()
-	defer ac.Close()
-	if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -809,7 +815,7 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 			if err = collector.Collect(newK, nil); err != nil {
 				return err
 			}
-			return nil
+			continue
 		}
 		if err := accounts.DeserialiseV3(&acc, v); err != nil {
 			return err
@@ -827,10 +833,6 @@ func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, 
 		if err := collector.Collect(newK, value); err != nil {
 			return err
 		}
-
-		return nil
-	}); err != nil {
-		return err
 	}
 	return collector.Load(p.tx, kv.HashedAccounts, etl.IdentityLoadFunc, etl.TransformArgs{Quit: p.ctx.Done()})
 }

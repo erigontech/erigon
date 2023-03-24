@@ -13,9 +13,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
@@ -214,9 +216,15 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 
 	if storage {
 		compositeKey := make([]byte, length.Hash+length.Hash)
-		sc := agg.Storage().MakeContext()
-		defer sc.Close()
-		if err := sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, v, err := it.Next()
+			if err != nil {
+				return err
+			}
 			addrHash, err := common.HashData(k[:length.Addr])
 			if err != nil {
 				return err
@@ -233,16 +241,19 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 			if err := load(compositeKey, v); err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			return err
 		}
 		return nil
 	}
 
-	ac := agg.Accounts().MakeContext()
-	defer ac.Close()
-	if err := ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -253,9 +264,6 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 		if err := load(newK, v); err != nil {
 			return err
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	return nil
 }
@@ -359,9 +367,15 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 	var deletedAccounts [][]byte
 
 	if storage {
-		sc := agg.Storage().MakeContext()
-		defer sc.Close()
-		if err = sc.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		if err != nil {
+			return err
+		}
+		for it.HasNext() {
+			k, _, err := it.Next()
+			if err != nil {
+				return err
+			}
 			// Plain state not unwind yet, it means - if key not-exists in PlainState but has value from ChangeSets - then need mark it as "created" in RetainList
 			enc, err := p.tx.GetOne(kv.PlainState, k[:20])
 			if err != nil {
@@ -382,16 +396,19 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 				return err
 			}
 			load(newK, value)
-			return nil
-		}); err != nil {
-			return err
 		}
 		return nil
 	}
 
-	ac := agg.Accounts().MakeContext()
-	defer ac.Close()
-	if err = ac.IterateRecentlyChanged(txnFrom, txnTo, p.tx, func(k []byte, v []byte) error {
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	if err != nil {
+		return err
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return err
+		}
 		newK, err := transformPlainStateKey(k)
 		if err != nil {
 			return err
@@ -420,9 +437,6 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		}
 
 		load(newK, value)
-		return nil
-	}); err != nil {
-		return err
 	}
 
 	// delete Intermediate hashes of deleted accounts
