@@ -18,6 +18,7 @@ linters:
     - noctx #TODO: enable me
     - nilerr #TODO: enable me
     - errorlint #TODO: enable me
+    - errchkjson #TODO: enable me
     - gocheckcompilerdirectives
   enable:
     - unconvert
