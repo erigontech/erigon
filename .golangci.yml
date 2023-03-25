@@ -2,22 +2,29 @@ run:
   deadline: 10m
 
 linters:
-  disable-all: true
+  presets:
+    - bugs
+    - error
+    - unused
+    - performance
+  disable:
+    - exhaustive
+    - musttag
+    - contextcheck
+    - wrapcheck
+    - goerr113
+    - unparam
+    - makezero
   enable:
-    - gofmt
-    - errcheck
-    - gosimple
-    - govet
-    - ineffassign
-    - staticcheck
-#    - structcheck # 1.18
-#    - unused # 1.18
-    - gocritic
-    - bodyclose
-    - gosec
-#    - forcetypeassert
-    - prealloc
     - unconvert
+    - predeclared
+    - wastedassign
+    - thelper
+    - gofmt
+    - gocritic
+#    - revive
+#    - forcetypeassert
+#    - stylecheck
 
 linters-settings:
   gocritic:
