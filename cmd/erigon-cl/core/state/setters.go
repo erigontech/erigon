@@ -176,21 +176,33 @@ func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []c
 
 func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
 	b.touchedLeaves[JustificationBitsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnJustificationBitsChange(b.justificationBits)
+	}
 	b.justificationBits = justificationBits
 }
 
 func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[PreviousJustifiedCheckpointLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnPreviousJustifiedCheckpointChange(b.previousJustifiedCheckpoint)
+	}
 	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
 }
 
 func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[CurrentJustifiedCheckpointLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnCurrentJustifiedCheckpointChange(b.currentJustifiedCheckpoint)
+	}
 	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
 }
 
 func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[FinalizedCheckpointLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnFinalizedCheckpointChange(b.finalizedCheckpoint)
+	}
 	b.finalizedCheckpoint = finalizedCheckpoint
 }
 
