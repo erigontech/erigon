@@ -17,6 +17,7 @@ linters:
     - makezero #TODO: enable me
     - noctx #TODO: enable me
     - nilerr #TODO: enable me
+    - errorlint #TODO: enable me
     - gocheckcompilerdirectives
   enable:
     - unconvert
