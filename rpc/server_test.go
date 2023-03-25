@@ -109,13 +109,19 @@ func runTestScript(t *testing.T, file string) {
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
-				b, _ := json.Marshal(msgs)
+				b, err := json.Marshal(msgs)
+				if err != nil {
+					panic(err)
+				}
 				sent = string(b)
 				msgs, _ = parseMessage(json.RawMessage(want))
 				sort.Slice(msgs, func(i, j int) bool {
 					return string(msgs[i].ID) < string(msgs[j].ID)
 				})
-				b, _ = json.Marshal(msgs)
+				b, err = json.Marshal(msgs)
+				if err != nil {
+					panic(err)
+				}
 				want = string(b)
 			}
 			if sent != want {

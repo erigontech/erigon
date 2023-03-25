@@ -325,12 +325,12 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		mapKey := v[:length.Addr]
 		if v[length.Addr]&1 > 0 {
 			if err = froms.Collect(mapKey, nil); err != nil {
-				return nil
+				return err
 			}
 		}
 		if v[length.Addr]&2 > 0 {
 			if err = tos.Collect(mapKey, nil); err != nil {
-				return nil
+				return err
 			}
 		}
 		select {

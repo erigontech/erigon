@@ -765,44 +765,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	return fields
 }
 
-func includes(addresses []common.Address, a common.Address) bool {
-	for _, addr := range addresses {
-		if addr == a {
-			return true
-		}
-	}
-	return false
-}
-
-// filterLogs creates a slice of logs matching the given criteria.
-func filterLogsOld(logs []*types.Log, addresses []common.Address, topics [][]common.Hash) []*types.Log {
-	result := make(types.Logs, 0, len(logs))
-Logs:
-	for _, log := range logs {
-		if len(addresses) > 0 && !includes(addresses, log.Address) {
-			continue
-		}
-		// If the to filtered topics is greater than the amount of topics in logs, skip.
-		if len(topics) > len(log.Topics) {
-			continue Logs
-		}
-		for i, sub := range topics {
-			match := len(sub) == 0 // empty rule set == wildcard
-			for _, topic := range sub {
-				if log.Topics[i] == topic {
-					match = true
-					break
-				}
-			}
-			if !match {
-				continue Logs
-			}
-		}
-		result = append(result, log)
-	}
-	return result
-}
-
 // MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
 //   - blockNum
 //   - txIndex in block: -1 means first system tx

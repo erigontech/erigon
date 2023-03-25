@@ -124,7 +124,7 @@ func lastSnapshot(db kv.RwDB) (uint64, error) {
 
 	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
 	if err != nil {
-		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
+		return 0, fmt.Errorf("failed check last clique snapshot: %w", err)
 	}
 	if len(lastEnc) == 0 {
 		return 0, ErrNotFound

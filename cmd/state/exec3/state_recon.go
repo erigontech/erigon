@@ -30,11 +30,10 @@ import (
 )
 
 type ScanWorker struct {
-	txNum          uint64
-	as             *libstate.AggregatorStep
-	fromKey, toKey []byte
-	currentKey     []byte
-	bitmap         roaring64.Bitmap
+	txNum  uint64
+	as     *libstate.AggregatorStep
+	toKey  []byte
+	bitmap roaring64.Bitmap
 }
 
 func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {

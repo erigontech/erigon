@@ -169,8 +169,8 @@ func BenchmarkCall(b *testing.B) {
 		}
 	}
 }
-func benchmarkEVM_Create(bench *testing.B, code string) {
-	_, tx := memdb.NewTestTx(bench)
+func benchmarkEVM_Create(b *testing.B, code string) {
+	_, tx := memdb.NewTestTx(b)
 	var (
 		statedb  = state.New(state.NewPlainState(tx, 1, nil))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
@@ -198,11 +198,11 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		EVMConfig: vm.Config{},
 	}
 	// Warm up the intpools and stuff
-	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
-	bench.StopTimer()
+	b.StopTimer()
 }
 
 func BenchmarkEVM_CREATE_500(bench *testing.B) {

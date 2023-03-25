@@ -30,8 +30,8 @@ import (
 // packBytesSlice packs the given bytes as [L, V] as the canonical representation
 // bytes slice.
 func packBytesSlice(bytes []byte, l int) []byte {
-	len := packNum(reflect.ValueOf(l))
-	return append(len, common.RightPadBytes(bytes, (l+31)/32*32)...)
+	packedLen := packNum(reflect.ValueOf(l))
+	return append(packedLen, common.RightPadBytes(bytes, (l+31)/32*32)...)
 }
 
 // packElement packs the given reflect value according to the abi specification in
