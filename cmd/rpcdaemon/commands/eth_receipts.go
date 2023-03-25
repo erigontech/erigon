@@ -547,7 +547,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 		var topicsUnion iter.U64
 		for _, topic := range sub {
-			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, -1)
+			it, err := tx.IndexRange(temporal.LogTopicIdx, topic.Bytes(), int(from), int(to), order.Asc, kv.Unlim)
 			if err != nil {
 				return nil, err
 			}
@@ -565,7 +565,7 @@ func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64
 
 func getAddrsBitmapV3(tx kv.TemporalTx, addrs []common.Address, from, to uint64) (res iter.U64, err error) {
 	for _, addr := range addrs {
-		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, -1)
+		it, err := tx.IndexRange(temporal.LogAddrIdx, addr[:], int(from), int(to), true, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}
