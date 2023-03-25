@@ -278,7 +278,22 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 
 	return it, nil
 }
-func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
+	switch name {
+	case AccountsDomain:
+		v, err = tx.GetOne(kv.PlainState, key)
+		return v, v != nil, err
+	case StorageDomain:
+		v, err = tx.GetOne(kv.PlainState, append(common.Copy(key), key2...))
+		return v, v != nil, err
+	case CodeDomain:
+		v, err = tx.GetOne(kv.Code, key2)
+		return v, v != nil, err
+	default:
+		panic(fmt.Sprintf("unexpected: %s", name))
+	}
+}
+func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	switch name {
 	case AccountsDomain:
 		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)
