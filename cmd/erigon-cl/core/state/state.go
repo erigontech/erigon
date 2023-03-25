@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
 
 type HashFunc func([]byte) ([32]byte, error)
@@ -73,6 +74,8 @@ type BeaconState struct {
 	previousStateRoot           libcommon.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
+	// Changesets
+	reverseChangeset *beacon_changeset.ReverseBeaconStateChangeSet
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {

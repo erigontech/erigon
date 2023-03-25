@@ -6,7 +6,20 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
+
+// StartCollecteingReverseChangeSet starts collection change sets.
+func (b *BeaconState) StartCollecteingReverseChangeSet() {
+	b.reverseChangeset = &beacon_changeset.ReverseBeaconStateChangeSet{}
+}
+
+// StartCollecteingReverseChangeSet starts collection change sets.
+func (b *BeaconState) StopCollecteingReverseChangeSet() *beacon_changeset.ReverseBeaconStateChangeSet {
+	ret := b.reverseChangeset
+	b.reverseChangeset = nil
+	return ret
+}
 
 func (b *BeaconState) IncreaseBalance(index, delta uint64) error {
 	currentBalance, err := b.ValidatorBalance(int(index))
@@ -60,6 +73,11 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 		exitQueueEpoch += 1
 	}
 
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.ExitEpochChange.AddChange(int(index), b.validators[index].ExitEpoch)
+		b.reverseChangeset.WithdrawalEpochChange.AddChange(int(index), b.validators[index].WithdrawableEpoch)
+	}
+
 	b.validators[index].ExitEpoch = exitQueueEpoch
 	var overflow bool
 	if b.validators[index].WithdrawableEpoch, overflow = math.SafeAdd(b.validators[index].ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
@@ -81,12 +99,20 @@ func (b *BeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64
 	if err := b.InitiateValidatorExit(slashedInd); err != nil {
 		return err
 	}
+	// Record changes in changeset
+	slashingsIndex := int(epoch % b.beaconConfig.EpochsPerSlashingsVector)
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.SlashedChange.AddChange(int(slashedInd), b.validators[slashedInd].Slashed)
+		b.reverseChangeset.WithdrawalEpochChange.AddChange(int(slashedInd), b.validators[slashedInd].WithdrawableEpoch)
+		b.reverseChangeset.SlashingsChanges.AddChange(slashingsIndex, b.slashings[slashingsIndex])
+	}
+
 	// Change the validator to be slashed
 	b.validators[slashedInd].Slashed = true
 	b.validators[slashedInd].WithdrawableEpoch = utils.Max64(b.validators[slashedInd].WithdrawableEpoch, epoch+b.beaconConfig.EpochsPerSlashingsVector)
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	// Update slashings vector
-	b.slashings[epoch%b.beaconConfig.EpochsPerSlashingsVector] += b.validators[slashedInd].EffectiveBalance
+	b.slashings[slashingsIndex] += b.validators[slashedInd].EffectiveBalance
 	b.touchedLeaves[SlashingsLeafIndex] = true
 	if err := b.DecreaseBalance(slashedInd, b.validators[slashedInd].EffectiveBalance/b.beaconConfig.GetMinSlashingPenaltyQuotient(b.version)); err != nil {
 		return err

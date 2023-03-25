@@ -11,17 +11,10 @@ const maxEth1Votes = 2048
 
 // Below are setters. Note that they also dirty the state.
 
-func (b *BeaconState) SetGenesisTime(genesisTime uint64) {
-	b.touchedLeaves[GenesisTimeLeafIndex] = true
-	b.genesisTime = genesisTime
-}
-
-func (b *BeaconState) SetGenesisValidatorsRoot(genesisValidatorRoot libcommon.Hash) {
-	b.touchedLeaves[GenesisValidatorsRootLeafIndex] = true
-	b.genesisValidatorsRoot = genesisValidatorRoot
-}
-
 func (b *BeaconState) SetSlot(slot uint64) {
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnSlotChange(b.slot)
+	}
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
 	b.proposerIndex = nil
@@ -32,47 +25,81 @@ func (b *BeaconState) SetSlot(slot uint64) {
 
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
 	b.touchedLeaves[ForkLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnForkChange(b.fork)
+	}
 	b.fork = fork
 }
 
 func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.touchedLeaves[LatestBlockHeaderLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader)
+	}
 	b.latestBlockHeader = header
-}
-
-func (b *BeaconState) SetHistoricalRoots(historicalRoots []libcommon.Hash) {
-	b.touchedLeaves[HistoricalRootsLeafIndex] = true
-	b.historicalRoots = historicalRoots
 }
 
 func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[BlockRootsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.BlockRootsChanges.AddChange(index, root)
+	}
 	b.blockRoots[index] = root
 }
 
 func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[StateRootsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.StateRootsChanges.AddChange(index, root)
+	}
 	b.stateRoots[index] = root
 }
 
 func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.touchedLeaves[HistoricalRootsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.HistoricalRootsChanges.AddChange(index, root)
+	}
 	b.historicalRoots[index] = root
 }
 
-func (b *BeaconState) SetValidatorAt(index int, validator *cltypes.Validator) error {
-	if index >= len(b.validators) {
-		return ErrInvalidValidatorIndex
-	}
-	b.validators[index] = validator
+func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds libcommon.Hash) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
-	// change in validator set means cache purging
-	b.totalActiveBalanceCache = nil
-	return nil
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.WithdrawalCredentialsChange.AddChange(index, b.validators[index].WithdrawalCredentials)
+	}
+	b.validators[index].WithdrawalCredentials = creds
+}
+
+func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.EffectiveBalanceChange.AddChange(index, b.validators[index].EffectiveBalance)
+	}
+	b.validators[index].EffectiveBalance = balance
+}
+
+func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.ActivationEpochChange.AddChange(index, b.validators[index].ActivationEpoch)
+	}
+	b.validators[index].ActivationEpoch = epoch
+}
+
+func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.ActivationEligibilityEpochChange.AddChange(index, b.validators[index].ActivationEligibilityEpoch)
+	}
+	b.validators[index].ActivationEligibilityEpoch = epoch
 }
 
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnEth1DataChange(eth1Data)
+	}
 	b.eth1Data = eth1Data
 }
 
@@ -88,6 +115,9 @@ func (b *BeaconState) ResetEth1DataVotes() {
 
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnEth1DepositIndexChange(eth1DepositIndex)
+	}
 	b.eth1DepositIndex = eth1DepositIndex
 }
 

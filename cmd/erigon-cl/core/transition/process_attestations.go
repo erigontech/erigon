@@ -169,10 +169,6 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 				validator.IsPreviousMatchingHeadAttester = true
 			}
 		}
-
-		if err := state.SetValidatorAt(int(index), validator); err != nil {
-			return nil, err
-		}
 	}
 	return indicies, nil
 }
