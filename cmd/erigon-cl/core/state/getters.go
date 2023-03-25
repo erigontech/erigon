@@ -39,8 +39,8 @@ func (b *BeaconState) Fork() *cltypes.Fork {
 	return b.fork
 }
 
-func (b *BeaconState) LatestBlockHeader() *cltypes.BeaconBlockHeader {
-	return b.latestBlockHeader
+func (b *BeaconState) LatestBlockHeader() cltypes.BeaconBlockHeader {
+	return *b.latestBlockHeader
 }
 
 func (b *BeaconState) BlockRoots() [blockRootsLength]libcommon.Hash {

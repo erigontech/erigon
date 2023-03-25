@@ -41,7 +41,7 @@ func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[BlockRootsLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.BlockRootsChanges.AddChange(index, root)
+		b.reverseChangeset.BlockRootsChanges.AddChange(index, b.blockRoots[index])
 	}
 	b.blockRoots[index] = root
 }
@@ -49,7 +49,7 @@ func (b *BeaconState) SetBlockRootAt(index int, root libcommon.Hash) {
 func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 	b.touchedLeaves[StateRootsLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.StateRootsChanges.AddChange(index, root)
+		b.reverseChangeset.StateRootsChanges.AddChange(index, b.stateRoots[index])
 	}
 	b.stateRoots[index] = root
 }
@@ -57,7 +57,7 @@ func (b *BeaconState) SetStateRootAt(index int, root libcommon.Hash) {
 func (b *BeaconState) SetHistoricalRootAt(index int, root [32]byte) {
 	b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.HistoricalRootsChanges.AddChange(index, root)
+		b.reverseChangeset.HistoricalRootsChanges.AddChange(index, b.historicalRoots[index])
 	}
 	b.historicalRoots[index] = root
 }
@@ -108,8 +108,11 @@ func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 }
 
 func (b *BeaconState) ResetEth1DataVotes() {
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.Eth1DataVotesAtReset = b.eth1DataVotes
+	}
 	b.touchedLeaves[Eth1DataVotesLeafIndex] = true
-	b.eth1DataVotes = b.eth1DataVotes[:0]
+	b.eth1DataVotes = nil
 }
 
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {

@@ -129,7 +129,7 @@ func (l *ListChangeSet[T]) ApplyChanges(input []T) (output []T, changed bool) {
 func (l *ListChangeSet[T]) ChangesWithHandler(fn func(value T, index int)) {
 	// Now apply changes to the given list
 	for _, elem := range l.list {
-		fn(elem.value, elem.id)
+		fn(elem.value, elem.listIndex)
 	}
 }
 

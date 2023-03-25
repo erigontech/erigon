@@ -70,10 +70,11 @@ func transitionSlot(state *state.BeaconState) error {
 	latestBlockHeader := state.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
 		latestBlockHeader.Root = previousStateRoot
-		state.SetLatestBlockHeader(latestBlockHeader)
+		state.SetLatestBlockHeader(&latestBlockHeader)
 	}
+	blockHeader := state.LatestBlockHeader()
 
-	previousBlockRoot, err := state.LatestBlockHeader().HashSSZ()
+	previousBlockRoot, err := (&blockHeader).HashSSZ()
 	if err != nil {
 		return err
 	}
