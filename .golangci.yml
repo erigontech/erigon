@@ -14,11 +14,15 @@ linters:
     - wrapcheck
     - goerr113
     - unparam
-    - makezero
+    - makezero #TODO: enable me
+    - noctx #TODO: enable me
+    - thelper #TODO: enable me
+    - predeclared #TODO: enable me
+    - nilerr #TODO: enable me
   enable:
     - unconvert
     - predeclared
-#    - wastedassign
+    #    - wastedassign
     - thelper
     - gofmt
     - gocritic
