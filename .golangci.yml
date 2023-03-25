@@ -19,6 +19,7 @@ linters:
     - nilerr #TODO: enable me
     - errorlint #TODO: enable me
     - errchkjson #TODO: enable me
+    - unused #TODO: enable me
     - gocheckcompilerdirectives
   enable:
     - unconvert
