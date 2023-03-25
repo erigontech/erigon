@@ -25,8 +25,14 @@ var _ KVClient = &KVClientMock{}
 //			DomainGetFunc: func(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error) {
 //				panic("mock out the DomainGet method")
 //			},
+//			DomainRangeFunc: func(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+//				panic("mock out the DomainRange method")
+//			},
 //			HistoryGetFunc: func(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
 //				panic("mock out the HistoryGet method")
+//			},
+//			HistoryRangeFunc: func(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+//				panic("mock out the HistoryRange method")
 //			},
 //			IndexRangeFunc: func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error) {
 //				panic("mock out the IndexRange method")
@@ -56,8 +62,14 @@ type KVClientMock struct {
 	// DomainGetFunc mocks the DomainGet method.
 	DomainGetFunc func(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error)
 
+	// DomainRangeFunc mocks the DomainRange method.
+	DomainRangeFunc func(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error)
+
 	// HistoryGetFunc mocks the HistoryGet method.
 	HistoryGetFunc func(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
+
+	// HistoryRangeFunc mocks the HistoryRange method.
+	HistoryRangeFunc func(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 
 	// IndexRangeFunc mocks the IndexRange method.
 	IndexRangeFunc func(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
@@ -88,12 +100,30 @@ type KVClientMock struct {
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
+		// DomainRange holds details about calls to the DomainRange method.
+		DomainRange []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *DomainRangeReq
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
 		// HistoryGet holds details about calls to the HistoryGet method.
 		HistoryGet []struct {
 			// Ctx is the ctx argument value.
 			Ctx context.Context
 			// In is the in argument value.
 			In *HistoryGetReq
+			// Opts is the opts argument value.
+			Opts []grpc.CallOption
+		}
+		// HistoryRange holds details about calls to the HistoryRange method.
+		HistoryRange []struct {
+			// Ctx is the ctx argument value.
+			Ctx context.Context
+			// In is the in argument value.
+			In *HistoryRangeReq
 			// Opts is the opts argument value.
 			Opts []grpc.CallOption
 		}
@@ -151,7 +181,9 @@ type KVClientMock struct {
 		}
 	}
 	lockDomainGet    sync.RWMutex
+	lockDomainRange  sync.RWMutex
 	lockHistoryGet   sync.RWMutex
+	lockHistoryRange sync.RWMutex
 	lockIndexRange   sync.RWMutex
 	lockRange        sync.RWMutex
 	lockSnapshots    sync.RWMutex
@@ -204,6 +236,50 @@ func (mock *KVClientMock) DomainGetCalls() []struct {
 	return calls
 }
 
+// DomainRange calls DomainRangeFunc.
+func (mock *KVClientMock) DomainRange(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *DomainRangeReq
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockDomainRange.Lock()
+	mock.calls.DomainRange = append(mock.calls.DomainRange, callInfo)
+	mock.lockDomainRange.Unlock()
+	if mock.DomainRangeFunc == nil {
+		var (
+			pairsOut *Pairs
+			errOut   error
+		)
+		return pairsOut, errOut
+	}
+	return mock.DomainRangeFunc(ctx, in, opts...)
+}
+
+// DomainRangeCalls gets all the calls that were made to DomainRange.
+// Check the length with:
+//
+//	len(mockedKVClient.DomainRangeCalls())
+func (mock *KVClientMock) DomainRangeCalls() []struct {
+	Ctx  context.Context
+	In   *DomainRangeReq
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *DomainRangeReq
+		Opts []grpc.CallOption
+	}
+	mock.lockDomainRange.RLock()
+	calls = mock.calls.DomainRange
+	mock.lockDomainRange.RUnlock()
+	return calls
+}
+
 // HistoryGet calls HistoryGetFunc.
 func (mock *KVClientMock) HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error) {
 	callInfo := struct {
@@ -245,6 +321,50 @@ func (mock *KVClientMock) HistoryGetCalls() []struct {
 	mock.lockHistoryGet.RLock()
 	calls = mock.calls.HistoryGet
 	mock.lockHistoryGet.RUnlock()
+	return calls
+}
+
+// HistoryRange calls HistoryRangeFunc.
+func (mock *KVClientMock) HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+	callInfo := struct {
+		Ctx  context.Context
+		In   *HistoryRangeReq
+		Opts []grpc.CallOption
+	}{
+		Ctx:  ctx,
+		In:   in,
+		Opts: opts,
+	}
+	mock.lockHistoryRange.Lock()
+	mock.calls.HistoryRange = append(mock.calls.HistoryRange, callInfo)
+	mock.lockHistoryRange.Unlock()
+	if mock.HistoryRangeFunc == nil {
+		var (
+			pairsOut *Pairs
+			errOut   error
+		)
+		return pairsOut, errOut
+	}
+	return mock.HistoryRangeFunc(ctx, in, opts...)
+}
+
+// HistoryRangeCalls gets all the calls that were made to HistoryRange.
+// Check the length with:
+//
+//	len(mockedKVClient.HistoryRangeCalls())
+func (mock *KVClientMock) HistoryRangeCalls() []struct {
+	Ctx  context.Context
+	In   *HistoryRangeReq
+	Opts []grpc.CallOption
+} {
+	var calls []struct {
+		Ctx  context.Context
+		In   *HistoryRangeReq
+		Opts []grpc.CallOption
+	}
+	mock.lockHistoryRange.RLock()
+	calls = mock.calls.HistoryRange
+	mock.lockHistoryRange.RUnlock()
 	return calls
 }
 

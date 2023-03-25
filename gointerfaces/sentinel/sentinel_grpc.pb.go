@@ -23,6 +23,7 @@ const (
 	Sentinel_SendRequest_FullMethodName     = "/sentinel.Sentinel/SendRequest"
 	Sentinel_SetStatus_FullMethodName       = "/sentinel.Sentinel/SetStatus"
 	Sentinel_GetPeers_FullMethodName        = "/sentinel.Sentinel/GetPeers"
+	Sentinel_BanPeer_FullMethodName         = "/sentinel.Sentinel/BanPeer"
 )
 
 // SentinelClient is the client API for Sentinel service.
@@ -105,7 +106,7 @@ func (c *sentinelClient) GetPeers(ctx context.Context, in *EmptyMessage, opts ..
 
 func (c *sentinelClient) BanPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error) {
 	out := new(EmptyMessage)
-	err := c.cc.Invoke(ctx, "/sentinel.Sentinel/BanPeer", in, out, opts...)
+	err := c.cc.Invoke(ctx, Sentinel_BanPeer_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -241,7 +242,7 @@ func _Sentinel_BanPeer_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/sentinel.Sentinel/BanPeer",
+		FullMethod: Sentinel_BanPeer_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SentinelServer).BanPeer(ctx, req.(*Peer))
