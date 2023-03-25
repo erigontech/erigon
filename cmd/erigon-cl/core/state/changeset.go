@@ -2,6 +2,7 @@ package state
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
@@ -85,9 +86,9 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 		b.nextSyncCommittee = changeset.NextSyncCommitteeChange
 		b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
 	}
-	if changeset.LatestBlockHeaderChange != nil {
-		b.latestBlockHeader = changeset.LatestBlockHeaderChange
-		b.touchedLeaves[LatestBlockHeaderLeafIndex] = true
+	if changeset.LatestExecutionPayloadHeaderChange != nil {
+		b.latestExecutionPayloadHeader = changeset.LatestExecutionPayloadHeaderChange
+		b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	}
 	if changeset.NextWithdrawalIndexChange != nil {
 		b.nextWithdrawalIndex = *changeset.NextWithdrawalIndexChange
@@ -96,6 +97,21 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	if changeset.NextWithdrawalValidatorIndexChange != nil {
 		b.nextWithdrawalValidatorIndex = *changeset.NextWithdrawalValidatorIndexChange
 		b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
+	}
+	if changeset.VersionChange != nil {
+		b.version = *changeset.VersionChange
+		if b.version == clparams.AltairVersion {
+			b.leaves[LatestExecutionPayloadHeaderLeafIndex] = libcommon.Hash{}
+			b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = false
+		}
+		if b.version == clparams.BellatrixVersion {
+			b.leaves[NextWithdrawalIndexLeafIndex] = libcommon.Hash{}
+			b.leaves[NextWithdrawalValidatorIndexLeafIndex] = libcommon.Hash{}
+			b.leaves[HistoricalSummariesLeafIndex] = libcommon.Hash{}
+			b.touchedLeaves[NextWithdrawalIndexLeafIndex] = false
+			b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = false
+			b.touchedLeaves[HistoricalSummariesLeafIndex] = false
+		}
 	}
 	// Process all the lists now.
 	// Start with arrays first
@@ -135,6 +151,7 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	}
 	b.inactivityScores, b.touchedLeaves[InactivityScoresLeafIndex] = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores)
 	b.historicalSummaries, b.touchedLeaves[HistoricalSummariesLeafIndex] = changeset.ApplyHistoricalSummaryChanges(b.historicalSummaries)
+
 	// Now start processing validators if there are any.
 	if changeset.HasValidatorSetNotChanged() {
 		return
