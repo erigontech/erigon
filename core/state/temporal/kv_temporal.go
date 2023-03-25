@@ -70,6 +70,8 @@ func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCo
 
 	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
 }
+
+//nolint:ruleguard
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
 	if err != nil {
@@ -90,6 +92,8 @@ func (db *DB) ViewTemporal(ctx context.Context, f func(tx kv.TemporalTx) error) 
 }
 
 // TODO: it's temporary method, allowing inject TemproalTx without changing code. But it's not type-safe.
+//
+//nolint:ruleguard
 func (db *DB) BeginRo(ctx context.Context) (kv.Tx, error) {
 	return db.BeginTemporalRo(ctx)
 }
