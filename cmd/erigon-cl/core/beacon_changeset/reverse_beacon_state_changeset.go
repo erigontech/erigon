@@ -37,8 +37,6 @@ type ReverseBeaconStateChangeSet struct {
 	CurrentEpochParticipationChanges  *ListChangeSet[cltypes.ParticipationFlags]
 	InactivityScoresChanges           *ListChangeSet[uint64]
 	HistoricalSummaryChange           *ListChangeSet[cltypes.HistoricalSummary]
-	PreviousEpochAttestationsChange   *ListChangeSet[cltypes.PendingAttestation]
-	CurrentEpochAttestationsChange    *ListChangeSet[cltypes.PendingAttestation]
 	// Validator fields.
 	WithdrawalCredentialsChange      *ListChangeSet[libcommon.Hash]
 	EffectiveBalanceChange           *ListChangeSet[uint64]
@@ -47,6 +45,9 @@ type ReverseBeaconStateChangeSet struct {
 	ActivationEpochChange            *ListChangeSet[uint64]
 	ExitEpochChange                  *ListChangeSet[uint64]
 	WithdrawalEpochChange            *ListChangeSet[uint64]
+	// Efficient unwinding on reset (only applicable at epoch boundaries)
+	PreviousEpochParticipationAtReset cltypes.ParticipationFlagsList
+	Eth1DataVotesAtReset              []*cltypes.Eth1Data
 }
 
 func (r *ReverseBeaconStateChangeSet) OnSlotChange(prevSlot uint64) {

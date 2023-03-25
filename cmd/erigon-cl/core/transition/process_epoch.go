@@ -49,8 +49,8 @@ func ProcessEpoch(state *state.BeaconState) error {
 }
 
 func ProcessParticipationRecordUpdates(state *state.BeaconState) error {
-	state.SetPreviousEpochAtteastations(state.CurrentEpochAttestations())
-	state.SetCurrentEpochAtteastations(nil)
+	state.SetPreviousEpochAttestations(state.CurrentEpochAttestations())
+	state.ResetCurrentEpochAttestations()
 	// Also mark all current attesters as previous
 	for _, validator := range state.Validators() {
 		// Previous sources/target/head

@@ -20,8 +20,6 @@ func (b *BeaconState) StartCollectingReverseChangeSet() {
 		CurrentEpochParticipationChanges:  beacon_changeset.NewListChangeSet[cltypes.ParticipationFlags](len(b.currentEpochParticipation)),
 		InactivityScoresChanges:           beacon_changeset.NewListChangeSet[uint64](len(b.inactivityScores)),
 		HistoricalSummaryChange:           beacon_changeset.NewListChangeSet[cltypes.HistoricalSummary](len(b.historicalSummaries)),
-		PreviousEpochAttestationsChange:   beacon_changeset.NewListChangeSet[cltypes.PendingAttestation](len(b.previousEpochParticipation)),
-		CurrentEpochAttestationsChange:    beacon_changeset.NewListChangeSet[cltypes.PendingAttestation](len(b.currentEpochAttestations)),
 		// Validators section
 		WithdrawalCredentialsChange:      beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.validators)),
 		EffectiveBalanceChange:           beacon_changeset.NewListChangeSet[uint64](len(b.validators)),

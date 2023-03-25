@@ -3,7 +3,6 @@ package state
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
@@ -150,18 +149,43 @@ func (b *BeaconState) SetValidatorBalance(index int, balance uint64) error {
 	}
 
 	b.touchedLeaves[BalancesLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.BalancesChanges.AddChange(index, b.balances[index])
+	}
 	b.balances[index] = balance
 	return nil
 }
 
 func (b *BeaconState) SetRandaoMixAt(index int, mix libcommon.Hash) {
 	b.touchedLeaves[RandaoMixesLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.RandaoMixesChanges.AddChange(index, b.randaoMixes[index])
+	}
 	b.randaoMixes[index] = mix
 }
 
 func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 	b.touchedLeaves[SlashingsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.SlashingsChanges.AddChange(index, b.slashings[index])
+	}
 	b.slashings[index] = segment
+}
+
+func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
+	if isCurrentEpoch {
+		if b.reverseChangeset != nil {
+			b.reverseChangeset.CurrentEpochParticipationChanges.AddChange(index, flags)
+		}
+		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
+		b.currentEpochParticipation[index] = flags
+		return
+	}
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.PreviousEpochParticipationChanges.AddChange(index, flags)
+	}
+	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
+	b.previousEpochParticipation[index] = flags
 }
 
 func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
@@ -208,26 +232,41 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkp
 
 func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[CurrentSyncCommitteeLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnCurrentSyncCommitteeChange(b.currentSyncCommittee)
+	}
 	b.currentSyncCommittee = currentSyncCommittee
 }
 
 func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnNextSyncCommitteeChange(b.nextSyncCommittee)
+	}
 	b.nextSyncCommittee = nextSyncCommittee
 }
 
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader)
+	}
 	b.latestExecutionPayloadHeader = header
 }
 
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
 	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnNextWithdrawalIndexChange(b.nextWithdrawalIndex)
+	}
 	b.nextWithdrawalIndex = index
 }
 
 func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.OnNextWithdrawalValidatorIndexChange(b.nextWithdrawalValidatorIndex)
+	}
 	b.nextWithdrawalValidatorIndex = index
 }
 
@@ -250,55 +289,40 @@ func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error
 	if index >= len(b.inactivityScores) {
 		return ErrInvalidValidatorIndex
 	}
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.InactivityScoresChanges.AddChange(index, score)
+	}
 	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores[index] = score
 	return nil
 }
 
 func (b *BeaconState) AddCurrentEpochParticipationFlags(flags cltypes.ParticipationFlags) {
-	if b.version == clparams.Phase0Version {
-		panic("cannot call AddCurrentEpochParticipationFlags on phase0")
-	}
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochParticipation = append(b.currentEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddPreviousEpochParticipationFlags(flags cltypes.ParticipationFlags) {
-	if b.version == clparams.Phase0Version {
-		panic("cannot call AddPreviousEpochParticipationFlags on phase0")
-	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = append(b.previousEpochParticipation, flags)
 }
 
 func (b *BeaconState) AddCurrentEpochAtteastation(attestation *cltypes.PendingAttestation) {
-	if b.version != clparams.Phase0Version {
-		panic("can call AddCurrentEpochAtteastation only on phase0")
-	}
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	b.currentEpochAttestations = append(b.currentEpochAttestations, attestation)
 }
 
-func (b *BeaconState) AddPreviousEpochAtteastation(attestation *cltypes.PendingAttestation) {
-	if b.version != clparams.Phase0Version {
-		panic("can call AddPreviousEpochAtteastation only on phase0")
-	}
+func (b *BeaconState) AddPreviousEpochAttestation(attestation *cltypes.PendingAttestation) {
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochAttestations = append(b.previousEpochAttestations, attestation)
 }
 
-func (b *BeaconState) SetCurrentEpochAtteastations(attestations []*cltypes.PendingAttestation) {
-	if b.version != clparams.Phase0Version {
-		panic("can call SetCurrentEpochAtteastations only on phase0")
-	}
+func (b *BeaconState) ResetCurrentEpochAttestations() {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-	b.currentEpochAttestations = attestations
+	b.currentEpochAttestations = nil
 }
 
-func (b *BeaconState) SetPreviousEpochAtteastations(attestations []*cltypes.PendingAttestation) {
-	if b.version != clparams.Phase0Version {
-		panic("can call SetPreviousEpochAtteastations only on phase0")
-	}
+func (b *BeaconState) SetPreviousEpochAttestations(attestations []*cltypes.PendingAttestation) {
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochAttestations = attestations
 }

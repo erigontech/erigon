@@ -84,7 +84,7 @@ func ProcessJustificationBitsAndFinality(state *state.BeaconState) error {
 		}
 	} else {
 		// Use bitlists to determine finality.
-		previousParticipation, currentParticipation := state.PreviousEpochParticipation(), state.CurrentEpochParticipation()
+		previousParticipation, currentParticipation := state.EpochParticipation(false), state.EpochParticipation(true)
 		for i, validator := range state.Validators() {
 			if validator.Slashed {
 				continue

@@ -101,16 +101,22 @@ func (b *BeaconState) SlashingSegmentAt(pos int) uint64 {
 	return b.slashings[pos]
 }
 
-func (b *BeaconState) PreviousEpochParticipation() cltypes.ParticipationFlagsList {
+func (b *BeaconState) EpochParticipation(currentEpoch bool) cltypes.ParticipationFlagsList {
+	if currentEpoch {
+		return b.currentEpochParticipation
+	}
 	return b.previousEpochParticipation
-}
-
-func (b *BeaconState) CurrentEpochParticipation() cltypes.ParticipationFlagsList {
-	return b.currentEpochParticipation
 }
 
 func (b *BeaconState) JustificationBits() cltypes.JustificationBits {
 	return b.justificationBits
+}
+
+func (b *BeaconState) EpochParticipationForValidatorIndex(isCurrentEpoch bool, index int) cltypes.ParticipationFlags {
+	if isCurrentEpoch {
+		return b.currentEpochParticipation[index]
+	}
+	return b.previousEpochParticipation[index]
 }
 
 func (b *BeaconState) PreviousJustifiedCheckpoint() *cltypes.Checkpoint {

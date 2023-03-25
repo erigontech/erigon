@@ -24,6 +24,6 @@ func ProcessRandaoMixesReset(state *state.BeaconState) {
 }
 
 func ProcessParticipationFlagUpdates(state *state.BeaconState) {
-	state.SetPreviousEpochParticipation(state.CurrentEpochParticipation())
+	state.SetPreviousEpochParticipation(state.EpochParticipation( /*isCurrentEpoch=*/ true))
 	state.SetCurrentEpochParticipation(make([]cltypes.ParticipationFlags, len(state.Validators())))
 }
