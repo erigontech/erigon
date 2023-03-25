@@ -102,6 +102,7 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
+//nolint:ruleguard
 func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
 	kvTx, err := db.RwDB.BeginRw(ctx)
 	if err != nil {

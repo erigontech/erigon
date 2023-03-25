@@ -339,7 +339,7 @@ func (t *Trie) NeedLoadCode(addrHash libcommon.Hash, codeHash libcommon.Hash, by
 		return false, nil
 	}
 
-	ok := false
+	var ok bool
 	if bytecode {
 		_, ok = t.GetAccountCode(addrHash[:])
 	} else {

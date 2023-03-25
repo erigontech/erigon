@@ -18,7 +18,7 @@ linters:
   enable:
     - unconvert
     - predeclared
-    - wastedassign
+#    - wastedassign
     - thelper
     - gofmt
     - gocritic

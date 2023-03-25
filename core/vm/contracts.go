@@ -257,7 +257,7 @@ func (c *ecrecover) Run(input []byte) ([]byte, error) {
 	pubKey, err := crypto.Ecrecover(input[:32], sig)
 	// make sure the public key is a valid one
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 
 	// the first byte of pubkey is bitcoin heritage

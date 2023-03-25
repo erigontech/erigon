@@ -10,9 +10,9 @@ import (
 )
 
 func TestBytes2(t *testing.T) {
-	len := 1000
-	buf := rawdb.Bytes2FromLength(len)
-	require.Equal(t, len, rawdb.LengthFromBytes2(buf))
+	l := 1000
+	buf := rawdb.Bytes2FromLength(l)
+	require.Equal(t, l, rawdb.LengthFromBytes2(buf))
 }
 
 var emptyBlock = &cltypes.Eth1Block{}

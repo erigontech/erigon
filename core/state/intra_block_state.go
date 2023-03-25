@@ -235,11 +235,11 @@ func (sdb *IntraBlockState) GetCodeSize(addr libcommon.Address) int {
 	if stateObject.code != nil {
 		return len(stateObject.code)
 	}
-	len, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
+	l, err := sdb.stateReader.ReadAccountCodeSize(addr, stateObject.data.Incarnation, stateObject.data.CodeHash)
 	if err != nil {
 		sdb.setErrorUnsafe(err)
 	}
-	return len
+	return l
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account

@@ -536,13 +536,13 @@ func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.
 	n.c = NewCodec(n.ln, key, clock)
 }
 
-func (n *handshakeTestNode) encode(t testing.TB, to handshakeTestNode, p Packet) ([]byte, Nonce) {
-	t.Helper()
-	return n.encodeWithChallenge(t, to, nil, p)
+func (n *handshakeTestNode) encode(tb testing.TB, to handshakeTestNode, p Packet) ([]byte, Nonce) {
+	tb.Helper()
+	return n.encodeWithChallenge(tb, to, nil, p)
 }
 
-func (n *handshakeTestNode) encodeWithChallenge(t testing.TB, to handshakeTestNode, c *Whoareyou, p Packet) ([]byte, Nonce) {
-	t.Helper()
+func (n *handshakeTestNode) encodeWithChallenge(tb testing.TB, to handshakeTestNode, c *Whoareyou, p Packet) ([]byte, Nonce) {
+	tb.Helper()
 
 	// Copy challenge and add destination node. This avoids sharing 'c' among the two codecs.
 	var challenge *Whoareyou
@@ -554,9 +554,9 @@ func (n *handshakeTestNode) encodeWithChallenge(t testing.TB, to handshakeTestNo
 	// Encode to destination.
 	enc, nonce, err := n.c.Encode(to.id(), to.addr(), p, challenge)
 	if err != nil {
-		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
+		tb.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
-	t.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
+	tb.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
 	return enc, nonce
 }
 
