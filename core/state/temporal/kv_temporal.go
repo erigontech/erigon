@@ -106,9 +106,8 @@ func (db *DB) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return f(tx)
 }
 
-//nolint:ruleguard
 func (db *DB) BeginTemporalRw(ctx context.Context) (kv.RwTx, error) {
-	kvTx, err := db.RwDB.BeginRw(ctx)
+	kvTx, err := db.RwDB.BeginRw(ctx) //nolint:ruleguard
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +129,7 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 }
 
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
-	kvTx, err := db.RwDB.BeginRwNosync(ctx)
+	kvTx, err := db.RwDB.BeginRwNosync(ctx) //nolint:ruleguard
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +139,7 @@ func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
 	return tx, nil
 }
 func (db *DB) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return db.BeginTemporalRwNosync(ctx)
+	return db.BeginTemporalRwNosync(ctx) //nolint:ruleguard
 }
 func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	tx, err := db.BeginTemporalRwNosync(ctx)
