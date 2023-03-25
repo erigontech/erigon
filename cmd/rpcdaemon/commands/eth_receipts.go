@@ -765,15 +765,6 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 	return fields
 }
 
-func includes(addresses []common.Address, a common.Address) bool {
-	for _, addr := range addresses {
-		if addr == a {
-			return true
-		}
-	}
-	return false
-}
-
 // MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
 //   - blockNum
 //   - txIndex in block: -1 means first system tx
