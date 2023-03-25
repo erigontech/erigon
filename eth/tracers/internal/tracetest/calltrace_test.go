@@ -222,12 +222,12 @@ func BenchmarkTracers(b *testing.B) {
 			if err := json.Unmarshal(blob, test); err != nil {
 				b.Fatalf("failed to parse testcase: %v", err)
 			}
-			benchTracer("callTracer", test, b)
+			benchTracer(b, "callTracer", test)
 		})
 	}
 }
 
-func benchTracer(tracerName string, test *callTracerTest, b *testing.B) {
+func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	// Configure a blockchain with the given prestate
 	tx, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(common.FromHex(test.Input)), 0))
 	if err != nil {
