@@ -105,12 +105,12 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 			aux := make([]byte, 32)
 
-			flg := UpdateFlags(updateSeed.Intn(int(CODE_UPDATE | DELETE_UPDATE | STORAGE_UPDATE | NONCE_UPDATE | BALANCE_UPDATE)))
+			flg := UpdateFlags(updateSeed.Intn(int(CodeUpdate | DeleteUpdate | StorageUpdate | NonceUpdate | BalanceUpdate)))
 			switch {
-			case flg&BALANCE_UPDATE != 0:
+			case flg&BalanceUpdate != 0:
 				builder.Balance(pkey, updateSeed.Uint64()).Nonce(pkey, updateSeed.Uint64())
 				continue
-			case flg&CODE_UPDATE != 0:
+			case flg&CodeUpdate != 0:
 				keccak := sha3.NewLegacyKeccak256().(keccakState)
 				var s [8]byte
 				n, err := updateSeed.Read(s[:])
@@ -121,7 +121,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 
 				builder.CodeHash(pkey, hex.EncodeToString(aux))
 				continue
-			case flg&STORAGE_UPDATE != 0:
+			case flg&StorageUpdate != 0:
 				sz := updateSeed.Intn(length.Hash)
 				n, err = updateSeed.Read(aux[:sz])
 				require.NoError(t, err)
@@ -131,7 +131,7 @@ func Fuzz_ProcessUpdates_ArbitraryUpdateCount(f *testing.F) {
 				keysSeed.Read(loc)
 				builder.Storage(pkey, hex.EncodeToString(loc), hex.EncodeToString(aux[:sz]))
 				continue
-			case flg&DELETE_UPDATE != 0:
+			case flg&DeleteUpdate != 0:
 				continue
 			default:
 				continue

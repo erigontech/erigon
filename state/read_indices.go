@@ -98,7 +98,7 @@ type RCollation struct {
 func (c RCollation) Close() {
 }
 
-func (ri *ReadIndices) collate(step uint64, txFrom, txTo uint64, roTx kv.Tx) (RCollation, error) {
+func (ri *ReadIndices) collate(txFrom, txTo uint64, roTx kv.Tx) (RCollation, error) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -188,7 +188,7 @@ func (ri *ReadIndices) integrateFiles(sf RStaticFiles, txNumFrom, txNumTo uint64
 	ri.code.integrateFiles(sf.code, txNumFrom, txNumTo)
 }
 
-func (ri *ReadIndices) prune(step uint64, txFrom, txTo uint64) error {
+func (ri *ReadIndices) prune(txFrom, txTo uint64) error {
 	ctx := context.TODO()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -384,7 +384,7 @@ func (ri *ReadIndices) FinishTx() error {
 	}
 	closeAll := true
 	step := ri.txNum / ri.aggregationStep
-	collation, err := ri.collate(step, step*ri.aggregationStep, (step+1)*ri.aggregationStep, ri.rwTx)
+	collation, err := ri.collate(step*ri.aggregationStep, (step+1)*ri.aggregationStep, ri.rwTx)
 	if err != nil {
 		return err
 	}
@@ -403,7 +403,7 @@ func (ri *ReadIndices) FinishTx() error {
 		}
 	}()
 	ri.integrateFiles(sf, step*ri.aggregationStep, (step+1)*ri.aggregationStep)
-	if err = ri.prune(step, step*ri.aggregationStep, (step+1)*ri.aggregationStep); err != nil {
+	if err = ri.prune(step*ri.aggregationStep, (step+1)*ri.aggregationStep); err != nil {
 		return err
 	}
 	maxEndTxNum := ri.endTxNumMinimax()

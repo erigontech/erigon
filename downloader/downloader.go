@@ -85,7 +85,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg) (*Downloader, error) {
 		return nil, err
 	}
 
-	db, c, m, torrentClient, err := openClient(ctx, cfg.ClientConfig)
+	db, c, m, torrentClient, err := openClient(cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
 	}
@@ -424,7 +424,7 @@ func (d *Downloader) Torrent() *torrent.Client {
 	return d.torrentClient
 }
 
-func openClient(ctx context.Context, cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
+func openClient(cfg *torrent.ClientConfig) (db kv.RwDB, c storage.PieceCompletion, m storage.ClientImplCloser, torrentClient *torrent.Client, err error) {
 	snapDir := cfg.DataDir
 	db, err = mdbx.NewMDBX(log.New()).
 		Label(kv.DownloaderDB).

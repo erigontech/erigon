@@ -400,7 +400,7 @@ func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
 	ii.wal = ii.newWriter(tmpdir, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
-	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRam > 0, false)
+	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRAM > 0, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.wal.close()
@@ -457,13 +457,13 @@ func (ii *invertedIndexWAL) close() {
 }
 
 // 3 history + 4 indices = 10 etl collectors, 10*256Mb/8 = 512mb - for all indices buffers
-var WALCollectorRam = 2 * (etl.BufferOptimalSize / 8)
+var WALCollectorRAM = 2 * (etl.BufferOptimalSize / 8)
 
 func init() {
 	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")
 	if v != "" {
 		var err error
-		WALCollectorRam, err = datasize.ParseString(v)
+		WALCollectorRAM, err = datasize.ParseString(v)
 		if err != nil {
 			panic(err)
 		}
@@ -478,8 +478,8 @@ func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *inver
 	}
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
-		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
 		w.index.LogLvl(log.LvlTrace)
 		w.indexKeys.LogLvl(log.LvlTrace)
 	}
@@ -834,7 +834,7 @@ func (it *RecentInvertedIdxIter) Close() {
 	bitmapdb.ReturnToPool64(it.bm)
 }
 
-func (it *RecentInvertedIdxIter) advanceInDb() {
+func (it *RecentInvertedIdxIter) advanceInDB() {
 	var v []byte
 	var err error
 	if it.cursor == nil {
@@ -930,11 +930,11 @@ func (it *RecentInvertedIdxIter) advanceInDb() {
 func (it *RecentInvertedIdxIter) advance() {
 	if it.orderAscend {
 		if it.hasNext {
-			it.advanceInDb()
+			it.advanceInDB()
 		}
 	} else {
 		if it.hasNext {
-			it.advanceInDb()
+			it.advanceInDB()
 		}
 	}
 }

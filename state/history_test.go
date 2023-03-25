@@ -286,7 +286,6 @@ func filledHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *History, 
 	if flusher != nil {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
-		flusher = nil
 	}
 	err = h.Rotate().Flush(ctx, tx)
 	require.NoError(tb, err)
@@ -296,7 +295,7 @@ func filledHistory(tb testing.TB, largeValues bool) (string, kv.RwDB, *History, 
 	return path, db, h, txs
 }
 
-func checkHistoryHistory(t *testing.T, db kv.RwDB, h *History, txs uint64) {
+func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	t.Helper()
 	// Check the history
 	hc := h.MakeContext()
@@ -350,7 +349,7 @@ func TestHistoryHistory(t *testing.T) {
 				require.NoError(err)
 			}()
 		}
-		checkHistoryHistory(t, db, h, txs)
+		checkHistoryHistory(t, h, txs)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		_, db, h, txs := filledHistory(t, true)
@@ -415,7 +414,7 @@ func TestHistoryMergeFiles(t *testing.T) {
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		collateAndMergeHistory(t, db, h, txs)
-		checkHistoryHistory(t, db, h, txs)
+		checkHistoryHistory(t, h, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {
@@ -441,7 +440,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		require.NoError(h.OpenFolder())
 		h.SetTxNum(txNum)
 		// Check the history
-		checkHistoryHistory(t, db, h, txs)
+		checkHistoryHistory(t, h, txs)
 	}
 
 	t.Run("large_values", func(t *testing.T) {

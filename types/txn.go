@@ -568,7 +568,7 @@ func (a Announcements) DedupCopy() Announcements {
 		sizes:  make([]uint32, unique),
 		hashes: make([]byte, unique*length.Hash),
 	}
-	copy(c.hashes[:], a.hashes[0:length.Hash])
+	copy(c.hashes, a.hashes[0:length.Hash])
 	c.ts[0] = a.ts[0]
 	c.sizes[0] = a.sizes[0]
 	dest := length.Hash

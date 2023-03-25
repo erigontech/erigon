@@ -872,7 +872,7 @@ func (a *Aggregator) AggregatedRoots() chan [length.Hash]byte {
 }
 
 func (a *Aggregator) notifyAggregated(rootHash []byte) {
-	rh := (*[length.Hash]byte)(rootHash[:])
+	rh := (*[length.Hash]byte)(rootHash)
 	select {
 	case a.stepDoneNotice <- *rh:
 	default:
@@ -1313,7 +1313,7 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 	} else {
 		value[pos] = 32
 		pos++
-		copy(value[pos:pos+32], hash[:])
+		copy(value[pos:pos+32], hash)
 		pos += 32
 	}
 	if incarnation == 0 {

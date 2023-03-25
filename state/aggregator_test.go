@@ -310,8 +310,6 @@ func TestAggregator_RestartOnFiles(t *testing.T) {
 	tx = nil
 	db.Close()
 	agg.Close()
-	db = nil
-	agg = nil
 
 	require.NoError(t, os.RemoveAll(filepath.Join(path, "db4")))
 

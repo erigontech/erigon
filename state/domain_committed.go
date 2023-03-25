@@ -115,17 +115,17 @@ func (d *DomainCommitted) TouchPlainKey(key, val []byte, fn func(c *CommitmentIt
 
 func (d *DomainCommitted) TouchPlainKeyAccount(c *CommitmentItem, val []byte) {
 	if len(val) == 0 {
-		c.update.Flags = commitment.DELETE_UPDATE
+		c.update.Flags = commitment.DeleteUpdate
 		return
 	}
 	c.update.DecodeForStorage(val)
-	c.update.Flags = commitment.BALANCE_UPDATE | commitment.NONCE_UPDATE
+	c.update.Flags = commitment.BalanceUpdate | commitment.NonceUpdate
 	item, found := d.commTree.Get(&CommitmentItem{hashedKey: c.hashedKey})
 	if !found {
 		return
 	}
-	if item.update.Flags&commitment.CODE_UPDATE != 0 {
-		c.update.Flags |= commitment.CODE_UPDATE
+	if item.update.Flags&commitment.CodeUpdate != 0 {
+		c.update.Flags |= commitment.CodeUpdate
 		copy(c.update.CodeHashOrStorage[:], item.update.CodeHashOrStorage[:])
 	}
 }
@@ -133,15 +133,15 @@ func (d *DomainCommitted) TouchPlainKeyAccount(c *CommitmentItem, val []byte) {
 func (d *DomainCommitted) TouchPlainKeyStorage(c *CommitmentItem, val []byte) {
 	c.update.ValLength = len(val)
 	if len(val) == 0 {
-		c.update.Flags = commitment.DELETE_UPDATE
+		c.update.Flags = commitment.DeleteUpdate
 	} else {
-		c.update.Flags = commitment.STORAGE_UPDATE
+		c.update.Flags = commitment.StorageUpdate
 		copy(c.update.CodeHashOrStorage[:], val)
 	}
 }
 
 func (d *DomainCommitted) TouchPlainKeyCode(c *CommitmentItem, val []byte) {
-	c.update.Flags = commitment.CODE_UPDATE
+	c.update.Flags = commitment.CodeUpdate
 	item, found := d.commTree.Get(c)
 	if !found {
 		d.keccak.Reset()
@@ -149,16 +149,16 @@ func (d *DomainCommitted) TouchPlainKeyCode(c *CommitmentItem, val []byte) {
 		copy(c.update.CodeHashOrStorage[:], d.keccak.Sum(nil))
 		return
 	}
-	if item.update.Flags&commitment.BALANCE_UPDATE != 0 {
-		c.update.Flags |= commitment.BALANCE_UPDATE
+	if item.update.Flags&commitment.BalanceUpdate != 0 {
+		c.update.Flags |= commitment.BalanceUpdate
 		c.update.Balance.Set(&item.update.Balance)
 	}
-	if item.update.Flags&commitment.NONCE_UPDATE != 0 {
-		c.update.Flags |= commitment.NONCE_UPDATE
+	if item.update.Flags&commitment.NonceUpdate != 0 {
+		c.update.Flags |= commitment.NonceUpdate
 		c.update.Nonce = item.update.Nonce
 	}
-	if item.update.Flags == commitment.DELETE_UPDATE && len(val) == 0 {
-		c.update.Flags = commitment.DELETE_UPDATE
+	if item.update.Flags == commitment.DeleteUpdate && len(val) == 0 {
+		c.update.Flags = commitment.DeleteUpdate
 	} else {
 		d.keccak.Reset()
 		d.keccak.Write(val)
