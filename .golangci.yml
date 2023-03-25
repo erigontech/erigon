@@ -16,13 +16,12 @@ linters:
     - unparam
     - makezero #TODO: enable me
     - noctx #TODO: enable me
-    - predeclared #TODO: enable me
     - nilerr #TODO: enable me
   enable:
     - unconvert
-    - predeclared
-    #    - wastedassign
+#    - predeclared #TODO: enable me
 #    - thelper #TODO: enable me
+    #    - wastedassign
     - gofmt
     - gocritic
 #    - revive
