@@ -83,7 +83,7 @@ func TestProcessBlockHeader(t *testing.T) {
 	badBlockBodyHash.Body.Attestations = append(badBlockBodyHash.Body.Attestations, &cltypes.Attestation{})
 
 	badStateSlashed := getTestState(t)
-	validator, err := badStateSlashed.ValidatorAt(int(testBlock.ProposerIndex))
+	validator, err := badStateSlashed.ValidatorForValidatorIndex(int(testBlock.ProposerIndex))
 	require.NoError(t, err)
 	validator.Slashed = true
 	badStateSlashed.SetValidatorAt(int(testBlock.ProposerIndex), validator)
@@ -160,7 +160,7 @@ func TestProcessRandao(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to get proposer index: %v", err)
 	}
-	validator, err := testStateSuccess.ValidatorAt(int(propInd))
+	validator, err := testStateSuccess.ValidatorForValidatorIndex(int(propInd))
 	require.NoError(t, err)
 	validator.PublicKey = testPublicKeyRandao
 	testStateSuccess.SetValidatorAt(int(propInd), validator)

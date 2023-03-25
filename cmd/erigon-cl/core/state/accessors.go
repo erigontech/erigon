@@ -228,7 +228,7 @@ func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uin
 		input := append(seed[:], buf...)
 		randomByte := uint64(utils.Keccak256(input)[i%32])
 
-		validator, err := b.ValidatorAt(int(candidateIndex))
+		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return 0, err
 		}
@@ -565,7 +565,7 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 		input := append(seed[:], buf...)
 		randomByte := uint64(utils.Keccak256(input)[i%32])
 		// retrieve validator.
-		validator, err := b.ValidatorAt(int(candidateIndex))
+		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return nil, err
 		}

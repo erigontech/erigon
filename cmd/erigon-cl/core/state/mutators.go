@@ -6,20 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 )
-
-// StartCollecteingReverseChangeSet starts collection change sets.
-func (b *BeaconState) StartCollecteingReverseChangeSet() {
-	b.reverseChangeset = &beacon_changeset.ReverseBeaconStateChangeSet{}
-}
-
-// StartCollecteingReverseChangeSet starts collection change sets.
-func (b *BeaconState) StopCollecteingReverseChangeSet() *beacon_changeset.ReverseBeaconStateChangeSet {
-	ret := b.reverseChangeset
-	b.reverseChangeset = nil
-	return ret
-}
 
 func (b *BeaconState) IncreaseBalance(index, delta uint64) error {
 	currentBalance, err := b.ValidatorBalance(int(index))

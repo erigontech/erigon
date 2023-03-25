@@ -14,8 +14,9 @@ func TestListChangeset(t *testing.T) {
 	changeset.AddChange(2, 45)
 	changeset.CompactChanges()
 	require.Equal(t, len(changeset.list), 2)
-	post := changeset.ApplyChanges(pre)
+	post, changed := changeset.ApplyChanges(pre)
 	require.Equal(t, post, []int{6, 1, 45})
+	require.Equal(t, changed, true)
 }
 
 func TestListChangesetWithReverse(t *testing.T) {
@@ -26,8 +27,9 @@ func TestListChangesetWithReverse(t *testing.T) {
 	changeset.AddChange(2, 45)
 	changeset.CompactChangesReverse()
 	require.Equal(t, len(changeset.list), 2)
-	post := changeset.ApplyChanges(pre)
+	post, changed := changeset.ApplyChanges(pre)
 	require.Equal(t, post, []int{6, 45, 45})
+	require.Equal(t, changed, true)
 }
 
 func TestListChangesetWithoutCompact(t *testing.T) {
@@ -37,6 +39,7 @@ func TestListChangesetWithoutCompact(t *testing.T) {
 	changeset.AddChange(1, 1)
 	changeset.AddChange(2, 45)
 	require.Equal(t, len(changeset.list), 3)
-	post := changeset.ApplyChanges(pre)
+	post, changed := changeset.ApplyChanges(pre)
 	require.Equal(t, post, []int{6, 1, 45})
+	require.Equal(t, changed, true)
 }

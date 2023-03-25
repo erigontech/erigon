@@ -127,7 +127,7 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 	}
 	// Basically we flag all validators we are currently attesting. will be important for rewards/finalization processing.
 	for _, index := range indicies {
-		validator, err := state.ValidatorAt(int(index))
+		validator, err := state.ValidatorForValidatorIndex(int(index))
 		if err != nil {
 			return nil, err
 		}

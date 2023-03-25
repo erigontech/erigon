@@ -169,3 +169,61 @@ func (r *ReverseBeaconStateChangeSet) OnVersionChange(v clparams.StateVersion) {
 	r.VersionChange = new(clparams.StateVersion)
 	*r.VersionChange = v
 }
+
+func (r *ReverseBeaconStateChangeSet) HasValidatorSetNotChanged() bool {
+	return r.WithdrawalCredentialsChange.Empty() && r.ActivationEligibilityEpochChange.Empty() && r.ActivationEpochChange.Empty() &&
+		r.EffectiveBalanceChange.Empty() && r.SlashedChange.Empty() && r.ExitEpochChange.Empty() && r.WithdrawalEpochChange.Empty()
+}
+
+func (r *ReverseBeaconStateChangeSet) ApplyEth1DataVotesChanges(input []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
+	output = input
+	if r.Eth1DataVotesChanges.Empty() {
+		return
+	}
+	changed = true
+	if r.Eth1DataVotesChanges.ListLength() != len(output) {
+		output = make([]*cltypes.Eth1Data, r.Eth1DataVotesChanges.ListLength())
+		copy(output, input)
+	}
+	r.Eth1DataVotesChanges.ChangesWithHandler(func(value cltypes.Eth1Data, index int) {
+		*output[index] = value
+	})
+	return
+}
+
+func (r *ReverseBeaconStateChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSummary) (output []*cltypes.HistoricalSummary, changed bool) {
+	output = input
+	if r.HistoricalSummaryChange.Empty() {
+		return
+	}
+	changed = true
+	if r.HistoricalSummaryChange.ListLength() != len(output) {
+		output = make([]*cltypes.HistoricalSummary, r.HistoricalSummaryChange.ListLength())
+		copy(output, input)
+	}
+	r.HistoricalSummaryChange.ChangesWithHandler(func(value cltypes.HistoricalSummary, index int) {
+		*output[index] = value
+	})
+	return
+}
+
+func (r *ReverseBeaconStateChangeSet) CompactChanges() {
+	r.BlockRootsChanges.CompactChangesReverse()
+	r.StateRootsChanges.CompactChangesReverse()
+	r.HistoricalRootsChanges.CompactChangesReverse()
+	r.SlashingsChanges.CompactChangesReverse()
+	r.RandaoMixesChanges.CompactChangesReverse()
+	r.BalancesChanges.CompactChangesReverse()
+	r.Eth1DataVotesChanges.CompactChangesReverse()
+	r.PreviousEpochParticipationChanges.CompactChangesReverse()
+	r.CurrentEpochParticipationChanges.CompactChangesReverse()
+	r.InactivityScoresChanges.CompactChangesReverse()
+	r.HistoricalRootsChanges.CompactChangesReverse()
+	r.WithdrawalCredentialsChange.CompactChangesReverse()
+	r.EffectiveBalanceChange.CompactChangesReverse()
+	r.ExitEpochChange.CompactChangesReverse()
+	r.ActivationEligibilityEpochChange.CompactChangesReverse()
+	r.ActivationEpochChange.CompactChangesReverse()
+	r.SlashedChange.CompactChangesReverse()
+	r.WithdrawalEpochChange.CompactChangesReverse()
+}

@@ -26,7 +26,7 @@ func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 
 	pks := [][]byte{}
 	for _, v := range inds {
-		val, err := state.ValidatorAt(int(v))
+		val, err := state.ValidatorForValidatorIndex(int(v))
 		if err != nil {
 			return false, err
 		}
@@ -77,7 +77,7 @@ func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.Pro
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer, err := state.ValidatorAt(int(h1.ProposerIndex))
+	proposer, err := state.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.Atte
 	slashedAny := false
 	currentEpoch := state.GetEpochAtSlot(state.Slot())
 	for _, ind := range utils.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
-		validator, err := state.ValidatorAt(int(ind))
+		validator, err := state.ValidatorForValidatorIndex(int(ind))
 		if err != nil {
 			return err
 		}
@@ -217,7 +217,7 @@ func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes
 	// Sanity checks so that we know it is good.
 	voluntaryExit := signedVoluntaryExit.VolunaryExit
 	currentEpoch := state.Epoch()
-	validator, err := state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
+	validator, err := state.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
 	}

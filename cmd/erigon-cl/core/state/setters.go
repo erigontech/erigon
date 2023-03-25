@@ -189,6 +189,9 @@ func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool
 }
 
 func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.PreviousEpochParticipationAtReset = b.previousEpochParticipation
+	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = previousEpochParticipation
 }

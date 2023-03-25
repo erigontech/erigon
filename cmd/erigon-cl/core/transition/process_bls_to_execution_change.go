@@ -16,7 +16,7 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 	change := signedChange.Message
 
 	beaconConfig := state.BeaconConfig()
-	validator, err := state.ValidatorAt(int(change.ValidatorIndex))
+	validator, err := state.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
 		return err
 	}

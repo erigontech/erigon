@@ -53,7 +53,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock, fu
 		BodyRoot:      bodyRoot,
 	})
 
-	proposer, err := state.ValidatorAt(int(block.ProposerIndex))
+	proposer, err := state.ValidatorForValidatorIndex(int(block.ProposerIndex))
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func ProcessBlockHeader(state *state.BeaconState, block *cltypes.BeaconBlock, fu
 
 func ProcessRandao(state *state.BeaconState, randao [96]byte, proposerIndex uint64, fullValidation bool) error {
 	epoch := state.Epoch()
-	proposer, err := state.ValidatorAt(int(proposerIndex))
+	proposer, err := state.ValidatorForValidatorIndex(int(proposerIndex))
 	if err != nil {
 		return err
 	}

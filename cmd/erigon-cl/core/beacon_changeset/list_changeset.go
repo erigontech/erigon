@@ -8,6 +8,7 @@ type ListChangeSet[T any] struct {
 	list       []*listElementChangeset[T]
 	listLength int
 	nextId     int
+	compact    bool
 }
 
 type listElementChangeset[T any] struct {
@@ -23,6 +24,7 @@ func NewListChangeSet[T any](length int) *ListChangeSet[T] {
 
 // AddChange appens to a new change to the changeset of the list.
 func (l *ListChangeSet[T]) AddChange(index int, elem T) {
+	l.compact = false
 	l.list = append(l.list, &listElementChangeset[T]{
 		value:     elem,
 		listIndex: index,
@@ -34,6 +36,10 @@ func (l *ListChangeSet[T]) AddChange(index int, elem T) {
 // CompactChanges removes duplicates from a list using QuickSort and linear scan.
 // duplicates may appear if one state parameter is changed more than once.
 func (l *ListChangeSet[T]) CompactChanges() {
+	if l.compact {
+		return
+	}
+	l.compact = true
 	// Check if there are any duplicates to remove.
 	if len(l.list) < 2 {
 		return
@@ -68,6 +74,10 @@ func (l *ListChangeSet[T]) CompactChanges() {
 // duplicates may appear if one state parameter is changed more than once.
 // Difference with CompactChanges is that the sorting is reversed.
 func (l *ListChangeSet[T]) CompactChangesReverse() {
+	if l.compact {
+		return
+	}
+	l.compact = true
 	// Check if there are any duplicates to remove.
 	if len(l.list) < 2 {
 		return
@@ -99,18 +109,36 @@ func (l *ListChangeSet[T]) CompactChangesReverse() {
 }
 
 // ApplyChanges Apply changes without any mercy. if it is reverse, you need to call CompactChangesReverse before.
-func (l *ListChangeSet[T]) ApplyChanges(input []T) (output []T) {
-	// Re-adjust list size.
-	if len(input) >= l.listLength {
-		output = input[:l.listLength]
-	} else {
-		// This is quite inefficient :(.
-		output = make([]T, l.listLength)
-		copy(output, input)
+func (l *ListChangeSet[T]) ApplyChanges(input []T) (output []T, changed bool) {
+	if len(l.list) == 0 && l.listLength == len(input) {
+		output = input
+		return
 	}
+	changed = true
+	// Re-adjust list size.
+	output = make([]T, l.listLength)
+	copy(output, input)
 	// Now apply changes to the given list
 	for _, elem := range l.list {
 		output[elem.listIndex] = elem.value
 	}
-	return output
+	return
+}
+
+// ChangesWithHandler uses custom handler to handle changes.
+func (l *ListChangeSet[T]) ChangesWithHandler(fn func(value T, index int)) {
+	// Now apply changes to the given list
+	for _, elem := range l.list {
+		fn(elem.value, elem.id)
+	}
+}
+
+// ListLength return full list length
+func (l *ListChangeSet[T]) ListLength() int {
+	return l.listLength
+}
+
+// Empty return whether current list diff is empty
+func (l *ListChangeSet[T]) Empty() bool {
+	return len(l.list) == 0
 }
