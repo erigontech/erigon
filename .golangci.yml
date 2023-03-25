@@ -19,8 +19,8 @@ linters:
     - nilerr #TODO: enable me
   enable:
     - unconvert
-#    - predeclared #TODO: enable me
-#    - thelper #TODO: enable me
+    #    - predeclared #TODO: enable me
+    #    - thelper #TODO: enable me
     #    - wastedassign
     - gofmt
     - gocritic
