@@ -23,7 +23,6 @@ linters:
     - unconvert
     - predeclared
     #    - wastedassign
-    - thelper
     - gofmt
     - gocritic
 #    - revive
