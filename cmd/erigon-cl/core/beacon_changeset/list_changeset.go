@@ -88,7 +88,7 @@ func (l *ListChangeSet[T]) CompactChangesReverse() {
 		if l.list[i].listIndex == l.list[j].listIndex {
 			return l.list[i].id > l.list[j].id
 		}
-		return l.list[i].listIndex > l.list[j].listIndex
+		return l.list[i].listIndex < l.list[j].listIndex
 	})
 
 	// Create a new list buffer for the compacted list.
@@ -103,7 +103,6 @@ func (l *ListChangeSet[T]) CompactChangesReverse() {
 		previousIndexElement = listElement
 	}
 	compactList = append(compactList, previousIndexElement)
-
 	// Update the original list with the compacted list.
 	l.list = compactList
 }

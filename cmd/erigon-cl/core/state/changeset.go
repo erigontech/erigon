@@ -1,8 +1,6 @@
 package state
 
 import (
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -43,6 +41,7 @@ func (b *BeaconState) StopCollectingReverseChangeSet() *beacon_changeset.Reverse
 
 func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBeaconStateChangeSet) {
 	changeset.CompactChanges()
+	beforeSlot := b.slot
 	var touched bool
 	// Updates all single types accordingly.
 	if changeset.SlotChange != nil {
@@ -166,10 +165,10 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	} else {
 		b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-		b.previousEpochParticipation = changeset.PreviousEpochParticipationAtReset
-		b.currentEpochParticipation = changeset.CurrentEpochParticipationAtReset
-		fmt.Println("A")
+		b.previousEpochParticipation = changeset.PreviousEpochParticipationAtReset.Copy()
+		b.currentEpochParticipation = changeset.CurrentEpochParticipationAtReset.Copy()
 	}
+
 	b.inactivityScores, touched = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores)
 	if touched {
 		b.touchedLeaves[InactivityScoresLeafIndex] = true
@@ -180,7 +179,7 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	}
 	// Now start processing validators if there are any.
 	if changeset.HasValidatorSetNotChanged(len(b.validators)) {
-		b.revertCachesOnBoundary()
+		b.revertCachesOnBoundary(beforeSlot)
 		return
 	}
 	// We do it like this because validators diff can get quite big so we only save individual fields.
@@ -240,19 +239,22 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 		}
 		b.validators[index].EffectiveBalance = value
 	})
-	b.revertCachesOnBoundary()
+	b.revertCachesOnBoundary(beforeSlot)
 }
 
-func (b *BeaconState) revertCachesOnBoundary() {
-	if (b.slot+1)%b.beaconConfig.SlotsPerEpoch != 0 {
-		return
-	}
-	nextEpoch := (b.slot + 1) % b.beaconConfig.SlotsPerEpoch
-	b.activeValidatorsCache.Remove(nextEpoch)
-	b.shuffledSetsCache.Remove(b.GetSeed(nextEpoch, b.beaconConfig.DomainBeaconAttester))
-	b.committeeCache.Purge()
+func (b *BeaconState) revertCachesOnBoundary(beforeSlot uint64) {
 	b.activeValidatorsCache.Purge()
-	b.totalActiveBalanceCache = nil
+	beforeEpoch := beforeSlot / b.beaconConfig.SlotsPerEpoch
+	epoch := b.Epoch()
+	b.committeeCache.Purge()
 	b.previousStateRoot = libcommon.Hash{}
 	b.proposerIndex = nil
+	b.totalActiveBalanceCache = nil
+	if epoch <= beforeEpoch {
+		return
+	}
+	for epochToBeRemoved := beforeEpoch; epochToBeRemoved < epoch+1; beforeEpoch++ {
+		b.shuffledSetsCache.Remove(b.GetSeed(epochToBeRemoved, b.beaconConfig.DomainBeaconAttester))
+		b.activeValidatorsCache.Remove(epochToBeRemoved)
+	}
 }

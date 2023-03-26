@@ -207,22 +207,16 @@ func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool
 	b.previousEpochParticipation[index] = flags
 }
 
-func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
-	if b.reverseChangeset != nil {
-		b.reverseChangeset.PreviousEpochParticipationAtReset = make(cltypes.ParticipationFlagsList, len(b.previousEpochParticipation))
-		copy(b.reverseChangeset.PreviousEpochParticipationAtReset, b.previousEpochParticipation)
+func (b *BeaconState) ResetEpochParticipation() {
+	if b.reverseChangeset != nil && len(b.reverseChangeset.CurrentEpochParticipationAtReset) == 0 &&
+		len(b.reverseChangeset.PreviousEpochParticipationAtReset) == 0 {
+		b.reverseChangeset.CurrentEpochParticipationAtReset = b.currentEpochParticipation.Copy()
+		b.reverseChangeset.PreviousEpochParticipationAtReset = b.previousEpochParticipation.Copy()
 	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
-	b.previousEpochParticipation = previousEpochParticipation
-}
-
-func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []cltypes.ParticipationFlags) {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-	if b.reverseChangeset != nil {
-		b.reverseChangeset.CurrentEpochParticipationAtReset = make(cltypes.ParticipationFlagsList, len(b.currentEpochParticipation))
-		copy(b.reverseChangeset.CurrentEpochParticipationAtReset, b.currentEpochParticipation)
-	}
-	b.currentEpochParticipation = currentEpochParticipation
+	b.previousEpochParticipation = b.currentEpochParticipation
+	b.currentEpochParticipation = make(cltypes.ParticipationFlagsList, len(b.validators))
 }
 
 func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {

@@ -3,7 +3,6 @@ package consensustests
 import (
 	"fmt"
 	"os"
-	"reflect"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -52,7 +51,7 @@ func testSanityFunction(context testContext) error {
 		}
 		return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 	}
-	expectedRoot, err := expectedState.HashSSZ()
+	finalRoot, err := expectedState.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -60,7 +59,7 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	if haveRoot != expectedRoot {
+	if haveRoot != finalRoot {
 		return fmt.Errorf("mismatching state roots")
 	}
 	if context.version == clparams.Phase0Version {
@@ -76,7 +75,7 @@ func testSanityFunction(context testContext) error {
 		testState.RevertWithChangeset(changes[i])
 	}
 
-	expectedRoot, err = initialState.HashSSZ()
+	expectedRoot, err := initialState.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -85,28 +84,21 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(reflect.DeepEqual(testState.Slot(), initialState.Slot()))
-	fmt.Println(reflect.DeepEqual(testState.BlockRoots(), initialState.BlockRoots()))
-	fmt.Println(reflect.DeepEqual(testState.StateRoots(), initialState.StateRoots()))
-	fmt.Println(reflect.DeepEqual(testState.HistoricalRoots(), initialState.HistoricalRoots()))
-	fmt.Println(reflect.DeepEqual(testState.LatestBlockHeader(), initialState.LatestBlockHeader()))
-	fmt.Println(reflect.DeepEqual(testState.Balances(), initialState.Balances()))
-	fmt.Println(reflect.DeepEqual(testState.JustificationBits(), initialState.JustificationBits()))
-	fmt.Println("B")
-	fmt.Println(reflect.DeepEqual(testState.EpochParticipation(true), initialState.EpochParticipation(true)))
-	fmt.Println(reflect.DeepEqual(testState.EpochParticipation(false), initialState.EpochParticipation(false)))
-	fmt.Println(reflect.DeepEqual(testState.Eth1DepositIndex(), testState.Eth1DepositIndex()))
-	fmt.Println(reflect.DeepEqual(testState.PreviousJustifiedCheckpoint(), testState.PreviousJustifiedCheckpoint()))
-	fmt.Println(reflect.DeepEqual(testState.CurrentJustifiedCheckpoint(), testState.CurrentJustifiedCheckpoint()))
-	fmt.Println(reflect.DeepEqual(testState.FinalizedCheckpoint(), testState.FinalizedCheckpoint()))
-	fmt.Println(reflect.DeepEqual(testState.InactivityScores(), testState.InactivityScores()))
-	fmt.Println(reflect.DeepEqual(testState.Slashings(), testState.Slashings()))
-	fmt.Println(reflect.DeepEqual(testState.Validators(), initialState.Validators()))
-	fmt.Println(reflect.DeepEqual(testState.Validators(), initialState.Validators()))
-	fmt.Println(reflect.DeepEqual(testState.LatestExecutionPayloadHeader(), initialState.LatestExecutionPayloadHeader()))
 
 	if haveRoot != expectedRoot {
 		return fmt.Errorf("mismatching state roots with unwind")
+	}
+	// Execute them back (ensure cache is good.)
+	for _, block = range blocks {
+		testState.StartCollectingReverseChangeSet()
+		err = transition.TransitionState(testState, block, true)
+		if err != nil {
+			break
+		}
+		changes = append(changes, testState.StopCollectingReverseChangeSet())
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }
