@@ -81,19 +81,6 @@ type stPostState struct {
 	}
 }
 
-type stTransaction struct {
-	GasPrice             *big.Int             `json:"gasPrice"`
-	MaxFeePerGas         *big.Int             `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *big.Int             `json:"maxPriorityFeePerGas"`
-	Nonce                uint64               `json:"nonce"`
-	To                   string               `json:"to"`
-	Data                 []string             `json:"data"`
-	AccessLists          []*types2.AccessList `json:"accessLists,omitempty"`
-	GasLimit             []uint64             `json:"gasLimit"`
-	Value                []string             `json:"value"`
-	PrivateKey           []byte               `json:"secretKey"`
-}
-
 type stTransactionMarshaling struct {
 	GasPrice             *math.HexOrDecimal256 `json:"gasPrice"`
 	MaxFeePerGas         *math.HexOrDecimal256 `json:"maxFeePerGas"`

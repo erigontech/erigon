@@ -205,7 +205,7 @@ func (api *PrivateDebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context,
 // getModifiedAccountsV3 returns a list of addresses that were modified in the block range
 // [startNum:endNum)
 func getModifiedAccountsV3(tx kv.TemporalTx, startTxNum, endTxNum uint64) ([]common.Address, error) {
-	it, err := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, -1)
+	it, err := tx.HistoryRange(temporal.AccountsHistory, int(startTxNum), int(endTxNum), order.Asc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
@@ -304,7 +304,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 			return nil, err
 		}
 		ttx := tx.(kv.TemporalTx)
-		v, ok, err := ttx.DomainGet(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
+		v, ok, err := ttx.DomainGetAsOf(temporal.AccountsDomain, address[:], nil, minTxNum+txIndex+1)
 		if err != nil {
 			return nil, err
 		}
@@ -321,7 +321,7 @@ func (api *PrivateDebugAPIImpl) AccountAt(ctx context.Context, blockHash common.
 		result.Nonce = hexutil.Uint64(a.Nonce)
 		result.CodeHash = a.CodeHash
 
-		code, _, err := ttx.DomainGet(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
+		code, _, err := ttx.DomainGetAsOf(temporal.CodeDomain, address[:], a.CodeHash[:], minTxNum+txIndex)
 		if err != nil {
 			return nil, err
 		}

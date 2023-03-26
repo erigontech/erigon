@@ -51,8 +51,8 @@ type BlockTest struct {
 }
 
 // UnmarshalJSON implements json.Unmarshaler interface.
-func (t *BlockTest) UnmarshalJSON(in []byte) error {
-	return json.Unmarshal(in, &t.json)
+func (bt *BlockTest) UnmarshalJSON(in []byte) error {
+	return json.Unmarshal(in, &bt.json)
 }
 
 type btJSON struct {
@@ -104,13 +104,13 @@ type btHeaderMarshaling struct {
 	BaseFee    *math.HexOrDecimal256
 }
 
-func (t *BlockTest) Run(tst *testing.T, _ bool) error {
-	config, ok := Forks[t.json.Network]
+func (bt *BlockTest) Run(t *testing.T, _ bool) error {
+	config, ok := Forks[bt.json.Network]
 	if !ok {
-		return UnsupportedForkError{t.json.Network}
+		return UnsupportedForkError{bt.json.Network}
 	}
 	var engine consensus.Engine
-	if t.json.SealEngine == "NoProof" {
+	if bt.json.SealEngine == "NoProof" {
 		engine = ethash.NewFaker()
 	} else {
 		engine = ethash.NewShared()
@@ -118,17 +118,17 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	if config.TerminalTotalDifficulty != nil {
 		engine = serenity.New(engine) // the Merge
 	}
-	m := stages.MockWithGenesisEngine(tst, t.genesis(config), engine, false)
+	m := stages.MockWithGenesisEngine(t, bt.genesis(config), engine, false)
 
 	// import pre accounts & construct test genesis block & state root
-	if m.Genesis.Hash() != t.json.Genesis.Hash {
-		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], t.json.Genesis.Hash[:6])
+	if m.Genesis.Hash() != bt.json.Genesis.Hash {
+		return fmt.Errorf("genesis block hash doesn't match test: computed=%x, test=%x", m.Genesis.Hash().Bytes()[:6], bt.json.Genesis.Hash[:6])
 	}
-	if m.Genesis.Root() != t.json.Genesis.StateRoot {
-		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], t.json.Genesis.StateRoot[:6])
+	if m.Genesis.Root() != bt.json.Genesis.StateRoot {
+		return fmt.Errorf("genesis block state root does not match test: computed=%x, test=%x", m.Genesis.Root().Bytes()[:6], bt.json.Genesis.StateRoot[:6])
 	}
 
-	validBlocks, err := t.insertBlocks(m)
+	validBlocks, err := bt.insertBlocks(m)
 	if err != nil {
 		return err
 	}
@@ -139,30 +139,30 @@ func (t *BlockTest) Run(tst *testing.T, _ bool) error {
 	}
 	defer tx.Rollback()
 	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if libcommon.Hash(t.json.BestBlock) != cmlast {
-		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", t.json.BestBlock, cmlast)
+	if libcommon.Hash(bt.json.BestBlock) != cmlast {
+		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(state.NewPlainStateReader(tx))
-	if err = t.validatePostState(newDB); err != nil {
+	if err = bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
-	return t.validateImportedHeaders(tx, validBlocks)
+	return bt.validateImportedHeaders(tx, validBlocks)
 }
 
-func (t *BlockTest) genesis(config *chain.Config) *core.Genesis {
+func (bt *BlockTest) genesis(config *chain.Config) *core.Genesis {
 	return &core.Genesis{
 		Config:     config,
-		Nonce:      t.json.Genesis.Nonce.Uint64(),
-		Timestamp:  t.json.Genesis.Timestamp,
-		ParentHash: t.json.Genesis.ParentHash,
-		ExtraData:  t.json.Genesis.ExtraData,
-		GasLimit:   t.json.Genesis.GasLimit,
-		GasUsed:    t.json.Genesis.GasUsed,
-		Difficulty: t.json.Genesis.Difficulty,
-		Mixhash:    t.json.Genesis.MixHash,
-		Coinbase:   t.json.Genesis.Coinbase,
-		Alloc:      t.json.Pre,
-		BaseFee:    t.json.Genesis.BaseFee,
+		Nonce:      bt.json.Genesis.Nonce.Uint64(),
+		Timestamp:  bt.json.Genesis.Timestamp,
+		ParentHash: bt.json.Genesis.ParentHash,
+		ExtraData:  bt.json.Genesis.ExtraData,
+		GasLimit:   bt.json.Genesis.GasLimit,
+		GasUsed:    bt.json.Genesis.GasUsed,
+		Difficulty: bt.json.Genesis.Difficulty,
+		Mixhash:    bt.json.Genesis.MixHash,
+		Coinbase:   bt.json.Genesis.Coinbase,
+		Alloc:      bt.json.Pre,
+		BaseFee:    bt.json.Genesis.BaseFee,
 	}
 }
 
@@ -179,10 +179,10 @@ See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 	expected we are expected to ignore it and continue processing and then validate the
 	post state.
 */
-func (t *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
+func (bt *BlockTest) insertBlocks(m *stages.MockSentry) ([]btBlock, error) {
 	validBlocks := make([]btBlock, 0)
 	// insert the test blocks, which will execute all transaction
-	for bi, b := range t.json.Blocks {
+	for bi, b := range bt.json.Blocks {
 		cb, err := b.decode()
 		if err != nil {
 			if b.BlockHeader == nil {
@@ -281,9 +281,9 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 	return nil
 }
 
-func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
+func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
-	for addr, acct := range t.json.Post {
+	for addr, acct := range bt.json.Post {
 		// address is indirectly verified by the other fields, as it's the db key
 		code2 := statedb.GetCode(addr)
 		balance2 := statedb.GetBalance(addr)
@@ -309,9 +309,9 @@ func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	return nil
 }
 
-func (t *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) error {
+func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock) error {
 	// to get constant lookup when verifying block headers by hash (some tests have many blocks)
-	bmap := make(map[libcommon.Hash]btBlock, len(t.json.Blocks))
+	bmap := make(map[libcommon.Hash]btBlock, len(bt.json.Blocks))
 	for _, b := range validBlocks {
 		bmap[b.BlockHeader.Hash] = b
 	}

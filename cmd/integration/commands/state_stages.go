@@ -380,7 +380,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		defer tx.Rollback()
 
 		// allow backward loop
-		if unwind > 0 && unwindEvery == 0 {
+		if unwind > 0 && unwindEvery > 0 {
 			stopAt -= unwind
 		}
 	}

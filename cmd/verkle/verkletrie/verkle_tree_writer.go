@@ -19,10 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
 
-func identityFuncForVerkleTree(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-	return next(k, k, value)
-}
-
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
 	bbytes := x.ToBig().Bytes()
 	if len(bbytes) > 0 {
