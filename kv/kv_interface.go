@@ -52,7 +52,8 @@ import (
 //                      - InvertedIndex: supports range-scans
 //                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
 //                          value of key K. Returns NIL if K not changed after TimeStamp.
-//                      - Domain: as History but also aware about latest/current value of key K.
+//                      - Domain: as History but also aware about latest/current value of key K. Can move
+//                          cold (updated long time ago) parts of state from db to snapshots.
 
 // HighLevel:
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
