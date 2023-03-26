@@ -56,7 +56,7 @@ require (
 	github.com/libp2p/go-libp2p v0.26.2
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/maticnetwork/crand v1.0.2
-	github.com/maticnetwork/polyproto v0.0.2
+	github.com/maticnetwork/polyproto v0.0.3-0.20230216113155-340ea926ca53
 	github.com/minio/sha256-simd v1.0.0
 	github.com/multiformats/go-multiaddr v0.8.0
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
@@ -262,3 +262,4 @@ require (
 )
 
 replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+replace github.com/ledgerwatch/erigon-lib => /home/anshal/polygon/fork/erigon-lib

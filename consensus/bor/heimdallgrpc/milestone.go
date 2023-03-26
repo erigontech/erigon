@@ -38,7 +38,7 @@ func (h *HeimdallGRPCClient) FetchMilestone(ctx context.Context) (*milestone.Mil
 	milestone := &milestone.Milestone{
 		StartBlock: new(big.Int).SetUint64(res.Result.StartBlock),
 		EndBlock:   new(big.Int).SetUint64(res.Result.EndBlock),
-		RootHash:   protoutils.ConvertH256ToHash(res.Result.RootHash),
+		Hash:       protoutils.ConvertH256ToHash(res.Result.RootHash),
 		Proposer:   protoutils.ConvertH160toAddress(res.Result.Proposer),
 		BorChainID: res.Result.BorChainID,
 		Timestamp:  uint64(res.Result.Timestamp.GetSeconds()),

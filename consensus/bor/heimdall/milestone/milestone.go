@@ -11,7 +11,7 @@ type Milestone struct {
 	Proposer   libcommon.Address `json:"proposer"`
 	StartBlock *big.Int          `json:"start_block"`
 	EndBlock   *big.Int          `json:"end_block"`
-	RootHash   libcommon.Hash    `json:"hash"`
+	Hash       libcommon.Hash    `json:"hash"`
 	BorChainID string            `json:"bor_chain_id"`
 	Timestamp  uint64            `json:"timestamp"`
 }
