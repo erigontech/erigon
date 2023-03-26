@@ -37,15 +37,7 @@ import (
 //Methods Naming:
 //  Get: exact match of criterias
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
-//  Each: Range(from, nil)
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
-
-//Entity Naming:
-//  State: simple table in db
-//  InvertedIndex: supports range-scans
-//  History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
-//              value of key K. Returns NIL if K not changed after TimeStamp.
-//  Domain: as History but also aware about latest/current value of key K.
 
 //Abstraction Layers:
 // LowLevel:
@@ -56,6 +48,12 @@ import (
 //      1. TemporalDB - abstracting DB+Snapshots. Target is:
 //              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
 //              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
+//              - using next entities:
+//                      - InvertedIndex: supports range-scans
+//                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
+//                          value of key K. Returns NIL if K not changed after TimeStamp.
+//                      - Domain: as History but also aware about latest/current value of key K.
+
 // HighLevel:
 //      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
