@@ -268,7 +268,6 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		}
 		defer tx.Rollback()
 
-		fmt.Printf("stopAt: %d, execAtBlock+ %d\n", stopAt, execAtBlock)
 		// All stages forward to `execStage + unwindEvery` block
 		execAtBlock = progress(tx, stages.Execution)
 		execToBlock := block
