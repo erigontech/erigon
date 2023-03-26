@@ -216,7 +216,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 
 	if storage {
 		compositeKey := make([]byte, length.Hash+length.Hash)
-		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -245,7 +245,7 @@ func (p *HashPromoter) PromoteOnHistoryV3(logPrefix string, agg *state.Aggregato
 		return nil
 	}
 
-	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}
@@ -367,7 +367,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 	var deletedAccounts [][]byte
 
 	if storage {
-		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+		it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.StorageHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
 		if err != nil {
 			return err
 		}
@@ -400,7 +400,7 @@ func (p *HashPromoter) UnwindOnHistoryV3(logPrefix string, agg *state.Aggregator
 		return nil
 	}
 
-	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, -1)
+	it, err := p.tx.(kv.TemporalTx).HistoryRange(temporal.AccountsHistory, int(txnFrom), int(txnTo), order.Asc, kv.Unlim)
 	if err != nil {
 		return err
 	}

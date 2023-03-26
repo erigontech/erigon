@@ -261,7 +261,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 		if !excludeStorage {
 			t := trie.New(libcommon.Hash{})
 			if d.historyV3 {
-				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, -1)
+				r, err := d.db.(kv.TemporalTx).DomainRange(temporal.StorageDomain, addr[:], nil, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return nil, fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}

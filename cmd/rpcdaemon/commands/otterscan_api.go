@@ -267,15 +267,15 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 	if err != nil {
 		return nil, err
 	}
-	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
+	itTo, err := tx.IndexRange(temporal.TracesToIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, -1)
+	itFrom, err := tx.IndexRange(temporal.TracesFromIdx, addr[:], int(fromTxNum), -1, order.Desc, kv.Unlim)
 	if err != nil {
 		return nil, err
 	}
-	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, -1)
+	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
 	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
