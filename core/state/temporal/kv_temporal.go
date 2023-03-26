@@ -122,7 +122,10 @@ func (db *DB) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 		return err
 	}
 	defer tx.Rollback()
-	return f(tx)
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) BeginTemporalRwNosync(ctx context.Context) (kv.RwTx, error) {
@@ -144,7 +147,10 @@ func (db *DB) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error 
 		return err
 	}
 	defer tx.Rollback()
-	return f(tx)
+	if err = f(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type Tx struct {
