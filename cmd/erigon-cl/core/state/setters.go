@@ -209,7 +209,8 @@ func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool
 
 func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation []cltypes.ParticipationFlags) {
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.PreviousEpochParticipationAtReset = b.previousEpochParticipation
+		b.reverseChangeset.PreviousEpochParticipationAtReset = make(cltypes.ParticipationFlagsList, len(b.previousEpochParticipation))
+		copy(b.reverseChangeset.PreviousEpochParticipationAtReset, b.previousEpochParticipation)
 	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation = previousEpochParticipation
@@ -217,6 +218,10 @@ func (b *BeaconState) SetPreviousEpochParticipation(previousEpochParticipation [
 
 func (b *BeaconState) SetCurrentEpochParticipation(currentEpochParticipation []cltypes.ParticipationFlags) {
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.CurrentEpochParticipationAtReset = make(cltypes.ParticipationFlagsList, len(b.currentEpochParticipation))
+		copy(b.reverseChangeset.CurrentEpochParticipationAtReset, b.currentEpochParticipation)
+	}
 	b.currentEpochParticipation = currentEpochParticipation
 }
 
@@ -271,7 +276,7 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader)
+		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader)
 	}
 	b.latestExecutionPayloadHeader = header
 }

@@ -47,6 +47,7 @@ type ReverseBeaconStateChangeSet struct {
 	WithdrawalEpochChange            *ListChangeSet[uint64]
 	// Efficient unwinding on reset (only applicable at epoch boundaries)
 	PreviousEpochParticipationAtReset cltypes.ParticipationFlagsList
+	CurrentEpochParticipationAtReset  cltypes.ParticipationFlagsList
 	Eth1DataVotesAtReset              []*cltypes.Eth1Data
 }
 
@@ -197,8 +198,9 @@ func (r *ReverseBeaconStateChangeSet) ApplyHistoricalSummaryChanges(input []*clt
 		return
 	}
 	changed = true
-	if r.HistoricalSummaryChange.ListLength() != len(output) {
-		output = make([]*cltypes.HistoricalSummary, r.HistoricalSummaryChange.ListLength())
+	historicalSummarryLength := r.HistoricalSummaryChange.ListLength()
+	if historicalSummarryLength != len(output) {
+		output = make([]*cltypes.HistoricalSummary, historicalSummarryLength)
 		copy(output, input)
 	}
 	r.HistoricalSummaryChange.ChangesWithHandler(func(value cltypes.HistoricalSummary, index int) {
@@ -208,15 +210,25 @@ func (r *ReverseBeaconStateChangeSet) ApplyHistoricalSummaryChanges(input []*clt
 }
 
 func (r *ReverseBeaconStateChangeSet) CompactChanges() {
+
 	r.BlockRootsChanges.CompactChangesReverse()
 	r.StateRootsChanges.CompactChangesReverse()
 	r.HistoricalRootsChanges.CompactChangesReverse()
 	r.SlashingsChanges.CompactChangesReverse()
 	r.RandaoMixesChanges.CompactChangesReverse()
 	r.BalancesChanges.CompactChangesReverse()
-	r.Eth1DataVotesChanges.CompactChangesReverse()
-	r.PreviousEpochParticipationChanges.CompactChangesReverse()
-	r.CurrentEpochParticipationChanges.CompactChangesReverse()
+	if len(r.Eth1DataVotesAtReset) > 0 {
+		r.Eth1DataVotesChanges = nil
+	} else {
+		r.Eth1DataVotesChanges.CompactChangesReverse()
+	}
+	if len(r.PreviousEpochParticipationAtReset) > 0 {
+		r.PreviousEpochParticipationChanges = nil
+		r.CurrentEpochParticipationChanges = nil
+	} else {
+		r.PreviousEpochParticipationChanges.CompactChangesReverse()
+		r.CurrentEpochParticipationChanges.CompactChangesReverse()
+	}
 	r.InactivityScoresChanges.CompactChangesReverse()
 	r.HistoricalRootsChanges.CompactChangesReverse()
 	r.WithdrawalCredentialsChange.CompactChangesReverse()

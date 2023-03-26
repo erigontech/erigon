@@ -1,6 +1,8 @@
 package state
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -152,7 +154,7 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 		b.touchedLeaves[BalancesLeafIndex] = true
 	}
 	// This also a special case, as this is another victim of reset, we use rotation with curr and prev to handle it efficiently
-	if len(changeset.PreviousEpochParticipationAtReset) == 0 {
+	if len(changeset.PreviousEpochParticipationAtReset) == 0 && len(changeset.CurrentEpochParticipationAtReset) == 0 {
 		b.previousEpochParticipation, touched = changeset.PreviousEpochParticipationChanges.ApplyChanges(b.previousEpochParticipation)
 		if touched {
 			b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
@@ -164,8 +166,9 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	} else {
 		b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-		b.currentEpochParticipation = b.previousEpochParticipation
 		b.previousEpochParticipation = changeset.PreviousEpochParticipationAtReset
+		b.currentEpochParticipation = changeset.CurrentEpochParticipationAtReset
+		fmt.Println("A")
 	}
 	b.inactivityScores, touched = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores)
 	if touched {
@@ -173,10 +176,11 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	}
 	b.historicalSummaries, touched = changeset.ApplyHistoricalSummaryChanges(b.historicalSummaries)
 	if touched {
-		b.touchedLeaves[HistoricalRootsLeafIndex] = true
+		b.touchedLeaves[HistoricalSummariesLeafIndex] = true
 	}
 	// Now start processing validators if there are any.
 	if changeset.HasValidatorSetNotChanged(len(b.validators)) {
+		b.revertCachesOnBoundary()
 		return
 	}
 	// We do it like this because validators diff can get quite big so we only save individual fields.
@@ -186,6 +190,9 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	previousValidatorSetLength := changeset.WithdrawalCredentialsChange.ListLength()
 
 	if previousValidatorSetLength != len(b.validators) {
+		for _, removedValidator := range b.validators[previousValidatorSetLength:] {
+			delete(b.publicKeyIndicies, removedValidator.PublicKey)
+		}
 		newValidatorsSet = make([]*cltypes.Validator, previousValidatorSetLength)
 		copy(newValidatorsSet, b.validators)
 	}
@@ -233,4 +240,19 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 		}
 		b.validators[index].EffectiveBalance = value
 	})
+	b.revertCachesOnBoundary()
+}
+
+func (b *BeaconState) revertCachesOnBoundary() {
+	if (b.slot+1)%b.beaconConfig.SlotsPerEpoch != 0 {
+		return
+	}
+	nextEpoch := (b.slot + 1) % b.beaconConfig.SlotsPerEpoch
+	b.activeValidatorsCache.Remove(nextEpoch)
+	b.shuffledSetsCache.Remove(b.GetSeed(nextEpoch, b.beaconConfig.DomainBeaconAttester))
+	b.committeeCache.Purge()
+	b.activeValidatorsCache.Purge()
+	b.totalActiveBalanceCache = nil
+	b.previousStateRoot = libcommon.Hash{}
+	b.proposerIndex = nil
 }
