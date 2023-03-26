@@ -70,7 +70,7 @@ func (b *BeaconState) GetUnslashedParticipatingIndices(flagIndex int, epoch uint
 		return nil, fmt.Errorf("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
 	}
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	for i, validator := range b.Validators() {
+	for i, validator := range b.validators {
 		if !validator.Active(epoch) ||
 			!participation[i].HasFlag(flagIndex) ||
 			validator.Slashed {

@@ -176,39 +176,61 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 		b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	}
 	// Now start processing validators if there are any.
-	if changeset.HasValidatorSetNotChanged() {
+	if changeset.HasValidatorSetNotChanged(len(b.validators)) {
 		return
 	}
 	// We do it like this because validators diff can get quite big so we only save individual fields.
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	newValidatorsSet := b.validators
 	// All changes habe same length
-	if changeset.WithdrawalCredentialsChange.ListLength() != len(b.validators) {
-		newValidatorsSet := make([]*cltypes.Validator, len(b.validators))
+	previousValidatorSetLength := changeset.WithdrawalCredentialsChange.ListLength()
+
+	if previousValidatorSetLength != len(b.validators) {
+		newValidatorsSet = make([]*cltypes.Validator, previousValidatorSetLength)
 		copy(newValidatorsSet, b.validators)
 	}
 	b.validators = newValidatorsSet
 	// Now start processing all of the validator fields
 	changeset.WithdrawalCredentialsChange.ChangesWithHandler(func(value libcommon.Hash, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].WithdrawalCredentials = value
 	})
 	changeset.ExitEpochChange.ChangesWithHandler(func(value uint64, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].ExitEpoch = value
 	})
 	changeset.ActivationEligibilityEpochChange.ChangesWithHandler(func(value uint64, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].ActivationEligibilityEpoch = value
 	})
 	changeset.ActivationEpochChange.ChangesWithHandler(func(value uint64, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].ActivationEpoch = value
 	})
 	changeset.SlashedChange.ChangesWithHandler(func(value bool, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].Slashed = value
 	})
 	changeset.WithdrawalEpochChange.ChangesWithHandler(func(value uint64, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].WithdrawableEpoch = value
 	})
 	changeset.EffectiveBalanceChange.ChangesWithHandler(func(value uint64, index int) {
+		if index >= len(b.validators) {
+			return
+		}
 		b.validators[index].EffectiveBalance = value
 	})
-
 }

@@ -120,6 +120,9 @@ func (l *ListChangeSet[T]) ApplyChanges(input []T) (output []T, changed bool) {
 	copy(output, input)
 	// Now apply changes to the given list
 	for _, elem := range l.list {
+		if elem.listIndex >= len(output) {
+			continue
+		}
 		output[elem.listIndex] = elem.value
 	}
 	return

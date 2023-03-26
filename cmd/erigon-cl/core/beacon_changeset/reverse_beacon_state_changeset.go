@@ -170,8 +170,8 @@ func (r *ReverseBeaconStateChangeSet) OnVersionChange(v clparams.StateVersion) {
 	*r.VersionChange = v
 }
 
-func (r *ReverseBeaconStateChangeSet) HasValidatorSetNotChanged() bool {
-	return r.WithdrawalCredentialsChange.Empty() && r.ActivationEligibilityEpochChange.Empty() && r.ActivationEpochChange.Empty() &&
+func (r *ReverseBeaconStateChangeSet) HasValidatorSetNotChanged(validatorSetLength int) bool {
+	return validatorSetLength == r.WithdrawalCredentialsChange.ListLength() && r.WithdrawalCredentialsChange.Empty() && r.ActivationEligibilityEpochChange.Empty() && r.ActivationEpochChange.Empty() &&
 		r.EffectiveBalanceChange.Empty() && r.SlashedChange.Empty() && r.ExitEpochChange.Empty() && r.WithdrawalEpochChange.Empty()
 }
 

@@ -60,17 +60,13 @@ func (b *BeaconState) InitiateValidatorExit(index uint64) error {
 		exitQueueEpoch += 1
 	}
 
-	if b.reverseChangeset != nil {
-		b.reverseChangeset.ExitEpochChange.AddChange(int(index), b.validators[index].ExitEpoch)
-		b.reverseChangeset.WithdrawalEpochChange.AddChange(int(index), b.validators[index].WithdrawableEpoch)
-	}
-
-	b.validators[index].ExitEpoch = exitQueueEpoch
 	var overflow bool
-	if b.validators[index].WithdrawableEpoch, overflow = math.SafeAdd(b.validators[index].ExitEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
+	var newWithdrawableEpoch uint64
+	if newWithdrawableEpoch, overflow = math.SafeAdd(exitQueueEpoch, b.beaconConfig.MinValidatorWithdrawabilityDelay); overflow {
 		return fmt.Errorf("withdrawable epoch is too big")
 	}
-	b.touchedLeaves[ValidatorsLeafIndex] = true
+	b.SetExitEpochForValidatorAtIndex(int(index), exitQueueEpoch)
+	b.SetWithdrawableEpochForValidatorAtIndex(int(index), newWithdrawableEpoch)
 	return nil
 }
 

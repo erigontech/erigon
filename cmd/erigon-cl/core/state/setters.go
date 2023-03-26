@@ -70,6 +70,22 @@ func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, cred
 	b.validators[index].WithdrawalCredentials = creds
 }
 
+func (b *BeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.ExitEpochChange.AddChange(index, b.validators[index].ExitEpoch)
+	}
+	b.validators[index].ExitEpoch = epoch
+}
+
+func (b *BeaconState) SetWithdrawableEpochForValidatorAtIndex(index int, epoch uint64) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.WithdrawalEpochChange.AddChange(index, b.validators[index].WithdrawableEpoch)
+	}
+	b.validators[index].WithdrawableEpoch = epoch
+}
+
 func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) {
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	if b.reverseChangeset != nil {
@@ -118,7 +134,7 @@ func (b *BeaconState) ResetEth1DataVotes() {
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1DepositIndexChange(eth1DepositIndex)
+		b.reverseChangeset.OnEth1DepositIndexChange(b.eth1DepositIndex)
 	}
 	b.eth1DepositIndex = eth1DepositIndex
 }
