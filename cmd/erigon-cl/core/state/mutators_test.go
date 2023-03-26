@@ -148,7 +148,7 @@ func TestSlashValidator(t *testing.T) {
 	successState.Balances()[slashedInd] = preSlashBalance
 	vali, err := successState.ValidatorForValidatorIndex(slashedInd)
 	require.NoError(t, err)
-	successState.SetValidatorAt(slashedInd, vali)
+	successState.SetValidatorAtIndex(slashedInd, vali)
 	vali.EffectiveBalance = preSlashBalance
 
 	testCases := []struct {

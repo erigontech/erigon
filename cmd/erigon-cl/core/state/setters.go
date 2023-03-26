@@ -207,6 +207,11 @@ func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool
 	b.previousEpochParticipation[index] = flags
 }
 
+func (b *BeaconState) SetValidatorAtIndex(index int, validator *cltypes.Validator) {
+	b.touchedLeaves[ValidatorsLeafIndex] = true
+	b.validators[index] = validator
+}
+
 func (b *BeaconState) ResetEpochParticipation() {
 	if b.reverseChangeset != nil && len(b.reverseChangeset.CurrentEpochParticipationAtReset) == 0 &&
 		len(b.reverseChangeset.PreviousEpochParticipationAtReset) == 0 {

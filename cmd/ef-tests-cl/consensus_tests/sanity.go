@@ -31,7 +31,7 @@ func testSanityFunction(context testContext) error {
 	}
 	startSlot := testState.Slot()
 
-	var changes []*beacon_changeset.ReverseBeaconStateChangeSet
+	changes := []*beacon_changeset.ReverseBeaconStateChangeSet{}
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
 		testState.StartCollectingReverseChangeSet()

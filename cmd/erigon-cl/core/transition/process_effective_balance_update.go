@@ -22,7 +22,7 @@ func ProcessEffectiveBalanceUpdates(state *state.BeaconState) error {
 			validator.EffectiveBalance+upwardThreshold < balance {
 			// Set new effective balance
 			effectiveBalance := utils.Min64(balance-(balance%beaconConfig.EffectiveBalanceIncrement), beaconConfig.MaxEffectiveBalance)
-			state.SetEffectiveBalanceForValidatorAtIndex(int(index), effectiveBalance)
+			state.SetEffectiveBalanceForValidatorAtIndex(index, effectiveBalance)
 		}
 	}
 	return nil
