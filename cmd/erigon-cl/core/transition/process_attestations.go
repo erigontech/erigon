@@ -52,21 +52,17 @@ func processAttestationPostAltair(state *state.BeaconState, attestation *cltypes
 	}
 	var proposerRewardNumerator uint64
 
-	var epochParticipation cltypes.ParticipationFlagsList
-	if data.Target.Epoch == currentEpoch {
-		epochParticipation = state.CurrentEpochParticipation()
-	} else {
-		epochParticipation = state.PreviousEpochParticipation()
-	}
-	validators := state.Validators()
+	isCurrentEpoch := data.Target.Epoch == currentEpoch
 
+	validators := state.Validators()
 	for _, attesterIndex := range attestingIndicies {
 		baseReward := (validators[attesterIndex].EffectiveBalance / beaconConfig.EffectiveBalanceIncrement) * baseRewardPerIncrement
 		for flagIndex, weight := range beaconConfig.ParticipationWeights() {
-			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
+			flagParticipation := state.EpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex))
+			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {
 				continue
 			}
-			epochParticipation[attesterIndex] = epochParticipation[attesterIndex].Add(flagIndex)
+			state.SetEpochParticipationForValidatorIndex(isCurrentEpoch, int(attesterIndex), flagParticipation.Add(flagIndex))
 			proposerRewardNumerator += baseReward * weight
 		}
 	}
@@ -74,12 +70,6 @@ func processAttestationPostAltair(state *state.BeaconState, attestation *cltypes
 	proposer, err := state.GetBeaconProposerIndex()
 	if err != nil {
 		return nil, err
-	}
-	// Set participation
-	if data.Target.Epoch == currentEpoch {
-		state.SetCurrentEpochParticipation(epochParticipation)
-	} else {
-		state.SetPreviousEpochParticipation(epochParticipation)
 	}
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
@@ -120,7 +110,7 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 		if !data.Source.Equal(state.PreviousJustifiedCheckpoint()) {
 			return nil, fmt.Errorf("processAttestationPhase0: mismatching sources")
 		}
-		state.AddPreviousEpochAtteastation(pendingAttestation)
+		state.AddPreviousEpochAttestation(pendingAttestation)
 	}
 	// Not required by specs but needed if we want performant epoch transition.
 	indicies, err := state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
@@ -137,7 +127,7 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 	}
 	// Basically we flag all validators we are currently attesting. will be important for rewards/finalization processing.
 	for _, index := range indicies {
-		validator, err := state.ValidatorAt(int(index))
+		validator, err := state.ValidatorForValidatorIndex(int(index))
 		if err != nil {
 			return nil, err
 		}
@@ -168,10 +158,6 @@ func processAttestationPhase0(state *state.BeaconState, attestation *cltypes.Att
 			if attestation.Data.BeaconBlockHash == slotRoot {
 				validator.IsPreviousMatchingHeadAttester = true
 			}
-		}
-
-		if err := state.SetValidatorAt(int(index), validator); err != nil {
-			return nil, err
 		}
 	}
 	return indicies, nil

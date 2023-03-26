@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
 
@@ -28,12 +30,16 @@ func testSanityFunction(context testContext) error {
 		return err
 	}
 	startSlot := testState.Slot()
+
+	changes := []*beacon_changeset.ReverseBeaconStateChangeSet{}
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
+		testState.StartCollectingReverseChangeSet()
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
 		}
+		changes = append(changes, testState.StopCollectingReverseChangeSet())
 	}
 	// Deal with transition error
 	if expectedError && err == nil {
@@ -45,7 +51,7 @@ func testSanityFunction(context testContext) error {
 		}
 		return fmt.Errorf("cannot transition state: %s. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
 	}
-	expectedRoot, err := expectedState.HashSSZ()
+	finalRoot, err := expectedState.HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -53,8 +59,46 @@ func testSanityFunction(context testContext) error {
 	if err != nil {
 		return err
 	}
-	if haveRoot != expectedRoot {
+	if haveRoot != finalRoot {
 		return fmt.Errorf("mismatching state roots")
+	}
+	if context.version == clparams.Phase0Version {
+		return nil
+	}
+	// Now do the unwind
+	initialState, err := decodeStateFromFile(context, "pre.ssz_snappy")
+	if err != nil {
+		return err
+	}
+	_ = initialState
+	for i := len(changes) - 1; i >= 0; i-- {
+		testState.RevertWithChangeset(changes[i])
+	}
+
+	expectedRoot, err := initialState.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	haveRoot, err = testState.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	if haveRoot != expectedRoot {
+		return fmt.Errorf("mismatching state roots with unwind")
+	}
+	// Execute them back (ensure cache is good.)
+	for _, block = range blocks {
+		testState.StartCollectingReverseChangeSet()
+		err = transition.TransitionState(testState, block, true)
+		if err != nil {
+			break
+		}
+		changes = append(changes, testState.StopCollectingReverseChangeSet())
+	}
+	if err != nil {
+		return err
 	}
 	return nil
 }

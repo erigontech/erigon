@@ -70,10 +70,11 @@ func transitionSlot(state *state.BeaconState) error {
 	latestBlockHeader := state.LatestBlockHeader()
 	if latestBlockHeader.Root == [32]byte{} {
 		latestBlockHeader.Root = previousStateRoot
-		state.SetLatestBlockHeader(latestBlockHeader)
+		state.SetLatestBlockHeader(&latestBlockHeader)
 	}
+	blockHeader := state.LatestBlockHeader()
 
-	previousBlockRoot, err := state.LatestBlockHeader().HashSSZ()
+	previousBlockRoot, err := (&blockHeader).HashSSZ()
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 }
 
 func verifyBlockSignature(state *state.BeaconState, block *cltypes.SignedBeaconBlock) (bool, error) {
-	proposer, err := state.ValidatorAt(int(block.Block.ProposerIndex))
+	proposer, err := state.ValidatorForValidatorIndex(int(block.Block.ProposerIndex))
 	if err != nil {
 		return false, err
 	}

@@ -531,7 +531,6 @@ func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
 		return
 	}
-	fmt.Println(dst)
 	dst = append(dst, ssz.Uint64SSZ(a.InclusionDelay)...)
 	dst = append(dst, ssz.Uint64SSZ(a.ProposerIndex)...)
 

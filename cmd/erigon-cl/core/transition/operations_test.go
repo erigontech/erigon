@@ -78,7 +78,7 @@ func getSuccessfulAttesterSlashing() *cltypes.AttesterSlashing {
 
 func TestProcessProposerSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAt(propInd, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -86,7 +86,7 @@ func TestProcessProposerSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetValidatorAt(propInd, &cltypes.Validator{
+	successState.SetValidatorAtIndex(propInd, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -187,13 +187,13 @@ func TestProcessProposerSlashing(t *testing.T) {
 
 func TestProcessAttesterSlashing(t *testing.T) {
 	unchangingState := getTestState(t)
-	unchangingState.SetValidatorAt(0, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
 		PublicKey:         testPublicKeySlashing,
 	})
-	unchangingState.SetValidatorAt(1, &cltypes.Validator{
+	unchangingState.SetValidatorAtIndex(1, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
@@ -201,13 +201,13 @@ func TestProcessAttesterSlashing(t *testing.T) {
 	})
 
 	successState := getTestState(t)
-	successState.SetValidatorAt(0, &cltypes.Validator{
+	successState.SetValidatorAtIndex(0, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,
 		PublicKey:         testPublicKeySlashing,
 	})
-	successState.SetValidatorAt(1, &cltypes.Validator{
+	successState.SetValidatorAtIndex(1, &cltypes.Validator{
 		Slashed:           false,
 		ActivationEpoch:   0,
 		WithdrawableEpoch: 10000,

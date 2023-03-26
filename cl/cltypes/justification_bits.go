@@ -33,3 +33,7 @@ func (j JustificationBits) CheckRange(start int, end int) bool {
 	}
 	return true
 }
+
+func (j JustificationBits) Copy() JustificationBits {
+	return JustificationBits{j[0], j[1], j[2], j[3]}
+}

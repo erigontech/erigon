@@ -54,7 +54,7 @@ func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs
 		// Only copy if the previous is empty.
 		if latestBlockHeader.Root == [32]byte{} {
 			latestBlockHeader.Root = libcommon.BytesToHash(hash)
-			nextState.SetLatestBlockHeader(latestBlockHeader)
+			nextState.SetLatestBlockHeader(&latestBlockHeader)
 		}
 		hash, err = hex.DecodeString(blockHashs[i])
 		if err != nil {

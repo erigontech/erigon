@@ -64,9 +64,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 
 	log.Info(fmt.Sprintf("[%s] Started", s.LogPrefix()), "start", progress, "target", targetSlot)
 	cfg.downloader.SetHighestProcessedSlot(progress)
-	if cfg.downloader.HighestProcessedRoot() == (libcommon.Hash{}) {
-		cfg.downloader.SetHighestProcessedRoot(lastRoot)
-	}
+	cfg.downloader.SetHighestProcessedRoot(lastRoot)
+
 	cfg.downloader.SetTargetSlot(targetSlot)
 	cfg.downloader.SetLimitSegmentsLength(1024)
 	// On new blocks we just check slot sequencing for now :)
