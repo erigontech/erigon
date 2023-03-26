@@ -178,14 +178,14 @@ func (b *BeaconState) SetSlashingSegmentAt(index int, segment uint64) {
 func (b *BeaconState) SetEpochParticipationForValidatorIndex(isCurrentEpoch bool, index int, flags cltypes.ParticipationFlags) {
 	if isCurrentEpoch {
 		if b.reverseChangeset != nil {
-			b.reverseChangeset.CurrentEpochParticipationChanges.AddChange(index, flags)
+			b.reverseChangeset.CurrentEpochParticipationChanges.AddChange(index, b.currentEpochParticipation[index])
 		}
 		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 		b.currentEpochParticipation[index] = flags
 		return
 	}
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.PreviousEpochParticipationChanges.AddChange(index, flags)
+		b.reverseChangeset.PreviousEpochParticipationChanges.AddChange(index, b.previousEpochParticipation[index])
 	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.previousEpochParticipation[index] = flags
@@ -296,7 +296,7 @@ func (b *BeaconState) SetValidatorInactivityScore(index int, score uint64) error
 		return ErrInvalidValidatorIndex
 	}
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.InactivityScoresChanges.AddChange(index, score)
+		b.reverseChangeset.InactivityScoresChanges.AddChange(index, b.inactivityScores[index])
 	}
 	b.touchedLeaves[InactivityScoresLeafIndex] = true
 	b.inactivityScores[index] = score
