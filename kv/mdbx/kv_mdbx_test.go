@@ -126,7 +126,7 @@ func TestRange(t *testing.T) {
 		_, tx, _ := BaseCase(t)
 
 		//[from, to)
-		it, err := tx.RangeDescend("Table", []byte("key3"), []byte("key1"), -1)
+		it, err := tx.RangeDescend("Table", []byte("key3"), []byte("key1"), kv.Unlim)
 		require.NoError(t, err)
 		require.True(t, it.HasNext())
 		k, v, err := it.Next()
