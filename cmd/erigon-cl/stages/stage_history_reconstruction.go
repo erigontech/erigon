@@ -126,7 +126,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			return false, err
 		}
 		// Collect Execution Payloads
-		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
+		if blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
 			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.BlockHash); err != nil {
 				return false, err

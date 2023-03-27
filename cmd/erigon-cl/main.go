@@ -62,13 +62,10 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 
 	tmpdir := "/tmp"
-	var executionClient *execution_client.ExecutionClient
-	if cfg.ELEnabled {
-		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
-		if err != nil {
-			log.Warn("Could not connect to execution client", "err", err)
-			return err
-		}
+	executionClient, err := execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
+	if err != nil {
+		log.Warn("Could not connect to execution client", "err", err)
+		return err
 	}
 
 	if cfg.TransitionChain {
@@ -80,7 +77,6 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, executionClient), nil, ctx)
 	}
 
-	fmt.Println(cfg.CheckpointUri)
 	// Fetch the checkpoint state.
 	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
