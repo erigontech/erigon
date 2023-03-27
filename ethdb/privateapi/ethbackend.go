@@ -334,6 +334,14 @@ func (s *EthBackendServer) EngineNewPayload(ctx context.Context, req *types2.Exe
 		return nil, err
 	}
 
+	if req.Version >= 3 {
+		header.ExcessDataGas = gointerfaces.ConvertH256ToUint256Int(req.ExcessDataGas).ToBig()
+	}
+
+	if !s.config.IsCancun(header.Time) && header.ExcessDataGas != nil || s.config.IsCancun(header.Time) && header.ExcessDataGas == nil {
+		return nil, &rpc.InvalidParamsError{Message: "excess data gas setting doesn't match sharding state"}
+	}
+
 	blockHash := gointerfaces.ConvertH256ToHash(req.BlockHash)
 	if header.Hash() != blockHash {
 		log.Error("[NewPayload] invalid block hash", "stated", libcommon.Hash(blockHash), "actual", header.Hash())
@@ -588,6 +596,13 @@ func (s *EthBackendServer) EngineGetPayload(ctx context.Context, req *remote.Eng
 	if block.Withdrawals() != nil {
 		payload.Version = 2
 		payload.Withdrawals = ConvertWithdrawalsToRpc(block.Withdrawals())
+	}
+
+	if block.ExcessDataGas() != nil {
+		payload.Version = 3
+		var excessDataGas uint256.Int
+		excessDataGas.SetFromBig(block.Header().ExcessDataGas)
+		payload.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(&excessDataGas)
 	}
 
 	blockValue := blockValue(blockWithReceipts, baseFee)
