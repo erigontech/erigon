@@ -71,7 +71,7 @@ func NewDomainMem(d *Domain, tmpdir string) *DomainMem {
 	return &DomainMem{
 		Domain: d,
 		latest: make(map[string][]byte, 128),
-		etl:    etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam)),
+		etl:    etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM)),
 		//values: &KVList{
 		//	Keys: make([]string, 0, 1000),
 		//	Vals: make([][]byte, 0, 1000),
