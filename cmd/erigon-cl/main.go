@@ -62,13 +62,10 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	}
 
 	tmpdir := "/tmp"
-	var executionClient *execution_client.ExecutionClient
-	if cfg.ELEnabled {
-		executionClient, err = execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
-		if err != nil {
-			log.Warn("Could not connect to execution client", "err", err)
-			return err
-		}
+	executionClient, err := execution_client.NewExecutionClient(ctx, "127.0.0.1:8989")
+	if err != nil {
+		log.Warn("Could not connect to execution client", "err", err)
+		return err
 	}
 
 	if cfg.TransitionChain {
@@ -77,10 +74,9 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 			return err
 		}
 		// Execute from genesis to whatever we have.
-		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, nil, true, executionClient), nil, ctx)
+		return stages.SpawnStageBeaconState(stages.StageBeaconState(db, cfg.BeaconCfg, state, executionClient), nil, ctx)
 	}
 
-	fmt.Println(cfg.CheckpointUri)
 	// Fetch the checkpoint state.
 	cpState, err := getCheckpointState(ctx, db, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
@@ -106,7 +102,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 	gossipManager := network.NewGossipReceiver(ctx, s)
 	gossipManager.AddReceiver(sentinelrpc.GossipType_BeaconBlockGossipType, downloader)
 	go gossipManager.Loop()
-	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, nil, false, tmpdir, executionClient, cfg.BeaconDataCfg)
+	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg)
 	if err != nil {
 		return err
 	}

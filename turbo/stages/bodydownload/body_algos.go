@@ -420,8 +420,8 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
-	if delete {
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBody {
+	if del {
 		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.bodyCacheSize -= item.payloadSize
 			return item.rawBody

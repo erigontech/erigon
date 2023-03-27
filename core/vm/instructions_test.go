@@ -282,7 +282,7 @@ func TestJsonTestcases(t *testing.T) {
 	}
 }
 
-func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
+func opBenchmark(b *testing.B, op executionFunc, args ...string) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
@@ -296,8 +296,8 @@ func opBenchmark(bench *testing.B, op executionFunc, args ...string) {
 		byteArgs[i] = common.Hex2Bytes(arg)
 	}
 	pc := uint64(0)
-	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		for _, arg := range byteArgs {
 			a := new(uint256.Int)
 			a.SetBytes(arg)

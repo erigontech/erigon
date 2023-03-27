@@ -119,7 +119,7 @@ func TestInitiatieValidatorExit(t *testing.T) {
 			state.SetValidators(append(state.Validators(), tc.validator))
 			testInd := uint64(len(state.Validators()) - 1)
 			state.InitiateValidatorExit(testInd)
-			val, err := state.ValidatorAt(int(testInd))
+			val, err := state.ValidatorForValidatorIndex(int(testInd))
 			require.NoError(t, err)
 			if val.ExitEpoch != tc.expectedExitEpoch {
 				t.Errorf("unexpected exit epoch: got %d, want %d", val.ExitEpoch, tc.expectedExitEpoch)
@@ -146,9 +146,9 @@ func TestSlashValidator(t *testing.T) {
 	// Set up slashed balance.
 	preSlashBalance := uint64(1 << 20)
 	successState.Balances()[slashedInd] = preSlashBalance
-	vali, err := successState.ValidatorAt(slashedInd)
+	vali, err := successState.ValidatorForValidatorIndex(slashedInd)
 	require.NoError(t, err)
-	successState.SetValidatorAt(slashedInd, vali)
+	successState.SetValidatorAtIndex(slashedInd, vali)
 	vali.EffectiveBalance = preSlashBalance
 
 	testCases := []struct {
@@ -177,7 +177,7 @@ func TestSlashValidator(t *testing.T) {
 			if err != nil {
 				t.Errorf("unexpected error, wanted success: %v", err)
 			}
-			vali, err := tc.state.ValidatorAt(slashedInd)
+			vali, err := tc.state.ValidatorForValidatorIndex(slashedInd)
 			require.NoError(t, err)
 			// Check that the validator is slashed.
 			if !vali.Slashed {

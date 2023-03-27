@@ -22,10 +22,7 @@ func ProcessRegistryUpdates(state *state.BeaconState) error {
 	// Process activation eligibility and ejections.
 	for validatorIndex, validator := range validators {
 		if state.IsValidatorEligibleForActivationQueue(validator) {
-			validator.ActivationEligibilityEpoch = currentEpoch + 1
-			if err := state.SetValidatorAt(validatorIndex, validator); err != nil {
-				return err
-			}
+			state.SetActivationEligibilityEpochForValidatorAtIndex(validatorIndex, currentEpoch+1)
 		}
 		if validator.Active(currentEpoch) && validator.EffectiveBalance <= beaconConfig.EjectionBalance {
 			if err := state.InitiateValidatorExit(uint64(validatorIndex)); err != nil {
@@ -51,14 +48,7 @@ func ProcessRegistryUpdates(state *state.BeaconState) error {
 	}
 	// Only process up to epoch limit.
 	for _, validatorIndex := range activationQueue {
-		validator, err := state.ValidatorAt(int(validatorIndex))
-		if err != nil {
-			return err
-		}
-		validator.ActivationEpoch = computeActivationExitEpoch(beaconConfig, currentEpoch)
-		if err := state.SetValidatorAt(int(validatorIndex), validator); err != nil {
-			return err
-		}
+		state.SetActivationEpochForValidatorAtIndex(int(validatorIndex), computeActivationExitEpoch(beaconConfig, currentEpoch))
 	}
 	return nil
 }

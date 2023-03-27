@@ -32,7 +32,7 @@ func (hr *HistoryReaderV3) SetTxNum(txNum uint64) { hr.txNum = txNum }
 func (hr *HistoryReaderV3) SetTrace(trace bool)   { hr.trace = trace }
 
 func (hr *HistoryReaderV3) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	enc, ok, err := hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.DomainGetAsOf(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountData [%x] => []\n", address)
@@ -53,7 +53,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address libcommon.Address, incarna
 	acc := make([]byte, 20+8)
 	copy(acc, address.Bytes())
 	binary.BigEndian.PutUint64(acc[20:], incarnation)
-	enc, _, err := hr.ttx.DomainGet(temporal.StorageDomain, acc, key.Bytes(), hr.txNum)
+	enc, _, err := hr.ttx.DomainGetAsOf(temporal.StorageDomain, acc, key.Bytes(), hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountStorage [%x] [%x] => [%x]\n", address, *key, enc)
 	}
@@ -64,7 +64,7 @@ func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnatio
 	if codeHash == emptyCodeHashH {
 		return nil, nil
 	}
-	code, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	code, _, err := hr.ttx.DomainGetAsOf(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	if hr.trace {
 		fmt.Printf("ReadAccountCode [%x %x] => [%x]\n", address, codeHash, code)
 	}
@@ -72,12 +72,12 @@ func (hr *HistoryReaderV3) ReadAccountCode(address libcommon.Address, incarnatio
 }
 
 func (hr *HistoryReaderV3) ReadAccountCodeSize(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash) (int, error) {
-	enc, _, err := hr.ttx.DomainGet(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	enc, _, err := hr.ttx.DomainGetAsOf(temporal.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	return len(enc), err
 }
 
 func (hr *HistoryReaderV3) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
-	enc, ok, err := hr.ttx.DomainGet(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
+	enc, ok, err := hr.ttx.DomainGetAsOf(temporal.AccountsDomain, address.Bytes(), nil, hr.txNum)
 	if err != nil || !ok || len(enc) == 0 {
 		if hr.trace {
 			fmt.Printf("ReadAccountIncarnation [%x] => [0]\n", address)

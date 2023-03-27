@@ -169,8 +169,8 @@ func BenchmarkCall(b *testing.B) {
 		}
 	}
 }
-func benchmarkEVM_Create(bench *testing.B, code string) {
-	_, tx := memdb.NewTestTx(bench)
+func benchmarkEVM_Create(b *testing.B, code string) {
+	_, tx := memdb.NewTestTx(b)
 	var (
 		statedb  = state.New(state.NewPlainState(tx, 1, nil))
 		sender   = libcommon.BytesToAddress([]byte("sender"))
@@ -198,11 +198,11 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 		EVMConfig: vm.Config{},
 	}
 	// Warm up the intpools and stuff
-	bench.ResetTimer()
-	for i := 0; i < bench.N; i++ {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
 		_, _, _ = Call(receiver, []byte{}, &runtimeConfig)
 	}
-	bench.StopTimer()
+	b.StopTimer()
 }
 
 func BenchmarkEVM_CREATE_500(bench *testing.B) {
@@ -334,7 +334,7 @@ func TestBlockhash(t *testing.T) {
 
 // benchmarkNonModifyingCode benchmarks code, but if the code modifies the
 // state, this should not be used, since it does not reset the state between runs.
-func benchmarkNonModifyingCode(gas uint64, code []byte, name string, b *testing.B) { //nolint:unparam
+func benchmarkNonModifyingCode(b *testing.B, gas uint64, code []byte, name string) { //nolint:unparam
 	cfg := new(Config)
 	setDefaults(cfg)
 	_, tx := memdb.NewTestTx(b)
@@ -479,12 +479,12 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//		Tracer: tracer,
 	//	}})
 	// 100M gas
-	benchmarkNonModifyingCode(100000000, staticCallIdentity, "staticcall-identity-100M", b)
-	benchmarkNonModifyingCode(100000000, callIdentity, "call-identity-100M", b)
-	benchmarkNonModifyingCode(100000000, loopingCode, "loop-100M", b)
-	benchmarkNonModifyingCode(100000000, callInexistant, "call-nonexist-100M", b)
-	benchmarkNonModifyingCode(100000000, callEOA, "call-EOA-100M", b)
-	benchmarkNonModifyingCode(100000000, calllRevertingContractWithInput, "call-reverting-100M", b)
+	benchmarkNonModifyingCode(b, 100000000, staticCallIdentity, "staticcall-identity-100M")
+	benchmarkNonModifyingCode(b, 100000000, callIdentity, "call-identity-100M")
+	benchmarkNonModifyingCode(b, 100000000, loopingCode, "loop-100M")
+	benchmarkNonModifyingCode(b, 100000000, callInexistant, "call-nonexist-100M")
+	benchmarkNonModifyingCode(b, 100000000, callEOA, "call-EOA-100M")
+	benchmarkNonModifyingCode(b, 100000000, calllRevertingContractWithInput, "call-reverting-100M")
 
 	//benchmarkNonModifyingCode(10000000, staticCallIdentity, "staticcall-identity-10M", b)
 	//benchmarkNonModifyingCode(10000000, loopingCode, "loop-10M", b)

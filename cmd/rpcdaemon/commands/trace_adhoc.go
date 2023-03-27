@@ -1049,10 +1049,10 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err != nil {
 		return nil, err
 	}
-	parentHeader := parentBlock.Header()
-	if parentHeader == nil {
-		return nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
+	if parentBlock == nil {
+		return nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
 	}
+	parentHeader := parentBlock.Header()
 	if parentHeader != nil && parentHeader.BaseFee != nil {
 		var overflow bool
 		baseFee, overflow = uint256.FromBig(parentHeader.BaseFee)

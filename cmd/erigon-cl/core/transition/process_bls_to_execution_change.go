@@ -16,7 +16,7 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 	change := signedChange.Message
 
 	beaconConfig := state.BeaconConfig()
-	validator, err := state.ValidatorAt(int(change.ValidatorIndex))
+	validator, err := state.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
 		return err
 	}
@@ -51,12 +51,13 @@ func ProcessBlsToExecutionChange(state *state.BeaconState, signedChange *cltypes
 			return fmt.Errorf("invalid signature")
 		}
 	}
-
+	credentials := validator.WithdrawalCredentials
 	// Reset the validator's withdrawal credentials.
-	validator.WithdrawalCredentials[0] = beaconConfig.ETH1AddressWithdrawalPrefixByte
-	copy(validator.WithdrawalCredentials[1:], make([]byte, 11))
-	copy(validator.WithdrawalCredentials[12:], change.To[:])
+	credentials[0] = beaconConfig.ETH1AddressWithdrawalPrefixByte
+	copy(credentials[1:], make([]byte, 11))
+	copy(credentials[12:], change.To[:])
 
 	// Update the state with the modified validator.
-	return state.SetValidatorAt(int(change.ValidatorIndex), validator)
+	state.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
+	return nil
 }
