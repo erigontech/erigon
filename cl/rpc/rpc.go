@@ -272,3 +272,15 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch ui
 	})
 	return err
 }
+
+func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
+	encoded, err := block.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	_, err = b.sentinel.PublishGossip(b.ctx, &sentinel.GossipData{
+		Data: encoded,
+		Type: sentinel.GossipType_BeaconBlockGossipType,
+	})
+	return err
+}
