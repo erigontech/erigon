@@ -144,7 +144,7 @@ func TestManagedTx(t *testing.T) {
 		db := db
 		msg := fmt.Sprintf("%T", db)
 		switch db.(type) {
-		case *remotedb.RemoteKV:
+		case *remotedb.DB:
 		default:
 			continue
 		}

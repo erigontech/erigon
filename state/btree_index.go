@@ -767,7 +767,7 @@ func (btw *BtIndexWriter) AddKey(key []byte, offset uint64) error {
 		}
 	}
 
-	if err := btw.bucketCollector.Collect(key[:], btw.numBuf[:]); err != nil {
+	if err := btw.bucketCollector.Collect(key, btw.numBuf[:]); err != nil {
 		return err
 	}
 	btw.keyCount++
@@ -831,7 +831,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	emptys := 0
 	for getter.HasNext() {
 		key, kp := getter.Next(key[:0])
-		err = iw.AddKey(key[:], pos)
+		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
 		}
@@ -876,7 +876,7 @@ func BuildBtreeIndex(dataPath, indexPath string) error {
 	var pos uint64
 	for getter.HasNext() {
 		key, _ := getter.Next(key[:0])
-		err = iw.AddKey(key[:], pos)
+		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
 		}

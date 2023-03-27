@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -56,12 +57,12 @@ type filesItem struct {
 	// Frozen: file of size StepsInBiggestFile. Completely immutable.
 	// Cold: file of size < StepsInBiggestFile. Immutable, but can be closed/removed after merge to bigger file.
 	// Hot: Stored in DB. Providing Snapshot-Isolation by CopyOnWrite.
-	frozen   bool           // immutable, don't need atomic
-	refcount atomic2.Uint64 // only for `frozen=false`
+	frozen   bool          // immutable, don't need atomic
+	refcount atomic2.Int32 // only for `frozen=false`
 
 	// file can be deleted in 2 cases: 1. when `refcount == 0 && canDelete == true` 2. on app startup when `file.isSubsetOfFrozenFile()`
 	// other processes (which also reading files, may have same logic)
-	canDelete atomic2.Bool
+	canDelete atomic.Bool
 }
 
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
@@ -113,8 +114,8 @@ type DomainStats struct {
 	LastCollationSize    uint64
 	LastPruneSize        uint64
 
-	HistoryQueries atomic2.Uint64
-	TotalQueries   atomic2.Uint64
+	HistoryQueries *atomic2.Uint64
+	TotalQueries   *atomic2.Uint64
 	EfSearchTime   time.Duration
 	DataSize       uint64
 	IndexSize      uint64
@@ -137,7 +138,7 @@ type Domain struct {
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
-	roFiles   atomic2.Pointer[[]ctxItem]
+	roFiles   atomic.Pointer[[]ctxItem]
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
@@ -151,8 +152,9 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		keysTable: keysTable,
 		valsTable: valsTable,
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		roFiles:   *atomic2.NewPointer(&[]ctxItem{}),
+		stats:     DomainStats{HistoryQueries: &atomic2.Uint64{}, TotalQueries: &atomic2.Uint64{}},
 	}
+	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(dir, tmpdir, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, compressVals, []string{"kv"}, largeValues); err != nil {
@@ -649,7 +651,7 @@ func (d *Domain) MakeContext() *DomainContext {
 	}
 	for _, item := range dc.files {
 		if !item.src.frozen {
-			item.src.refcount.Inc()
+			item.src.refcount.Add(1)
 		}
 	}
 
@@ -884,6 +886,9 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
 	}
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
+		if err != nil {
+			return Collation{}, err
+		}
 		pos++
 		select {
 		case <-logEvery.C:
@@ -892,7 +897,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 				"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
 		case <-ctx.Done():
 			log.Warn("[snapshots] collate domain cancelled", "name", d.filenameBase, "err", ctx.Err())
-			return Collation{}, err
+			return Collation{}, ctx.Err()
 		default:
 		}
 
@@ -1148,7 +1153,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 
 	var (
 		_state    = "scan steps"
-		pos       atomic2.Uint64
+		pos       atomic.Uint64
 		totalKeys uint64
 	)
 
@@ -1196,7 +1201,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 				}
 			}
 		}
-		pos.Inc()
+		pos.Add(1)
 
 		if ctx.Err() != nil {
 			log.Warn("[snapshots] prune domain cancelled", "name", d.filenameBase, "err", ctx.Err())
@@ -1243,7 +1248,7 @@ func (d *Domain) prune(ctx context.Context, step uint64, txFrom, txTo, limit uin
 			}
 			mxPruneSize.Inc()
 		}
-		pos.Inc()
+		pos.Add(1)
 		//_prog = 100 * (float64(pos) / float64(totalKeys))
 
 		select {
@@ -1386,7 +1391,7 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.HistoryQueries.Inc()
+	dc.d.stats.HistoryQueries.Add(1)
 
 	v, found, err := dc.hc.GetNoState(key, txNum)
 	if err != nil {

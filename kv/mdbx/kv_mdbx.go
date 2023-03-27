@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pbnjay/memory"
 	"github.com/torquem-ch/mdbx-go/mdbx"
-	"go.uber.org/atomic"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 )

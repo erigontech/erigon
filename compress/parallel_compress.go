@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/sais"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 )
 
@@ -181,7 +180,7 @@ func optimiseCluster(trace bool, input []byte, mf2 *patricia.MatchFinder2, outpu
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic2.Uint64, posMap map[uint64]uint64) {
+func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -262,7 +261,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 		log.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
 	ch := make(chan *CompressionWord, 10_000)
-	inputSize, outputSize := atomic2.NewUint64(0), atomic2.NewUint64(0)
+	inputSize, outputSize := &atomic.Uint64{}, &atomic.Uint64{}
 
 	var collectors []*etl.Collector
 	defer func() {

@@ -25,10 +25,12 @@ const (
 	KV_Tx_FullMethodName           = "/remote.KV/Tx"
 	KV_StateChanges_FullMethodName = "/remote.KV/StateChanges"
 	KV_Snapshots_FullMethodName    = "/remote.KV/Snapshots"
+	KV_Range_FullMethodName        = "/remote.KV/Range"
 	KV_DomainGet_FullMethodName    = "/remote.KV/DomainGet"
 	KV_HistoryGet_FullMethodName   = "/remote.KV/HistoryGet"
 	KV_IndexRange_FullMethodName   = "/remote.KV/IndexRange"
-	KV_Range_FullMethodName        = "/remote.KV/Range"
+	KV_HistoryRange_FullMethodName = "/remote.KV/HistoryRange"
+	KV_DomainRange_FullMethodName  = "/remote.KV/DomainRange"
 )
 
 // KVClient is the client API for KV service.
@@ -46,15 +48,17 @@ type KVClient interface {
 	StateChanges(ctx context.Context, in *StateChangeRequest, opts ...grpc.CallOption) (KV_StateChangesClient, error)
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...grpc.CallOption) (*SnapshotsReply, error)
-	// Temporal methods
-	DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error)
-	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
-	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error)
+	// Temporal methods
+	DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error)
+	HistoryGet(ctx context.Context, in *HistoryGetReq, opts ...grpc.CallOption) (*HistoryGetReply, error)
+	IndexRange(ctx context.Context, in *IndexRangeReq, opts ...grpc.CallOption) (*IndexRangeReply, error)
+	HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error)
+	DomainRange(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error)
 }
 
 type kVClient struct {
@@ -146,6 +150,15 @@ func (c *kVClient) Snapshots(ctx context.Context, in *SnapshotsRequest, opts ...
 	return out, nil
 }
 
+func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+	out := new(Pairs)
+	err := c.cc.Invoke(ctx, KV_Range_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *kVClient) DomainGet(ctx context.Context, in *DomainGetReq, opts ...grpc.CallOption) (*DomainGetReply, error) {
 	out := new(DomainGetReply)
 	err := c.cc.Invoke(ctx, KV_DomainGet_FullMethodName, in, out, opts...)
@@ -173,9 +186,18 @@ func (c *kVClient) IndexRange(ctx context.Context, in *IndexRangeReq, opts ...gr
 	return out, nil
 }
 
-func (c *kVClient) Range(ctx context.Context, in *RangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+func (c *kVClient) HistoryRange(ctx context.Context, in *HistoryRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
 	out := new(Pairs)
-	err := c.cc.Invoke(ctx, KV_Range_FullMethodName, in, out, opts...)
+	err := c.cc.Invoke(ctx, KV_HistoryRange_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *kVClient) DomainRange(ctx context.Context, in *DomainRangeReq, opts ...grpc.CallOption) (*Pairs, error) {
+	out := new(Pairs)
+	err := c.cc.Invoke(ctx, KV_DomainRange_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -197,15 +219,17 @@ type KVServer interface {
 	StateChanges(*StateChangeRequest, KV_StateChangesServer) error
 	// Snapshots returns list of current snapshot files. Then client can just open all of them.
 	Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error)
-	// Temporal methods
-	DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error)
-	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
-	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
 	// Range [from, to)
 	// Range(from, nil) means [from, EndOfTable)
 	// Range(nil, to)   means [StartOfTable, to)
 	// If orderAscend=false server expecting `from`<`to`. Example: Range("B", "A")
 	Range(context.Context, *RangeReq) (*Pairs, error)
+	// Temporal methods
+	DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error)
+	HistoryGet(context.Context, *HistoryGetReq) (*HistoryGetReply, error)
+	IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error)
+	HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error)
+	DomainRange(context.Context, *DomainRangeReq) (*Pairs, error)
 	mustEmbedUnimplementedKVServer()
 }
 
@@ -225,6 +249,9 @@ func (UnimplementedKVServer) StateChanges(*StateChangeRequest, KV_StateChangesSe
 func (UnimplementedKVServer) Snapshots(context.Context, *SnapshotsRequest) (*SnapshotsReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Snapshots not implemented")
 }
+func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Range not implemented")
+}
 func (UnimplementedKVServer) DomainGet(context.Context, *DomainGetReq) (*DomainGetReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DomainGet not implemented")
 }
@@ -234,8 +261,11 @@ func (UnimplementedKVServer) HistoryGet(context.Context, *HistoryGetReq) (*Histo
 func (UnimplementedKVServer) IndexRange(context.Context, *IndexRangeReq) (*IndexRangeReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IndexRange not implemented")
 }
-func (UnimplementedKVServer) Range(context.Context, *RangeReq) (*Pairs, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method Range not implemented")
+func (UnimplementedKVServer) HistoryRange(context.Context, *HistoryRangeReq) (*Pairs, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HistoryRange not implemented")
+}
+func (UnimplementedKVServer) DomainRange(context.Context, *DomainRangeReq) (*Pairs, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DomainRange not implemented")
 }
 func (UnimplementedKVServer) mustEmbedUnimplementedKVServer() {}
 
@@ -333,6 +363,24 @@ func _KV_Snapshots_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KV_Range_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RangeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).Range(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_Range_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).Range(ctx, req.(*RangeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KV_DomainGet_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DomainGetReq)
 	if err := dec(in); err != nil {
@@ -387,20 +435,38 @@ func _KV_IndexRange_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KV_Range_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RangeReq)
+func _KV_HistoryRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HistoryRangeReq)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(KVServer).Range(ctx, in)
+		return srv.(KVServer).HistoryRange(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: KV_Range_FullMethodName,
+		FullMethod: KV_HistoryRange_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KVServer).Range(ctx, req.(*RangeReq))
+		return srv.(KVServer).HistoryRange(ctx, req.(*HistoryRangeReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KV_DomainRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DomainRangeReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KVServer).DomainRange(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KV_DomainRange_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KVServer).DomainRange(ctx, req.(*DomainRangeReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -421,6 +487,10 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_Snapshots_Handler,
 		},
 		{
+			MethodName: "Range",
+			Handler:    _KV_Range_Handler,
+		},
+		{
 			MethodName: "DomainGet",
 			Handler:    _KV_DomainGet_Handler,
 		},
@@ -433,8 +503,12 @@ var KV_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KV_IndexRange_Handler,
 		},
 		{
-			MethodName: "Range",
-			Handler:    _KV_Range_Handler,
+			MethodName: "HistoryRange",
+			Handler:    _KV_HistoryRange_Handler,
+		},
+		{
+			MethodName: "DomainRange",
+			Handler:    _KV_DomainRange_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

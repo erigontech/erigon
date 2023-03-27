@@ -460,11 +460,17 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	efIt := ef.Iterator()
 	newEf := eliasfano32.NewEliasFano(preef.Count()+ef.Count(), ef.Max())
 	for preIt.HasNext() {
-		v, _ := preIt.Next()
+		v, err := preIt.Next()
+		if err != nil {
+			return nil, err
+		}
 		newEf.AddOffset(v)
 	}
 	for efIt.HasNext() {
-		v, _ := efIt.Next()
+		v, err := efIt.Next()
+		if err != nil {
+			return nil, err
+		}
 		newEf.AddOffset(v)
 	}
 	newEf.Build()

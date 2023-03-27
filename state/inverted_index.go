@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -43,7 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
@@ -53,7 +53,7 @@ type InvertedIndex struct {
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
-	roFiles atomic2.Pointer[[]ctxItem]
+	roFiles atomic.Pointer[[]ctxItem]
 
 	indexKeysTable  string // txnNum_u64 -> key (k+auto_increment)
 	indexTable      string // k -> txnNum_u64 , Needs to be table with DupSort
@@ -86,7 +86,6 @@ func NewInvertedIndex(
 		dir:                     dir,
 		tmpdir:                  tmpdir,
 		files:                   btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		roFiles:                 *atomic2.NewPointer(&[]ctxItem{}),
 		aggregationStep:         aggregationStep,
 		filenameBase:            filenameBase,
 		indexKeysTable:          indexKeysTable,
@@ -95,6 +94,8 @@ func NewInvertedIndex(
 		integrityFileExtensions: integrityFileExtensions,
 		withLocalityIndex:       withLocalityIndex,
 	}
+	ii.roFiles.Store(&[]ctxItem{})
+
 	if ii.withLocalityIndex {
 		var err error
 		ii.localityIndex, err = NewLocalityIndex(ii.dir, ii.tmpdir, ii.aggregationStep, ii.filenameBase)
@@ -399,7 +400,7 @@ func (ii *InvertedIndex) DiscardHistory(tmpdir string) {
 	ii.wal = ii.newWriter(tmpdir, false, true)
 }
 func (ii *InvertedIndex) StartWrites() {
-	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRam > 0, false)
+	ii.wal = ii.newWriter(ii.tmpdir, WALCollectorRAM > 0, false)
 }
 func (ii *InvertedIndex) FinishWrites() {
 	ii.wal.close()
@@ -456,13 +457,13 @@ func (ii *invertedIndexWAL) close() {
 }
 
 // 3 history + 4 indices = 10 etl collectors, 10*256Mb/8 = 512mb - for all indices buffers
-var WALCollectorRam = 2 * (etl.BufferOptimalSize / 8)
+var WALCollectorRAM = 2 * (etl.BufferOptimalSize / 8)
 
 func init() {
 	v, _ := os.LookupEnv("ERIGON_WAL_COLLETOR_RAM")
 	if v != "" {
 		var err error
-		WALCollectorRam, err = datasize.ParseString(v)
+		WALCollectorRAM, err = datasize.ParseString(v)
 		if err != nil {
 			panic(err)
 		}
@@ -477,8 +478,8 @@ func (ii *InvertedIndex) newWriter(tmpdir string, buffered, discard bool) *inver
 	}
 	if buffered {
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
-		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRam))
+		w.index = etl.NewCollector(ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.indexKeys = etl.NewCollector(ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
 		w.index.LogLvl(log.LvlTrace)
 		w.indexKeys.LogLvl(log.LvlTrace)
 	}
@@ -517,7 +518,7 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 	}
 	for _, item := range ic.files {
 		if !item.src.frozen {
-			item.src.refcount.Inc()
+			item.src.refcount.Add(1)
 		}
 	}
 	return &ic
@@ -527,7 +528,7 @@ func (ic *InvertedIndexContext) Close() {
 		if item.src.frozen {
 			continue
 		}
-		refCnt := item.src.refcount.Dec()
+		refCnt := item.src.refcount.Add(-1)
 		//GC: last reader responsible to remove useles files: close it and delete
 		if refCnt == 0 && item.src.canDelete.Load() {
 			item.src.closeFilesAndRemove()
@@ -581,11 +582,11 @@ func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
 	return it, false
 }
 
-// IterateRange - return range of txNums for given `key`
+// IdxRange - return range of txNums for given `key`
 // is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
-func (ic *InvertedIndexContext) IterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
+func (ic *InvertedIndexContext) IdxRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.U64, error) {
 	frozenIt, err := ic.iterateRangeFrozen(key, startTxNum, endTxNum, asc, limit)
 	if err != nil {
 		return nil, err
@@ -632,7 +633,7 @@ func (ic *InvertedIndexContext) recentIterateRange(key []byte, startTxNum, endTx
 	}), nil
 }
 
-// IterateRange is to be used in public API, therefore it relies on read-only transaction
+// IdxRange is to be used in public API, therefore it relies on read-only transaction
 // so that iteration can be done even when the inverted index is being updated.
 // [startTxNum; endNumTx)
 func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTxNum int, asc order.By, limit int) (*FrozenInvertedIdxIter, error) {
@@ -833,7 +834,7 @@ func (it *RecentInvertedIdxIter) Close() {
 	bitmapdb.ReturnToPool64(it.bm)
 }
 
-func (it *RecentInvertedIdxIter) advanceInDb() {
+func (it *RecentInvertedIdxIter) advanceInDB() {
 	var v []byte
 	var err error
 	if it.cursor == nil {
@@ -929,11 +930,11 @@ func (it *RecentInvertedIdxIter) advanceInDb() {
 func (it *RecentInvertedIdxIter) advance() {
 	if it.orderAscend {
 		if it.hasNext {
-			it.advanceInDb()
+			it.advanceInDB()
 		}
 	} else {
 		if it.hasNext {
-			it.advanceInDb()
+			it.advanceInDB()
 		}
 	}
 }
@@ -1136,8 +1137,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx 
 			log.Debug("[snapshots] collate history", "name", ii.filenameBase, "range", fmt.Sprintf("%.2f-%.2f", float64(txNum)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 			bitmap.RunOptimize()
 		case <-ctx.Done():
-			err := ctx.Err()
-			return nil, err
+			return nil, ctx.Err()
 		default:
 		}
 	}
@@ -1333,7 +1333,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		default:
 		}
 	}
@@ -1355,8 +1355,6 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 			}
 
 			select {
-			case <-ctx.Done():
-				return nil
 			case <-logEvery.C:
 				log.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
 			default:

@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
@@ -32,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
 )
 
 const LocalityIndexUint64Limit = 64 //bitmap spend 1 bit per file, stored as uint64
@@ -48,8 +48,8 @@ type LocalityIndex struct {
 	file *filesItem
 	bm   *bitmapdb.FixedSizeBitmaps
 
-	roFiles  atomic2.Pointer[ctxItem]
-	roBmFile atomic2.Pointer[bitmapdb.FixedSizeBitmaps]
+	roFiles  atomic.Pointer[ctxItem]
+	roBmFile atomic.Pointer[bitmapdb.FixedSizeBitmaps]
 }
 
 func NewLocalityIndex(
@@ -194,24 +194,24 @@ func (li *LocalityIndex) reCalcRoFiles() {
 }
 
 func (li *LocalityIndex) MakeContext() *ctxLocalityIdx {
-	if li == nil || li.file == nil {
+	if li == nil {
 		return nil
 	}
 	x := &ctxLocalityIdx{
 		file: li.roFiles.Load(),
 		bm:   li.roBmFile.Load(),
 	}
-	if x.file.src != nil {
-		x.file.src.refcount.Inc()
+	if x.file != nil && x.file.src != nil {
+		x.file.src.refcount.Add(1)
 	}
 	return x
 }
 
 func (out *ctxLocalityIdx) Close() {
-	if out == nil || out.file.src == nil {
+	if out == nil || out.file == nil || out.file.src == nil {
 		return
 	}
-	refCnt := out.file.src.refcount.Dec()
+	refCnt := out.file.src.refcount.Add(-1)
 	if refCnt == 0 && out.file.src.canDelete.Load() {
 		closeLocalityIndexFilesAndRemove(out)
 	}

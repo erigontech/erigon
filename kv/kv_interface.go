@@ -26,30 +26,42 @@ import (
 )
 
 //Variables Naming:
-//  ts - TimeStamp (usually it's TxnNumber)
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
-//  RoTx - Read-Only Database Transaction
-//  RwTx - Read-Write Database Transaction
-//  k - key
-//  v - value
+//  RoTx - Read-Only Database Transaction. RwTx - read-write
+//  k, v - key, value
+//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
-//  Iter - high-level iterator-like api over Table, InvertedIndex, History, Domain. Has less features than Cursor.
+//  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`
 
 //Methods Naming:
 //  Get: exact match of criterias
-//  Range: [from, to). Stream(from, nil) means [from, EndOfTable). Stream(nil, to) means [StartOfTable, to).
-//  Each: Range(from, nil)
+//  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
-//  Limit: [from, INF) AND maximum N records
 
-//Entity Naming:
-//  State: simple table in db
-//  InvertedIndex: supports range-scans
-//  History: can return value of key K as of given TimeStamp. Doesn't know about latest/current value of key K. Returns NIL if K not changed after TimeStamp.
-//  Domain: as History but also aware about latest/current value of key K.
+//Abstraction Layers:
+// LowLevel:
+//      1. DB/Tx - low-level key-value database
+//      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
+//              start or auto-generate by moving old data from DB to Snapshots.
+// MediumLevel:
+//      1. TemporalDB - abstracting DB+Snapshots. Target is:
+//              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
+//              - using next entities:
+//                      - InvertedIndex: supports range-scans
+//                      - History: can return value of key K as of given TimeStamp. Doesn't know about latest/current
+//                          value of key K. Returns NIL if K not changed after TimeStamp.
+//                      - Domain: as History but also aware about latest/current value of key K. Can move
+//                          cold (updated long time ago) parts of state from db to snapshots.
+
+// HighLevel:
+//      1. Application - rely on TemporalDB (Ex: ExecutionLayer) or just DB (Ex: TxPool, Sentry, Downloader).
 
 const ReadersLimit = 32000 // MDBX_READERS_LIMIT=32767
+
+// const Unbounded []byte = nil
+const Unlim int = -1
 
 var (
 	ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutils.ChaindataDeprecatedTables can be deleted")
@@ -456,14 +468,15 @@ type (
 	History     string
 	InvertedIdx string
 )
-type TemporalRoDb interface {
+type TemporalRoDB interface {
 	RoDB
 	BeginTemporalRo(ctx context.Context) (TemporalTx, error)
 	ViewTemporal(ctx context.Context, f func(tx TemporalTx) error) error
 }
 type TemporalTx interface {
 	Tx
-	DomainGet(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
+	DomainGet(name Domain, k, k2 []byte) (v []byte, ok bool, err error)
+	DomainGetAsOf(name Domain, k, k2 []byte, ts uint64) (v []byte, ok bool, err error)
 	HistoryGet(name History, k []byte, ts uint64) (v []byte, ok bool, err error)
 
 	// IndexRange - return iterator over range of inverted index for given key `k`
@@ -480,5 +493,5 @@ type TemporalTx interface {
 
 type TemporalRwDB interface {
 	RwDB
-	TemporalRoDb
+	TemporalRoDB
 }

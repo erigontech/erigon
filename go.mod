@@ -1,9 +1,9 @@
 module github.com/ledgerwatch/erigon-lib
 
-go 1.18
+go 1.19
 
 require (
-	github.com/ledgerwatch/interfaces v0.0.0-20230306115306-76f49663a127
+	github.com/ledgerwatch/interfaces v0.0.0-20230327101909-b7aa9aaf6dd3
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 	github.com/ledgerwatch/trackerslist v1.1.0
@@ -24,20 +24,19 @@ require (
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.2
-	github.com/holiman/uint256 v1.2.1
+	github.com/holiman/uint256 v1.2.2
 	github.com/matryer/moq v0.3.1
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.2
 	github.com/tidwall/btree v1.6.0
-	go.uber.org/atomic v1.10.0
 	golang.org/x/crypto v0.7.0
-	golang.org/x/exp v0.0.0-20230314191032-db074128a8ec
+	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.6.0
 	golang.org/x/time v0.3.0
-	google.golang.org/grpc v1.53.0
+	google.golang.org/grpc v1.54.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.30.0
 )

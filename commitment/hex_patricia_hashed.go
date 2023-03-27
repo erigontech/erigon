@@ -1743,7 +1743,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 
 		update := updates[i]
 		// Update the cell
-		if update.Flags == DELETE_UPDATE {
+		if update.Flags == DeleteUpdate {
 			hph.deleteCell(hashedKey)
 			if hph.trace {
 				fmt.Printf("key %x deleted\n", plainKey)
@@ -1753,19 +1753,19 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			if hph.trace {
 				fmt.Printf("accountFn updated key %x =>", plainKey)
 			}
-			if update.Flags&BALANCE_UPDATE != 0 {
+			if update.Flags&BalanceUpdate != 0 {
 				if hph.trace {
 					fmt.Printf(" balance=%d", update.Balance.Uint64())
 				}
 				cell.Balance.Set(&update.Balance)
 			}
-			if update.Flags&NONCE_UPDATE != 0 {
+			if update.Flags&NonceUpdate != 0 {
 				if hph.trace {
 					fmt.Printf(" nonce=%d", update.Nonce)
 				}
 				cell.Nonce = update.Nonce
 			}
-			if update.Flags&CODE_UPDATE != 0 {
+			if update.Flags&CodeUpdate != 0 {
 				if hph.trace {
 					fmt.Printf(" codeHash=%x", update.CodeHashOrStorage)
 				}
@@ -1774,7 +1774,7 @@ func (hph *HexPatriciaHashed) ProcessUpdates(plainKeys, hashedKeys [][]byte, upd
 			if hph.trace {
 				fmt.Printf("\n")
 			}
-			if update.Flags&STORAGE_UPDATE != 0 {
+			if update.Flags&StorageUpdate != 0 {
 				cell.setStorage(update.CodeHashOrStorage[:update.ValLength])
 				if hph.trace {
 					fmt.Printf("\rstorageFn filled key %x => %x\n", plainKey, update.CodeHashOrStorage[:update.ValLength])
@@ -1825,28 +1825,28 @@ func (hph *HexPatriciaHashed) hashAndNibblizeKey(key []byte) []byte {
 type UpdateFlags uint8
 
 const (
-	CODE_UPDATE    UpdateFlags = 1
-	DELETE_UPDATE  UpdateFlags = 2
-	BALANCE_UPDATE UpdateFlags = 4
-	NONCE_UPDATE   UpdateFlags = 8
-	STORAGE_UPDATE UpdateFlags = 16
+	CodeUpdate    UpdateFlags = 1
+	DeleteUpdate  UpdateFlags = 2
+	BalanceUpdate UpdateFlags = 4
+	NonceUpdate   UpdateFlags = 8
+	StorageUpdate UpdateFlags = 16
 )
 
 func (uf UpdateFlags) String() string {
 	var sb strings.Builder
-	if uf == DELETE_UPDATE {
+	if uf == DeleteUpdate {
 		sb.WriteString("Delete")
 	} else {
-		if uf&BALANCE_UPDATE != 0 {
+		if uf&BalanceUpdate != 0 {
 			sb.WriteString("+Balance")
 		}
-		if uf&NONCE_UPDATE != 0 {
+		if uf&NonceUpdate != 0 {
 			sb.WriteString("+Nonce")
 		}
-		if uf&CODE_UPDATE != 0 {
+		if uf&CodeUpdate != 0 {
 			sb.WriteString("+Code")
 		}
-		if uf&STORAGE_UPDATE != 0 {
+		if uf&StorageUpdate != 0 {
 			sb.WriteString("+Storage")
 		}
 	}
@@ -1888,18 +1888,18 @@ func (u *Update) DecodeForStorage(enc []byte) {
 
 func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 	buf = append(buf, byte(u.Flags))
-	if u.Flags&BALANCE_UPDATE != 0 {
+	if u.Flags&BalanceUpdate != 0 {
 		buf = append(buf, byte(u.Balance.ByteLen()))
 		buf = append(buf, u.Balance.Bytes()...)
 	}
-	if u.Flags&NONCE_UPDATE != 0 {
+	if u.Flags&NonceUpdate != 0 {
 		n := binary.PutUvarint(numBuf, u.Nonce)
 		buf = append(buf, numBuf[:n]...)
 	}
-	if u.Flags&CODE_UPDATE != 0 {
+	if u.Flags&CodeUpdate != 0 {
 		buf = append(buf, u.CodeHashOrStorage[:]...)
 	}
-	if u.Flags&STORAGE_UPDATE != 0 {
+	if u.Flags&StorageUpdate != 0 {
 		n := binary.PutUvarint(numBuf, uint64(u.ValLength))
 		buf = append(buf, numBuf[:n]...)
 		if u.ValLength > 0 {
@@ -1915,7 +1915,7 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 	}
 	u.Flags = UpdateFlags(buf[pos])
 	pos++
-	if u.Flags&BALANCE_UPDATE != 0 {
+	if u.Flags&BalanceUpdate != 0 {
 		if len(buf) < pos+1 {
 			return 0, fmt.Errorf("decode Update: buffer too small for balance len")
 		}
@@ -1927,7 +1927,7 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		u.Balance.SetBytes(buf[pos : pos+balanceLen])
 		pos += balanceLen
 	}
-	if u.Flags&NONCE_UPDATE != 0 {
+	if u.Flags&NonceUpdate != 0 {
 		var n int
 		u.Nonce, n = binary.Uvarint(buf[pos:])
 		if n == 0 {
@@ -1938,14 +1938,14 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		}
 		pos += n
 	}
-	if u.Flags&CODE_UPDATE != 0 {
+	if u.Flags&CodeUpdate != 0 {
 		if len(buf) < pos+32 {
 			return 0, fmt.Errorf("decode Update: buffer too small for codeHash")
 		}
 		copy(u.CodeHashOrStorage[:], buf[pos:pos+32])
 		pos += 32
 	}
-	if u.Flags&STORAGE_UPDATE != 0 {
+	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])
 		if n == 0 {
 			return 0, fmt.Errorf("decode Update: buffer too small for storage len")
@@ -1967,16 +1967,16 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 func (u *Update) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Flags: [%s]", u.Flags))
-	if u.Flags&BALANCE_UPDATE != 0 {
+	if u.Flags&BalanceUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", Balance: [%d]", &u.Balance))
 	}
-	if u.Flags&NONCE_UPDATE != 0 {
+	if u.Flags&NonceUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
 	}
-	if u.Flags&CODE_UPDATE != 0 {
+	if u.Flags&CodeUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHashOrStorage))
 	}
-	if u.Flags&STORAGE_UPDATE != 0 {
+	if u.Flags&StorageUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.CodeHashOrStorage[:u.ValLength]))
 	}
 	return sb.String()

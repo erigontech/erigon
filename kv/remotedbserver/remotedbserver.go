@@ -24,12 +24,12 @@ import (
 	"io"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -131,7 +131,7 @@ func (s *KvServer) begin(ctx context.Context) (id uint64, err error) {
 	if errBegin != nil {
 		return 0, errBegin
 	}
-	id = s.txIdGen.Inc()
+	id = s.txIdGen.Add(1)
 	s.txs[id] = &threadSafeTx{Tx: tx}
 	return id, nil
 }
@@ -513,9 +513,16 @@ func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (rep
 		if !ok {
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
-		reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2, req.Ts)
-		if err != nil {
-			return err
+		if req.Latest {
+			reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2)
+			if err != nil {
+				return err
+			}
+		} else {
+			reply.V, reply.Ok, err = ttx.DomainGetAsOf(kv.Domain(req.Table), req.K, req.K2, req.Ts)
+			if err != nil {
+				return err
+			}
 		}
 		return nil
 	}); err != nil {
@@ -540,38 +547,6 @@ func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (r
 	}
 	return reply, nil
 }
-
-/*
-func (s *KvServer) IndexStream(req *remote.IndexRangeReq, stream remote.KV_IndexStreamServer) error {
-	const step = 4096 // make sure `s.with` has limited time
-	var last int
-	for from := int(req.FromTs); from < int(req.ToTs); from = last {
-		if err := s.with(req.TxId, func(tx kv.Tx) error {
-			ttx, ok := tx.(kv.TemporalTx)
-			if !ok {
-				return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
-			}
-			it, err := ttx.IndexRange(kv.InvertedIdx(req.Table), req.K, uint64(from), uint64(req.ToTs), order.By(req.OrderAscend), step)
-			if err != nil {
-				return err
-			}
-			bm, err := it.(bitmapdb.ToBitamp).ToBitmap()
-			if err != nil {
-				return err
-			}
-			if err := stream.Send(&remote.IndexRangeReply{Timestamps: bm.ToArray()}); err != nil {
-				return err
-			}
-			last = int(bm.Maximum())
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-*/
 
 const PageSizeLimit = 4 * 4096
 
@@ -622,92 +597,6 @@ func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*
 	}
 	return reply, nil
 }
-
-/*
-func (s *KvServer) Stream(req *remote.RangeReq, stream remote.KV_StreamServer) error {
-	orderAscend, fromPrefix, toPrefix := req.OrderAscend, req.FromPrefix, req.ToPrefix
-	if orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) >= 0 {
-		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", fromPrefix, toPrefix)
-	}
-	if !orderAscend && fromPrefix != nil && toPrefix != nil && bytes.Compare(fromPrefix, toPrefix) <= 0 {
-		return fmt.Errorf("tx.Dual: %x must be lexicographicaly before %x", toPrefix, fromPrefix)
-	}
-
-	var k, v []byte
-
-	if req.OrderAscend && fromPrefix == nil {
-		fromPrefix = []byte{}
-	}
-
-	var it iter.KV
-	var err error
-	var skipFirst = false
-
-	limit := int(req.PageSize)
-	step := cmp.Min(s.rangeStep, limit) // make sure `s.with` has limited time
-	for from := fromPrefix; ; from = k {
-		if (req.OrderAscend && from == nil) || limit == 0 {
-			break
-		}
-		if toPrefix != nil {
-			cmp := bytes.Compare(from, toPrefix)
-			hasNext := (orderAscend && cmp < 0) || (!orderAscend && cmp > 0)
-			if !hasNext {
-				break
-			}
-		}
-
-		reply := &remote.Pairs{}
-		if err = s.with(req.TxId, func(tx kv.Tx) error {
-			if orderAscend {
-				it, err = tx.RangeAscend(req.Table, from, toPrefix, step)
-				if err != nil {
-					return err
-				}
-			} else {
-				it, err = tx.RangeDescend(req.Table, from, toPrefix, step)
-				if err != nil {
-					return err
-				}
-			}
-			k = nil
-			for it.HasNext() {
-				k, v, err = it.Next()
-				if err != nil {
-					return err
-				}
-				reply.Keys = append(reply.Keys, k)
-				reply.Values = append(reply.Values, v)
-				limit--
-			}
-			if k != nil {
-				k = common.Copy(k)
-				if req.OrderAscend {
-					k = append(k, []byte{01}...)
-				} else {
-					if skipFirst {
-						reply.Keys = reply.Keys[1:]
-						reply.Values = reply.Values[1:]
-					}
-					skipFirst = true
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-
-		if len(reply.Keys) > 0 {
-			if err := stream.Send(reply); err != nil {
-				return err
-			}
-		} else {
-			break
-		}
-	}
-	return nil
-}
-*/
 
 func (s *KvServer) Range(ctx context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)

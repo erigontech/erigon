@@ -211,7 +211,7 @@ func (a *Aggregator) ReopenList(fNames []string) error {
 }
 
 func (a *Aggregator) GetAndResetStats() DomainStats {
-	stats := DomainStats{}
+	stats := DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	stats.Accumulate(a.accounts.GetAndResetStats())
 	stats.Accumulate(a.storage.GetAndResetStats())
 	stats.Accumulate(a.code.GetAndResetStats())
@@ -889,7 +889,7 @@ func (a *Aggregator) AggregatedRoots() chan [length.Hash]byte {
 }
 
 func (a *Aggregator) notifyAggregated(rootHash []byte) {
-	rh := (*[length.Hash]byte)(rootHash[:])
+	rh := (*[length.Hash]byte)(rootHash)
 	select {
 	case a.stepDoneNotice <- *rh:
 	default:
@@ -1228,19 +1228,19 @@ func (ac *AggregatorContext) storageFn(plainKey []byte, cell *commitment.Cell) e
 }
 
 func (ac *AggregatorContext) LogAddrIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logAddrs.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.logAddrs.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) LogTopicIterator(topic []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.logTopics.IterateRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.logTopics.IdxRange(topic, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) TraceFromIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesFrom.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.tracesFrom.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) TraceToIterator(addr []byte, startTxNum, endTxNum int, roTx kv.Tx) (iter.U64, error) {
-	return ac.tracesTo.IterateRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
+	return ac.tracesTo.IdxRange(addr, startTxNum, endTxNum, order.Asc, -1, roTx)
 }
 
 func (ac *AggregatorContext) Close() {
@@ -1330,7 +1330,7 @@ func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarna
 	} else {
 		value[pos] = 32
 		pos++
-		copy(value[pos:pos+32], hash[:])
+		copy(value[pos:pos+32], hash)
 		pos += 32
 	}
 	if incarnation == 0 {

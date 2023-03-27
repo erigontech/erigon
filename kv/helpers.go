@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/torquem-ch/mdbx-go/mdbx"
-	"go.uber.org/atomic"
 )
 
 func DefaultPageSize() uint64 {

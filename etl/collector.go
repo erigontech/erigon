@@ -163,7 +163,7 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 
 	i := 0
 	var prevK []byte
-	loadNextFunc := func(originalK, k, v []byte) error {
+	loadNextFunc := func(_, k, v []byte) error {
 		if i == 0 {
 			isEndOfBucket := lastKey == nil || bytes.Compare(lastKey, k) == -1
 			canUseAppend = haveSortingGuaranties && isEndOfBucket

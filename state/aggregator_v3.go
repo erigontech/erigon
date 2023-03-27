@@ -717,6 +717,7 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 	if txn <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
 	}
+
 	_, err = a.shared.Commit(txn, true, false)
 	if err != nil {
 		return err

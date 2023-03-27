@@ -351,17 +351,24 @@ func generateTestData(t *testing.T, db kv.Putter, bucket string, count int) {
 func testExtractToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = v
-	out, _ := json.Marshal(valueMap)
+	out, err := json.Marshal(valueMap)
+	if err != nil {
+		return err
+	}
 	return next(k, k, out)
 }
 
 func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
+	var err error
 	valueMap := make(map[string][]byte)
 	valueMap["value"] = append(v, 0xAA)
 	k1 := append(k, 0xAA)
-	out, _ := json.Marshal(valueMap)
+	out, err := json.Marshal(valueMap)
+	if err != nil {
+		panic(err)
+	}
 
-	err := next(k, k1, out)
+	err = next(k, k1, out)
 	if err != nil {
 		return err
 	}
@@ -369,7 +376,10 @@ func testExtractDoubleToMapFunc(k, v []byte, next ExtractNextFunc) error {
 	valueMap = make(map[string][]byte)
 	valueMap["value"] = append(v, 0xBB)
 	k2 := append(k, 0xBB)
-	out, _ = json.Marshal(valueMap)
+	out, err = json.Marshal(valueMap)
+	if err != nil {
+		panic(err)
+	}
 	return next(k, k2, out)
 }
 

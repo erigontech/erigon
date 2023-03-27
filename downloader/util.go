@@ -30,6 +30,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anacrolix/torrent"
@@ -45,7 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/trackers"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
+
 	"golang.org/x/sync/semaphore"
 )
 
@@ -235,14 +236,14 @@ func BuildTorrentFilesIfNeed(ctx context.Context, snapDir string) ([]string, err
 	wg := &sync.WaitGroup{}
 	workers := cmp.Max(1, runtime.GOMAXPROCS(-1)-1) * 2
 	var sem = semaphore.NewWeighted(int64(workers))
-	i := atomic2.NewInt32(0)
+	i := atomic.Int32{}
 	for _, f := range files {
 		wg.Add(1)
 		if err := sem.Acquire(ctx, 1); err != nil {
 			return nil, err
 		}
 		go func(f string) {
-			defer i.Inc()
+			defer i.Add(1)
 			defer sem.Release(1)
 			defer wg.Done()
 			if err := buildTorrentIfNeed(f, snapDir); err != nil {
