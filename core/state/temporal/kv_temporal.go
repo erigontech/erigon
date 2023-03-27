@@ -378,11 +378,11 @@ func (tx *Tx) HistoryGet(name kv.History, key []byte, ts uint64) (v []byte, ok b
 func (tx *Tx) IndexRange(name kv.InvertedIdx, k []byte, fromTs, toTs int, asc order.By, limit int) (timestamps iter.U64, err error) {
 	switch name {
 	case AccountsHistoryIdx:
-		timestamps, err = tx.agg.AccountHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.AccountHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case StorageHistoryIdx:
-		timestamps, err = tx.agg.StorageHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.StorageHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case CodeHistoryIdx:
-		timestamps, err = tx.agg.CodeHistoyIdxRange(k, fromTs, toTs, asc, limit, tx)
+		timestamps, err = tx.agg.CodeHistoryIdxRange(k, fromTs, toTs, asc, limit, tx)
 	case LogTopicIdx:
 		timestamps, err = tx.agg.LogTopicRange(k, fromTs, toTs, asc, limit, tx)
 	case LogAddrIdx:

@@ -2,7 +2,9 @@ package exec22
 
 import (
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -31,6 +33,9 @@ type TxTask struct {
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
 
+	CommitPlainKeys    [][]byte
+	CommitHashKeys     [][]byte
+	CommitUpdates      []commitment.Update
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*KvList
 	WriteLists         map[string]*KvList

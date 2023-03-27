@@ -16,6 +16,10 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/torquem-ch/mdbx-go/mdbx"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -27,13 +31,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/torquem-ch/mdbx-go/mdbx"
-	"golang.org/x/sync/errgroup"
-
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -654,8 +654,12 @@ Loop:
 					break Loop
 				}
 
-				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
+				rh, err := rs.ApplyState4(applyTx, txTask, agg)
+				if err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
+				}
+				if !bytes.Equal(header.Root.Bytes(), rh) {
+					return fmt.Errorf("root hash mismatch: %x != %x", header.Root.Bytes(), rh)
 				}
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Add(1)
@@ -791,7 +795,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			i++
 		}
 
-		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
+		if _, err := rs.ApplyState4(applyTx, txTask, agg); err != nil {
 			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))

@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -262,7 +263,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 }
 func (so *stateObject) printTrie() {
 	for key, value := range so.dirtyStorage {
-		fmt.Printf("WriteAccountStorage: %x,%x,%s\n", so.address, key, value.Hex())
+		fmt.Printf("UpdateStorage: %x,%x,%s\n", so.address, key, value.Hex())
 	}
 }
 

@@ -13,6 +13,10 @@ import (
 	"unsafe"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -23,8 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
 )
 
 const CodeSizeTable = "CodeSize"
@@ -33,6 +35,7 @@ const StorageTable = "Storage"
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
+	shared         *libstate.SharedDomains
 	chCode         map[string][]byte
 	chAccs         map[string][]byte
 	chStorage      *btree2.Map[string, []byte]
@@ -55,9 +58,10 @@ type StateV3 struct {
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
-func NewStateV3(tmpdir string) *StateV3 {
+func NewStateV3(tmpdir string, shared *libstate.SharedDomains) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
+		shared:         shared,
 		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
@@ -79,6 +83,13 @@ func (rs *StateV3) put(table string, key, val []byte) {
 
 func (rs *StateV3) puts(table string, key string, val []byte) {
 	switch table {
+	//case kv.CommitmentVals:
+	//	if old, ok := rs.chCommitment[key]; ok {
+	//		rs.sizeEstimate += len(val) - len(old)
+	//	} else {
+	//		rs.sizeEstimate += len(key) + len(val)
+	//	}
+	//	rs.chCommitment[key] = val
 	case StorageTable:
 		if old, ok := rs.chStorage.Set(key, val); ok {
 			rs.sizeEstimate += len(val) - len(old)
@@ -130,6 +141,8 @@ func (rs *StateV3) get(table string, key []byte) (v []byte, ok bool) {
 	switch table {
 	case StorageTable:
 		v, ok = rs.chStorage.Get(keyS)
+	//case kv.CommitmentVals:
+	//	v, ok = rs.chCommitment[keyS]
 	case kv.PlainState:
 		v, ok = rs.chAccs[keyS]
 	case kv.Code:
@@ -221,6 +234,11 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 		return err
 	}
 	rs.chIncs = map[string][]byte{}
+	rs.shared.Flush()
+	//if err := rs.flushMap(ctx, rwTx, kv.CommitmentVals, rs.chCommitment, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	//rs.chCommitment = map[string][]byte{}
 
 	rs.sizeEstimate = 0
 	return nil
@@ -345,61 +363,63 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 
 			prev := rs.applyPrevAccountBuf[:accounts.SerialiseV3Len(original)]
 			accounts.SerialiseV3To(original, prev)
-			if err := agg.AddAccountPrev(addr, prev); err != nil {
+			if err := agg.DeleteAccount(addr, prev); err != nil {
 				return err
 			}
-			codeHashBytes := original.CodeHash.Bytes()
-			codePrev, ok := rs.get(kv.Code, codeHashBytes)
-			if !ok || codePrev == nil {
-				var err error
-				codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
-				if err != nil {
-					return err
-				}
-			}
-			if err := agg.AddCodePrev(addr, codePrev); err != nil {
-				return err
-			}
-			// Iterate over storage
-			var k, v []byte
-			_, _ = k, v
-			var e error
-			if k, v, e = cursor.Seek(addr1); err != nil {
-				return e
-			}
-			if !bytes.HasPrefix(k, addr1) {
-				k = nil
-			}
-			//TODO: try full-scan, then can replace btree by map
-			iter := rs.chStorage.Iter()
-			for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
-				key := []byte(iter.Key())
-				if !bytes.HasPrefix(key, addr1) {
-					break
-				}
-				for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
-					if !bytes.Equal(k, key) {
-						// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
-						if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-							return e
-						}
-					}
-				}
-				if e != nil {
-					return e
-				}
-				if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
-					break
-				}
-			}
-			for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
-				if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
-					return e
-				}
-			}
-			if e != nil {
-				return e
-			}
+
+			//codeHashBytes := original.CodeHash.Bytes()
+			//codePrev, ok := rs.get(kv.Code, codeHashBytes)
+			//if !ok || codePrev == nil {
+			//	var err error
+			//	codePrev, err = roTx.GetOne(kv.Code, codeHashBytes)
+			//	if err != nil {
+			//		return err
+			//	}
+			//}
+			//
+			//if err := agg.UpdateCode(addr, []byte{}, codePrev); err != nil {
+			//	return err
+			//}
+			//// Iterate over storage
+			//var k, v []byte
+			//_, _ = k, v
+			//var e error
+			//if k, v, e = cursor.Seek(addr1); err != nil {
+			//	return e
+			//}
+			//if !bytes.HasPrefix(k, addr1) {
+			//	k = nil
+			//}
+			////TODO: try full-scan, then can replace btree by map
+			//iter := rs.chStorage.Iter()
+			//for ok := iter.Seek(string(addr1)); ok; ok = iter.Next() {
+			//	key := []byte(iter.Key())
+			//	if !bytes.HasPrefix(key, addr1) {
+			//		break
+			//	}
+			//	for ; e == nil && k != nil && bytes.HasPrefix(k, addr1) && bytes.Compare(k, key) <= 0; k, v, e = cursor.Next() {
+			//		if !bytes.Equal(k, key) {
+			//			// Skip the cursor item when the key is equal, i.e. prefer the item from the changes tree
+			//			if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+			//				return e
+			//			}
+			//		}
+			//	}
+			//	if e != nil {
+			//		return e
+			//	}
+			//	if e = agg.AddStoragePrev(addr, key[28:], iter.Value()); e != nil {
+			//		break
+			//	}
+			//}
+			//for ; e == nil && k != nil && bytes.HasPrefix(k, addr1); k, v, e = cursor.Next() {
+			//	if e = agg.AddStoragePrev(addr, k[28:], v); e != nil {
+			//		return e
+			//	}
+			//}
+			//if e != nil {
+			//	return e
+			//}
 		}
 	}
 
@@ -428,11 +448,47 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 				}
 			}
 		}
-		if err := agg.AddCodePrev(addr, codePrev); err != nil {
-			return err
-		}
+		//if err := agg.UpdateCode(addr, newCode, codePrev); err != nil {
+		//	return err
+		//}
 	}
 	return nil
+}
+
+func (rs *StateV3) applyUpdates(roTx kv.Tx, task *exec22.TxTask, agg *libstate.AggregatorV3) {
+	//emptyRemoval := task.Rules.IsSpuriousDragon
+	rs.lock.Lock()
+	defer rs.lock.Unlock()
+
+	var p2 []byte
+	for table, wl := range task.WriteLists {
+		var d *libstate.DomainMem
+		switch table {
+		case kv.PlainState:
+			d = rs.shared.Account
+		case kv.Code:
+			d = rs.shared.Code
+		case StorageTable:
+			d = rs.shared.Storage
+		default:
+			panic(fmt.Errorf("unknown table %s", table))
+		}
+
+		for i := 0; i < len(wl.Keys); i++ {
+			addr, err := hex.DecodeString(wl.Keys[i])
+			if err != nil {
+				panic(err)
+			}
+			if len(addr) > 28 {
+				p2 = addr[length.Addr : len(addr)-length.Incarnation]
+			}
+			if err := d.Put(addr[:length.Addr], p2, wl.Vals[i]); err != nil {
+				panic(err)
+			}
+			p2 = p2[:0]
+		}
+	}
+	//rs.shared.Commitment.Compu()
 }
 
 func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
@@ -468,7 +524,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 			a.EncodeForStorage(enc1)
 		}
 		rs.put(kv.PlainState, addrBytes, enc1)
-		if err := agg.AddAccountPrev(addrBytes, enc0); err != nil {
+		if err := agg.UpdateAccount(addrBytes, enc0, enc1); err != nil {
 			return err
 		}
 	}
@@ -501,23 +557,39 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
+func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
+	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+
+	agg.SetTxNum(txTask.TxNum)
+	rh, err := rs.shared.Commit(txTask.TxNum, false, false)
+	if err != nil {
+		return nil, err
+	}
+
+	returnReadList(txTask.ReadLists)
+	returnWriteList(txTask.WriteLists)
+
+	txTask.ReadLists, txTask.WriteLists = nil, nil
+	return rh, nil
+}
+
 func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	if dbg.DiscardHistory() {
 		return nil
 	}
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	for addrS, enc0 := range txTask.AccountPrevs {
-		if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
-			return err
-		}
-	}
-	for compositeS, val := range txTask.StoragePrevs {
-		composite := []byte(compositeS)
-		if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
-			return err
-		}
-	}
+	//for addrS, enc0 := range txTask.AccountPrevs {
+	//	if err := agg.AddAccountPrev([]byte(addrS), enc0); err != nil {
+	//		return err
+	//	}
+	//}
+	//for compositeS, val := range txTask.StoragePrevs {
+	//	composite := []byte(compositeS)
+	//	if err := agg.AddStoragePrev(composite[:20], composite[28:], val); err != nil {
+	//		return err
+	//	}
+	//}
 	if txTask.TraceFroms != nil {
 		for addr := range txTask.TraceFroms {
 			if err := agg.AddTraceFrom(addr[:]); err != nil {
@@ -731,6 +803,7 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 
 func (w *StateWriterV3) SetTxNum(txNum uint64) {
 	w.txNum = txNum
+	w.rs.shared.SetTxNum(txNum)
 }
 
 func (w *StateWriterV3) ResetWriteSet() {
@@ -745,6 +818,10 @@ func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
+func (w *StateWriterV3) CommitSets() ([][]byte, [][]byte, []commitment.Update) {
+	return w.rs.shared.Updates.List()
+}
+
 func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
@@ -756,6 +833,10 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
+	//w.rs.shared.Updates.TouchPlainKey(addressBytes, value, w.rs.shared.Updates.TouchPlainKeyAccount)
+	if err := w.rs.shared.UpdateAccountData(addressBytes, value); err != nil {
+		return err
+	}
 	var prev []byte
 	if original.Initialised {
 		prev = accounts.SerialiseV3(original)
@@ -776,7 +857,11 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, string(dbutils.PlainGenerateStoragePrefix(addressBytes, incarnation)))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHashBytes)
 	}
-
+	//w.rs.shared.Updates.TouchPlainKey(addressBytes, codeHashBytes, w.rs.shared.Updates.TouchPlainKeyCode)
+	//
+	if err := w.rs.shared.UpdateAccountCode(addressBytes, codeHashBytes); err != nil {
+		return err
+	}
 	if w.codePrevs == nil {
 		w.codePrevs = map[string]uint64{}
 	}
@@ -794,6 +879,12 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, string(addressBytes))
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
+	if err := w.rs.shared.DeleteAccount(addressBytes); err != nil {
+		return err
+	}
+	//w.rs.shared.Updates.TouchPlainKey(addressBytes, nil, w.rs.shared.Updates.TouchPlainKeyAccount)
+	//w.rs.shared.Updates.TouchPlainKey(addressBytes, nil, w.rs.shared.Updates.TouchPlainKeyCode)
+	//TODO STORAGE
 	if original.Initialised {
 		if w.accountDels == nil {
 			w.accountDels = map[string]*accounts.Account{}
@@ -812,6 +903,10 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	w.writeLists[StorageTable].Keys = append(w.writeLists[StorageTable].Keys, cmpositeS)
 	w.writeLists[StorageTable].Vals = append(w.writeLists[StorageTable].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+	//w.rs.shared.Updates.TouchPlainKey(composite, value.Bytes(), w.rs.shared.Updates.TouchPlainKeyStorage)
+	if err := w.rs.shared.WriteAccountStorage(address[:], key.Bytes(), value.Bytes()); err != nil {
+		return err
+	}
 	if w.storagePrevs == nil {
 		w.storagePrevs = map[string][]byte{}
 	}
