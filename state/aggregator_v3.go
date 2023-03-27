@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	math2 "math"
+	"path"
 	"runtime"
 	"sort"
 	"strings"
@@ -48,6 +49,7 @@ import (
 type AggregatorV3 struct {
 	rwTx             kv.RwTx
 	db               kv.RoDB
+	shared           *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
@@ -538,9 +540,189 @@ func (sf AggV3StaticFiles) Close() {
 	sf.tracesTo.Close()
 }
 
+func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
+	var (
+		logEvery = time.NewTicker(time.Second * 30)
+		wg       sync.WaitGroup
+		errCh    = make(chan error, 8)
+		//maxSpan  = StepsInBiggestFile * a.aggregationStep
+		txFrom = step * a.aggregationStep
+		txTo   = (step + 1) * a.aggregationStep
+		//workers  = 1
+
+		stepStartedAt = time.Now()
+	)
+
+	defer logEvery.Stop()
+
+	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
+		wg.Add(1)
+
+		mxRunningCollations.Inc()
+		start := time.Now()
+		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx, logEvery)
+		mxRunningCollations.Dec()
+		mxCollateTook.UpdateDuration(start)
+
+		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+		//mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+
+		if err != nil {
+			collation.Close()
+			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+		}
+
+		go func(wg *sync.WaitGroup, d *Domain, collation Collation) {
+			defer wg.Done()
+			mxRunningMerges.Inc()
+
+			start := time.Now()
+			sf, err := d.buildFiles(ctx, step, collation)
+			collation.Close()
+
+			if err != nil {
+				errCh <- err
+
+				sf.Close()
+				//mxRunningMerges.Dec()
+				return
+			}
+
+			//mxRunningMerges.Dec()
+
+			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+			d.stats.LastFileBuildingTook = time.Since(start)
+		}(&wg, d, collation)
+
+		//mxPruningProgress.Add(2) // domain and history
+		if err := d.prune(ctx, step, txFrom, txTo, (1<<64)-1, logEvery); err != nil {
+			return err
+		}
+		//mxPruningProgress.Dec()
+		//mxPruningProgress.Dec()
+
+		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
+		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
+	}
+
+	// indices are built concurrently
+	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
+		wg.Add(1)
+
+		//mxRunningCollations.Inc()
+		start := time.Now()
+		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx, logEvery)
+		//mxRunningCollations.Dec()
+		mxCollateTook.UpdateDuration(start)
+
+		if err != nil {
+			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
+		}
+
+		go func(wg *sync.WaitGroup, d *InvertedIndex, tx kv.Tx) {
+			defer wg.Done()
+
+			//mxRunningMerges.Inc()
+			//start := time.Now()
+
+			sf, err := d.buildFiles(ctx, step, collation)
+			if err != nil {
+				errCh <- err
+				sf.Close()
+				return
+			}
+
+			//mxRunningMerges.Dec()
+			//mxBuildTook.UpdateDuration(start)
+
+			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+
+			icx := d.MakeContext()
+			//mxRunningMerges.Inc()
+
+			//if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx); err != nil {
+			//	errCh <- err
+			//
+			//	mxRunningMerges.Dec()
+			//	icx.Close()
+			//	return
+			//}
+
+			//mxRunningMerges.Dec()
+			icx.Close()
+		}(&wg, d, d.tx)
+
+		//mxPruningProgress.Inc()
+		//startPrune := time.Now()
+		if err := d.prune(ctx, txFrom, txTo, 1<<64-1, logEvery); err != nil {
+			return err
+		}
+		//mxPruneTook.UpdateDuration(startPrune)
+		//mxPruningProgress.Dec()
+	}
+
+	// when domain files are build and db is pruned, we can merge them
+	wg.Add(1)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+
+		if err := a.mergeDomainSteps(ctx); err != nil {
+			errCh <- err
+		}
+	}(&wg)
+
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	for err := range errCh {
+		log.Warn("domain collate-buildFiles failed", "err", err)
+		return fmt.Errorf("domain collate-build failed: %w", err)
+	}
+
+	log.Info("[stat] aggregation is finished",
+		"range", fmt.Sprintf("%.2fM-%.2fM", float64(txFrom)/10e5, float64(txTo)/10e5),
+		"took", time.Since(stepStartedAt))
+
+	//mxStepTook.UpdateDuration(stepStartedAt)
+
+	return nil
+}
+
+func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
+	mergeStartedAt := time.Now()
+	var upmerges int
+	for {
+		somethingMerged, err := a.mergeLoopStep(ctx, 1)
+		if err != nil {
+			return err
+		}
+
+		if !somethingMerged {
+			break
+		}
+		upmerges++
+	}
+
+	if upmerges > 1 {
+		log.Info("[stat] aggregation merged", "merge_took", time.Since(mergeStartedAt), "merges_count", upmerges)
+	}
+
+	return nil
+}
+
 func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
-	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+	txn := a.txNum.Load() + 1
+	if txn <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return nil
+	}
+	_, err = a.shared.Commit(txn, true, false)
+	if err != nil {
+		return err
+	}
+	if err := a.shared.Flush(); err != nil {
+		return err
 	}
 
 	// trying to create as much small-step-files as possible:
@@ -613,6 +795,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethin
 	closeAll = false
 	return true, nil
 }
+
 func (a *AggregatorV3) MergeLoop(ctx context.Context, workers int) error {
 	for {
 		somethingMerged, err := a.mergeLoopStep(ctx, workers)
@@ -792,6 +975,10 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	return nil
+}
+
+func (a *AggregatorV3) BufferedDomains() *SharedDomains {
+	return NewSharedDomains(path.Join(a.tmpdir, "shared"), a.accounts, a.code, a.storage, a.commitment)
 }
 
 func (a *AggregatorV3) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }

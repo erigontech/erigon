@@ -14,143 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 )
 
-func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []commitment.Update, saveStateAfter, trace bool) (rootHash []byte, err error) {
-	// if commitment mode is Disabled, there will be nothing to compute on.
-	//mxCommitmentRunning.Inc()
-	rootHash, branchNodeUpdates, err := a.Commitment.ComputeCommitment(pk, hk, upd, trace)
-	//mxCommitmentRunning.Dec()
-	if err != nil {
-		return nil, err
-	}
-	//if a.seekTxNum > a.txNum {
-	//	saveStateAfter = false
-	//}
-
-	//mxCommitmentKeys.Add(int(a.commitment.comKeys))
-	//mxCommitmentTook.Update(a.commitment.comTook.Seconds())
-
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
-
-	//sortedPrefixes := make([]string, len(branchNodeUpdates))
-	//for pref := range branchNodeUpdates {
-	//	sortedPrefixes = append(sortedPrefixes, pref)
-	//}
-	//sort.Strings(sortedPrefixes)
-
-	cct := a.Commitment //.MakeContext()
-	//defer cct.Close()
-
-	for pref, update := range branchNodeUpdates {
-		prefix := []byte(pref)
-		//update := branchNodeUpdates[pref]
-
-		stateValue, err := cct.Get(prefix, nil)
-		if err != nil {
-			return nil, err
-		}
-		//mxCommitmentUpdates.Inc()
-		stated := commitment.BranchData(stateValue)
-		merged, err := a.Commitment.c.branchMerger.Merge(stated, update)
-		if err != nil {
-			return nil, err
-		}
-		if bytes.Equal(stated, merged) {
-			continue
-		}
-		if trace {
-			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
-		}
-		if err = a.Commitment.Put(prefix, nil, merged); err != nil {
-			return nil, err
-		}
-		//mxCommitmentUpdatesApplied.Inc()
-	}
-
-	if saveStateAfter {
-		if err := a.Commitment.c.storeCommitmentState(0, txNum); err != nil {
-			return nil, err
-		}
-	}
-
-	return rootHash, nil
-}
-
-type SharedDomains struct {
-	Account    *DomainMem
-	Storage    *DomainMem
-	Code       *DomainMem
-	Commitment *DomainMemCommit
-
-	Updates *UpdateTree
-}
-
-type DomainMemCommit struct {
-	*DomainMem
-	c *DomainCommitted
-}
-
-func (d *DomainMemCommit) ComputeCommitment(pk, hk [][]byte, upd []commitment.Update, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
-	return d.c.CommitmentOver(pk, hk, upd, trace)
-}
-
-func NewSharedDomains(tmp string, a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
-	return &SharedDomains{
-		Updates:    NewUpdateTree(comm.mode),
-		Account:    NewDomainMem(a, tmp),
-		Storage:    NewDomainMem(s, tmp),
-		Code:       NewDomainMem(c, tmp),
-		Commitment: &DomainMemCommit{DomainMem: NewDomainMem(comm.Domain, tmp), c: comm},
-	}
-}
-
-func (s *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
-	v, err := s.Commitment.Get(pref, nil)
-	if err != nil {
-		return nil, fmt.Errorf("branchFn: no value for prefix %x: %w", pref, err)
-	}
-	// skip touchmap
-	return v[2:], nil
-}
-
-func (s *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, err := s.Account.Get(plainKey, nil)
-	if err != nil {
-		return fmt.Errorf("accountFn: no value for address %x : %w", plainKey, err)
-	}
-	cell.Nonce = 0
-	cell.Balance.Clear()
-	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
-	if len(encAccount) > 0 {
-		nonce, balance, chash := DecodeAccountBytes(encAccount)
-		cell.Nonce = nonce
-		cell.Balance.Set(balance)
-		if chash != nil {
-			copy(cell.CodeHash[:], chash)
-		}
-	}
-
-	code, _ := s.Code.Get(plainKey, nil)
-	if code != nil {
-		s.Updates.keccak.Reset()
-		s.Updates.keccak.Write(code)
-		copy(cell.CodeHash[:], s.Updates.keccak.Sum(nil))
-	}
-	cell.Delete = len(encAccount) == 0 && len(code) == 0
-	return nil
-}
-
-func (s *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
-	// Look in the summary table first
-	enc, err := s.Storage.Get(plainKey[:length.Addr], plainKey[length.Addr:])
-	if err != nil {
-		return err
-	}
-	cell.StorageLen = len(enc)
-	copy(cell.Storage[:], enc)
-	cell.Delete = cell.StorageLen == 0
-	return nil
-}
-
 type DomainMem struct {
 	*Domain
 
@@ -237,11 +100,8 @@ func (d *DomainMem) Get(k1, k2 []byte) ([]byte, error) {
 // 2. read prev value correctly from domain
 // 3. load from etl to table, process on the fly to avoid domain pruning
 
-func (d *DomainMem) Flush() {
-	err := d.etl.Load(d.tx, d.valsTable, d.etlLoader(), etl.TransformArgs{})
-	if err != nil {
-		panic(err)
-	}
+func (d *DomainMem) Flush() error {
+	return d.etl.Load(d.tx, d.valsTable, d.etlLoader(), etl.TransformArgs{})
 }
 
 func (d *DomainMem) Close() {
@@ -330,30 +190,254 @@ func (d *DomainMem) Reset() {
 	d.mu.Unlock()
 }
 
-//type UpdateWriter *UpdateTree
-//
-//func (w *(*UpdateWriter)) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-//	//TODO implement me
-//	w.TouchPlainKey(addressBytes, value, w.rs.Commitment.TouchPlainKeyAccount)
-//	panic("implement me")
-//}
-//
-//func (UpdateWriter) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
-//	//TODO implement me
-//	panic("implement me")
-//}
-//
-//func (UpdateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
-//	//TODO implement me
-//	panic("implement me")
-//}
-//
-//func (UpdateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
-//	//TODO implement me
-//	panic("implement me")
-//}
-//
-//func (UpdateWriter) CreateContract(address common.Address) error {
-//	//TODO implement me
-//	panic("implement me")
-//}
+type SharedDomains struct {
+	Account    *DomainMem
+	Storage    *DomainMem
+	Code       *DomainMem
+	Commitment *DomainMemCommit
+
+	Updates *UpdateTree
+}
+
+func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []commitment.Update, saveStateAfter, trace bool) (rootHash []byte, err error) {
+	// if commitment mode is Disabled, there will be nothing to compute on.
+	//mxCommitmentRunning.Inc()
+	rootHash, branchNodeUpdates, err := a.Commitment.ComputeCommitment(pk, hk, upd, trace)
+	//mxCommitmentRunning.Dec()
+	if err != nil {
+		return nil, err
+	}
+	//if a.seekTxNum > a.txNum {
+	//	saveStateAfter = false
+	//}
+
+	//mxCommitmentKeys.Add(int(a.commitment.comKeys))
+	//mxCommitmentTook.Update(a.commitment.comTook.Seconds())
+
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+
+	//sortedPrefixes := make([]string, len(branchNodeUpdates))
+	//for pref := range branchNodeUpdates {
+	//	sortedPrefixes = append(sortedPrefixes, pref)
+	//}
+	//sort.Strings(sortedPrefixes)
+
+	cct := a.Commitment //.MakeContext()
+	//defer cct.Close()
+
+	for pref, update := range branchNodeUpdates {
+		prefix := []byte(pref)
+		//update := branchNodeUpdates[pref]
+
+		stateValue, err := cct.Get(prefix, nil)
+		if err != nil {
+			return nil, err
+		}
+		//mxCommitmentUpdates.Inc()
+		stated := commitment.BranchData(stateValue)
+		merged, err := a.Commitment.c.branchMerger.Merge(stated, update)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(stated, merged) {
+			continue
+		}
+		if trace {
+			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
+		}
+		if err = a.Commitment.Put(prefix, nil, merged); err != nil {
+			return nil, err
+		}
+		//mxCommitmentUpdatesApplied.Inc()
+	}
+
+	if saveStateAfter {
+		if err := a.Commitment.c.storeCommitmentState(0, txNum); err != nil {
+			return nil, err
+		}
+	}
+
+	return rootHash, nil
+}
+
+func (a *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHash []byte, err error) {
+	// if commitment mode is Disabled, there will be nothing to compute on.
+	rootHash, branchNodeUpdates, err := a.Commitment.c.ComputeCommitment(trace)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+
+	for pref, update := range branchNodeUpdates {
+		prefix := []byte(pref)
+
+		stateValue, err := a.Commitment.Get(prefix, nil)
+		if err != nil {
+			return nil, err
+		}
+		stated := commitment.BranchData(stateValue)
+		merged, err := a.Commitment.c.branchMerger.Merge(stated, update)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(stated, merged) {
+			continue
+		}
+		if trace {
+			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
+		}
+		if err = a.UpdateCommitmentData(prefix, merged); err != nil {
+			return nil, err
+		}
+		mxCommitmentUpdatesApplied.Inc()
+	}
+
+	if saveStateAfter {
+		if err := a.Commitment.c.storeCommitmentState(0, txNum); err != nil {
+			return nil, err
+		}
+	}
+
+	return rootHash, nil
+}
+
+func (s *SharedDomains) SetTxNum(txNum uint64) {
+	s.Account.SetTxNum(txNum)
+	s.Storage.SetTxNum(txNum)
+	s.Code.SetTxNum(txNum)
+	s.Commitment.SetTxNum(txNum)
+}
+
+func (s *SharedDomains) Flush() error {
+	if err := s.Account.Flush(); err != nil {
+		return err
+	}
+	if err := s.Storage.Flush(); err != nil {
+		return err
+	}
+	if err := s.Code.Flush(); err != nil {
+		return err
+	}
+	if err := s.Commitment.Flush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func NewSharedDomains(tmp string, a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
+	return &SharedDomains{
+		Updates:    NewUpdateTree(comm.mode),
+		Account:    NewDomainMem(a, tmp),
+		Storage:    NewDomainMem(s, tmp),
+		Code:       NewDomainMem(c, tmp),
+		Commitment: &DomainMemCommit{DomainMem: NewDomainMem(comm.Domain, tmp), c: comm},
+	}
+}
+
+type DomainMemCommit struct {
+	*DomainMem
+	c *DomainCommitted
+}
+
+func (d *DomainMemCommit) ComputeCommitment(pk, hk [][]byte, upd []commitment.Update, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+	return d.c.CommitmentOver(pk, hk, upd, trace)
+}
+
+func (s *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
+	v, err := s.Commitment.Get(pref, nil)
+	if err != nil {
+		return nil, fmt.Errorf("branchFn: no value for prefix %x: %w", pref, err)
+	}
+	// skip touchmap
+	return v[2:], nil
+}
+
+func (s *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, err := s.Account.Get(plainKey, nil)
+	if err != nil {
+		return fmt.Errorf("accountFn: no value for address %x : %w", plainKey, err)
+	}
+	cell.Nonce = 0
+	cell.Balance.Clear()
+	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
+	if len(encAccount) > 0 {
+		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		cell.Nonce = nonce
+		cell.Balance.Set(balance)
+		if chash != nil {
+			copy(cell.CodeHash[:], chash)
+		}
+	}
+
+	code, _ := s.Code.Get(plainKey, nil)
+	if code != nil {
+		s.Updates.keccak.Reset()
+		s.Updates.keccak.Write(code)
+		copy(cell.CodeHash[:], s.Updates.keccak.Sum(nil))
+	}
+	cell.Delete = len(encAccount) == 0 && len(code) == 0
+	return nil
+}
+
+func (s *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
+	// Look in the summary table first
+	enc, err := s.Storage.Get(plainKey[:length.Addr], plainKey[length.Addr:])
+	if err != nil {
+		return err
+	}
+	cell.StorageLen = len(enc)
+	copy(cell.Storage[:], enc)
+	cell.Delete = cell.StorageLen == 0
+	return nil
+}
+
+func (a *SharedDomains) UpdateAccountData(addr []byte, account []byte) error {
+	a.Commitment.c.TouchPlainKey(addr, account, a.Commitment.c.TouchPlainKeyAccount)
+	return a.Account.Put(addr, nil, account)
+}
+
+func (a *SharedDomains) UpdateAccountCode(addr []byte, code []byte) error {
+	a.Commitment.c.TouchPlainKey(addr, code, a.Commitment.c.TouchPlainKeyCode)
+	if len(code) == 0 {
+		return a.Code.Delete(addr, nil)
+	}
+	return a.Code.Put(addr, nil, code)
+}
+
+func (a *SharedDomains) UpdateCommitmentData(prefix []byte, code []byte) error {
+	return a.Commitment.Put(prefix, nil, code)
+}
+
+func (a *SharedDomains) DeleteAccount(addr []byte) error {
+	a.Commitment.c.TouchPlainKey(addr, nil, a.Commitment.c.TouchPlainKeyAccount)
+
+	if err := a.Account.Delete(addr, nil); err != nil {
+		return err
+	}
+	if err := a.Code.Delete(addr, nil); err != nil {
+		return err
+	}
+	var e error
+	if err := a.Storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
+		a.Commitment.c.TouchPlainKey(k, nil, a.Commitment.c.TouchPlainKeyStorage)
+		if e == nil {
+			e = a.Storage.Delete(k, nil)
+		}
+	}); err != nil {
+		return err
+	}
+	return e
+}
+
+func (a *SharedDomains) WriteAccountStorage(addr, loc []byte, value []byte) error {
+	composite := make([]byte, len(addr)+len(loc))
+	copy(composite, addr)
+	copy(composite[length.Addr:], loc)
+
+	a.Commitment.c.TouchPlainKey(composite, value, a.Commitment.c.TouchPlainKeyStorage)
+	if len(value) == 0 {
+		return a.Storage.Delete(addr, loc)
+	}
+	return a.Storage.Put(addr, loc, value)
+}
