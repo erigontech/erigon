@@ -74,6 +74,128 @@ func ParseCommitmentMode(s string) CommitmentMode {
 
 type ValueMerger func(prev, current []byte) (merged []byte, err error)
 
+type UpdateTree struct {
+	tree   *btree.BTreeG[*CommitmentItem]
+	mode   CommitmentMode
+	keccak hash.Hash
+}
+
+func NewUpdateTree(mode CommitmentMode) *UpdateTree {
+	return &UpdateTree{
+		tree:   btree.NewG[*CommitmentItem](32, commitmentItemLess),
+		mode:   mode,
+		keccak: sha3.NewLegacyKeccak256(),
+	}
+}
+
+// TouchPlainKey marks plainKey as updated and applies different fn for different key types
+// (different behaviour for Code, Account and Storage key modifications).
+func (t *UpdateTree) TouchPlainKey(key, val []byte, fn func(c *CommitmentItem, val []byte)) {
+	if t.mode == CommitmentModeDisabled {
+		return
+	}
+	c := &CommitmentItem{plainKey: common.Copy(key), hashedKey: t.hashAndNibblizeKey(key)}
+	if t.mode > CommitmentModeDirect {
+		fn(c, val)
+	}
+	t.tree.ReplaceOrInsert(c)
+}
+
+func (t *UpdateTree) TouchPlainKeyAccount(c *CommitmentItem, val []byte) {
+	if len(val) == 0 {
+		c.update.Flags = commitment.DELETE_UPDATE
+		return
+	}
+	c.update.DecodeForStorage(val)
+	c.update.Flags = commitment.BALANCE_UPDATE | commitment.NONCE_UPDATE
+	item, found := t.tree.Get(&CommitmentItem{hashedKey: c.hashedKey})
+	if !found {
+		return
+	}
+	if item.update.Flags&commitment.CODE_UPDATE != 0 {
+		c.update.Flags |= commitment.CODE_UPDATE
+		copy(c.update.CodeHashOrStorage[:], item.update.CodeHashOrStorage[:])
+	}
+}
+
+func (t *UpdateTree) TouchPlainKeyStorage(c *CommitmentItem, val []byte) {
+	c.update.ValLength = len(val)
+	if len(val) == 0 {
+		c.update.Flags = commitment.DELETE_UPDATE
+	} else {
+		c.update.Flags = commitment.STORAGE_UPDATE
+		copy(c.update.CodeHashOrStorage[:], val)
+	}
+}
+
+func (t *UpdateTree) TouchPlainKeyCode(c *CommitmentItem, val []byte) {
+	c.update.Flags = commitment.CODE_UPDATE
+	item, found := t.tree.Get(c)
+	if !found {
+		t.keccak.Reset()
+		t.keccak.Write(val)
+		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+		return
+	}
+	if item.update.Flags&commitment.BALANCE_UPDATE != 0 {
+		c.update.Flags |= commitment.BALANCE_UPDATE
+		c.update.Balance.Set(&item.update.Balance)
+	}
+	if item.update.Flags&commitment.NONCE_UPDATE != 0 {
+		c.update.Flags |= commitment.NONCE_UPDATE
+		c.update.Nonce = item.update.Nonce
+	}
+	if item.update.Flags == commitment.DELETE_UPDATE && len(val) == 0 {
+		c.update.Flags = commitment.DELETE_UPDATE
+	} else {
+		t.keccak.Reset()
+		t.keccak.Write(val)
+		copy(c.update.CodeHashOrStorage[:], t.keccak.Sum(nil))
+	}
+}
+
+// Returns list of both plain and hashed keys. If .mode is CommitmentModeUpdate, updates also returned.
+func (t *UpdateTree) List() ([][]byte, [][]byte, []commitment.Update) {
+	plainKeys := make([][]byte, t.tree.Len())
+	hashedKeys := make([][]byte, t.tree.Len())
+	updates := make([]commitment.Update, t.tree.Len())
+
+	j := 0
+	t.tree.Ascend(func(item *CommitmentItem) bool {
+		plainKeys[j] = item.plainKey
+		hashedKeys[j] = item.hashedKey
+		updates[j] = item.update
+		j++
+		return true
+	})
+
+	t.tree.Clear(true)
+	return plainKeys, hashedKeys, updates
+}
+
+// TODO(awskii): let trie define hashing function
+func (t *UpdateTree) hashAndNibblizeKey(key []byte) []byte {
+	hashedKey := make([]byte, length.Hash)
+
+	t.keccak.Reset()
+	t.keccak.Write(key[:length.Addr])
+	copy(hashedKey[:length.Hash], t.keccak.Sum(nil))
+
+	if len(key[length.Addr:]) > 0 {
+		hashedKey = append(hashedKey, make([]byte, length.Hash)...)
+		t.keccak.Reset()
+		t.keccak.Write(key[length.Addr:])
+		copy(hashedKey[length.Hash:], t.keccak.Sum(nil))
+	}
+
+	nibblized := make([]byte, len(hashedKey)*2)
+	for i, b := range hashedKey {
+		nibblized[i*2] = (b >> 4) & 0xf
+		nibblized[i*2+1] = b & 0xf
+	}
+	return nibblized
+}
+
 type DomainCommitted struct {
 	*Domain
 	mode         CommitmentMode
@@ -546,6 +668,38 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	closeItem = false
 	d.stats.MergesCount++
 	return
+}
+
+func (d *DomainCommitted) CommitmentOver(touchedKeys, hashedKeys [][]byte, updates []commitment.Update, trace bool) (rootHash []byte, branchNodeUpdates map[string]commitment.BranchData, err error) {
+	defer func(s time.Time) { d.comTook = time.Since(s) }(time.Now())
+
+	d.comKeys = uint64(len(touchedKeys))
+	if len(touchedKeys) == 0 {
+		rootHash, err = d.patriciaTrie.RootHash()
+		return rootHash, nil, err
+	}
+
+	// data accessing functions should be set once before
+	d.patriciaTrie.Reset()
+	d.patriciaTrie.SetTrace(trace)
+
+	switch d.mode {
+	case CommitmentModeDirect:
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ReviewKeys(touchedKeys, hashedKeys)
+		if err != nil {
+			return nil, nil, err
+		}
+	case CommitmentModeUpdate:
+		rootHash, branchNodeUpdates, err = d.patriciaTrie.ProcessUpdates(touchedKeys, hashedKeys, updates)
+		if err != nil {
+			return nil, nil, err
+		}
+	case CommitmentModeDisabled:
+		return nil, nil, nil
+	default:
+		return nil, nil, fmt.Errorf("invalid commitment mode: %d", d.mode)
+	}
+	return rootHash, branchNodeUpdates, err
 }
 
 // Evaluates commitment for processed state. Commit=true - store trie state after evaluation
