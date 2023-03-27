@@ -1,18 +1,18 @@
-package eth
+package borfinality
 
 import (
 	"context"
 	"errors"
 
+	eth "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/common"
-	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/log/v3"
 )
 
-type borHandler struct {
-	borAPI     *bor.API
-	downloader *downloader3.Downloader
+type Handler struct {
+	BorAPI *bor.API
+	eth.ChainValidator
 }
 
 var (
@@ -29,7 +29,7 @@ var (
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
-func (h *borHandler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, eth *Ethereum, verifier *borVerifier) (uint64, common.Hash, error) {
+func (h *Handler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *chainConfig) (uint64, common.Hash, error) {
 	var (
 		blockNum  uint64
 		blockHash common.Hash
@@ -45,7 +45,7 @@ func (h *borHandler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor,
 	// Verify if the checkpoint fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the checkpoint. If not,
 	// it will return appropriate error.
-	hash, err := verifier.verify(ctx, eth, h, checkpoint.StartBlock.Uint64(), checkpoint.EndBlock.Uint64(), checkpoint.RootHash.String()[2:], true)
+	hash, err := verifier.verify(ctx, h, config, checkpoint.StartBlock.Uint64(), checkpoint.EndBlock.Uint64(), checkpoint.RootHash.String()[2:], true)
 	if err != nil {
 		log.Warn("Failed to whitelist checkpoint", "err", err)
 		return blockNum, blockHash, err
@@ -59,7 +59,7 @@ func (h *borHandler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor,
 
 // fetchWhitelistMilestone fetches the latest milestone from it's local heimdall
 // and verifies the data against bor data.
-func (h *borHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, eth *Ethereum, verifier *borVerifier) (uint64, common.Hash, error) {
+func (h *Handler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *chainConfig) (uint64, common.Hash, error) {
 	var (
 		num  uint64
 		hash common.Hash
@@ -78,7 +78,7 @@ func (h *borHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, 
 	// Verify if the milestone fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the milestone. If not,
 	// it will return appropriate error.
-	_, err = verifier.verify(ctx, eth, h, milestone.StartBlock.Uint64(), milestone.EndBlock.Uint64(), milestone.Hash.String()[2:], false)
+	_, err = verifier.verify(ctx, h, config, milestone.StartBlock.Uint64(), milestone.EndBlock.Uint64(), milestone.Hash.String()[2:], false)
 	if err != nil {
 		// h.downloader.UnlockSprint(milestone.EndBlock.Uint64())
 		return num, hash, err
@@ -87,7 +87,7 @@ func (h *borHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, 
 	return num, hash, nil
 }
 
-func (h *borHandler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
+func (h *Handler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
 	var (
 		milestoneID string
 	)
@@ -103,7 +103,7 @@ func (h *borHandler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (str
 	return milestoneID, nil
 }
 
-func (h *borHandler) fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
+func (h *Handler) fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
 	// fetch latest milestone
 	err := bor.HeimdallClient.FetchNoAckMilestone(ctx, milestoneID)
 
