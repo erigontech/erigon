@@ -96,11 +96,23 @@ type Header struct {
 
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
+	ExcessDataGas   *big.Int        `json:"excessDataGas"`   // EIP-4844
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
 	VerkleProof   []byte
 	VerkleKeyVals []verkle.KeyValuePair
+}
+
+// ParentExcessDataGas is a helper that returns the excess data gas value of the parent block.  It
+// returns nil if the parent header could not be fetched, or if the parent block's excess data gas
+// is nil.
+func (h *Header) ParentExcessDataGas(getHeader func(hash libcommon.Hash, number uint64) *Header) *big.Int {
+	p := getHeader(h.ParentHash, h.Number.Uint64())
+	if p != nil {
+		return p.ExcessDataGas
+	}
+	return nil
 }
 
 func bitsToBytes(bitLen int) (byteLen int) {
@@ -156,6 +168,11 @@ func (h *Header) EncodingSize() int {
 
 	if h.WithdrawalsHash != nil {
 		encodingSize += 33
+	}
+
+	if h.ExcessDataGas != nil {
+		encodingSize++
+		encodingSize += rlp.BigIntLenExcludingHead(h.ExcessDataGas)
 	}
 
 	if h.Verkle {
@@ -296,6 +313,12 @@ func (h *Header) EncodeRLP(w io.Writer) error {
 			return err
 		}
 		if _, err := w.Write(h.WithdrawalsHash.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	if h.ExcessDataGas != nil {
+		if err := rlp.EncodeBigInt(h.ExcessDataGas, w, b[:]); err != nil {
 			return err
 		}
 	}
@@ -445,6 +468,19 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 	h.WithdrawalsHash = new(libcommon.Hash)
 	h.WithdrawalsHash.SetBytes(b)
 
+	// ExcessDataGas
+	if b, err = s.Uint256Bytes(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			h.ExcessDataGas = nil
+			if err := s.ListEnd(); err != nil {
+				return fmt.Errorf("close header struct (no ExcessDataGas): %w", err)
+			}
+			return nil
+		}
+		return fmt.Errorf("read ExcessDataGas: %w", err)
+	}
+	h.ExcessDataGas = new(big.Int).SetBytes(b)
+
 	if h.Verkle {
 		if h.VerkleProof, err = s.Bytes(); err != nil {
 			return fmt.Errorf("read VerkleProof: %w", err)
@@ -464,14 +500,27 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty *hexutil.Big
-	Number     *hexutil.Big
-	GasLimit   hexutil.Uint64
-	GasUsed    hexutil.Uint64
-	Time       hexutil.Uint64
-	Extra      hexutil.Bytes
-	BaseFee    *hexutil.Big
-	Hash       libcommon.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+	Difficulty    *hexutil.Big
+	Number        *hexutil.Big
+	GasLimit      hexutil.Uint64
+	GasUsed       hexutil.Uint64
+	Time          hexutil.Uint64
+	Extra         hexutil.Bytes
+	BaseFee       *hexutil.Big
+	ExcessDataGas *hexutil.Big
+	Hash          libcommon.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+}
+
+// SetExcessDataGas sets the excess_data_gas field in the header
+func (h *Header) SetExcessDataGas(v *big.Int) {
+	h.ExcessDataGas = new(big.Int)
+	if v != nil {
+		h.ExcessDataGas.Set(v)
+	}
+	if h.WithdrawalsHash == nil {
+		// leaving this nil would result in a buggy encoding
+		h.WithdrawalsHash = &EmptyRootHash
+	}
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
@@ -491,6 +540,9 @@ func (h *Header) Size() common.StorageSize {
 	}
 	if h.WithdrawalsHash != nil {
 		s += common.StorageSize(32)
+	}
+	if h.ExcessDataGas != nil {
+		s += common.StorageSize(bitsToBytes(h.ExcessDataGas.BitLen()))
 	}
 	return s
 }
@@ -516,6 +568,12 @@ func (h *Header) SanityCheck() error {
 			return fmt.Errorf("too large base fee: bitlen %d", bfLen)
 		}
 	}
+	if h.ExcessDataGas != nil {
+		if bfLen := h.ExcessDataGas.BitLen(); bfLen > 256 {
+			return fmt.Errorf("too large excess data gas: bitlen %d", bfLen)
+		}
+	}
+
 	return nil
 }
 
@@ -1173,6 +1231,10 @@ func CopyHeader(h *Header) *Header {
 		cpy.WithdrawalsHash = new(libcommon.Hash)
 		cpy.WithdrawalsHash.SetBytes(h.WithdrawalsHash.Bytes())
 	}
+	if h.ExcessDataGas != nil {
+		cpy.ExcessDataGas = new(big.Int)
+		cpy.ExcessDataGas.Set(h.ExcessDataGas)
+	}
 	return &cpy
 }
 
@@ -1399,6 +1461,13 @@ func (b *Block) BaseFee() *big.Int {
 }
 func (b *Block) WithdrawalsHash() *libcommon.Hash { return b.header.WithdrawalsHash }
 func (b *Block) Withdrawals() Withdrawals         { return b.withdrawals }
+
+func (b *Block) ExcessDataGas() *big.Int {
+	if b.header.ExcessDataGas == nil {
+		return nil
+	}
+	return new(big.Int).Set(b.header.ExcessDataGas)
+}
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }

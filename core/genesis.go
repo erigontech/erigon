@@ -76,10 +76,11 @@ type Genesis struct {
 
 	// These fields are used for consensus tests. Please don't use them
 	// in actual genesis blocks.
-	Number     uint64         `json:"number"`
-	GasUsed    uint64         `json:"gasUsed"`
-	ParentHash libcommon.Hash `json:"parentHash"`
-	BaseFee    *big.Int       `json:"baseFeePerGas"`
+	Number        uint64         `json:"number"`
+	GasUsed       uint64         `json:"gasUsed"`
+	ParentHash    libcommon.Hash `json:"parentHash"`
+	BaseFee       *big.Int       `json:"baseFeePerGas"`
+	ExcessDataGas *big.Int       `json:"excessDataGas"`
 }
 
 // GenesisAlloc specifies the initial state that is part of the genesis block.
@@ -120,15 +121,16 @@ type GenesisAccount struct {
 
 // field type overrides for gencodec
 type genesisSpecMarshaling struct {
-	Nonce      math.HexOrDecimal64
-	Timestamp  math.HexOrDecimal64
-	ExtraData  hexutil.Bytes
-	GasLimit   math.HexOrDecimal64
-	GasUsed    math.HexOrDecimal64
-	Number     math.HexOrDecimal64
-	Difficulty *math.HexOrDecimal256
-	BaseFee    *math.HexOrDecimal256
-	Alloc      map[common.UnprefixedAddress]GenesisAccount
+	Nonce         math.HexOrDecimal64
+	Timestamp     math.HexOrDecimal64
+	ExtraData     hexutil.Bytes
+	GasLimit      math.HexOrDecimal64
+	GasUsed       math.HexOrDecimal64
+	Number        math.HexOrDecimal64
+	Difficulty    *math.HexOrDecimal256
+	BaseFee       *math.HexOrDecimal256
+	ExcessDataGas *math.HexOrDecimal256
+	Alloc         map[common.UnprefixedAddress]GenesisAccount
 }
 
 type genesisAccountMarshaling struct {
@@ -335,19 +337,20 @@ func (g *Genesis) ToBlock(tmpDir string) (*types.Block, *state.IntraBlockState, 
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
-		Number:     new(big.Int).SetUint64(g.Number),
-		Nonce:      types.EncodeNonce(g.Nonce),
-		Time:       g.Timestamp,
-		ParentHash: g.ParentHash,
-		Extra:      g.ExtraData,
-		GasLimit:   g.GasLimit,
-		GasUsed:    g.GasUsed,
-		Difficulty: g.Difficulty,
-		MixDigest:  g.Mixhash,
-		Coinbase:   g.Coinbase,
-		BaseFee:    g.BaseFee,
-		AuRaStep:   g.AuRaStep,
-		AuRaSeal:   g.AuRaSeal,
+		Number:        new(big.Int).SetUint64(g.Number),
+		Nonce:         types.EncodeNonce(g.Nonce),
+		Time:          g.Timestamp,
+		ParentHash:    g.ParentHash,
+		Extra:         g.ExtraData,
+		GasLimit:      g.GasLimit,
+		GasUsed:       g.GasUsed,
+		Difficulty:    g.Difficulty,
+		MixDigest:     g.Mixhash,
+		Coinbase:      g.Coinbase,
+		BaseFee:       g.BaseFee,
+		ExcessDataGas: g.ExcessDataGas,
+		AuRaStep:      g.AuRaStep,
+		AuRaSeal:      g.AuRaSeal,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
