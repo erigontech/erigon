@@ -25,7 +25,6 @@ type ConsensusClientCliCfg struct {
 	NoDiscovery      bool                        `json:"noDiscovery"`
 	CheckpointUri    string                      `json:"checkpointUri"`
 	Chaindata        string                      `json:"chaindata"`
-	ELEnabled        bool                        `json:"elEnabled"`
 	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
 	TransitionChain  bool                        `json:"transitionChain"`
 	NetworkType      clparams.NetworkType
@@ -69,7 +68,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 		fmt.Println(cfg.CheckpointUri)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
-	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
