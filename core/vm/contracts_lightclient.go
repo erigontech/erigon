@@ -28,6 +28,11 @@ const (
 // 32 bytes               |                 |                   |
 func decodeTendermintHeaderValidationInput(input []byte) (*lightclient.ConsensusState, *lightclient.Header, error) {
 	csLen := binary.BigEndian.Uint64(input[consensusStateLengthBytesLength-uint64TypeLength : consensusStateLengthBytesLength])
+
+	if consensusStateLengthBytesLength+csLen < consensusStateLengthBytesLength {
+		return nil, nil, fmt.Errorf("integer overflow, csLen: %d", csLen)
+	}
+
 	if uint64(len(input)) <= consensusStateLengthBytesLength+csLen {
 		return nil, nil, fmt.Errorf("expected payload size %d, actual size: %d", consensusStateLengthBytesLength+csLen, len(input))
 	}
