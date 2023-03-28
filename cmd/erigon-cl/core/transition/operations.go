@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -196,6 +198,7 @@ func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullVali
 		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
 		// Literally you can input it trash.
 		if !valid || err != nil {
+			log.Debug("Validator BLS verification failed", "valid", valid, "err", err)
 			return nil
 		}
 		// Append validator
