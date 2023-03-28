@@ -30,7 +30,6 @@ import (
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	atomic2 "go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -212,7 +211,7 @@ func (a *Aggregator) ReopenList(fNames []string) error {
 }
 
 func (a *Aggregator) GetAndResetStats() DomainStats {
-	stats := DomainStats{HistoryQueries: &atomic2.Uint64{}, TotalQueries: &atomic2.Uint64{}}
+	stats := DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	stats.Accumulate(a.accounts.GetAndResetStats())
 	stats.Accumulate(a.storage.GetAndResetStats())
 	stats.Accumulate(a.code.GetAndResetStats())
