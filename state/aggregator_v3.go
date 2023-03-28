@@ -117,6 +117,8 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil); err != nil {
 		return nil, err
 	}
+
+	a.shared = NewSharedDomains(path.Join(tmpdir, "domains"), a.accounts, a.storage, a.code, a.commitment)
 	a.recalcMaxTxNum()
 	return a, nil
 }
@@ -198,6 +200,7 @@ func (a *AggregatorV3) Close() {
 	a.logTopics.Close()
 	a.tracesFrom.Close()
 	a.tracesTo.Close()
+	a.shared.Close()
 }
 
 /*
@@ -921,6 +924,7 @@ func (a *AggregatorV3) StartWrites() *AggregatorV3 {
 	a.accounts.StartWrites()
 	a.storage.StartWrites()
 	a.code.StartWrites()
+	a.commitment.StartWrites()
 	a.logAddrs.StartWrites()
 	a.logTopics.StartWrites()
 	a.tracesFrom.StartWrites()
@@ -963,7 +967,7 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 		a.accounts.Rotate(),
 		a.storage.Rotate(),
 		a.code.Rotate(),
-		a.commitment.Rotate(),
+		a.commitment.Domain.Rotate(),
 		a.logAddrs.Rotate(),
 		a.logTopics.Rotate(),
 		a.tracesFrom.Rotate(),

@@ -20,7 +20,6 @@ type DomainMem struct {
 	etl    *etl.Collector
 	mu     sync.RWMutex
 	values map[string]*KVList
-	latest map[string][]byte // key+^step -> value
 }
 
 type KVList struct {
@@ -70,12 +69,7 @@ func (l *KVList) Reset() {
 func NewDomainMem(d *Domain, tmpdir string) *DomainMem {
 	return &DomainMem{
 		Domain: d,
-		latest: make(map[string][]byte, 128),
 		etl:    etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM)),
-		//values: &KVList{
-		//	Keys: make([]string, 0, 1000),
-		//	Vals: make([][]byte, 0, 1000),
-		//},
 		values: make(map[string]*KVList, 128),
 	}
 }
@@ -101,33 +95,40 @@ func (d *DomainMem) Get(k1, k2 []byte) ([]byte, error) {
 // 3. load from etl to table, process on the fly to avoid domain pruning
 
 func (d *DomainMem) Flush() error {
+	//etl.TransformArgs{Quit: ctx.Done()}
 	return d.etl.Load(d.tx, d.valsTable, d.etlLoader(), etl.TransformArgs{})
 }
 
 func (d *DomainMem) Close() {
 	d.etl.Close()
+	// domain is closed outside since it is shared
 }
 
 func (d *DomainMem) etlLoader() etl.LoadFunc {
-	stepSize := d.aggregationStep
-	//assert := func(k []byte) {
-	//	if
-	//}
+	//stepSize := d.aggregationStep
+	//assert := func(k []byte) { }
 	return func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// if its ordered we could put to history each key excluding last one
-		tx := binary.BigEndian.Uint64(k[len(k)-8:])
-
-		keySuffix := make([]byte, len(k))
-		binary.BigEndian.PutUint64(keySuffix[len(k)-8:], ^(tx / stepSize))
-		var k2 []byte
-		if len(k) > length.Addr+8 {
-			k2 = k[length.Addr : len(k)-8]
-		}
-
-		if err := d.Put(k[:length.Addr], k2, value); err != nil {
-			return err
-		}
-		return next(k, keySuffix, value)
+		//if its ordered we could put to history each key excluding last one
+		// write inverted index with state and lookup if it's last update for this key
+		// and prune here without db for that case.
+		//ksz := len(k) - 8
+		//txnum := binary.BigEndian.Uint64(k[ksz:])
+		//
+		//keySuffix := make([]byte, len(k))
+		//binary.BigEndian.PutUint64(keySuffix[ksz:], ^(txnum / stepSize))
+		//
+		//var k2 []byte
+		//ek := ksz
+		//if ksz == length.Hash+length.Addr {
+		//	k2 = k[length.Addr:ksz]
+		//	ek = length.Addr
+		//}
+		//
+		//d.SetTxNum(txnum)
+		//if err := d.Put(k[:ek], k2, value); err != nil {
+		//	return err
+		//}
+		return next(k, k, value)
 	}
 }
 
@@ -135,10 +136,10 @@ func (d *DomainMem) Put(k1, k2, value []byte) error {
 	key := common.Append(k1, k2)
 	ks := *(*string)(unsafe.Pointer(&key))
 
-	invertedStep := ^(d.txNum / d.aggregationStep)
+	//invertedStep := ^(d.txNum / d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
-	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
+	binary.BigEndian.PutUint64(keySuffix[len(key):], d.txNum)
 
 	if err := d.etl.Collect(keySuffix, value); err != nil {
 		return err
@@ -154,24 +155,23 @@ func (d *DomainMem) Put(k1, k2, value []byte) error {
 		d.values[ks] = kvl
 	}
 
-	ltx, prev := d.values[ks].Put(d.txNum, value)
+	ltx, prev := kvl.Put(d.txNum, value)
 	_ = ltx
 	d.mu.Unlock()
 
-	if len(prev) == 0 {
-		var ok bool
-		prev, ok = d.defaultDc.readFromFiles(key, 0)
-		if !ok {
-			return fmt.Errorf("failed to read from files: %x", key)
-		}
-	}
+	//if len(prev) == 0 {
+	//	var ok bool
+	//	prev, ok = d.defaultDc.readFromFiles(key, 0)
+	//	if !ok {
+	//		return fmt.Errorf("failed to read from files: %x", key)
+	//	}
+	//}
 
-	if err := d.wal.addPrevValue(k1, k2, prev); err != nil {
+	if err := d.History.AddPrevValue(k1, k2, prev); err != nil {
 		return err
 	}
 
 	return nil
-	//return d.PutWitPrev(k1, k2, value, prev)
 }
 
 func (d *DomainMem) Delete(k1, k2 []byte) error {
@@ -184,10 +184,9 @@ func (d *DomainMem) Delete(k1, k2 []byte) error {
 }
 
 func (d *DomainMem) Reset() {
-	d.mu.Lock()
-	d.latest = make(map[string][]byte)
-	//d.values.Reset()
-	d.mu.Unlock()
+	//d.mu.Lock()
+	////d.values.Reset()
+	//d.mu.Unlock()
 }
 
 type SharedDomains struct {
@@ -199,20 +198,28 @@ type SharedDomains struct {
 	Updates *UpdateTree
 }
 
-func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []commitment.Update, saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) Close() {
+	sd.Account.Close()
+	sd.Storage.Close()
+	sd.Code.Close()
+	sd.Commitment.Close()
+	sd.Updates.tree.Clear(true)
+}
+
+func (sd *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []commitment.Update, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
 	//mxCommitmentRunning.Inc()
-	rootHash, branchNodeUpdates, err := a.Commitment.ComputeCommitment(pk, hk, upd, trace)
+	rootHash, branchNodeUpdates, err := sd.Commitment.ComputeCommitment(pk, hk, upd, trace)
 	//mxCommitmentRunning.Dec()
 	if err != nil {
 		return nil, err
 	}
-	//if a.seekTxNum > a.txNum {
+	//if sd.seekTxNum > sd.txNum {
 	//	saveStateAfter = false
 	//}
 
-	//mxCommitmentKeys.Add(int(a.commitment.comKeys))
-	//mxCommitmentTook.Update(a.commitment.comTook.Seconds())
+	//mxCommitmentKeys.Add(int(sd.commitment.comKeys))
+	//mxCommitmentTook.Update(sd.commitment.comTook.Seconds())
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 
@@ -222,7 +229,7 @@ func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []c
 	//}
 	//sort.Strings(sortedPrefixes)
 
-	cct := a.Commitment //.MakeContext()
+	cct := sd.Commitment //.MakeContext()
 	//defer cct.Close()
 
 	for pref, update := range branchNodeUpdates {
@@ -235,7 +242,7 @@ func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []c
 		}
 		//mxCommitmentUpdates.Inc()
 		stated := commitment.BranchData(stateValue)
-		merged, err := a.Commitment.c.branchMerger.Merge(stated, update)
+		merged, err := sd.Commitment.c.branchMerger.Merge(stated, update)
 		if err != nil {
 			return nil, err
 		}
@@ -245,14 +252,14 @@ func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []c
 		if trace {
 			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
-		if err = a.Commitment.Put(prefix, nil, merged); err != nil {
+		if err = sd.Commitment.Put(prefix, nil, merged); err != nil {
 			return nil, err
 		}
 		//mxCommitmentUpdatesApplied.Inc()
 	}
 
 	if saveStateAfter {
-		if err := a.Commitment.c.storeCommitmentState(0, txNum); err != nil {
+		if err := sd.Commitment.c.storeCommitmentState(0, txNum); err != nil {
 			return nil, err
 		}
 	}
@@ -260,9 +267,9 @@ func (a *SharedDomains) ComputeCommitment(txNum uint64, pk, hk [][]byte, upd []c
 	return rootHash, nil
 }
 
-func (a *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHash []byte, err error) {
+func (sd *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
-	rootHash, branchNodeUpdates, err := a.Commitment.c.ComputeCommitment(trace)
+	rootHash, branchNodeUpdates, err := sd.Commitment.c.ComputeCommitment(trace)
 	if err != nil {
 		return nil, err
 	}
@@ -272,12 +279,12 @@ func (a *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHa
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
 
-		stateValue, err := a.Commitment.Get(prefix, nil)
+		stateValue, err := sd.Commitment.Get(prefix, nil)
 		if err != nil {
 			return nil, err
 		}
 		stated := commitment.BranchData(stateValue)
-		merged, err := a.Commitment.c.branchMerger.Merge(stated, update)
+		merged, err := sd.Commitment.c.branchMerger.Merge(stated, update)
 		if err != nil {
 			return nil, err
 		}
@@ -287,14 +294,14 @@ func (a *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHa
 		if trace {
 			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
-		if err = a.UpdateCommitmentData(prefix, merged); err != nil {
+		if err = sd.UpdateCommitmentData(prefix, merged); err != nil {
 			return nil, err
 		}
 		mxCommitmentUpdatesApplied.Inc()
 	}
 
 	if saveStateAfter {
-		if err := a.Commitment.c.storeCommitmentState(0, txNum); err != nil {
+		if err := sd.Commitment.c.storeCommitmentState(0, txNum); err != nil {
 			return nil, err
 		}
 	}
@@ -302,37 +309,39 @@ func (a *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootHa
 	return rootHash, nil
 }
 
-func (s *SharedDomains) SetTxNum(txNum uint64) {
-	s.Account.SetTxNum(txNum)
-	s.Storage.SetTxNum(txNum)
-	s.Code.SetTxNum(txNum)
-	s.Commitment.SetTxNum(txNum)
+func (sd *SharedDomains) SetTxNum(txNum uint64) {
+	sd.Account.SetTxNum(txNum)
+	sd.Storage.SetTxNum(txNum)
+	sd.Code.SetTxNum(txNum)
+	sd.Commitment.SetTxNum(txNum)
 }
 
-func (s *SharedDomains) Flush() error {
-	if err := s.Account.Flush(); err != nil {
+func (sd *SharedDomains) Flush() error {
+	if err := sd.Account.Flush(); err != nil {
 		return err
 	}
-	if err := s.Storage.Flush(); err != nil {
+	if err := sd.Storage.Flush(); err != nil {
 		return err
 	}
-	if err := s.Code.Flush(); err != nil {
+	if err := sd.Code.Flush(); err != nil {
 		return err
 	}
-	if err := s.Commitment.Flush(); err != nil {
+	if err := sd.Commitment.Flush(); err != nil {
 		return err
 	}
 	return nil
 }
 
 func NewSharedDomains(tmp string, a, c, s *Domain, comm *DomainCommitted) *SharedDomains {
-	return &SharedDomains{
+	sd := &SharedDomains{
 		Updates:    NewUpdateTree(comm.mode),
 		Account:    NewDomainMem(a, tmp),
 		Storage:    NewDomainMem(s, tmp),
 		Code:       NewDomainMem(c, tmp),
 		Commitment: &DomainMemCommit{DomainMem: NewDomainMem(comm.Domain, tmp), c: comm},
 	}
+	sd.Commitment.c.ResetFns(sd.BranchFn, sd.AccountFn, sd.StorageFn)
+	return sd
 }
 
 type DomainMemCommit struct {
@@ -344,17 +353,20 @@ func (d *DomainMemCommit) ComputeCommitment(pk, hk [][]byte, upd []commitment.Up
 	return d.c.CommitmentOver(pk, hk, upd, trace)
 }
 
-func (s *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
-	v, err := s.Commitment.Get(pref, nil)
+func (sd *SharedDomains) BranchFn(pref []byte) ([]byte, error) {
+	v, err := sd.Commitment.Get(pref, nil)
 	if err != nil {
 		return nil, fmt.Errorf("branchFn: no value for prefix %x: %w", pref, err)
+	}
+	if v == nil {
+		return nil, nil
 	}
 	// skip touchmap
 	return v[2:], nil
 }
 
-func (s *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error {
-	encAccount, err := s.Account.Get(plainKey, nil)
+func (sd *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, err := sd.Account.Get(plainKey, nil)
 	if err != nil {
 		return fmt.Errorf("accountFn: no value for address %x : %w", plainKey, err)
 	}
@@ -370,19 +382,19 @@ func (s *SharedDomains) AccountFn(plainKey []byte, cell *commitment.Cell) error 
 		}
 	}
 
-	code, _ := s.Code.Get(plainKey, nil)
+	code, _ := sd.Code.Get(plainKey, nil)
 	if code != nil {
-		s.Updates.keccak.Reset()
-		s.Updates.keccak.Write(code)
-		copy(cell.CodeHash[:], s.Updates.keccak.Sum(nil))
+		sd.Updates.keccak.Reset()
+		sd.Updates.keccak.Write(code)
+		copy(cell.CodeHash[:], sd.Updates.keccak.Sum(nil))
 	}
 	cell.Delete = len(encAccount) == 0 && len(code) == 0
 	return nil
 }
 
-func (s *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
+func (sd *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error {
 	// Look in the summary table first
-	enc, err := s.Storage.Get(plainKey[:length.Addr], plainKey[length.Addr:])
+	enc, err := sd.Storage.Get(plainKey[:length.Addr], plainKey[length.Addr:])
 	if err != nil {
 		return err
 	}
@@ -392,37 +404,37 @@ func (s *SharedDomains) StorageFn(plainKey []byte, cell *commitment.Cell) error 
 	return nil
 }
 
-func (a *SharedDomains) UpdateAccountData(addr []byte, account []byte) error {
-	a.Commitment.c.TouchPlainKey(addr, account, a.Commitment.c.TouchPlainKeyAccount)
-	return a.Account.Put(addr, nil, account)
+func (sd *SharedDomains) UpdateAccountData(addr []byte, account []byte) error {
+	sd.Commitment.c.TouchPlainKey(addr, account, sd.Commitment.c.TouchPlainKeyAccount)
+	return sd.Account.Put(addr, nil, account)
 }
 
-func (a *SharedDomains) UpdateAccountCode(addr []byte, code []byte) error {
-	a.Commitment.c.TouchPlainKey(addr, code, a.Commitment.c.TouchPlainKeyCode)
+func (sd *SharedDomains) UpdateAccountCode(addr []byte, code []byte) error {
+	sd.Commitment.c.TouchPlainKey(addr, code, sd.Commitment.c.TouchPlainKeyCode)
 	if len(code) == 0 {
-		return a.Code.Delete(addr, nil)
+		return sd.Code.Delete(addr, nil)
 	}
-	return a.Code.Put(addr, nil, code)
+	return sd.Code.Put(addr, nil, code)
 }
 
-func (a *SharedDomains) UpdateCommitmentData(prefix []byte, code []byte) error {
-	return a.Commitment.Put(prefix, nil, code)
+func (sd *SharedDomains) UpdateCommitmentData(prefix []byte, code []byte) error {
+	return sd.Commitment.Put(prefix, nil, code)
 }
 
-func (a *SharedDomains) DeleteAccount(addr []byte) error {
-	a.Commitment.c.TouchPlainKey(addr, nil, a.Commitment.c.TouchPlainKeyAccount)
+func (sd *SharedDomains) DeleteAccount(addr []byte) error {
+	sd.Commitment.c.TouchPlainKey(addr, nil, sd.Commitment.c.TouchPlainKeyAccount)
 
-	if err := a.Account.Delete(addr, nil); err != nil {
+	if err := sd.Account.Delete(addr, nil); err != nil {
 		return err
 	}
-	if err := a.Code.Delete(addr, nil); err != nil {
+	if err := sd.Code.Delete(addr, nil); err != nil {
 		return err
 	}
 	var e error
-	if err := a.Storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
-		a.Commitment.c.TouchPlainKey(k, nil, a.Commitment.c.TouchPlainKeyStorage)
+	if err := sd.Storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
+		sd.Commitment.c.TouchPlainKey(k, nil, sd.Commitment.c.TouchPlainKeyStorage)
 		if e == nil {
-			e = a.Storage.Delete(k, nil)
+			e = sd.Storage.Delete(k, nil)
 		}
 	}); err != nil {
 		return err
@@ -430,14 +442,14 @@ func (a *SharedDomains) DeleteAccount(addr []byte) error {
 	return e
 }
 
-func (a *SharedDomains) WriteAccountStorage(addr, loc []byte, value []byte) error {
+func (sd *SharedDomains) WriteAccountStorage(addr, loc []byte, value []byte) error {
 	composite := make([]byte, len(addr)+len(loc))
 	copy(composite, addr)
 	copy(composite[length.Addr:], loc)
 
-	a.Commitment.c.TouchPlainKey(composite, value, a.Commitment.c.TouchPlainKeyStorage)
+	sd.Commitment.c.TouchPlainKey(composite, value, sd.Commitment.c.TouchPlainKeyStorage)
 	if len(value) == 0 {
-		return a.Storage.Delete(addr, loc)
+		return sd.Storage.Delete(addr, loc)
 	}
-	return a.Storage.Put(addr, loc, value)
+	return sd.Storage.Put(addr, loc, value)
 }

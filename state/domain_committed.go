@@ -210,9 +210,9 @@ type DomainCommitted struct {
 }
 
 func (d *DomainCommitted) ResetFns(
-	 branchFn func(prefix []byte) ([]byte, error),
-	 accountFn func(plainKey []byte, cell *commitment.Cell) error,
-	 storageFn func(plainKey []byte, cell *commitment.Cell) error,
+	branchFn func(prefix []byte) ([]byte, error),
+	accountFn func(plainKey []byte, cell *commitment.Cell) error,
+	storageFn func(plainKey []byte, cell *commitment.Cell) error,
 ) {
 	d.patriciaTrie.ResetFns(branchFn, accountFn, storageFn)
 }
