@@ -728,6 +728,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByHashV1(ctx context.Context, r
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, len(request.Hashes))
 
@@ -753,6 +754,7 @@ func (s *EthBackendServer) EngineGetPayloadBodiesByRangeV1(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
 
 	bodies := make([]*types2.ExecutionPayloadBodyV1, 0, request.Count)
 
