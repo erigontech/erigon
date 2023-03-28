@@ -2,10 +2,8 @@ module github.com/ledgerwatch/erigon
 
 go 1.19
 
-replace github.com/ledgerwatch/erigon-lib => ../erigon-lib
-
 require (
-	//github.com/ledgerwatch/erigon-lib v0.0.0-20230325072849-9f1fc3dd0d0c
+	github.com/ledgerwatch/erigon-lib v0.0.0-20230327173508-4799d7de9b58
 	github.com/ledgerwatch/erigon-snapshot v1.1.1-0.20230306083105-1391330d62a3
 	github.com/ledgerwatch/log/v3 v3.7.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -55,7 +53,6 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kevinburke/go-bindata v3.21.0+incompatible
-	github.com/ledgerwatch/erigon-lib v0.0.0-00010101000000-000000000000
 	github.com/libp2p/go-libp2p v0.26.2
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
 	github.com/maticnetwork/crand v1.0.2

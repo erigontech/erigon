@@ -480,7 +480,7 @@ func (rs *StateV3) applyUpdates(roTx kv.Tx, task *exec22.TxTask, agg *libstate.A
 				panic(err)
 			}
 			if len(addr) > 28 {
-				p2 = addr[length.Addr : len(addr)-length.Incarnation]
+				p2 = addr[length.Addr+8:]
 			}
 			if err := d.Put(addr[:length.Addr], p2, wl.Vals[i]); err != nil {
 				panic(err)
