@@ -29,17 +29,14 @@ func backOffTime(snap *Snapshot, header *types.Header, val libcommon.Address, ch
 				recentsMap[recent] = seen
 			}
 
-			// if the validator has recently signed, it is unexpected, stop here.
-			if seen, ok := recentsMap[val]; ok {
-				log.Error("unreachable code, validator signed recently",
-					"block", header.Number, "address", val,
-					"seen", seen, "len(snap.Recents)", len(snap.Recents))
+			// The backOffTime does not matter when a validator has signed recently.
+			if _, ok := recentsMap[val]; ok {
 				return 0
 			}
 
 			inTurnAddr := validators[(snap.Number+1)%uint64(len(validators))]
 			if _, ok := recentsMap[inTurnAddr]; ok {
-				log.Info("in turn validator has recently signed, skip initialBackOffTime",
+				log.Debug("in turn validator has recently signed, skip initialBackOffTime",
 					"inTurnAddr", inTurnAddr)
 				delay = 0
 			}

@@ -172,7 +172,7 @@ var PrecompiledContractsPlanck = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesPlanck           []libcommon.Address
+	PrecompiledAddressesPlanck         []libcommon.Address
 	PrecompiledAddressesMoran          []libcommon.Address
 	PrecompiledAddressesNano           []libcommon.Address
 	PrecompiledAddressesBerlin         []libcommon.Address
