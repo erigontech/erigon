@@ -141,7 +141,7 @@ func TraceTx(
 		timeout := callTimeout
 		if config.Timeout != nil {
 			if timeout, err = time.ParseDuration(*config.Timeout); err != nil {
-				stream.WriteNil()
+				// stream.WriteNil()
 				return err
 			}
 		}
@@ -153,7 +153,7 @@ func TraceTx(
 		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
 			TxHash: txCtx.TxHash,
 		}, cfg); err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 		// Handle timeouts and RPC cancellations
@@ -189,9 +189,9 @@ func TraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
-		} else {
-			stream.WriteNil()
 		}
+		// If an error will be returned, no need to write null (see rpc/handler.go).
+		// stream.WriteNil()
 		return fmt.Errorf("tracing failed: %w", err)
 	}
 	// Depending on the tracer type, format and return the output

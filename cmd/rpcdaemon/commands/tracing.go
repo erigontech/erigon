@@ -40,7 +40,7 @@ func (api *PrivateDebugAPIImpl) TraceBlockByHash(ctx context.Context, hash commo
 func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
@@ -60,7 +60,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
@@ -73,14 +73,14 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	engine := api.engine()
 
 	_, blockCtx, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
@@ -93,7 +93,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		select {
 		default:
 		case <-ctx.Done():
-			stream.WriteNil()
+			// stream.WriteNil()
 			return ctx.Err()
 		}
 		ibs.Prepare(txn.Hash(), block.Hash(), idx)
@@ -142,45 +142,45 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash, config *tracers.TraceConfig, stream *jsoniter.Stream) error {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
 	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	if !ok {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return nil
 	}
 	// Private API returns 0 if transaction is not found.
 	if blockNum == 0 && chainConfig.Bor != nil {
 		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
 		if err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 		if blockNumPtr == nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return nil
 		}
 		blockNum = *blockNumPtr
 	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	if block == nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return nil
 	}
 	var txnIndex uint64
@@ -196,22 +196,22 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		var borTx types.Transaction
 		borTx, _, _, _, err = rawdb.ReadBorTransaction(tx, hash)
 		if err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 
 		if borTx != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return nil
 		}
-		stream.WriteNil()
+		// stream.WriteNil()
 		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	engine := api.engine()
 
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
@@ -300,17 +300,17 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	defer tx.Rollback()
 	chainConfig, err := api.chainConfig(tx)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 	if len(bundles) == 0 {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return fmt.Errorf("empty bundles")
 	}
 	empty := true
@@ -321,7 +321,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	if empty {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return fmt.Errorf("empty bundles")
 	}
 
@@ -329,13 +329,13 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(simulateContext.BlockNumber, tx, api.filters)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
@@ -355,7 +355,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api.historyV3(tx), chainConfig.ChainName)
 	if err != nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return err
 	}
 
@@ -364,7 +364,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	parent := block.Header()
 
 	if parent == nil {
-		stream.WriteNil()
+		// stream.WriteNil()
 		return fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
@@ -407,7 +407,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		st.Prepare(txn.Hash(), block.Hash(), idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 		txCtx = core.NewEVMTxContext(msg)
@@ -415,7 +415,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		// Execute the transaction message
 		_, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 		_ = st.FinalizeTx(rules, state.NewNoopWriter())
@@ -426,7 +426,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	if config.StateOverrides != nil {
 		err = config.StateOverrides.Override(evm.IntraBlockState().(*state.IntraBlockState))
 		if err != nil {
-			stream.WriteNil()
+			// stream.WriteNil()
 			return err
 		}
 	}
@@ -442,7 +442,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			}
 			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
 			if err != nil {
-				stream.WriteNil()
+				// stream.WriteNil()
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
@@ -451,7 +451,7 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
 
 			if err != nil {
-				stream.WriteNil()
+				// stream.WriteNil()
 				return err
 			}
 
