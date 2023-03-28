@@ -561,11 +561,12 @@ func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	rh, err := rs.shared.Commit(txTask.TxNum, false, false)
-	if err != nil {
-		return nil, err
-	}
+	//rh, err := rs.shared.Commit(txTask.TxNum, false, false)
+	//if err != nil {
+	//	return nil, err
+	//}
 
+	rh := []byte{}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 
@@ -784,6 +785,10 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 	return true
 }
 
+func (rs *StateV3) CalcCommitment(saveAfter, trace bool) ([]byte, error) {
+	return rs.shared.Commit(rs.txsDone.Load(), saveAfter, trace)
+}
+
 type StateWriterV3 struct {
 	rs           *StateV3
 	txNum        uint64
@@ -834,7 +839,8 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
 	//w.rs.shared.Updates.TouchPlainKey(addressBytes, value, w.rs.shared.Updates.TouchPlainKeyAccount)
-	if err := w.rs.shared.UpdateAccountData(addressBytes, value); err != nil {
+	enc := libstate.EncodeAccountBytes(account.Nonce, &account.Balance, account.CodeHash[:], 0)
+	if err := w.rs.shared.UpdateAccountData(addressBytes, enc); err != nil {
 		return err
 	}
 	var prev []byte

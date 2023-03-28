@@ -589,6 +589,7 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
+				BlockRoot:       b.Root(),
 				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,
@@ -795,9 +796,18 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			i++
 		}
 
-		if _, err := rs.ApplyState4(applyTx, txTask, agg); err != nil {
+		_, err := rs.ApplyState4(applyTx, txTask, agg)
+		if err != nil {
 			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
+		rh, err := rs.CalcCommitment(false, false)
+		if err != nil {
+			panic(err)
+		}
+		if !bytes.Equal(rh, txTask.BlockRoot[:]) {
+			panic(fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum))
+		}
+
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 		outputTxNum++
 		if rwsCond != nil {
@@ -806,7 +816,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 		if err := rs.ApplyHistory(txTask, agg); err != nil {
 			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
+		fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		processedBlockNum = txTask.BlockNum
 	}
 	return resultSize, outputTxNum, conflicts, processedBlockNum, nil

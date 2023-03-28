@@ -724,6 +724,7 @@ func stageSenders(db kv.RwDB, ctx context.Context) error {
 
 func stageExec(db kv.RwDB, ctx context.Context) error {
 	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+	//historyV3 = true
 	dirs := datadir.New(datadirCli)
 	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil)
 	must(sync.SetCurrentStage(stages.Execution))

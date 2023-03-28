@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -18,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/stretchr/testify/require"
 )
 
 func TestExec(t *testing.T) {
@@ -129,7 +130,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewStateV3("")
+	rs := state.NewStateV3("", agg.BufferedDomains())
 	stateWriter := state.NewStateWriterV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
