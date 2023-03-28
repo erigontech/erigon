@@ -424,7 +424,6 @@ var ourCapabilities = []string{
 	"engine_getPayloadV2",
 	"engine_exchangeTransitionConfigurationV1",
 	"engine_getPayloadBodiesByHashV1",
-	"engine_getPayloadBodiesByRangeV1",
 }
 
 func (e *EngineImpl) ExchangeCapabilities(fromCl []string) []string {
