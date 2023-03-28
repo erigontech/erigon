@@ -144,7 +144,7 @@ set -e\n\
 echo "Mounting GCS Fuse."\n\
 gcsfuse --debug_gcs --debug_fuse -o rw,allow_other --uid 1000 --gid 1000 ${BUCKET} ${STORAGE_DIR}\n\
 echo "Mounting completed."\n\
-su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}"\n\
+su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}" &\n\
 echo "Waiting for blockimporter to initialize."\n\
 sleep 10\n\
 su erigon -c "rpcdaemon --http.port 8555 --http.addr 0.0.0.0 --datadir ${STORAGE_DIR} --http.corsdomain * --http.api=eth,erigon,ots" &\n\
