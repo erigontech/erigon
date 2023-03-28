@@ -1422,6 +1422,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		return nil
 	}
 
+	maxFailedWithdrawalsToProcess := big.NewInt(4)
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]libcommon.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
@@ -1429,7 +1430,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 		addresses = append(addresses, w.Address)
 	}
 
-	packed, err := withdrawalAbi().Pack("executeSystemWithdrawals", amounts, addresses)
+	packed, err := withdrawalAbi().Pack("executeSystemWithdrawals", maxFailedWithdrawalsToProcess, amounts, addresses)
 	if err != nil {
 		return err
 	}
