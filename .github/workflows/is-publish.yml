@@ -54,7 +54,7 @@ jobs:
         with:
           # push: ${{ (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') ||  github.ref_type == 'tag' }}
           push: true
-          context: ./ic-dev-base
+          context: .
           file: ./Dockerfile.cloudrun
           tags: |
             us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon-dev:latest
