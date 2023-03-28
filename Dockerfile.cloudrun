@@ -1,0 +1,156 @@
+# Just modified version of the original Dockerfile
+#
+# syntax = docker/dockerfile:1.2
+FROM docker.io/library/golang:1.19-bullseye AS builder
+
+# RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apt-get update -y
+RUN apt-get install -y git bash ca-certificates build-essential libstdc++-10-dev
+# linux-headers-amd64
+# RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+
+WORKDIR /app
+ADD go.mod go.mod
+ADD go.sum go.sum
+
+RUN go mod download
+ADD . .
+
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make all
+
+
+FROM docker.io/library/golang:1.19-bullseye AS tools-builder
+
+# RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
+RUN apt-get update -y
+RUN apt-get install -y git bash ca-certificates build-essential libstdc++-10-dev
+    
+WORKDIR /app
+
+ADD Makefile Makefile
+ADD tools.go tools.go
+ADD go.mod go.mod
+ADD go.sum go.sum
+
+RUN mkdir -p /app/build/bin
+
+RUN --mount=type=cache,target=/root/.cache \
+    --mount=type=cache,target=/tmp/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    make db-tools
+
+FROM docker.io/library/debian:bullseye as app
+
+RUN apt-get update -y
+
+# install required runtime libs, along with some helpers for debugging
+RUN apt-get install -y ca-certificates libstdc++-10-dev tzdata
+RUN apt-get install -y curl jq bind9-utils 
+
+# Setup user and group
+#
+# from the perspective of the container, uid=1000, gid=1000 is a sensible choice
+# (mimicking Ubuntu Server), but if caller creates a .env (example in repo root),
+# these defaults will get overridden when make calls docker-compose
+ARG UID=1000
+ARG GID=1000
+RUN adduser --disabled-password --uid $UID --gecos $GID erigon
+USER erigon
+RUN mkdir -p ~/.local/share/erigon
+
+# copy compiled artifacts from builder
+## first do the mdbx ones - since these wont change as often
+COPY --from=tools-builder /app/build/bin/mdbx_chk /usr/local/bin/mdbx_chk
+COPY --from=tools-builder /app/build/bin/mdbx_copy /usr/local/bin/mdbx_copy
+COPY --from=tools-builder /app/build/bin/mdbx_drop /usr/local/bin/mdbx_drop
+COPY --from=tools-builder /app/build/bin/mdbx_dump /usr/local/bin/mdbx_dump
+COPY --from=tools-builder /app/build/bin/mdbx_load /usr/local/bin/mdbx_load
+COPY --from=tools-builder /app/build/bin/mdbx_stat /usr/local/bin/mdbx_stat
+
+## then give each binary its own layer
+COPY --from=builder /app/build/bin/devnet /usr/local/bin/devnet
+COPY --from=builder /app/build/bin/downloader /usr/local/bin/downloader
+COPY --from=builder /app/build/bin/erigon /usr/local/bin/erigon
+COPY --from=builder /app/build/bin/erigon-cl /usr/local/bin/erigon-cl
+COPY --from=builder /app/build/bin/evm /usr/local/bin/evm
+COPY --from=builder /app/build/bin/hack /usr/local/bin/hack
+COPY --from=builder /app/build/bin/integration /usr/local/bin/integration
+COPY --from=builder /app/build/bin/lightclient /usr/local/bin/lightclient
+COPY --from=builder /app/build/bin/observer /usr/local/bin/observer
+COPY --from=builder /app/build/bin/pics /usr/local/bin/pics
+COPY --from=builder /app/build/bin/rpcdaemon /usr/local/bin/rpcdaemon
+COPY --from=builder /app/build/bin/rpctest /usr/local/bin/rpctest
+COPY --from=builder /app/build/bin/sentinel /usr/local/bin/sentinel
+COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
+COPY --from=builder /app/build/bin/state /usr/local/bin/state
+COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
+COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+
+## PATCH HERE
+COPY --from=builder /app/build/bin/blockimporter /usr/local/bin/blockimporter
+
+
+EXPOSE 8545 \
+       8555 \
+       8551 \
+       8546 \
+       30303 \
+       30303/udp \
+       42069 \
+       42069/udp \
+       8080 \
+       9090 \
+       6060
+
+# https://github.com/opencontainers/image-spec/blob/main/annotations.md
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.label-schema.build-date=$BUILD_DATE \
+      org.label-schema.description="Erigon Ethereum Client" \
+      org.label-schema.name="Erigon" \
+      org.label-schema.schema-version="1.0" \
+      org.label-schema.url="https://torquem.ch" \
+      org.label-schema.vcs-ref=$VCS_REF \
+      org.label-schema.vcs-url="https://github.com/ledgerwatch/erigon.git" \
+      org.label-schema.vendor="Torquem" \
+      org.label-schema.version=$VERSION
+
+# Cloud RUN updates
+# Install system dependencies
+USER root
+
+RUN apt-get install -y tini lsb-release gnupg vim
+
+RUN gcsFuseRepo=gcsfuse-`lsb_release -c -s`; \
+    echo "deb http://packages.cloud.google.com/apt $gcsFuseRepo main" | \
+    tee /etc/apt/sources.list.d/gcsfuse.list; \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+    apt-key add -; \
+    apt-get update; \
+    apt-get install -y gcsfuse \
+    && apt-get clean
+
+
+ENV STORAGE_DIR=/chain-db
+
+RUN mkdir $STORAGE_DIR
+
+RUN echo '#!/usr/bin/env sh\n\
+set -e\n\
+echo "Mounting GCS Fuse."\n\
+gcsfuse --debug_gcs --debug_fuse -o rw,allow_other --uid 1000 --gid 1000 ${BUCKET} ${STORAGE_DIR}\n\
+echo "Mounting completed."\n\
+su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}"\n\
+echo "Waiting for blockimporter to initialize."\n\
+sleep 10\n\
+su erigon -c "rpcdaemon --http.port 8555 --http.addr 0.0.0.0 --datadir ${STORAGE_DIR} --http.corsdomain * --http.api=eth,erigon,ots" &\n\
+wait $(jobs -p)\n\
+' > /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
+
+CMD /entrypoint.sh
