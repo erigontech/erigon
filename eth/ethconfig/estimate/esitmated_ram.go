@@ -41,7 +41,6 @@ func totalMemory() uint64 {
 	cgmem, err := docker.CgroupMemDocker(hostname)
 	if err == nil {
 		mem = cmp.Min(mem, cgmem.MemLimitInBytes)
-		panic(err)
 	}
 
 	return mem
