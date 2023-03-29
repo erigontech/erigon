@@ -1,6 +1,8 @@
 package fork_graph
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
@@ -73,6 +75,10 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	if err != nil {
 		return LogisticError, err
 	}
+
+	if _, ok := f.forwardEdges[blockRoot]; ok {
+		return Success, nil
+	}
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
 		log.Debug("block below anchor slot", "slot", block.Slot, "hash", libcommon.Hash(blockRoot))
@@ -118,6 +124,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	currentIteratorRoot := block.ParentRoot
 	// try and find the point of recconection
 	for _, ok := f.farthestExtendingPath[currentIteratorRoot]; !ok; {
+		fmt.Println(currentIteratorRoot)
 		currentBlock, isSegmentPresent := f.forwardEdges[currentIteratorRoot]
 		if !isSegmentPresent {
 			return MissingSegment, nil
@@ -166,6 +173,13 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		}
 	}
 
+	// If we have a new farthest extended path, update it accordingly.
+	for _, root := range inverselyTraversedRoots {
+		delete(f.farthestExtendingPath, root)
+	}
+	for _, root := range blockRootsFromFarthestExtendingPath {
+		f.farthestExtendingPath[root] = true
+	}
 	f.lastState.StartCollectingReverseChangeSet()
 	// Execute the state
 	if err := transition.TransitionState(f.lastState, signedBlock /*fullValidation=*/, true); err != nil {
@@ -183,13 +197,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		sourceSlot:                block.Slot,
 	}] = f.lastState.StopCollectingReverseChangeSet()
 	f.forwardEdges[blockRoot] = signedBlock
-	// If we have a new farthest extended path, update it accordingly.
-	for _, root := range inverselyTraversedRoots {
-		delete(f.farthestExtendingPath, root)
-	}
-	for _, root := range blockRootsFromFarthestExtendingPath {
-		f.farthestExtendingPath[root] = true
-	}
+	f.farthestExtendingPath[blockRoot] = true
 
 	return Success, nil
 }
