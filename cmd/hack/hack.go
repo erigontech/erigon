@@ -58,8 +58,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
-const ASSERT = false
-
 var (
 	action     = flag.String("action", "", "action to execute")
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
@@ -207,6 +205,34 @@ func readAccount(chaindata string, account libcommon.Address) error {
 		}
 		fmt.Printf("%x => %x\n", k, v)
 	}
+	return nil
+}
+
+func readAccountAtVersion(chaindata string, account string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	ps := state.NewPlainState(tx, block, nil)
+
+	addr := libcommon.HexToAddress(account)
+	acc, err := ps.ReadAccountData(addr)
+	if err != nil {
+		return err
+	}
+
+	asJson, err := json.Marshal(acc)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("account: %s", asJson)
+
 	return nil
 }
 
@@ -1506,6 +1532,8 @@ func main() {
 		err = dumpState(*chaindata)
 	case "rlptest":
 		err = rlptest()
+	case "readAccountAtVersion":
+		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
 
 	if err != nil {

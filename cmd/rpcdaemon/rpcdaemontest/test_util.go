@@ -156,7 +156,7 @@ func generateChain(
 	var tokenContract *contracts.Token
 
 	// We generate the blocks without plain state because it's not supported in core.GenerateChain
-	return core.GenerateChain(config, parent, engine, db, 10, func(i int, block *core.BlockGen) {
+	return core.GenerateChain(config, parent, engine, db, 11, func(i int, block *core.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -260,6 +260,9 @@ func generateChain(
 				panic(err)
 			}
 			txs = append(txs, txn)
+		case 10:
+			// Empty block
+			break
 		}
 
 		if err != nil {
@@ -291,7 +294,7 @@ func CreateTestGrpcConn(t *testing.T, m *stages.MockSentry) (context.Context, *g
 	ethashApi := apis[1].Service.(*ethash.API)
 	server := grpc.NewServer()
 
-	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReader(), nil, nil, nil, false))
+	remote.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications.Events, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, nil, nil, false))
 	txpool.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpool.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi))
 	listener := bufconn.Listen(1024 * 1024)

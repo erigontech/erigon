@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const dirname = "Erigon"
@@ -69,4 +72,55 @@ func homeDir() string {
 		return usr.HomeDir
 	}
 	return ""
+}
+
+func DataDirForNetwork(datadir string, network string) string {
+	if datadir != DefaultDataDir() {
+		return datadir
+	}
+
+	switch network {
+	case networkname.DevChainName:
+		return "" // unless explicitly requested, use memory databases
+	case networkname.RinkebyChainName:
+		return networkDataDirCheckingLegacy(datadir, "rinkeby")
+	case networkname.GoerliChainName:
+		return networkDataDirCheckingLegacy(datadir, "goerli")
+	case networkname.SokolChainName:
+		return networkDataDirCheckingLegacy(datadir, "sokol")
+	case networkname.MumbaiChainName:
+		return networkDataDirCheckingLegacy(datadir, "mumbai")
+	case networkname.BorMainnetChainName:
+		return networkDataDirCheckingLegacy(datadir, "bor-mainnet")
+	case networkname.BorDevnetChainName:
+		return networkDataDirCheckingLegacy(datadir, "bor-devnet")
+	case networkname.SepoliaChainName:
+		return networkDataDirCheckingLegacy(datadir, "sepolia")
+	case networkname.GnosisChainName:
+		return networkDataDirCheckingLegacy(datadir, "gnosis")
+	case networkname.ChiadoChainName:
+		return networkDataDirCheckingLegacy(datadir, "chiado")
+
+	default:
+		return datadir
+	}
+}
+
+// networkDataDirCheckingLegacy checks if the datadir for the network already exists and uses that if found.
+// if not checks for a LOCK file at the root of the datadir and uses this if found
+// or by default assume a fresh node and to use the nested directory for the network
+func networkDataDirCheckingLegacy(datadir, network string) string {
+	anticipated := filepath.Join(datadir, network)
+
+	if _, err := os.Stat(anticipated); !os.IsNotExist(err) {
+		return anticipated
+	}
+
+	legacyLockFile := filepath.Join(datadir, "LOCK")
+	if _, err := os.Stat(legacyLockFile); !os.IsNotExist(err) {
+		log.Info("Using legacy datadir")
+		return datadir
+	}
+
+	return anticipated
 }

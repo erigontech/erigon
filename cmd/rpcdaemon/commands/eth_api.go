@@ -3,22 +3,23 @@ package commands
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -27,10 +28,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
 	ethapi2 "github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // EthAPI is a collection of functions that are exposed in the
@@ -65,7 +68,8 @@ type EthAPI interface {
 	NewBlockFilter(_ context.Context) (string, error)
 	NewFilter(_ context.Context, crit ethFilters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
-	GetFilterChanges(_ context.Context, index string) ([]interface{}, error)
+	GetFilterChanges(_ context.Context, index string) ([]any, error)
+	GetFilterLogs(_ context.Context, index string) ([]*types.Log, error)
 
 	// Account related (see ./eth_accounts.go)
 	Accounts(ctx context.Context) ([]common.Address, error)
@@ -101,15 +105,13 @@ type EthAPI interface {
 }
 
 type BaseAPI struct {
-	stateCache   kvcache.Cache // thread-safe
-	blocksLRU    *lru.Cache    // thread-safe
+	stateCache   kvcache.Cache                         // thread-safe
+	blocksLRU    *lru.Cache[common.Hash, *types.Block] // thread-safe
 	filters      *rpchelper.Filters
-	_chainConfig *chain.Config
-	_genesis     *types.Block
-	_genesisLock sync.RWMutex
-
-	_historyV3     *bool
-	_historyV3Lock sync.RWMutex
+	_chainConfig atomic.Pointer[chain.Config]
+	_genesis     atomic.Pointer[types.Block]
+	_historyV3   atomic.Pointer[bool]
+	_pruneMode   atomic.Pointer[prune.Mode]
 
 	_blockReader services.FullBlockReader
 	_txnReader   services.TxnReader
@@ -124,7 +126,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 	if !singleNodeMode {
 		blocksLRUSize = 512
 	}
-	blocksLRU, err := lru.New(blocksLRUSize)
+	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
 	}
@@ -162,7 +164,7 @@ func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Bl
 func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	number := rawdb.ReadHeaderNumber(tx, hash)
@@ -176,7 +178,7 @@ func (api *BaseAPI) blockByHashWithSenders(tx kv.Tx, hash common.Hash) (*types.B
 func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.(*types.Block), nil
+			return it, nil
 		}
 	}
 	block, _, err := api._blockReader.BlockWithSenders(context.Background(), tx, hash, number)
@@ -203,10 +205,7 @@ func (api *BaseAPI) blockWithSenders(tx kv.Tx, hash common.Hash, number uint64) 
 }
 
 func (api *BaseAPI) historyV3(tx kv.Tx) bool {
-	api._historyV3Lock.RLock()
-	historyV3 := api._historyV3
-	api._historyV3Lock.RUnlock()
-
+	historyV3 := api._historyV3.Load()
 	if historyV3 != nil {
 		return *historyV3
 	}
@@ -215,20 +214,16 @@ func (api *BaseAPI) historyV3(tx kv.Tx) bool {
 		log.Warn("HisoryV3Enabled: read", "err", err)
 		return false
 	}
-	api._historyV3Lock.Lock()
-	api._historyV3 = &enabled
-	api._historyV3Lock.Unlock()
+	api._historyV3.Store(&enabled)
 	return enabled
 }
 
 func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Block, error) {
-	api._genesisLock.RLock()
-	cc, genesisBlock := api._chainConfig, api._genesis
-	api._genesisLock.RUnlock()
-
-	if cc != nil {
+	cc, genesisBlock := api._chainConfig.Load(), api._genesis.Load()
+	if cc != nil && genesisBlock != nil {
 		return cc, genesisBlock, nil
 	}
+
 	genesisBlock, err := rawdb.ReadBlockByNumber(tx, 0)
 	if err != nil {
 		return nil, nil, err
@@ -238,10 +233,8 @@ func (api *BaseAPI) chainConfigWithGenesis(tx kv.Tx) (*chain.Config, *types.Bloc
 		return nil, nil, err
 	}
 	if cc != nil && genesisBlock != nil {
-		api._genesisLock.Lock()
-		api._genesis = genesisBlock
-		api._chainConfig = cc
-		api._genesisLock.Unlock()
+		api._genesis.Store(genesisBlock)
+		api._chainConfig.Store(cc)
 	}
 	return cc, genesisBlock, nil
 }
@@ -266,6 +259,52 @@ func (api *BaseAPI) headerByRPCNumber(number rpc.BlockNumber, tx kv.Tx) (*types.
 		return nil, err
 	}
 	return api._blockReader.Header(context.Background(), tx, h, n)
+}
+
+// checks the pruning state to see if we would hold information about this
+// block in state history or not.  Some strange issues arise getting account
+// history for blocks that have been pruned away giving nonce too low errors
+// etc. as red herrings
+func (api *BaseAPI) checkPruneHistory(tx kv.Tx, block uint64) error {
+	p, err := api.pruneMode(tx)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		// no prune info found
+		return nil
+	}
+	if p.History.Enabled() {
+		latest, err := api.blockByRPCNumber(rpc.LatestBlockNumber, tx)
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return nil
+		}
+		prunedTo := p.History.PruneTo(latest.Number().Uint64())
+		if block < prunedTo {
+			return fmt.Errorf("history has been pruned for this block")
+		}
+	}
+
+	return nil
+}
+
+func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
+	p := api._pruneMode.Load()
+	if p != nil {
+		return p, nil
+	}
+
+	mode, err := prune.Get(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	api._pruneMode.Store(&mode)
+
+	return p, nil
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

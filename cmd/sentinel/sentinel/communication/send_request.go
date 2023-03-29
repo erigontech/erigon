@@ -21,10 +21,8 @@ var NoRequestHandlers = map[string]bool{
 }
 
 func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topic string, peerId peer.ID) ([]byte, bool, error) {
-	reqRetryTimer := time.NewTimer(clparams.ReqTimeout)
-	defer reqRetryTimer.Stop()
 
-	respRetryTicker := time.NewTimer(100 * time.Millisecond)
+	respRetryTicker := time.NewTimer(30 * time.Millisecond)
 	defer respRetryTicker.Stop()
 
 	stream, err := writeRequestRaw(host, ctx, data, peerId, topic)
@@ -33,7 +31,7 @@ func SendRequestRawToPeer(ctx context.Context, host host.Host, data []byte, topi
 	}
 	defer stream.Close()
 
-	log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
+	//log.Trace("[Sentinel Req] sent request", "topic", topic, "peer", peerId)
 
 	respRetryTimer := time.NewTimer(clparams.RespTimeout)
 	defer respRetryTimer.Stop()

@@ -35,10 +35,11 @@ type BodiesCfg struct {
 	snapshots       *snapshotsync.RoSnapshots
 	blockReader     services.FullBlockReader
 	historyV3       bool
+	transactionsV3  bool
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, transactionsV3 bool) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, transactionsV3: transactionsV3}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -81,6 +82,7 @@ func BodiesForward(
 	if _, _, _, _, err = cfg.bd.UpdateFromDb(tx); err != nil {
 		return err
 	}
+	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
 	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
@@ -105,7 +107,7 @@ func BodiesForward(
 	// Property of blockchain: same block in different forks will have different hashes.
 	// Means - can mark all canonical blocks as non-canonical on unwind, and
 	// do opposite here - without storing any meta-info.
-	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, func(blockNum, lastTxnNum uint64) error {
+	if err := rawdb.MakeBodiesCanonical(tx, s.BlockNumber+1, ctx, logPrefix, logEvery, cfg.transactionsV3, func(blockNum, lastTxnNum uint64) error {
 		if cfg.historyV3 {
 			if err := rawdbv3.TxNums.Append(tx, blockNum, lastTxnNum); err != nil {
 				return err
@@ -125,7 +127,7 @@ func BodiesForward(
 	var sentToPeer bool
 	stopped := false
 	prevProgress := bodyProgress
-	noProgressCount := 0 // How many time the progress was printed without actual progress
+	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
 
 	loopBody := func() (bool, error) {
@@ -309,8 +311,6 @@ func BodiesForward(
 		if err := tx.Commit(); err != nil {
 			return err
 		}
-	} else {
-		cfg.bd.ClearBodyCache()
 	}
 
 	if stopped {

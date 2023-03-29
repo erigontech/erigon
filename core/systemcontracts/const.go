@@ -15,6 +15,7 @@ var (
 	RelayerHubContract         = libcommon.HexToAddress("0x0000000000000000000000000000000000001006")
 	GovHubContract             = libcommon.HexToAddress("0x0000000000000000000000000000000000001007")
 	TokenManagerContract       = libcommon.HexToAddress("0x0000000000000000000000000000000000001008")
+	MaticTokenContract         = libcommon.HexToAddress("0x0000000000000000000000000000000000001010")
 	CrossChainContract         = libcommon.HexToAddress("0x0000000000000000000000000000000000002000")
 	StakingContract            = libcommon.HexToAddress("0x0000000000000000000000000000000000002001")
 )

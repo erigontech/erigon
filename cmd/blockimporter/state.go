@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type State struct {
@@ -28,7 +29,7 @@ type State struct {
 }
 
 // Account that is used to perform withdraws/deposits
-const ownerAccount string = "0x0000000000000000000000000000000000000000"
+const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
 const chainID int64 = 355113
 
 func NewState(db *DB) (*State, error) {
@@ -53,9 +54,26 @@ func NewState(db *DB) (*State, error) {
 		genesis.Alloc = initState
 		chainConfig := chain.Config{
 			ChainID: big.NewInt(chainID),
+
+			// Set the chain spec corresponding to the latest one from revm
+			HomesteadBlock:        big.NewInt(0),
+			DAOForkBlock:          big.NewInt(0),
+			DAOForkSupport:        true,
+			TangerineWhistleBlock: big.NewInt(0),
+			SpuriousDragonBlock:   big.NewInt(0),
+			ByzantiumBlock:        big.NewInt(0),
+			ConstantinopleBlock:   big.NewInt(0),
+			PetersburgBlock:       big.NewInt(0),
+			IstanbulBlock:         big.NewInt(0),
+			MuirGlacierBlock:      big.NewInt(0),
+			BerlinBlock:           big.NewInt(0),
+			LondonBlock:           big.NewInt(0),
+			ArrowGlacierBlock:     big.NewInt(0),
+			GrayGlacierBlock:      big.NewInt(0),
+			MergeNetsplitBlock:    big.NewInt(0),
 		}
 		genesis.Config = &chainConfig
-		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis)
+		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
 		if err != nil {
 			return nil, err
 		}
@@ -90,9 +108,17 @@ func (state *State) ProcessBlock(block types.Block) error {
 	// Set v equal to 27, otherwise the wrong chain ID will be derived for legacy transaction
 	// TODO: remove it when all the transactions are signed
 	// https: //infinityswap.atlassian.net/browse/EPROD-203
+	log.Info(block.Number().String())
 	for _, tr := range block.Transactions() {
 		if legacyTr, ok := tr.(*types.LegacyTx); ok {
-			legacyTr.V = *uint256.NewInt(27)
+			if legacyTr.V.IsZero() {
+				legacyTr.V = *uint256.NewInt(27)
+			}
+
+			signer := types.MakeSigner(state.chainConfig, block.NumberU64())
+			from, _ := legacyTr.Sender(*signer)
+
+			log.Info(fmt.Sprintf("from: %s, to: %x , nonce: %d", from.Hex(), legacyTr.To, legacyTr.Nonce))
 		}
 	}
 
@@ -177,6 +203,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 
 	state.blockNum.Add(state.blockNum, big.NewInt(1))
 
+	log.Info(fmt.Sprintf("processed block %d", block.NumberU64()))
 	return tx.Commit()
 }
 

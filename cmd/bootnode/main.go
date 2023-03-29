@@ -117,7 +117,7 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *realaddr)
 
-	db, err := enode.OpenDB("")
+	db, err := enode.OpenDB("" /* path */, "" /* tmpDir */)
 	if err != nil {
 		panic(err)
 	}

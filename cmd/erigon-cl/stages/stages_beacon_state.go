@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -52,6 +56,7 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		}
 		defer tx.Rollback()
 	}
+
 	endSlot, err := stages.GetStageProgress(tx, stages.BeaconBlocks)
 	if err != nil {
 		return err
@@ -60,20 +65,39 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 
 	fromSlot := latestBlockHeader.Slot
 	for slot := fromSlot + 1; slot <= endSlot; slot++ {
-		block, err := rawdb.ReadBeaconBlock(tx, slot)
+		finalizedRoot, err := rawdb.ReadFinalizedBlockRoot(tx, slot)
 		if err != nil {
 			return err
 		}
-		// Missed proposal are absent slot
-		if block == nil {
+		// Slot had a missing proposal in this case.
+		if finalizedRoot == (libcommon.Hash{}) {
 			continue
 		}
+		block, eth1Number, eth1Hash, err := rawdb.ReadBeaconBlock(tx, finalizedRoot, slot)
+		if err != nil {
+			return err
+		}
 		// TODO: Pass this to state transition with the state
-		_ = block
+		if cfg.executionClient != nil {
+			if block.Block.Body.ExecutionPayload, err = cfg.executionClient.ReadExecutionPayload(eth1Number, eth1Hash); err != nil {
+				return err
+			}
+			// validate fully only in current epoch.
+			fullValidate := utils.GetCurrentEpoch(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, cfg.beaconCfg.SlotsPerEpoch) == cfg.state.Epoch()
+			if err := transition.TransitionState(cfg.state, block, fullValidate); err != nil {
+				log.Info("Found epoch, so stopping now...", "count", slot-(fromSlot+1), "slot", slot)
+				return err
+			}
+			log.Info("Applied state transition", "from", slot, "to", slot+1)
+		}
 	}
 	// If successful update fork choice
 	if cfg.executionClient != nil {
-		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, endSlot)
+		finalizedRoot, err := rawdb.ReadFinalizedBlockRoot(tx, endSlot)
+		if err != nil {
+			return err
+		}
+		_, _, eth1Hash, _, err := rawdb.ReadBeaconBlockForStorage(tx, finalizedRoot, endSlot)
 		if err != nil {
 			return err
 		}
@@ -92,15 +116,18 @@ func SpawnStageBeaconState(cfg StageBeaconStateCfg, s *stagedsync.StageState, tx
 		if err := tx.ClearBucket(kv.BlockBody); err != nil {
 			return err
 		}
-		if err := tx.ClearBucket(kv.EthTx); err != nil {
+		ethTx := kv.EthTx
+		transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
+		if transactionsV3 {
+			ethTx = kv.EthTxV3
+		}
+		if err := tx.ClearBucket(ethTx); err != nil {
 			return err
 		}
 		if err := tx.ClearBucket(kv.Sequence); err != nil {
 			return err
 		}
 	}
-	latestBlockHeader.Slot = endSlot
-	cfg.state.SetLatestBlockHeader(latestBlockHeader)
 
 	log.Info(fmt.Sprintf("[%s] Finished transitioning state", s.LogPrefix()), "from", fromSlot, "to", endSlot)
 	if !useExternalTx {

@@ -130,7 +130,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 	agg.StartWrites()
 
 	rs := state.NewStateV3()
-	stateWriter := state.NewStateWriter22(rs)
+	stateWriter := state.NewStateWriterV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
@@ -167,7 +167,7 @@ func newAgg(t *testing.T) *libstate.AggregatorV3 {
 	dir, ctx := t.TempDir(), context.Background()
 	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil)
 	require.NoError(t, err)
-	err = agg.ReopenFiles()
+	err = agg.OpenFolder()
 	require.NoError(t, err)
 	return agg
 }

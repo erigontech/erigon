@@ -10,56 +10,17 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
-	"golang.org/x/exp/slices"
 )
 
-func IsSlashableValidator(validator *cltypes.Validator, epoch uint64) bool {
-	return !validator.Slashed && (validator.ActivationEpoch <= epoch) && (epoch < validator.WithdrawableEpoch)
-}
-
-func IsSlashableAttestationData(d1, d2 *cltypes.AttestationData) (bool, error) {
-	hash1, err := d1.HashSSZ()
-	if err != nil {
-		return false, fmt.Errorf("unable to hash attestation data 1: %v", err)
-	}
-
-	hash2, err := d2.HashSSZ()
-	if err != nil {
-		return false, fmt.Errorf("unable to hash attestation data 2: %v", err)
-	}
-
-	return (hash1 != hash2 && d1.Target.Epoch == d2.Target.Epoch) || (d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch), nil
-}
-
-func IsSortedSet(vals []uint64) bool {
-	for i := 0; i < len(vals)-1; i++ {
-		if vals[i] >= vals[i+1] {
-			return false
-		}
-	}
-	return true
-}
-
-func GetSetIntersection(v1, v2 []uint64) []uint64 {
-	intersection := []uint64{}
-	present := map[uint64]bool{}
-
-	for _, v := range v1 {
-		present[v] = true
-	}
-
-	for _, v := range v2 {
-		if present[v] {
-			intersection = append(intersection, v)
-		}
-	}
-	return intersection
+func isSlashableAttestationData(d1, d2 *cltypes.AttestationData) bool {
+	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
+		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)
 }
 
 func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAttestation) (bool, error) {
 	inds := att.AttestingIndices
-	if len(inds) == 0 || !IsSortedSet(inds) {
-		return false, fmt.Errorf("invalid attesting indices")
+	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
 	}
 
 	pks := [][]byte{}
@@ -71,7 +32,7 @@ func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 		pks = append(pks, val.PublicKey[:])
 	}
 
-	domain, err := state.GetDomain(clparams.MainnetBeaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
+	domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconAttester, att.Data.Target.Epoch)
 	if err != nil {
 		return false, fmt.Errorf("unable to get the domain: %v", err)
 	}
@@ -91,7 +52,7 @@ func isValidIndexedAttestation(state *state.BeaconState, att *cltypes.IndexedAtt
 	return true, nil
 }
 
-func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.ProposerSlashing) error {
+func ProcessProposerSlashing(state *state.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
 	h1 := propSlashing.Header1.Header
 	h2 := propSlashing.Header2.Header
 
@@ -115,16 +76,16 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 		return fmt.Errorf("propose slashing headers are the same: %v == %v", h1Root, h2Root)
 	}
 
-	proposer, err := s.state.ValidatorAt(int(h1.ProposerIndex))
+	proposer, err := state.ValidatorAt(int(h1.ProposerIndex))
 	if err != nil {
 		return err
 	}
-	if !IsSlashableValidator(&proposer, s.state.Epoch()) {
+	if !proposer.IsSlashable(state.Epoch()) {
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 
 	for _, signedHeader := range []*cltypes.SignedBeaconBlockHeader{propSlashing.Header1, propSlashing.Header2} {
-		domain, err := s.state.GetDomain(s.beaconConfig.DomainBeaconProposer, s.state.GetEpochAtSlot(signedHeader.Header.Slot))
+		domain, err := state.GetDomain(state.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(signedHeader.Header.Slot))
 		if err != nil {
 			return fmt.Errorf("unable to get domain: %v", err)
 		}
@@ -142,23 +103,19 @@ func (s *StateTransistor) ProcessProposerSlashing(propSlashing *cltypes.Proposer
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
-	s.state.SlashValidator(h1.ProposerIndex, 0)
+	state.SlashValidator(h1.ProposerIndex, nil)
 	return nil
 }
 
-func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterSlashing) error {
+func ProcessAttesterSlashing(state *state.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
 	att1 := attSlashing.Attestation_1
 	att2 := attSlashing.Attestation_2
 
-	slashable, err := IsSlashableAttestationData(att1.Data, att2.Data)
-	if err != nil {
-		return fmt.Errorf("unable to determine if attestation data was slashable: %v", err)
-	}
-	if !slashable {
+	if !isSlashableAttestationData(att1.Data, att2.Data) {
 		return fmt.Errorf("attestation data not slashable: %+v; %+v", att1.Data, att2.Data)
 	}
 
-	valid, err := isValidIndexedAttestation(s.state, att1)
+	valid, err := isValidIndexedAttestation(state, att1)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
 	}
@@ -166,7 +123,7 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 		return fmt.Errorf("invalid indexed attestation 1")
 	}
 
-	valid, err = isValidIndexedAttestation(s.state, att2)
+	valid, err = isValidIndexedAttestation(state, att2)
 	if err != nil {
 		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
 	}
@@ -175,14 +132,14 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	}
 
 	slashedAny := false
-	indices := GetSetIntersection(att1.AttestingIndices, att2.AttestingIndices)
-	for _, ind := range indices {
-		currentValidator, err := s.state.ValidatorAt(int(ind))
+	currentEpoch := state.GetEpochAtSlot(state.Slot())
+	for _, ind := range utils.IntersectionOfSortedSets(att1.AttestingIndices, att2.AttestingIndices) {
+		validator, err := state.ValidatorAt(int(ind))
 		if err != nil {
 			return err
 		}
-		if IsSlashableValidator(&currentValidator, s.state.GetEpochAtSlot(s.state.Slot())) {
-			err := s.state.SlashValidator(ind, 0)
+		if validator.IsSlashable(currentEpoch) {
+			err := state.SlashValidator(ind, nil)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
 			}
@@ -196,7 +153,7 @@ func (s *StateTransistor) ProcessAttesterSlashing(attSlashing *cltypes.AttesterS
 	return nil
 }
 
-func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
+func ProcessDeposit(state *state.BeaconState, deposit *cltypes.Deposit, fullValidation bool) error {
 	if deposit == nil {
 		return nil
 	}
@@ -204,13 +161,13 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 	if err != nil {
 		return err
 	}
-	depositIndex := s.state.Eth1DepositIndex()
-	eth1Data := s.state.Eth1Data()
+	depositIndex := state.Eth1DepositIndex()
+	eth1Data := state.Eth1Data()
 	// Validate merkle proof for deposit leaf.
-	if !s.noValidate && utils.IsValidMerkleBranch(
+	if fullValidation && !utils.IsValidMerkleBranch(
 		depositLeaf,
 		deposit.Proof,
-		s.beaconConfig.DepositContractTreeDepth+1,
+		state.BeaconConfig().DepositContractTreeDepth+1,
 		depositIndex,
 		eth1Data.Root,
 	) {
@@ -218,14 +175,14 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 	}
 
 	// Increment index
-	s.state.SetEth1DepositIndex(depositIndex + 1)
+	state.SetEth1DepositIndex(depositIndex + 1)
 	publicKey := deposit.Data.PubKey
 	amount := deposit.Data.Amount
 	// Check if pub key is in validator set
-	validatorIndex, has := s.state.ValidatorIndexByPubkey(publicKey)
+	validatorIndex, has := state.ValidatorIndexByPubkey(publicKey)
 	if !has {
 		// Agnostic domain.
-		domain, err := fork.ComputeDomain(s.beaconConfig.DomainDeposit[:], utils.Uint32ToBytes4(s.beaconConfig.GenesisForkVersion), [32]byte{})
+		domain, err := fork.ComputeDomain(state.BeaconConfig().DomainDeposit[:], utils.Uint32ToBytes4(state.BeaconConfig().GenesisForkVersion), [32]byte{})
 		if err != nil {
 			return err
 		}
@@ -236,50 +193,49 @@ func (s *StateTransistor) ProcessDeposit(deposit *cltypes.Deposit) error {
 		signedRoot := utils.Keccak256(depositMessageRoot[:], domain)
 		// Perform BLS verification and if successful noice.
 		valid, err := bls.Verify(deposit.Data.Signature[:], signedRoot[:], publicKey[:])
-		if err != nil {
-			return err
+		// Literally you can input it trash.
+		if !valid || err != nil {
+			return nil
 		}
-		if valid {
-			// Append validator
-			s.state.AddValidator(s.state.ValidatorFromDeposit(deposit))
-			s.state.AddBalance(amount)
-			// Altair only
-			s.state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
-			s.state.AddInactivityScore(0)
+		// Append validator
+		state.AddValidator(state.ValidatorFromDeposit(deposit), amount)
+		// Altair forward
+		if state.Version() >= clparams.AltairVersion {
+			state.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			state.AddPreviousEpochParticipationFlags(cltypes.ParticipationFlags(0))
+			state.AddInactivityScore(0)
 		}
 		return nil
 	}
 	// Increase the balance if exists already
-	return s.state.IncreaseBalance(int(validatorIndex), amount)
-
+	return state.IncreaseBalance(validatorIndex, amount)
 }
 
 // ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit) error {
+func ProcessVoluntaryExit(state *state.BeaconState, signedVoluntaryExit *cltypes.SignedVoluntaryExit, fullValidation bool) error {
 	// Sanity checks so that we know it is good.
 	voluntaryExit := signedVoluntaryExit.VolunaryExit
-	currentEpoch := s.state.Epoch()
-	validator, err := s.state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
+	currentEpoch := state.Epoch()
+	validator, err := state.ValidatorAt(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		return err
 	}
 	if !validator.Active(currentEpoch) {
 		return errors.New("ProcessVoluntaryExit: validator is not active")
 	}
-	if validator.ExitEpoch != s.beaconConfig.FarFutureEpoch {
+	if validator.ExitEpoch != state.BeaconConfig().FarFutureEpoch {
 		return errors.New("ProcessVoluntaryExit: another exit for the same validator is already getting processed")
 	}
 	if currentEpoch < voluntaryExit.Epoch {
 		return errors.New("ProcessVoluntaryExit: exit is happening in the future")
 	}
-	if currentEpoch < validator.ActivationEpoch+s.beaconConfig.ShardCommitteePeriod {
+	if currentEpoch < validator.ActivationEpoch+state.BeaconConfig().ShardCommitteePeriod {
 		return errors.New("ProcessVoluntaryExit: exit is happening too fast")
 	}
 
 	// We can skip it in some instances if we want to optimistically sync up.
-	if !s.noValidate {
-		domain, err := s.state.GetDomain(s.beaconConfig.DomainVoluntaryExit, voluntaryExit.Epoch)
+	if fullValidation {
+		domain, err := state.GetDomain(state.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 		if err != nil {
 			return err
 		}
@@ -296,94 +252,5 @@ func (s *StateTransistor) ProcessVoluntaryExit(signedVoluntaryExit *cltypes.Sign
 		}
 	}
 	// Do the exit (same process in slashing).
-	return s.state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
-}
-
-// ProcessVoluntaryExit takes a voluntary exit and applies state transition.
-func (s *StateTransistor) ProcessAttestation(attestation *cltypes.Attestation) error {
-	participationFlagWeights := []uint64{
-		s.beaconConfig.TimelySourceWeight,
-		s.beaconConfig.TimelyTargetWeight,
-		s.beaconConfig.TimelyHeadWeight,
-	}
-
-	totalActiveBalance, err := s.state.GetTotalActiveBalance()
-	if err != nil {
-		return err
-	}
-	data := attestation.Data
-	currentEpoch := s.state.Epoch()
-	previousEpoch := s.state.PreviousEpoch()
-	stateSlot := s.state.Slot()
-	if (data.Target.Epoch != currentEpoch && data.Target.Epoch != previousEpoch) || data.Target.Epoch != s.state.GetEpochAtSlot(data.Slot) {
-		return errors.New("ProcessAttestation: attestation with invalid epoch")
-	}
-	if data.Slot+s.beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot+s.beaconConfig.SlotsPerEpoch {
-		return errors.New("ProcessAttestation: attestation slot not in range")
-	}
-	if data.Index >= s.state.CommitteeCount(data.Target.Epoch) {
-		return errors.New("ProcessAttestation: attester index out of range")
-	}
-	participationFlagsIndicies, err := s.state.GetAttestationParticipationFlagIndicies(attestation.Data, stateSlot-data.Slot)
-	if err != nil {
-		return err
-	}
-	valid, err := s.verifyAttestation(attestation)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return errors.New("ProcessAttestation: wrong bls data")
-	}
-	var epochParticipation cltypes.ParticipationFlagsList
-	if data.Target.Epoch == currentEpoch {
-		epochParticipation = s.state.CurrentEpochParticipation()
-	} else {
-		epochParticipation = s.state.PreviousEpochParticipation()
-	}
-
-	var proposerRewardNumerator uint64
-	attestingIndicies, err := s.state.GetAttestingIndicies(attestation.Data, attestation.AggregationBits)
-	if err != nil {
-		return err
-	}
-
-	for _, attesterIndex := range attestingIndicies {
-		for flagIndex, weight := range participationFlagWeights {
-			if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || epochParticipation[attesterIndex].HasFlag(flagIndex) {
-				continue
-			}
-			epochParticipation[attesterIndex] = epochParticipation[attesterIndex].Add(flagIndex)
-			baseReward, err := s.state.BaseReward(totalActiveBalance, attesterIndex)
-			if err != nil {
-				return err
-			}
-			proposerRewardNumerator += baseReward * weight
-		}
-	}
-	// Reward proposer
-	proposer, err := s.state.GetBeaconProposerIndex()
-	if err != nil {
-		return err
-	}
-	// Set participation
-	if data.Target.Epoch == currentEpoch {
-		s.state.SetCurrentEpochParticipation(epochParticipation)
-	} else {
-		s.state.SetPreviousEpochParticipation(epochParticipation)
-	}
-	proposerRewardDenominator := (s.beaconConfig.WeightDenominator - s.beaconConfig.ProposerWeight) * s.beaconConfig.WeightDenominator / s.beaconConfig.ProposerWeight
-	reward := proposerRewardNumerator / proposerRewardDenominator
-	return s.state.IncreaseBalance(int(proposer), reward)
-}
-
-func (s *StateTransistor) verifyAttestation(attestation *cltypes.Attestation) (bool, error) {
-	if s.noValidate {
-		return true, nil
-	}
-	indexedAttestation, err := s.state.GetIndexedAttestation(attestation)
-	if err != nil {
-		return false, err
-	}
-	return isValidIndexedAttestation(s.state, indexedAttestation)
+	return state.InitiateValidatorExit(voluntaryExit.ValidatorIndex)
 }

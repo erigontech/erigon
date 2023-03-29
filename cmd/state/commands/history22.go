@@ -12,6 +12,7 @@ import (
 	"time"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -31,6 +32,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
+)
+
+var (
+	blockTo    int
+	traceBlock int
 )
 
 func init() {
@@ -72,10 +78,14 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	}
 	defer historyTx.Rollback()
 	aggPath := filepath.Join(datadirCli, "erigon23")
-	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep)
+	h, err := libstate.NewAggregator(aggPath, dirs.Tmp, ethconfig.HistoryV3AggregationStep, libstate.CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	if err != nil {
 		return fmt.Errorf("create history: %w", err)
 	}
+	if err := h.ReopenFolder(); err != nil {
+		return err
+	}
+
 	defer h.Close()
 	readDbPath := path.Join(datadirCli, "readdb")
 	if block == 0 {
@@ -137,7 +147,7 @@ func History22(genesis *core.Genesis, logger log.Logger) error {
 	if err := allSnapshots.ReopenWithDB(db); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
 	readWrapper := state.NewHistoryReader23(h.MakeContext(), ri)
 
 	for !interrupt {

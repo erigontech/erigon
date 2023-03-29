@@ -48,6 +48,7 @@ import (
 	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
+	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/health"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -79,8 +80,9 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	cfg := &httpcfg.HttpCfg{Enabled: true, StateCache: kvcache.DefaultCoherentConfig}
-	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "private api network address, for example: 127.0.0.1:9090")
+	rootCmd.PersistentFlags().StringVar(&cfg.PrivateApiAddr, "private.api.addr", "127.0.0.1:9090", "Erigon's components (txpool, rpcdaemon, sentry, downloader, ...) can be deployed as independent Processes on same/another server. Then components will connect to erigon by this internal grpc API. Example: 127.0.0.1:9090")
 	rootCmd.PersistentFlags().StringVar(&cfg.DataDir, "datadir", "", "path to Erigon working directory")
+	rootCmd.PersistentFlags().BoolVar(&cfg.GraphQLEnabled, "graphql", false, "enables graphql endpoint (disabled by default)")
 	rootCmd.PersistentFlags().StringVar(&cfg.HttpListenAddress, "http.addr", nodecfg.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSCertfile, "tls.cert", "", "certificate for client side TLS handshake")
 	rootCmd.PersistentFlags().StringVar(&cfg.TLSKeyFile, "tls.key", "", "key file for client side TLS handshake")
@@ -342,71 +344,68 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 		}
 
 		// Configure sapshots
-		if cfg.Snap.Enabled {
-			allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
-			// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
-			// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
-			allSnapshots.OptimisticReopenWithDB(db)
-			allSnapshots.LogStat()
+		allSnapshots = snapshotsync.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap)
+		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
+		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
+		allSnapshots.OptimisticReopenWithDB(db)
+		allSnapshots.LogStat()
 
-			if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
-				return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
-			}
-			_ = agg.ReopenFiles()
-
-			db.View(context.Background(), func(tx kv.Tx) error {
-				agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-					_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-					return histBlockNumProgress
-				})
-				return nil
-			})
-			onNewSnapshot = func() {
-				go func() { // don't block events processing by network communication
-					reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
-					if err != nil {
-						log.Warn("[Snapshots] reopen", "err", err)
-						return
-					}
-					if err := allSnapshots.ReopenList(reply.Files, true); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						allSnapshots.LogStat()
-					}
-
-					if err = agg.ReopenFiles(); err != nil {
-						log.Error("[Snapshots] reopen", "err", err)
-					} else {
-						db.View(context.Background(), func(tx kv.Tx) error {
-							agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-								_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-								return histBlockNumProgress
-							})
-							return nil
-						})
-					}
-				}()
-			}
-			onNewSnapshot()
-			blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
-
-			var histV3Enabled bool
-			_ = db.View(ctx, func(tx kv.Tx) error {
-				histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
-				return nil
-			})
-			if histV3Enabled {
-				log.Info("HistoryV3", "enable", histV3Enabled)
-				db, err = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[cc.ChainName])
-				if err != nil {
-					return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
-				}
-			}
-			stateCache = kvcache.NewDummy()
-		} else {
-			blockReader = snapshotsync.NewBlockReader()
-			stateCache = kvcache.NewDummy()
+		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db); err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
 		}
+		_ = agg.OpenFolder()
+
+		db.View(context.Background(), func(tx kv.Tx) error {
+			agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+				return histBlockNumProgress
+			})
+			return nil
+		})
+		onNewSnapshot = func() {
+			go func() { // don't block events processing by network communication
+				reply, err := remoteKvClient.Snapshots(ctx, &remote.SnapshotsRequest{}, grpc.WaitForReady(true))
+				if err != nil {
+					log.Warn("[snapshots] reopen", "err", err)
+					return
+				}
+				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
+					log.Error("[snapshots] reopen", "err", err)
+				} else {
+					allSnapshots.LogStat()
+				}
+
+				_ = reply.HistoryFiles
+
+				if err = agg.OpenFolder(); err != nil {
+					log.Error("[snapshots] reopen", "err", err)
+				} else {
+					db.View(context.Background(), func(tx kv.Tx) error {
+						agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+							_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+							return histBlockNumProgress
+						})
+						return nil
+					})
+				}
+			}()
+		}
+		onNewSnapshot()
+		blockReader = snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, ethconfig.Defaults.TransactionsV3)
+
+		var histV3Enabled bool
+		_ = db.View(ctx, func(tx kv.Tx) error {
+			histV3Enabled, _ = kvcfg.HistoryV3.Enabled(tx)
+			return nil
+		})
+		if histV3Enabled {
+			log.Info("HistoryV3", "enable", histV3Enabled)
+			db, err = temporal.New(rwKv, agg, accounts.ConvertV3toV2, historyv2read.RestoreCodeHash, accounts.DecodeIncarnationFromStorage, systemcontracts.SystemContractCodeLookup[cc.ChainName])
+			if err != nil {
+				return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+			}
+		}
+		stateCache = kvcache.NewDummy()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
 	if db == nil {
@@ -537,12 +536,14 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		wsHandler = srv.WebsocketHandler([]string{"*"}, nil, cfg.WebsocketCompression)
 	}
 
-	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, nil)
+	graphQLHandler := graphql.CreateHandler(defaultAPIList)
+
+	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
 	}
 
-	listener, _, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
+	listener, httpAddr, err := node.StartHTTPEndpoint(httpEndpoint, cfg.HTTPTimeouts, apiHandler)
 	if err != nil {
 		return fmt.Errorf("could not start RPC api: %w", err)
 	}
@@ -563,8 +564,10 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		log.Info("TCP Endpoint opened", "url", tcpEndpoint)
 	}
 
-	info := []interface{}{"url", httpEndpoint, "ws", cfg.WebsocketEnabled,
-		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled}
+	info := []interface{}{
+		"url", httpAddr, "ws", cfg.WebsocketEnabled,
+		"ws.compression", cfg.WebsocketCompression, "grpc", cfg.GRPCServerEnabled,
+	}
 
 	var (
 		healthServer *grpcHealth.Server
@@ -593,7 +596,7 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = listener.Shutdown(shutdownCtx)
-		log.Info("HTTP endpoint closed", "url", httpEndpoint)
+		log.Info("HTTP endpoint closed", "url", httpAddr)
 
 		if cfg.GRPCServerEnabled {
 			if cfg.GRPCHealthCheckEnabled {
@@ -680,8 +683,12 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg) ([]byte, error) {
 	return jwtSecret, nil
 }
 
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
+func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
+			return
+		}
+
 		// adding a healthcheck here
 		if health.ProcessHealthcheckIfNeeded(w, r, apiList) {
 			return
@@ -719,18 +726,20 @@ func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API) (*http.Serve
 
 	engineHttpHandler := node.NewHTTPHandlerStack(engineSrv, nil /* authCors */, cfg.AuthRpcVirtualHost, cfg.HttpCompression)
 
-	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, jwtSecret)
+	graphQLHandler := graphql.CreateHandler(engineApi)
+
+	engineApiHandler, err := createHandler(cfg, engineApi, engineHttpHandler, wsHandler, graphQLHandler, jwtSecret)
 	if err != nil {
 		return nil, nil, "", err
 	}
 
-	engineListener, _, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
+	engineListener, engineAddr, err := node.StartHTTPEndpoint(engineHttpEndpoint, cfg.AuthRpcTimeouts, engineApiHandler)
 	if err != nil {
 		return nil, nil, "", fmt.Errorf("could not start RPC api: %w", err)
 	}
 
-	engineInfo := []interface{}{"url", engineHttpEndpoint, "ws", true, "ws.compression", cfg.WebsocketCompression}
+	engineInfo := []interface{}{"url", engineAddr, "ws", true, "ws.compression", cfg.WebsocketCompression}
 	log.Info("HTTP endpoint opened for Engine API", engineInfo...)
 
-	return engineListener, engineSrv, engineHttpEndpoint, nil
+	return engineListener, engineSrv, engineAddr.String(), nil
 }

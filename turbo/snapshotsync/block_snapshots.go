@@ -33,12 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -49,6 +43,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snapcfg"
+	"github.com/ledgerwatch/log/v3"
+	"go.uber.org/atomic"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
 )
 
 type DownloadRequest struct {
@@ -390,7 +388,7 @@ func (s *RoSnapshots) BlocksAvailable() uint64 { return cmp.Min(s.segmentsMax.Lo
 func (s *RoSnapshots) LogStat() {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	log.Info("[Snapshots] Blocks Stat",
+	log.Info("[snapshots] Blocks Stat",
 		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
@@ -884,7 +882,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainID uint256.Int, tm
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, sem *semaphore.Weighted) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 	logEvery := time.NewTicker(20 * time.Second)
@@ -897,6 +895,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	startIndexingTime := time.Now()
 
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(workers)
 	for _, t := range snaptype.AllSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
@@ -906,12 +905,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			if hasIdxFile(&segment) {
 				continue
 			}
-			if err := sem.Acquire(gCtx, 1); err != nil {
-				return err
-			}
 			sn := segment
 			g.Go(func() error {
-				defer sem.Release(1)
 				p := &background.Progress{}
 				ps.Add(p)
 				defer ps.Delete(p)
@@ -921,8 +916,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	}
 	finish := make(chan struct{})
 	go func() {
+		defer close(finish)
 		g.Wait()
-		close(finish)
 	}()
 
 	for {
@@ -1048,7 +1043,8 @@ func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
 }
 
 type BlockRetire struct {
-	working atomic.Bool
+	working               atomic.Bool
+	needSaveFilesListInDB atomic.Bool
 
 	workers   int
 	tmpDir    string
@@ -1057,15 +1053,16 @@ type BlockRetire struct {
 
 	downloader proto_downloader.DownloaderClient
 	notifier   DBEventNotifier
-
-	BackgroundResult *BackgroundResult
 }
 
 func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.RoDB, downloader proto_downloader.DownloaderClient, notifier DBEventNotifier) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier, BackgroundResult: &BackgroundResult{}}
+	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
 func (br *BlockRetire) Working() bool           { return br.working.Load() }
+func (br *BlockRetire) NeedSaveFilesListInDB() bool {
+	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
+}
 
 func CanRetire(curBlockNum uint64, snapshots *RoSnapshots) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
@@ -1118,7 +1115,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	return retireBlocks(ctx, blockFrom, blockTo, *chainID, br.tmpDir, br.snapshots, br.db, br.workers, br.downloader, lvl, br.notifier)
 }
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if br.snapshots.cfg.KeepBlocks {
 		return nil
 	}
@@ -1127,26 +1124,21 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx) error {
 		return err
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, br.snapshots)
-	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, 100); err != nil {
+	if _, _, err := rawdb.DeleteAncientBlocks(tx, canDeleteTo, limit); err != nil {
 		return nil
 	}
-	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), 100); err != nil {
+	if err := rawdb.PruneTable(tx, kv.Senders, canDeleteTo, context.Background(), limit); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl) {
-	if br.working.Load() {
+	ok := br.working.CompareAndSwap(false, true)
+	if !ok {
 		// go-routine is still working
 		return
 	}
-	if br.BackgroundResult.Has() {
-		// Prevent invocation for the same range twice, result needs to be cleared in the Result() function
-		return
-	}
-
-	br.working.Store(true)
 	go func() {
 		defer br.working.Store(false)
 
@@ -1157,9 +1149,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 
 		err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl)
 		if err != nil {
-			br.BackgroundResult.Set(fmt.Errorf("retire blocks error: %w, fromBlock=%d, toBlock=%d", err, blockFrom, blockTo))
-		} else {
-			br.BackgroundResult.Set(nil)
+			log.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 		}
 	}()
 }
@@ -1329,7 +1319,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, segmentFile, tmpDir string, blockF
 	chainConfig := fromdb.ChainConfig(db)
 	chainID, _ := uint256.FromBig(chainConfig.ChainID)
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Txs", segmentFile, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Txs", segmentFile, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return 0, fmt.Errorf("NewCompressor: %w, %s", err, segmentFile)
 	}
@@ -1504,7 +1494,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Headers", segmentFilePath, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
@@ -1566,7 +1556,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, segmentFilePath, tmpDir string,
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	f, err := compress.NewCompressor(ctx, "Snapshot Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers, lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshot Bodies", segmentFilePath, tmpDir, compress.MinPatternScore, workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
@@ -1716,11 +1706,7 @@ func TransactionsIdx(ctx context.Context, chainID uint256.Int, blockFrom, blockT
 	if err != nil {
 		return err
 	}
-	idxLogLvl := log.LvlDebug
-	if d.Count() > 1_000_000 {
-		idxLogLvl = log.LvlInfo
-	}
-	txnHashIdx.LogLvl(idxLogLvl)
+	txnHashIdx.LogLvl(log.LvlDebug)
 	txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
 
 	parseCtx := types2.NewTxParseContext(chainID)
@@ -1901,7 +1887,7 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	if err != nil {
 		return err
 	}
-	rs.LogLvl(lvl)
+	rs.LogLvl(log.LvlDebug)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
@@ -2090,7 +2076,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, m.lvl)
+	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
@@ -2109,7 +2095,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 					return ctx.Err()
 				case <-logEvery.C:
 					_, fName := filepath.Split(targetFile)
-					log.Info("[Snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
+					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
 				default:
 				}
 			}

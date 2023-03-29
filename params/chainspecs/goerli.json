@@ -15,6 +15,7 @@
   "londonBlock": 5062605,
   "terminalTotalDifficulty": 10790000,
   "terminalTotalDifficultyPassed": true,
+  "shanghaiTime": 1678832736,
   "clique": {
     "period": 15,
     "epoch": 30000

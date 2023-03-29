@@ -11,7 +11,7 @@ make erigon
 ```
 
 
-## 2. Build RPCdeamon
+## 2. Build RPC deamon
 On the same terminal folder you can build the RPC daemon.
 
 ```bash
@@ -19,7 +19,7 @@ make rpcdaemon
 ```
 
 ## 3. Start Node 1 
-If evereything is fine, by changing directory to erigon/build/bin you will see the two exec for erigon and rpc daemon.
+If everything is fine, by changing directory to erigon/build/bin you will see the two exec for erigon and rpc daemon.
 On the terminal you can type the following command to start node1.
 
 ```bash
@@ -31,9 +31,9 @@ On the terminal you can type the following command to start node1.
  * chain : Tells that we want to run Erigon in the dev chain.
  * private.api.addr=localhost:9090 : Tells where Eigon is going to listen for connections.
  * mine : Add this if you want the node to mine.
- * dev.period <number-of-seconds>: Add this to specify the timing interval amongst blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
+ * dev.period <number-of-seconds>: Add this to specify the timing interval among blocks. Number of seconds MUST be > 0 (if you want empty blocks) otherwise the default value 0 does not allow mining of empty blocks.
  
-The result will be somenthing like this:
+The result will be something like this:
 
 <img width="1652" alt="Node 1 start" src="https://user-images.githubusercontent.com/24697803/140478108-c93a131d-745d-45ac-a76f-9bb808e504df.png">
 
@@ -72,7 +72,7 @@ To check if the nodes are connected, you can go to the log of both the nodes and
     
   ```  [p2p] GoodPeers    eth66=1 ```
     
-Note: this might take a while it is not istantaneus, also if you see a 1 on either one of the two the node is fine.
+Note: this might take a while it is not instantaneous, also if you see a 1 on either one of the two the node is fine.
     
     
  
@@ -110,10 +110,10 @@ Other commands you can try:
   curl -X POST -H "Content-Type: application/json" --data '{"jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id":83}' localhost:8545
  ```
     
-## 7. Send a transaction with metamask
+## 7. Send a transaction with MetaMask
     
  Finally, we want to try sending a transaction between two accounts.
- For this example we will use dev accounts retrived from Erigon code:
+ For this example we will use dev accounts retrieved from Erigon code:
  
  * Account with balance (Dev 1) 
    * address = ``` 0x67b1d87101671b127f5f8714789C7192f7ad340e ``` 
@@ -125,7 +125,7 @@ Other commands you can try:
  
  
 
-Now from metamask, you can import Dev 1 , and then send a transaction to pass some ethers from Dev 1 to Dev 2. 
+Now from MetaMask, you can import Dev 1 , and then send a transaction to pass some ethers from Dev 1 to Dev 2. 
 From the RPC daemon terminal, you will see something like this
  
 <img width="1633" alt="Transaction example" src="https://user-images.githubusercontent.com/24697803/140479146-94b6e66c-22b7-4d8a-a160-b3643d27b612.png">

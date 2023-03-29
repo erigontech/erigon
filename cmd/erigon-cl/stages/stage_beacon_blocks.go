@@ -57,7 +57,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		progress = cfg.state.LatestBlockHeader().Slot
 		lastRoot, err = cfg.state.BlockRoot()
 	} else {
-		_, _, _, lastRoot, err = rawdb.ReadBeaconBlockForStorage(tx, progress)
+		lastRoot, err = rawdb.ReadFinalizedBlockRoot(tx, progress)
 	}
 	if err != nil {
 		return err
@@ -124,6 +124,15 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
 				return
 			}
+			var currentRoot libcommon.Hash
+			currentRoot, err = block.Block.HashSSZ()
+			if err != nil {
+				return
+			}
+			// Assume all of them are finalized
+			if err = rawdb.WriteFinalizedBlockRoot(tx, block.Block.Slot, currentRoot); err != nil {
+				return
+			}
 			if cfg.executionClient != nil && block.Version() >= clparams.BellatrixVersion {
 				if err = executionPayloadInsertionBatch.WriteExecutionPayload(block.Block.Body.ExecutionPayload); err != nil {
 					log.Warn("Could not send Execution Payload", "err", err)
@@ -160,6 +169,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	if err := executionPayloadInsertionBatch.Flush(); err != nil {
 		return err
 	}
+
 	log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "count", targetSlot-progress)
 	if err := s.Update(tx, cfg.downloader.GetHighestProcessedSlot()); err != nil {
 		return err

@@ -16,3 +16,11 @@ func IsValidMerkleBranch(leaf libcommon.Hash, branch []libcommon.Hash, depth uin
 	}
 	return value == root
 }
+
+func PreparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
+	ret := make([][32]byte, len(roots))
+	for i := range roots {
+		copy(ret[i][:], roots[i][:])
+	}
+	return ret
+}
