@@ -51,5 +51,4 @@ func TestForkGraph(t *testing.T) {
 	// Ensure it ends up on correct state.
 	require.NoError(t, err)
 	require.Equal(t, expectedStateHashPostFail, haveStateHashPostFail)
-	panic("A")
 }

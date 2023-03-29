@@ -237,6 +237,7 @@ func (b *BeaconState) revertCachesOnBoundary(beforeSlot uint64) {
 	epoch := b.Epoch()
 	b.previousStateRoot = libcommon.Hash{}
 	b.proposerIndex = nil
+	b.totalActiveBalanceCache = nil
 	if epoch <= beforeEpoch {
 		return
 	}
