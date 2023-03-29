@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,7 +45,7 @@ func TestNonceFromAddress(t *testing.T) {
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
-	cfg := DefaultConfig
+	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil)
 	assert.NoError(err)
@@ -164,7 +165,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
-	cfg := DefaultConfig
+	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil)
 	assert.NoError(err)
@@ -281,7 +282,7 @@ func TestReverseNonces(t *testing.T) {
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
-	cfg := DefaultConfig
+	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil)
 	assert.NoError(err)
@@ -408,7 +409,7 @@ func TestTxPoke(t *testing.T) {
 	ch := make(chan types.Announcements, 100)
 	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
 
-	cfg := DefaultConfig
+	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil)
 	assert.NoError(err)
@@ -665,7 +666,7 @@ func TestShanghaiValidateTx(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ch := make(chan types.Announcements, 100)
 			_, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
-			cfg := DefaultConfig
+			cfg := txpoolcfg.DefaultConfig
 
 			var shanghaiTime *big.Int
 			if test.isShanghai {
