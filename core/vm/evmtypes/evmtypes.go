@@ -22,23 +22,25 @@ type BlockContext struct {
 	GetHash GetHashFunc
 
 	// Block information
-	Coinbase    libcommon.Address // Provides information for COINBASE
-	GasLimit    uint64            // Provides information for GASLIMIT
-	MaxGasLimit bool              // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
-	BlockNumber uint64            // Provides information for NUMBER
-	Time        uint64            // Provides information for TIME
-	Difficulty  *big.Int          // Provides information for DIFFICULTY
-	BaseFee     *uint256.Int      // Provides information for BASEFEE
-	PrevRanDao  *libcommon.Hash   // Provides information for PREVRANDAO
+	Coinbase      libcommon.Address // Provides information for COINBASE
+	GasLimit      uint64            // Provides information for GASLIMIT
+	MaxGasLimit   bool              // Use GasLimit override for 2^256-1 (to be compatible with OpenEthereum's trace_call)
+	BlockNumber   uint64            // Provides information for NUMBER
+	Time          uint64            // Provides information for TIME
+	Difficulty    *big.Int          // Provides information for DIFFICULTY
+	BaseFee       *uint256.Int      // Provides information for BASEFEE
+	PrevRanDao    *libcommon.Hash   // Provides information for PREVRANDAO
+	ExcessDataGas *big.Int          // Provides information for handling data blobs
 }
 
 // TxContext provides the EVM with information about a transaction.
 // All fields can change between transactions.
 type TxContext struct {
 	// Message information
-	TxHash   libcommon.Hash
-	Origin   libcommon.Address // Provides information for ORIGIN
-	GasPrice *uint256.Int      // Provides information for GASPRICE
+	TxHash     libcommon.Hash
+	Origin     libcommon.Address // Provides information for ORIGIN
+	GasPrice   *uint256.Int      // Provides information for GASPRICE
+	DataHashes []libcommon.Hash  // Provides versioned data hashes for DATAHASH
 }
 
 type (

@@ -28,7 +28,7 @@ CGO_CFLAGS += -Wno-error=strict-prototypes # for Clang15, remove it when can htt
 CGO_CFLAGS := CGO_CFLAGS="$(CGO_CFLAGS)"
 DBG_CGO_CFLAGS += -DMDBX_DEBUG=1
 
-BUILD_TAGS = nosqlite,noboltdb
+BUILD_TAGS = nosqlite,noboltdb,netgo # about netgo see: https://github.com/golang/go/issues/30310#issuecomment-471669125
 PACKAGE = github.com/ledgerwatch/erigon
 
 GO_FLAGS += -trimpath -tags $(BUILD_TAGS) -buildvcs=false

@@ -8,6 +8,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -23,13 +25,43 @@ const (
 
 func compareCurrentState(
 	t *testing.T,
+	agg *state2.AggregatorV3,
 	db1 kv.Tx,
 	db2 kv.Tx,
 	buckets ...string,
 ) {
 	for _, bucket := range buckets {
+		if ethconfig.EnableHistoryV4InTest {
+			compareDomain(t, agg, db1, db2, bucket)
+			continue
+		}
 		compareBucket(t, db1, db2, bucket)
 	}
+}
+
+func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucketName string) {
+	panic("implement me")
+	/*
+		ac := agg.MakeContext()
+		defer ac.Close()
+
+		switch bucketName {
+		case kv.PlainState:
+			bucket1 := make(map[string][]byte)
+			ac.DeprecatedLatestAcc(db1.(kv.RwTx), func(k, v []byte) {
+				bucket1[string(k)] = v
+			})
+
+			bucket2 := make(map[string][]byte)
+			ac.DeprecatedLatestAcc(db2.(kv.RwTx), func(k, v []byte) {
+				bucket2[string(k)] = v
+			})
+
+			assert.Equalf(t, bucket1 , bucket2 , "bucket %q", bucketName)
+		default:
+			panic(bucketName)
+		}
+	*/
 }
 
 func compareBucket(t *testing.T, db1, db2 kv.Tx, bucketName string) {

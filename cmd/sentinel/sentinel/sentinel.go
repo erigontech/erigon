@@ -270,3 +270,7 @@ func (s *Sentinel) Host() host.Host {
 func (s *Sentinel) Peers() *peers.Peers {
 	return s.peers
 }
+
+func (s *Sentinel) GossipManager() *GossipManager {
+	return s.subManager
+}
