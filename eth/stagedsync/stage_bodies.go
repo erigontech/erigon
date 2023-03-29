@@ -3,6 +3,7 @@ package stagedsync
 import (
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/erigon/cmd/erigon-el/therealmerge"
 	"runtime"
 	"time"
 
@@ -36,10 +37,11 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	historyV3       bool
 	transactionsV3  bool
+	executionServer *therealmerge.Eth3Execution
 }
 
-func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, transactionsV3 bool) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, transactionsV3: transactionsV3}
+func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload, bodyReqSend func(context.Context, *bodydownload.BodyRequest) ([64]byte, bool), penalise func(context.Context, []headerdownload.PenaltyItem), blockPropagator adapter.BlockPropagator, timeout int, chanConfig chain.Config, snapshots *snapshotsync.RoSnapshots, blockReader services.FullBlockReader, historyV3 bool, transactionsV3 bool, executionServer *therealmerge.Eth3Execution) BodiesCfg {
+	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, snapshots: snapshots, blockReader: blockReader, historyV3: historyV3, transactionsV3: transactionsV3, executionServer: executionServer}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -237,9 +239,15 @@ func BodiesForward(
 			}
 
 			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, lastTxnNum, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
-			if err != nil {
-				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+			var ok bool
+			var lastTxnNum uint64
+			if cfg.transactionsV3 {
+				// TODO: call cfg.executionServer.InsertBodies()
+			} else {
+				ok, lastTxnNum, err = rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+				if err != nil {
+					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+				}
 			}
 			if cfg.historyV3 && ok {
 				if err := rawdbv3.TxNums.Append(tx, blockHeight, lastTxnNum); err != nil {
