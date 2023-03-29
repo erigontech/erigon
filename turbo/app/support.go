@@ -16,10 +16,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/net/http2"
+)
+
+var (
+	diagnosticsURLFlag = cli.StringFlag{
+		Name:  "diagnostics.url",
+		Usage: "URL of the diagnostics system provided by the support team, include unique session PIN",
+	}
+	metricsURLsFlag = cli.StringSliceFlag{
+		Name:  "metrics.urls",
+		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
+	}
 )
 
 var supportCommand = cli.Command{
@@ -28,8 +38,8 @@ var supportCommand = cli.Command{
 	Usage:     "Connect Erigon instance to a diagnostics system for support",
 	ArgsUsage: "--diagnostics.url <URL for the diagnostics system> --metrics.url <http://erigon_host:metrics_port>",
 	Flags: []cli.Flag{
-		&utils.MetricsURLsFlag,
-		&utils.DiagnosticsURLFlag,
+		&metricsURLsFlag,
+		&diagnosticsURLFlag,
 	},
 	Category: "SUPPORT COMMANDS",
 	Description: `
@@ -94,21 +104,21 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	defer pollEvery.Stop()
 	client := &http.Client{}
 	defer client.CloseIdleConnections()
-	metricsURLs := cliCtx.StringSlice(utils.MetricsURLsFlag.Name)
+	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
 	metricsURL := metricsURLs[0] // TODO: Generalise
 
-	diagnosticsUrl := cliCtx.String(utils.DiagnosticsURLFlag.Name)
+	diagnosticsUrl := cliCtx.String(diagnosticsURLFlag.Name)
 
 	// Create a pool with the server certificate since it is not signed
 	// by a known CA
 	certPool := x509.NewCertPool()
 	srvCert, err := ioutil.ReadFile("diagnostics.crt")
 	if err != nil {
-		log.Error("Reading server certificate", "err", err)
+		return fmt.Errorf("reading server certificate: %v", err)
 	}
 	caCert, err := ioutil.ReadFile("CA-cert.pem")
 	if err != nil {
-		log.Error("Reading server certificate", "err", err)
+		return fmt.Errorf("reading server certificate: %v", err)
 	}
 	certPool.AppendCertsFromPEM(srvCert)
 	certPool.AppendCertsFromPEM(caCert)
