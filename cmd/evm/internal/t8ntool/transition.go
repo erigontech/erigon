@@ -87,9 +87,9 @@ var (
 )
 
 type input struct {
-	Alloc core.GenesisAlloc `json:"alloc,omitempty"`
-	Env   *stEnv            `json:"env,omitempty"`
-	Txs   []*txWithKey      `json:"txs,omitempty"`
+	Alloc types.GenesisAlloc `json:"alloc,omitempty"`
+	Env   *stEnv             `json:"env,omitempty"`
+	Txs   []*txWithKey       `json:"txs,omitempty"`
 }
 
 func Main(ctx *cli.Context) error {
@@ -487,7 +487,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
-type Alloc map[libcommon.Address]core.GenesisAccount
+type Alloc map[libcommon.Address]types.GenesisAccount
 
 func (g Alloc) OnRoot(libcommon.Hash) {}
 
@@ -500,7 +500,7 @@ func (g Alloc) OnAccount(addr libcommon.Address, dumpAccount state.DumpAccount) 
 			storage[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 		}
 	}
-	genesisAccount := core.GenesisAccount{
+	genesisAccount := types.GenesisAccount{
 		Code:    dumpAccount.Code,
 		Storage: storage,
 		Balance: balance,

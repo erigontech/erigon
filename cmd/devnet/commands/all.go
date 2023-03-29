@@ -39,14 +39,23 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	// initiate a contract transaction
-	fmt.Println("INITIATING A CONTRACT TRANSACTION...")
-	_, err := callContractTx()
+	// USING DYNAMIC FEE
+	// send a token from the dev address to the recipient address
+	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
 	if err != nil {
-		fmt.Printf("callContractTx error: %v\n", err)
+		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)
 		return
 	}
 	fmt.Println()
+
+	// initiate a contract transaction
+	//fmt.Println("INITIATING A CONTRACT TRANSACTION...")
+	//_, err := callContractTx()
+	//if err != nil {
+	//	fmt.Printf("callContractTx error: %v\n", err)
+	//	return
+	//}
+	//fmt.Println()
 
 	fmt.Print("SEND SIGNAL TO QUIT ALL RUNNING NODES")
 	models.QuitNodeChan <- true

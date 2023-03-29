@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"sync"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/xsleonard/go-merkle"
 	"golang.org/x/crypto/sha3"
@@ -30,7 +30,7 @@ var (
 type API struct {
 	chain         consensus.ChainHeaderReader
 	bor           *Bor
-	rootHashCache *lru.ARCCache
+	rootHashCache *lru2.ARCCache[string, string]
 }
 
 // GetSnapshot retrieves the state snapshot at a given block.
@@ -225,7 +225,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 	key := getRootHashKey(start, end)
 
 	if root, known := api.rootHashCache.Get(key); known {
-		return root.(string), nil
+		return root, nil
 	}
 
 	length := end - start + 1
@@ -289,7 +289,7 @@ func (api *API) GetRootHash(start uint64, end uint64) (string, error) {
 func (api *API) initializeRootHashCache() error {
 	var err error
 	if api.rootHashCache == nil {
-		api.rootHashCache, err = lru.NewARC(10)
+		api.rootHashCache, err = lru2.NewARC[string, string](10)
 	}
 
 	return err

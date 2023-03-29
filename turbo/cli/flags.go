@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
@@ -193,6 +195,12 @@ var (
 		Name:  "rpc.evmtimeout",
 		Usage: "Maximum amount of time to wait for the answer from EVM call.",
 		Value: rpccfg.DefaultEvmCallTimeout,
+	}
+
+	TxPoolCommitEvery = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 )
 

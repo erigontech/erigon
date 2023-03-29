@@ -35,7 +35,7 @@ func InitSubscriptions(methods []models.SubMethod) {
 }
 
 func SearchReservesForTransactionHash(hashes map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
-	fmt.Printf("Searching for txes in reserved blocks...\n")
+	fmt.Printf("Searching for transactions in reserved blocks...\n")
 	m, err := searchBlockForHashes(hashes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search reserves for hashes: %v", err)
@@ -81,78 +81,14 @@ func subscribeToMethod(method models.SubMethod) (*models.MethodSubscription, err
 	return sub, nil
 }
 
-//func searchBlockForHash(hash common.Hash) (uint64, error) {
-//	// create a one entry hashmap to hold the hash
-//	hashmap := map[common.Hash]bool{hash: true}
-//
-//	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
-//	if methodSub == nil {
-//		return uint64(0), fmt.Errorf("client subscription should not be nil")
-//	}
-//
-//	var (
-//		wg     sync.WaitGroup
-//		err    error
-//		blockN uint64
-//	)
-//
-//	// add the current process to the waitGroup
-//	wg.Add(1)
-//
-//	go func() {
-//		var blockCount int
-//	mark:
-//		for {
-//			select {
-//			case v := <-models.NewHeadsChan:
-//				blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
-//				blockNumber := v.(map[string]interface{})["number"].(string)
-//				// add the block to the old heads
-//				models.OldHeads = append(models.OldHeads, blockNumber)
-//				num, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNumber) // check if the block has the transaction to look for inside of it
-//				// return if error is found and end the goroutine
-//				if foundErr != nil {
-//					err = foundErr
-//					wg.Done()
-//					CheckTxPoolContent(1, 0)
-//					return
-//				}
-//				// if the max number of blocks to check is reached, look for tx old heads and break the tag
-//				if blockCount == models.MaxNumberOfBlockChecks {
-//					num, numFound, foundErr = checkOldHeads(methodSub.Client, hashmap)
-//					if foundErr != nil {
-//						err = foundErr
-//						wg.Done()
-//						CheckTxPoolContent(1, 0)
-//						return
-//					}
-//					if numFound == 0 {
-//						err = fmt.Errorf("timeout when searching for tx")
-//						wg.Done()
-//						break mark
-//					}
-//				}
-//				// if the tx is found, through new heads or old heads, break the tag
-//				if numFound == 1 {
-//					blockN = num
-//					wg.Done()
-//					CheckTxPoolContent(0, 0)
-//					break mark
-//				}
-//			case subErr := <-methodSub.ClientSub.Err():
-//				fmt.Printf("subscription error from client: %v", subErr)
-//				return
-//			}
-//		}
-//	}()
-//
-//	return blockN, err
-//}
+func searchBlockForHashes(hashmap map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
+	if len(hashmap) == 0 {
+		return nil, fmt.Errorf("no hashes to search for")
+	}
 
-func searchBlockForHashes(hashesmap map[libcommon.Hash]bool) (*map[libcommon.Hash]string, error) {
-	txToBlock := make(map[libcommon.Hash]string, len(hashesmap))
+	txToBlock := make(map[libcommon.Hash]string, len(hashmap))
 
-	toFind := len(hashesmap)
+	toFind := len(hashmap)
 	methodSub := (*models.MethodSubscriptionMap)[models.ETHNewHeads]
 	if methodSub == nil {
 		return nil, fmt.Errorf("client subscription should not be nil")
@@ -164,7 +100,7 @@ func searchBlockForHashes(hashesmap map[libcommon.Hash]bool) (*map[libcommon.Has
 		block := <-models.NewHeadsChan
 		blockCount++ // increment the number of blocks seen to check against the max number of blocks to iterate over
 		blockNum := block.(map[string]interface{})["number"].(string)
-		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashesmap, blockNum, txToBlock)
+		_, numFound, foundErr := txHashInBlock(methodSub.Client, hashmap, blockNum, txToBlock)
 		if foundErr != nil {
 			return nil, fmt.Errorf("failed to find hash in block with number %q: %v", foundErr, blockNum)
 		}

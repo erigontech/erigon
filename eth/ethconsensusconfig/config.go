@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/log/v3"
@@ -30,19 +31,19 @@ func CreateConsensusEngine(chainConfig *chain.Config, logger log.Logger, config 
 	var eng consensus.Engine
 
 	switch consensusCfg := config.(type) {
-	case *ethash.Config:
+	case *ethashcfg.Config:
 		switch consensusCfg.PowMode {
-		case ethash.ModeFake:
+		case ethashcfg.ModeFake:
 			log.Warn("Ethash used in fake mode")
 			eng = ethash.NewFaker()
-		case ethash.ModeTest:
+		case ethashcfg.ModeTest:
 			log.Warn("Ethash used in test mode")
 			eng = ethash.NewTester(nil, noverify)
-		case ethash.ModeShared:
+		case ethashcfg.ModeShared:
 			log.Warn("Ethash used in shared mode")
 			eng = ethash.NewShared()
 		default:
-			eng = ethash.New(ethash.Config{
+			eng = ethash.New(ethashcfg.Config{
 				CachesInMem:      consensusCfg.CachesInMem,
 				CachesLockMmap:   consensusCfg.CachesLockMmap,
 				DatasetDir:       consensusCfg.DatasetDir,

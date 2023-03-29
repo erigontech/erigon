@@ -24,11 +24,11 @@ import (
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/fork"
 )
 
-func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error {
+func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	// create prefix for length of packet
 	lengthBuf := make([]byte, 10)
 	vin := binary.PutUvarint(lengthBuf, uint64(val.EncodingSizeSSZ()))
@@ -52,7 +52,7 @@ func EncodeAndWrite(w io.Writer, val ssz_utils.Marshaler, prefix ...byte) error 
 	return err
 }
 
-func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
 	var forkDigest [4]byte
 	// TODO(issues/5884): assert the fork digest matches the expectation for
 	// a specific configuration.
@@ -66,7 +66,7 @@ func DecodeAndRead(r io.Reader, val ssz_utils.EncodableSSZ, b *clparams.BeaconCh
 	return DecodeAndReadNoForkDigest(r, val, version)
 }
 
-func DecodeAndReadNoForkDigest(r io.Reader, val ssz_utils.EncodableSSZ, version clparams.StateVersion) error {
+func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clparams.StateVersion) error {
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
@@ -108,13 +108,12 @@ func ReadUvarint(r io.Reader) (x, n uint64, err error) {
 	return 0, n, nil
 }
 
-func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
+func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clparams.BeaconChainConfig, genesisValidatorRoot libcommon.Hash) error {
 	objSize := list[0].EncodingSizeSSZ()
 
 	r := bytes.NewReader(data)
 	var forkDigest [4]byte
-	// TODO(issues/5884): assert the fork digest matches the expectation for
-	// a specific configuration.
+
 	if _, err := r.Read(forkDigest[:]); err != nil {
 		return err
 	}
@@ -129,14 +128,14 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz_utils.EncodableSSZ, b *
 		return fmt.Errorf("unable to read varint from message prefix: %v", err)
 	}
 	pos := 4 + bytesCount
-	if encodedLn != uint64(objSize) || len(list) != int(count) {
+	if len(list) != int(count) {
 		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
 	}
 
 	sr := snappy.NewReader(r)
 	for i := 0; i < int(count); i++ {
 		var n int
-		raw := make([]byte, objSize)
+		raw := make([]byte, encodedLn)
 		if n, err = sr.Read(raw); err != nil {
 			return fmt.Errorf("readPacket: %w", err)
 		}

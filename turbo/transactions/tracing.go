@@ -53,7 +53,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		return h
 	}
 	header := block.HeaderNoCopy()
-	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
+	BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil, nil /*excessDataGas*/)
 
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(cfg, block.NumberU64())
@@ -188,7 +188,7 @@ func TraceTx(
 	}
 
 	var result *core.ExecutionResult
-	if config.BorTx != nil && *config.BorTx {
+	if config != nil && config.BorTx != nil && *config.BorTx {
 		callmsg := prepareCallMessage(message)
 		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
 	} else {

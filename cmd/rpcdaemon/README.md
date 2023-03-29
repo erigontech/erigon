@@ -243,6 +243,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_newFilter                              | Yes     | Added by PR#4253                     |
 | eth_newBlockFilter                         | Yes     |                                      |
 | eth_newPendingTransactionFilter            | Yes     |                                      |
+| eth_getFilterLogs                          | Yes     | Added by PR#6514                     |
 | eth_getFilterChanges                       | Yes     |                                      |
 | eth_uninstallFilter                        | Yes     |                                      |
 | eth_getLogs                                | Yes     |                                      |

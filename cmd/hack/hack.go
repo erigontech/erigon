@@ -20,7 +20,6 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -31,12 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	librlp "github.com/ledgerwatch/erigon-lib/rlp"
-	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -55,6 +50,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -205,6 +202,34 @@ func readAccount(chaindata string, account libcommon.Address) error {
 		}
 		fmt.Printf("%x => %x\n", k, v)
 	}
+	return nil
+}
+
+func readAccountAtVersion(chaindata string, account string, block uint64) error {
+	db := mdbx.MustOpen(chaindata)
+	defer db.Close()
+
+	tx, txErr := db.BeginRo(context.Background())
+	if txErr != nil {
+		return txErr
+	}
+	defer tx.Rollback()
+
+	ps := state.NewPlainState(tx, block, nil)
+
+	addr := libcommon.HexToAddress(account)
+	acc, err := ps.ReadAccountData(addr)
+	if err != nil {
+		return err
+	}
+
+	asJson, err := json.Marshal(acc)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("account: %s", asJson)
+
 	return nil
 }
 
@@ -1075,33 +1100,8 @@ func devTx(chaindata string) error {
 }
 
 func chainConfig(name string) error {
-	var chainConfig *chain.Config
-	switch name {
-	case "mainnet":
-		chainConfig = params.MainnetChainConfig
-	case "sepolia":
-		chainConfig = params.SepoliaChainConfig
-	case "rinkeby":
-		chainConfig = params.RinkebyChainConfig
-	case "goerli":
-		chainConfig = params.GoerliChainConfig
-	case "bsc":
-		chainConfig = params.BSCChainConfig
-	case "sokol":
-		chainConfig = params.SokolChainConfig
-	case "chapel":
-		chainConfig = params.ChapelChainConfig
-	case "rialto":
-		chainConfig = params.RialtoChainConfig
-	case "mumbai":
-		chainConfig = params.MumbaiChainConfig
-	case "bor-mainnet":
-		chainConfig = params.BorMainnetChainConfig
-	case "gnosis":
-		chainConfig = params.GnosisChainConfig
-	case "chiado":
-		chainConfig = params.ChiadoChainConfig
-	default:
+	chainConfig := params.ChainConfigByChainName(name)
+	if chainConfig == nil {
 		return fmt.Errorf("unknown name: %s", name)
 	}
 	f, err := os.Create(filepath.Join("params", "chainspecs", fmt.Sprintf("%s.json", name)))
@@ -1504,6 +1504,8 @@ func main() {
 		err = dumpState(*chaindata)
 	case "rlptest":
 		err = rlptest()
+	case "readAccountAtVersion":
+		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
 	}
 
 	if err != nil {

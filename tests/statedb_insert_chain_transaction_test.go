@@ -686,7 +686,7 @@ type initialData struct {
 	keys         []*ecdsa.PrivateKey
 	addresses    []libcommon.Address
 	transactOpts []*bind.TransactOpts
-	genesisSpec  *core.Genesis
+	genesisSpec  *types.Genesis
 }
 
 func getGenesis(funds ...*big.Int) initialData {
@@ -702,7 +702,7 @@ func getGenesis(funds ...*big.Int) initialData {
 
 	addresses := make([]libcommon.Address, 0, len(keys))
 	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
-	allocs := core.GenesisAlloc{}
+	allocs := types.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
@@ -712,14 +712,14 @@ func getGenesis(funds ...*big.Int) initialData {
 		}
 		transactOpts = append(transactOpts, to)
 
-		allocs[addr] = core.GenesisAccount{Balance: accountFunds}
+		allocs[addr] = types.GenesisAccount{Balance: accountFunds}
 	}
 
 	return initialData{
 		keys:         keys,
 		addresses:    addresses,
 		transactOpts: transactOpts,
-		genesisSpec: &core.Genesis{
+		genesisSpec: &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
@@ -738,7 +738,7 @@ type tx struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(t *testing.T, gspec *core.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
+func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]tx) (*stages.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := stages.MockWithGenesis(t, gspec, key, false)
 

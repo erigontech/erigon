@@ -394,15 +394,7 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 
 // SanityCheck verifies that the values are reasonable, as a DoS protection
 func (request *NewBlockPacket) SanityCheck() error {
-	if err := request.Block.SanityCheck(); err != nil {
-		return err
-	}
-	//TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
-	// larger, it will still fit within 100 bits
-	if tdLen := request.TD.BitLen(); tdLen > 100 {
-		return fmt.Errorf("too large block TD: bitlen %d", tdLen)
-	}
-	return nil
+	return request.Block.SanityCheck()
 }
 
 // GetBlockBodiesPacket represents a block body query.

@@ -8,12 +8,13 @@ import (
 )
 
 const (
-	maxSubscribers = 100 // only 100 lightclients per sentinel
+	maxSubscribers = 100 // only 100 clients per sentinel
 )
 
 type gossipObject struct {
 	data []byte              // gossip data
 	t    sentinel.GossipType // determine which gossip message we are notifying of
+	pid  string
 }
 
 type gossipNotifier struct {
@@ -28,7 +29,7 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte) {
+func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte, pid string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -36,6 +37,7 @@ func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte) {
 		ch <- gossipObject{
 			data: data,
 			t:    t,
+			pid:  pid,
 		}
 	}
 }

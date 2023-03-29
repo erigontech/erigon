@@ -50,6 +50,7 @@ const (
 	LegacyTxType = iota
 	AccessListTxType
 	DynamicFeeTxType
+	BlobTxType = 5
 )
 
 // Transaction is an Ethereum transaction.
@@ -62,6 +63,7 @@ type Transaction interface {
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
 	Cost() *uint256.Int
+	GetDataHashes() []libcommon.Hash
 	GetGas() uint64
 	GetValue() *uint256.Int
 	Time() time.Time

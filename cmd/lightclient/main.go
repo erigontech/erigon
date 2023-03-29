@@ -19,9 +19,6 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"google.golang.org/grpc"
@@ -58,16 +55,6 @@ func runLightClientNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[LightClient]", "chain", cliCtx.String(flags.Chain.Name))
 	log.Info("[LightClient] Running lightclient", "cfg", cfg)
-	var db kv.RwDB
-	if cfg.Chaindata == "" {
-		log.Info("chaindata is in-memory")
-		db = memdb.New("" /* tmpDir */)
-	} else {
-		db, err = mdbx.Open(cfg.Chaindata, log.Root(), false)
-		if err != nil {
-			return err
-		}
-	}
 	state, err := core.RetrieveBeaconState(ctx, cfg.BeaconCfg, cfg.GenesisCfg, cfg.CheckpointUri)
 	if err != nil {
 		return err
@@ -86,7 +73,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		NetworkConfig: cfg.NetworkCfg,
 		BeaconConfig:  cfg.BeaconCfg,
 		NoDiscovery:   cfg.NoDiscovery,
-	}, db, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  state.FinalizedCheckpoint().Root,
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
@@ -111,7 +98,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		execution = remote.NewETHBACKENDClient(cc)
 	}
-	lc, err := lightclient.NewLightClient(ctx, db, cfg.GenesisCfg, cfg.BeaconCfg, nil, execution, sentinel, 0, true)
+	lc, err := lightclient.NewLightClient(ctx, cfg.GenesisCfg, cfg.BeaconCfg, nil, execution, sentinel, 0, true)
 	if err != nil {
 		log.Error("Could not make Lightclient", "err", err)
 		return err

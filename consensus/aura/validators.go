@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
-	"go.uber.org/atomic"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"

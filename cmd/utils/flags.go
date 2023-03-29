@@ -34,7 +34,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -43,11 +46,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/common/paths"
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -156,7 +157,7 @@ var (
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
 		Usage: "Price bump percentage to replace an already existing transaction",
-		Value: txpool.DefaultConfig.PriceBump,
+		Value: txpoolcfg.DefaultConfig.PriceBump,
 	}
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
@@ -192,6 +193,11 @@ var (
 		Name:  "txpool.trace.senders",
 		Usage: "Comma separared list of addresses, whoes transactions will traced in transaction pool with debug printing",
 		Value: "",
+	}
+	TxPoolCommitEveryFlag = cli.DurationFlag{
+		Name:  "txpool.commit.every",
+		Usage: "How often transactions should be committed to the storage",
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -500,6 +506,11 @@ var (
 		Name:  "sentry.log-peer-info",
 		Usage: "Log detailed peer info when a peer connects or disconnects. Enable to integrate with observer.",
 	}
+	SentryDropUselessPeers = cli.BoolFlag{
+		Name:  "sentry.drop-useless-peers",
+		Usage: "Drop useless peers, those returning empty body or header responses",
+		Value: false,
+	}
 	DownloaderAddrFlag = cli.StringFlag{
 		Name:  "downloader.api.addr",
 		Usage: "downloader address '<host>:<port>'",
@@ -610,6 +621,10 @@ var (
 		Name:  "experimental.history.v3",
 		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
+	TransactionV3Flag = cli.BoolFlag{
+		Name:  "experimental.transactions.v3",
+		Usage: "(this flag is in testing stage) Not recommended yet: Can't change this flag after node creation. New DB table for transactions allows keeping multiple branches of block bodies in the DB simultaneously",
+	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
@@ -659,6 +674,11 @@ var (
 		Name:  "torrent.download.slots",
 		Value: 3,
 		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+	}
+	TorrentStaticPeersFlag = cli.StringFlag{
+		Name:  "torrent.staticpeers",
+		Usage: "Comma separated enode URLs to connect to",
+		Value: "",
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
@@ -891,6 +911,7 @@ func NewP2PConfig(
 	port uint,
 	protocol uint,
 	allowedPorts []uint,
+	metricsEnabled bool,
 ) (*p2p.Config, error) {
 	var enodeDBPath string
 	switch protocol {
@@ -921,6 +942,7 @@ func NewP2PConfig(
 		NodeDatabase:    enodeDBPath,
 		AllowedPorts:    allowedPorts,
 		TmpDir:          dirs.Tmp,
+		MetricsEnabled:  metricsEnabled,
 	}
 	if netRestrict != "" {
 		cfg.NetRestrict = new(netutil.Netlist)
@@ -1084,6 +1106,10 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string) {
 		cfg.DiscoveryV5 = ctx.Bool(DiscoveryV5Flag.Name)
 	}
 
+	if ctx.IsSet(MetricsEnabledFlag.Name) {
+		cfg.MetricsEnabled = ctx.Bool(MetricsEnabledFlag.Name)
+	}
+
 	ethPeers := cfg.MaxPeers
 	cfg.Name = nodeName
 	log.Info("Maximum peer count", "ETH", ethPeers, "total", cfg.MaxPeers)
@@ -1167,7 +1193,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 }
 
-func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
+func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
 	if ctx.IsSet(GpoBlocksFlag.Name) {
 		cfg.Blocks = ctx.Int(GpoBlocksFlag.Name)
 	}
@@ -1180,7 +1206,7 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 }
 
 // nolint
-func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
+func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
 	}
@@ -1192,7 +1218,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 	}
 }
 
-func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
+func setTxPool(ctx *cli.Context, cfg *ethconfig.DeprecatedTxPoolConfig) {
 	if ctx.IsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
@@ -1242,6 +1268,8 @@ func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
 			cfg.TracedSenders[i] = string(sender[:])
 		}
 	}
+
+	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1257,7 +1285,7 @@ func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
 		cfg.Ethash.CachesLockMmap = ctx.Bool(EthashCachesLockMmapFlag.Name)
 	}
 	if ctx.IsSet(FakePoWFlag.Name) {
-		cfg.Ethash.PowMode = ethash.ModeFake
+		cfg.Ethash.PowMode = ethashcfg.ModeFake
 	}
 	if ctx.IsSet(EthashDatasetsLockMmapFlag.Name) {
 		cfg.Ethash.DatasetsLockMmap = ctx.Bool(EthashDatasetsLockMmapFlag.Name)
@@ -1466,7 +1494,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		log.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name))
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs.Snap, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name))
 		if err != nil {
 			panic(err)
 		}
@@ -1483,7 +1511,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setGPO(ctx, &cfg.GPO)
 
 	setTxPool(ctx, &cfg.DeprecatedTxPool)
-	cfg.TxPool = core.DefaultTxPool2Config(cfg.DeprecatedTxPool)
+	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg.DeprecatedTxPool)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
@@ -1497,6 +1525,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
+	cfg.TransactionsV3 = ctx.Bool(TransactionV3Flag.Name)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 	}
@@ -1527,7 +1556,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	switch chain {
 	default:
-		genesis := core.DefaultGenesisBlockByChainName(chain)
+		genesis := core.GenesisBlockByChainName(chain)
 		genesisHash := params.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
 			Fatalf("ChainDB name is not recognized: %s", chain)
@@ -1572,7 +1601,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	} else {
 		cfg.ExternalCL = !clparams.EmbeddedEnabledByDefault(cfg.NetworkID)
 	}
+
 	nodeConfig.Http.InternalCL = !cfg.ExternalCL
+
+	if ctx.IsSet(SentryDropUselessPeers.Name) {
+		cfg.DropUselessPeers = ctx.Bool(SentryDropUselessPeers.Name)
+	}
 }
 
 // SetDNSDiscoveryDefaults configures DNS discovery with the given URL if

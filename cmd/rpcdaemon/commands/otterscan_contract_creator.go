@@ -72,7 +72,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		// so it is optimal to search from the beginning even if the contract has multiple
 		// incarnations.
 		var prevTxnID, nextTxnID uint64
-		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, -1)
+		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}

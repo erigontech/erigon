@@ -39,12 +39,13 @@ import (
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -231,6 +232,11 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return err
 		}
 
+		config.TransactionsV3, err = kvcfg.TransactionsV3.WriteOnce(tx, config.TransactionsV3)
+		if err != nil {
+			return err
+		}
+
 		// if we are in the incorrect syncmode then we change it to the appropriate one
 		if !isCorrectSync {
 			log.Warn("Incorrect snapshot enablement", "got", config.Sync.UseSnapshots, "change_to", useSnapshots)
@@ -268,7 +274,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		allSnapshots *snapshotsync.RoSnapshots
 		agg          *libstate.AggregatorV3
 	)
-	backend.blockReader, allSnapshots, agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader)
+	backend.blockReader, allSnapshots, agg, err = backend.setUpBlockReader(ctx, config.Dirs, config.Snapshot, config.Downloader, config.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}
@@ -441,6 +447,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		backend.blockReader,
 		stack.Config().SentryLogPeerInfo,
 		backend.forkValidator,
+		config.DropUselessPeers,
 	)
 	if err != nil {
 		return nil, err
@@ -477,7 +484,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	mining := stagedsync.New(
 		stagedsync.MiningStages(backend.sentryCtx,
 			stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miner, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, nil, tmpdir),
-			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB),
+			stagedsync.StageMiningExecCfg(backend.chainDB, miner, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, nil, 0, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 			stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 			stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 			stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miner, backend.miningSealingQuit),
@@ -495,7 +502,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		proposingSync := stagedsync.New(
 			stagedsync.MiningStages(backend.sentryCtx,
 				stagedsync.StageMiningCreateBlockCfg(backend.chainDB, miningStatePos, *backend.chainConfig, backend.engine, backend.txPool2, backend.txPool2DB, param, tmpdir),
-				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB),
+				stagedsync.StageMiningExecCfg(backend.chainDB, miningStatePos, backend.notifications.Events, *backend.chainConfig, backend.engine, &vm.Config{}, tmpdir, interrupt, param.PayloadId, backend.txPool2, backend.txPool2DB, allSnapshots, config.TransactionsV3),
 				stagedsync.StageHashStateCfg(backend.chainDB, dirs, config.HistoryV3, backend.agg),
 				stagedsync.StageTrieCfg(backend.chainDB, false, true, true, tmpdir, backend.blockReader, nil, config.HistoryV3, backend.agg),
 				stagedsync.StageMiningFinishCfg(backend.chainDB, *backend.chainConfig, backend.engine, miningStatePos, backend.miningSealingQuit),
@@ -612,7 +619,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		return nil, err
 	}
 
-	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)
+	backend.stagedSync, err = stages3.NewStagedSync(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, config.TransactionsV3)
 	if err != nil {
 		return nil, err
 	}
@@ -857,18 +864,13 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 }
 
 // sets up blockReader and client downloader
-func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
-	if !snConfig.Enabled {
-		blockReader := snapshotsync.NewBlockReader()
-		return blockReader, nil, nil, nil
-	}
-
+func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snConfig ethconfig.Snapshot, downloaderCfg *downloadercfg.Cfg, transactionsV3 bool) (services.FullBlockReader, *snapshotsync.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := snapshotsync.NewRoSnapshots(snConfig, dirs.Snap)
 	var err error
 	if !snConfig.NoDownloader {
 		allSnapshots.OptimisticalyReopenWithDB(s.chainDB)
 	}
-	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots)
+	blockReader := snapshotsync.NewBlockReaderWithSnapshots(allSnapshots, transactionsV3)
 
 	if !snConfig.NoDownloader {
 		if snConfig.DownloaderAddr != "" {
@@ -880,7 +882,7 @@ func (s *Ethereum) setUpBlockReader(ctx context.Context, dirs datadir.Dirs, snCo
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			go downloader3.MainLoop(ctx, s.downloader, true)
+			s.downloader.MainLoopInBackground(ctx, true)
 			bittorrentServer, err := downloader3.NewGrpcServer(s.downloader)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("new server: %w", err)

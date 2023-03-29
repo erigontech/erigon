@@ -6,7 +6,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/prysmaticlabs/gohashtree"
 
-	"github.com/ledgerwatch/erigon/cl/cltypes/ssz_utils"
+	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
@@ -206,7 +206,7 @@ func TransactionsListRoot(transactions [][]byte) (libcommon.Hash, error) {
 	return utils.Keccak256(transactionsBaseRoot[:], countRoot[:]), nil
 }
 
-func ListObjectSSZRoot[T ssz_utils.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
+func ListObjectSSZRoot[T ssz.HashableSSZ](list []T, limit uint64) ([32]byte, error) {
 	subLeaves := make([][32]byte, 0, len(list))
 	for _, element := range list {
 		subLeaf, err := element.HashSSZ()

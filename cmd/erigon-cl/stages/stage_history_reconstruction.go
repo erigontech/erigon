@@ -77,7 +77,13 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	defer attestationsCollector.Close()
 	executionPayloadsCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
 	defer executionPayloadsCollector.Close()
-
+	// Indexes collector
+	rootToSlotCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer rootToSlotCollector.Close()
+	// Lastly finalizations markers collector.
+	finalizationCollector := etl.NewCollector(s.LogPrefix(), cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize))
+	defer finalizationCollector.Close()
+	// Start the procedure
 	log.Info(fmt.Sprintf("[%s] Reconstructing", s.LogPrefix()), "from", cfg.state.LatestBlockHeader().Slot, "to", destinationSlot)
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
@@ -89,9 +95,14 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		slot := blk.Block.Slot
+		blockRoot, err := blk.Block.HashSSZ()
+		if err != nil {
+			return false, err
+		}
+		key := append(rawdb.EncodeNumber(slot), blockRoot[:]...)
 		// Collect attestations
 		encodedAttestations := cltypes.EncodeAttestationsForStorage(blk.Block.Body.Attestations)
-		if err := attestationsCollector.Collect(rawdb.EncodeNumber(slot), encodedAttestations); err != nil {
+		if err := attestationsCollector.Collect(key, encodedAttestations); err != nil {
 			return false, err
 		}
 		// Collect beacon blocks
@@ -99,20 +110,32 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 		if err != nil {
 			return false, err
 		}
-		if err := beaconBlocksCollector.Collect(rawdb.EncodeNumber(slot), encodedBeaconBlock); err != nil {
+		slotBytes := rawdb.EncodeNumber(slot)
+		if err := beaconBlocksCollector.Collect(key, encodedBeaconBlock); err != nil {
+			return false, err
+		}
+		// Collect hashes
+		if err := rootToSlotCollector.Collect(blockRoot[:], slotBytes); err != nil {
+			return false, err
+		}
+		if err := rootToSlotCollector.Collect(blk.Block.StateRoot[:], slotBytes); err != nil {
+			return false, err
+		}
+		// Mark finalization markers.
+		if err := finalizationCollector.Collect(slotBytes, blockRoot[:]); err != nil {
 			return false, err
 		}
 		// Collect Execution Payloads
-		if cfg.executionClient != nil && blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
+		if blk.Version() >= clparams.BellatrixVersion && !foundLatestEth1ValidHash {
 			payload := blk.Block.Body.ExecutionPayload
-			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.Hash()); err != nil {
+			if foundLatestEth1ValidHash, err = cfg.executionClient.IsCanonical(payload.BlockHash); err != nil {
 				return false, err
 			}
 			if foundLatestEth1ValidHash {
 				return slot <= destinationSlot, nil
 			}
-			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ(blk.Version()))
-			encodedPayload, err = payload.EncodeSSZ(encodedPayload, blk.Version())
+			encodedPayload := make([]byte, 0, payload.EncodingSizeSSZ())
+			encodedPayload, err = payload.EncodeSSZ(encodedPayload)
 			if err != nil {
 				return false, err
 			}
@@ -124,7 +147,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	})
 	prevProgress := cfg.downloader.Progress()
 
-	logInterval := time.NewTicker(30 * time.Second)
+	logInterval := time.NewTicker(logIntervalTime)
 	finishCh := make(chan struct{})
 	// Start logging thread
 	go func() {
@@ -133,7 +156,7 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 			case <-logInterval.C:
 				logArgs := []interface{}{}
 				currProgress := cfg.downloader.Progress()
-				speed := (float64(prevProgress) - float64(currProgress)) / (float64(logIntervalTime) / float64(time.Second))
+				speed := float64(prevProgress-currProgress) / float64(logIntervalTime/time.Second)
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
@@ -164,11 +187,17 @@ func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stage
 	if err := beaconBlocksCollector.Load(tx, kv.BeaconBlocks, etl.IdentityLoadFunc, etl.TransformArgs{Quit: context.Background().Done()}); err != nil {
 		return err
 	}
+	if err := rootToSlotCollector.Load(tx, kv.RootSlotIndex, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := finalizationCollector.Load(tx, kv.FinalizedBlockRoots, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	executionPayloadInsertionBatch := execution_client.NewInsertBatch(cfg.executionClient)
 	// Send in ordered manner EL blocks to Execution Layer
 	if err := executionPayloadsCollector.Load(tx, kv.BeaconBlocks, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		payload := &cltypes.Eth1Block{}
-		if err := payload.DecodeSSZ(v, clparams.BellatrixVersion); err != nil {
+		if err := payload.DecodeSSZWithVersion(v, int(clparams.BellatrixVersion)); err != nil {
 			return err
 		}
 		if err := executionPayloadInsertionBatch.WriteExecutionPayload(payload); err != nil {

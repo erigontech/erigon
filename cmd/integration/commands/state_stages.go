@@ -58,7 +58,7 @@ Examples:
 		cfg := &nodecfg.DefaultConfig
 		utils.SetNodeConfigCobra(cmd, cfg)
 		ethConfig := &ethconfig.Defaults
-		ethConfig.Genesis = core.DefaultGenesisBlockByChainName(chain)
+		ethConfig.Genesis = core.GenesisBlockByChainName(chain)
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
@@ -121,6 +121,7 @@ var loopExecCmd = &cobra.Command{
 }
 
 func init() {
+	withConfig(stateStages)
 	withDataDir2(stateStages)
 	withReferenceChaindata(stateStages)
 	withUnwind(stateStages)
@@ -131,24 +132,23 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-
 	rootCmd.AddCommand(stateStages)
 
+	withConfig(loopIhCmd)
 	withDataDir(loopIhCmd)
 	withBatchSize(loopIhCmd)
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
 	withHeimdall(loopIhCmd)
-
 	rootCmd.AddCommand(loopIhCmd)
 
+	withConfig(loopExecCmd)
 	withDataDir(loopExecCmd)
 	withBatchSize(loopExecCmd)
 	withUnwind(loopExecCmd)
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-
 	rootCmd.AddCommand(loopExecCmd)
 }
 
@@ -195,7 +195,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 	stateStages.DisableStages(stages.Snapshots, stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders)
 	changesAcc := shards.NewAccumulator()
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)
@@ -380,7 +380,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		defer tx.Rollback()
 
 		// allow backward loop
-		if unwind > 0 && unwindEvery == 0 {
+		if unwind > 0 && unwindEvery > 0 {
 			stopAt -= unwind
 		}
 	}
@@ -525,7 +525,7 @@ func loopExec(db kv.RwDB, ctx context.Context, unwind uint64) error {
 	from := progress(tx, stages.Execution)
 	to := from + unwind
 
-	genesis := core.DefaultGenesisBlockByChainName(chain)
+	genesis := core.GenesisBlockByChainName(chain)
 	syncCfg := ethconfig.Defaults.Sync
 	syncCfg.ExecWorkerCount = int(workers)
 	syncCfg.ReconWorkerCount = int(reconWorkers)

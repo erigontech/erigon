@@ -6,13 +6,14 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
 	node2 "github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/spf13/cobra"
 )
 
 // generate the messages
@@ -33,6 +34,7 @@ var (
 	maxPeers     int
 	maxPendPeers int
 	healthCheck  bool
+	metrics      bool
 )
 
 func init() {
@@ -52,8 +54,13 @@ func init() {
 	rootCmd.Flags().IntVar(&maxPeers, utils.MaxPeersFlag.Name, utils.MaxPeersFlag.Value, utils.MaxPeersFlag.Usage)
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
+	rootCmd.Flags().BoolVar(&metrics, utils.MetricsEnabledFlag.Name, false, utils.MetricsEnabledFlag.Usage)
 
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
+
+	if err := debug.SetCobraFlagsFromConfigFile(rootCmd); err != nil {
 		panic(err)
 	}
 }
@@ -85,6 +92,7 @@ var rootCmd = &cobra.Command{
 			uint(port),
 			protocol,
 			allowedPorts,
+			metrics,
 		)
 		if err != nil {
 			return err

@@ -101,7 +101,7 @@ func TestRewardContract(t *testing.T) {
 	auraDB, require := memdb.NewTestDB(t), require.New(t)
 	engine, err := aura.NewAuRa(nil, auraDB, libcommon.Address{}, test.AuthorityRoundBlockRewardContract)
 	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, core.DefaultSokolGenesisBlock(), engine, false)
+	m := stages.MockWithGenesisEngine(t, core.SokolGenesisBlock(), engine, false)
 	m.EnableLogs()
 
 	var accBefore *accounts.Account
@@ -202,8 +202,8 @@ func TestEmptyBlock(t *testing.T) {
 	}
 
 	require := require.New(t)
-	genesis := core.DefaultGnosisGenesisBlock()
-	genesisBlock, _, err := genesis.ToBlock("")
+	genesis := core.GnosisGenesisBlock()
+	genesisBlock, _, err := core.GenesisToBlock(genesis, "")
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

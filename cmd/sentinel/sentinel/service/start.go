@@ -9,7 +9,6 @@ import (
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/log/v3"
@@ -25,31 +24,6 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func hardForkListener(ctx context.Context, s *sentinel.Sentinel) {
-	tryAgainInterval := time.NewTicker(time.Second)
-	beaconCfg, genesisCfg := s.ChainConfigs()
-	currentDigest, err := fork.ComputeForkDigest(&beaconCfg, &genesisCfg)
-	if err != nil {
-		log.Error("cannot listen for hard forks", "reasons", err)
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-tryAgainInterval.C:
-			newDigest, err := fork.ComputeForkDigest(&beaconCfg, &genesisCfg)
-			if err != nil {
-				log.Error("cannot listen for hard forks", "reasons", err)
-				return
-			}
-			if newDigest != currentDigest {
-				s.RestartTopics()
-				currentDigest = newDigest
-			}
-		}
-	}
-}
 func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, rule handshake.RuleFunc) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
 	sent, err := sentinel.New(context.Background(), cfg, db, rule)
@@ -63,9 +37,9 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 		sentinel.BeaconBlockSsz,
 		// Cause problem due to buggy msg id will uncomment in the future.
 		//sentinel.BeaconAggregateAndProofSsz,
-		sentinel.VoluntaryExitSsz,
-		sentinel.ProposerSlashingSsz,
-		sentinel.AttesterSlashingSsz,
+		//sentinel.VoluntaryExitSsz,
+		//sentinel.ProposerSlashingSsz,
+		//sentinel.AttesterSlashingSsz,
 		sentinel.LightClientFinalityUpdateSsz,
 		sentinel.LightClientOptimisticUpdateSsz,
 	}
@@ -81,7 +55,6 @@ func StartSentinelService(cfg *sentinel.SentinelConfig, db kv.RoDB, srvCfg *Serv
 			log.Error("[Sentinel] failed to start sentinel", "err", err)
 		}
 	}
-	go hardForkListener(ctx, sent)
 	log.Info("[Sentinel] Sentinel started", "enr", sent.String())
 	if initialStatus != nil {
 		sent.SetStatus(initialStatus)

@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -38,26 +39,29 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	logger   log.Logger
-	genesis  *core.Genesis
+	genesis  *types.Genesis
 	resultCh chan *exec22.TxTask
 	epoch    EpochReader
 	chain    ChainReader
 	isPoSA   bool
 	posa     consensus.PoSA
 
+	callTracer  *CallTracer
+	taskGasPool *core.GasPool
+
 	evm *vm.EVM
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriter22(rs),
-		stateReader: state.NewStateReader22(rs),
+		stateWriter: state.NewStateWriterV3(rs),
+		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
 		ctx:      ctx,
@@ -66,7 +70,9 @@ func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb k
 		resultCh: resultCh,
 		engine:   engine,
 
-		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
+		callTracer:  NewCallTracer(),
+		taskGasPool: new(core.GasPool),
 	}
 	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
 		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
@@ -97,15 +103,16 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	}
 }
 
-func (rw *Worker) Run() {
+func (rw *Worker) Run() error {
 	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
 		rw.RunTxTask(txTask)
 		select {
 		case rw.resultCh <- txTask: // Needs to have outside of the lock
 		case <-rw.ctx.Done():
-			return
+			return rw.ctx.Err()
 		}
 	}
+	return nil
 }
 
 func (rw *Worker) RunTxTask(txTask *exec22.TxTask) {
@@ -133,13 +140,13 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	ibs := rw.ibs
 
 	rules := txTask.Rules
-	daoForkTx := rw.chainConfig.DAOForkSupport && rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
+	daoForkTx := rw.chainConfig.DAOForkBlock != nil && rw.chainConfig.DAOForkBlock.Uint64() == txTask.BlockNum && txTask.TxIndex == -1
 	var err error
 	header := txTask.Header
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			panic(err)
 		}
@@ -171,6 +178,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
+				//rw.callTracer.AddCoinbase(txTask.Coinbase, txTask.Uncles)
+				//txTask.TraceTos = rw.callTracer.Tos()
 				txTask.TraceTos = map[libcommon.Address]struct{}{}
 				txTask.TraceTos[txTask.Coinbase] = struct{}{}
 				for _, uncle := range txTask.Uncles {
@@ -189,21 +198,21 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			}
 		}
 		txHash := txTask.Tx.Hash()
-		gp := new(core.GasPool).AddGas(txTask.Tx.GetGas())
-		ct := NewCallTracer()
-		vmConfig := vm.Config{Debug: true, Tracer: ct, SkipAnalysis: txTask.SkipAnalysis}
+		rw.taskGasPool.Reset(txTask.Tx.GetGas())
+		rw.callTracer.Reset()
+		vmConfig := vm.Config{Debug: true, Tracer: rw.callTracer, SkipAnalysis: txTask.SkipAnalysis}
 		ibs.Prepare(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
 		blockContext := txTask.EvmBlockContext
 		if !rw.background {
 			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, nil /*excessDataGas*/)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm
 
-		applyRes, err := core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
+		applyRes, err := core.ApplyMessage(vmenv, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			txTask.Error = err
 			//fmt.Printf("error=%v\n", err)
@@ -212,8 +221,8 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			txTask.Logs = ibs.GetLogs(txHash)
-			txTask.TraceFroms = ct.froms
-			txTask.TraceTos = ct.tos
+			txTask.TraceFroms = rw.callTracer.Froms()
+			txTask.TraceTos = rw.callTracer.Tos()
 		}
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
@@ -318,38 +327,44 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
-	ctx, cancel := context.WithCancel(ctx)
-	var wg sync.WaitGroup
-	queueSize := workerCount * 2
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
+	queueSize := workerCount * 256
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)
-	for i := 0; i < workerCount; i++ {
-		reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+	{
+		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.
+		// and in applyLoop all errors are critical
+		ctx, cancel := context.WithCancel(ctx)
+		g, ctx := errgroup.WithContext(ctx)
+		for i := 0; i < workerCount; i++ {
+			reconWorkers[i] = NewWorker(lock, ctx, background, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
+		}
+		if background {
+			for i := 0; i < workerCount; i++ {
+				i := i
+				g.Go(func() error {
+					return reconWorkers[i].Run()
+				})
+			}
+			wait = func() { g.Wait() }
+		}
+
+		var clearDone bool
+		clear = func() {
+			if clearDone {
+				return
+			}
+			clearDone = true
+			cancel()
+			g.Wait()
+			for _, w := range reconWorkers {
+				w.ResetTx(nil)
+			}
+			//applyWorker.ResetTx(nil)
+			close(resultCh)
+		}
 	}
 	applyWorker = NewWorker(lock, ctx, false, chainDb, rs, blockReader, chainConfig, logger, genesis, resultCh, engine)
-	var clearDone bool
-	clear = func() {
-		if clearDone {
-			return
-		}
-		clearDone = true
-		cancel()
-		wg.Wait()
-		for _, w := range reconWorkers {
-			w.ResetTx(nil)
-		}
-		applyWorker.ResetTx(nil)
-		close(resultCh)
-	}
-	if background {
-		wg.Add(workerCount)
-		for i := 0; i < workerCount; i++ {
-			go func(i int) {
-				defer wg.Done()
-				reconWorkers[i].Run()
-			}(i)
-		}
-	}
-	return reconWorkers, applyWorker, resultCh, clear, wg.Wait
+
+	return reconWorkers, applyWorker, resultCh, clear, wait
 }

@@ -13,13 +13,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
 )
 
 var cmdResetState = &cobra.Command{
@@ -60,6 +61,7 @@ var cmdResetState = &cobra.Command{
 }
 
 func init() {
+	withConfig(cmdResetState)
 	withDataDir(cmdResetState)
 	withChain(cmdResetState)
 
@@ -103,7 +105,13 @@ func printStages(tx kv.Tx, snapshots *snapshotsync.RoSnapshots, agg *state.Aggre
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
 	fmt.Fprintf(w, "history.v3: %t, idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
 
-	s1, err := tx.ReadSequence(kv.EthTx)
+	transactionsV3, _ := kvcfg.TransactionsV3.Enabled(tx)
+	var s1 uint64
+	if transactionsV3 {
+		s1, err = tx.ReadSequence(kv.EthTxV3)
+	} else {
+		s1, err = tx.ReadSequence(kv.EthTx)
+	}
 	if err != nil {
 		return err
 	}

@@ -18,6 +18,7 @@ package vm
 
 import (
 	"hash"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -41,6 +42,12 @@ type Config struct {
 	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+}
+
+var pool = sync.Pool{
+	New: func() any {
+		return NewMemory()
+	},
 }
 
 func (vmConfig *Config) HasEip3860(rules *chain.Rules) bool {
@@ -117,6 +124,8 @@ func copyJumpTable(jt *JumpTable) *JumpTable {
 func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	var jt *JumpTable
 	switch {
+	case evm.ChainRules().IsPrague:
+		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
 	case evm.ChainRules().IsShanghai:
@@ -160,6 +169,8 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 	}
 }
 
+func (in *EVMInterpreter) decrementDepth() { in.depth-- }
+
 // Run loops and evaluates the contract's code with the given input data and returns
 // the return byte-slice and an error if one occurred.
 //
@@ -167,27 +178,29 @@ func NewEVMInterpreter(evm VMInterpreter, cfg Config) *EVMInterpreter {
 // considered a revert-and-consume-all-gas operation except for
 // ErrExecutionReverted which means revert-and-keep-gas-left.
 func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (ret []byte, err error) {
-	// Increment the call depth which is restricted to 1024
-	in.depth++
-	defer func() { in.depth-- }()
-
-	// Make sure the readOnly is only set if we aren't in readOnly yet.
-	// This makes also sure that the readOnly flag isn't removed for child calls.
-	callback := in.setReadonly(readOnly)
-	defer callback()
-
-	// Reset the previous call's return data. It's unimportant to preserve the old buffer
-	// as every returning call will return new data anyway.
-	in.returnData = nil
-
 	// Don't bother with the execution if there's no code.
 	if len(contract.Code) == 0 {
 		return nil, nil
 	}
 
+	// Increment the call depth which is restricted to 1024
+	in.depth++
+	defer in.decrementDepth()
+
+	// Make sure the readOnly is only set if we aren't in readOnly yet.
+	// This makes also sure that the readOnly flag isn't removed for child calls.
+	if readOnly && !in.readOnly {
+		in.readOnly = true
+		defer func() { in.readOnly = false }()
+	}
+
+	// Reset the previous call's return data. It's unimportant to preserve the old buffer
+	// as every returning call will return new data anyway.
+	in.returnData = nil
+
 	var (
-		op          OpCode        // current opcode
-		mem         = NewMemory() // bound memory
+		op          OpCode // current opcode
+		mem         = pool.Get().(*Memory)
 		locStack    = stack.New()
 		callContext = &ScopeContext{
 			Memory:   mem,
@@ -209,6 +222,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Don't move this deferrred function, it's placed before the capturestate-deferred method,
 	// so that it get's executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
+	mem.Reset()
+	defer pool.Put(mem)
 	defer stack.ReturnNormalStack(locStack)
 	contract.Input = input
 
@@ -298,13 +313,17 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		err = nil // clear stop token error
 	}
 
-	return res, err
+	ret = append(ret, res...)
+	return
 }
 
 // Depth returns the current call stack depth.
 func (in *EVMInterpreter) Depth() int {
 	return in.depth
 }
+
+func (vm *VM) disableReadonly() { vm.readOnly = false }
+func (vm *VM) noop()            {}
 
 func (vm *VM) setReadonly(outerReadonly bool) func() {
 	if outerReadonly && !vm.readOnly {

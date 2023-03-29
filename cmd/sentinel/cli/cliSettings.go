@@ -25,16 +25,16 @@ type ConsensusClientCliCfg struct {
 	NoDiscovery      bool                        `json:"noDiscovery"`
 	CheckpointUri    string                      `json:"checkpointUri"`
 	Chaindata        string                      `json:"chaindata"`
-	ELEnabled        bool                        `json:"elEnabled"`
 	ErigonPrivateApi string                      `json:"erigonPrivateApi"`
+	TransitionChain  bool                        `json:"transitionChain"`
+	NetworkType      clparams.NetworkType
 }
 
 func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	cfg := &ConsensusClientCliCfg{}
 	chainName := ctx.String(flags.Chain.Name)
 	var err error
-	var network clparams.NetworkType
-	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, network, err = clparams.GetConfigsByNetworkName(chainName)
+	cfg.GenesisCfg, cfg.NetworkCfg, cfg.BeaconCfg, cfg.NetworkType, err = clparams.GetConfigsByNetworkName(chainName)
 	if err != nil {
 		return nil, err
 	}
@@ -64,10 +64,10 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	if ctx.String(flags.CheckpointSyncUrlFlag.Name) != "" {
 		cfg.CheckpointUri = ctx.String(flags.CheckpointSyncUrlFlag.Name)
 	} else {
-		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(network)
+		cfg.CheckpointUri = clparams.GetCheckpointSyncEndpoint(cfg.NetworkType)
+		fmt.Println(cfg.CheckpointUri)
 	}
 	cfg.Chaindata = ctx.String(flags.ChaindataFlag.Name)
-	cfg.ELEnabled = ctx.Bool(flags.ELEnabledFlag.Name)
 	cfg.BeaconDataCfg = rawdb.BeaconDataConfigurations[ctx.String(flags.BeaconDBModeFlag.Name)]
 	// Process bootnodes
 	if ctx.String(flags.BootnodesFlag.Name) != "" {
@@ -76,5 +76,6 @@ func SetupConsensusClientCfg(ctx *cli.Context) (*ConsensusClientCliCfg, error) {
 	if ctx.String(flags.SentinelStaticPeersFlag.Name) != "" {
 		cfg.NetworkCfg.StaticPeers = strings.Split(ctx.String(flags.SentinelStaticPeersFlag.Name), ",")
 	}
+	cfg.TransitionChain = ctx.Bool(flags.TransitionChainFlag.Name)
 	return cfg, nil
 }

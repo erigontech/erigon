@@ -39,7 +39,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
@@ -55,7 +55,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithCodeChanges", func(t *testing.T) {
 		t.Skip("not supported yet, to be restored")
@@ -73,7 +73,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 
 	t.Run("PruneExecution", func(t *testing.T) {
@@ -129,8 +129,8 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 	agg.SetTx(tx)
 	agg.StartWrites()
 
-	rs := state.NewStateV3()
-	stateWriter := state.NewStateWriter22(rs)
+	rs := state.NewStateV3("")
+	stateWriter := state.NewStateWriterV3(rs)
 	return func(n, from, numberOfBlocks uint64) {
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
@@ -198,7 +198,7 @@ func TestExec22(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
 		t.Skip("we don't delete newer incarnations - seems it's a feature?")
@@ -235,6 +235,6 @@ func TestExec22(t *testing.T) {
 			return nil
 		})
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 }

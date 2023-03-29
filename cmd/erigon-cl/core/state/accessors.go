@@ -2,23 +2,31 @@ package state
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 
+	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 	eth2_shuffle "github.com/protolambda/eth2-shuffle"
 )
 
 const PreAllocatedRewardsAndPenalties = 8192
 
+var (
+	ErrGetBlockRootAtSlotFuture = errors.New("GetBlockRootAtSlot: slot in the future")
+)
+
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
 	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok {
-		return cachedIndicies.([]uint64)
+		return cachedIndicies
 	}
 	for i, validator := range b.validators {
 		if !validator.Active(epoch) {
@@ -62,7 +70,7 @@ func (b *BeaconState) GetUnslashedParticipatingIndices(flagIndex int, epoch uint
 		return nil, fmt.Errorf("getUnslashedParticipatingIndices: only epoch and previous epoch can be used")
 	}
 	// Iterate over all validators and include the active ones that have flag_index enabled and are not slashed.
-	for i, validator := range b.Validators() {
+	for i, validator := range b.validators {
 		if !validator.Active(epoch) ||
 			!participation[i].HasFlag(flagIndex) ||
 			validator.Slashed {
@@ -117,7 +125,7 @@ func (b *BeaconState) GetBlockRoot(epoch uint64) (libcommon.Hash, error) {
 // GetBlockRootAtSlot returns the block root at a given slot
 func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 	if slot >= b.slot {
-		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot in the future")
+		return libcommon.Hash{}, ErrGetBlockRootAtSlotFuture
 	}
 	if b.slot > slot+b.beaconConfig.SlotsPerHistoricalRoot {
 		return libcommon.Hash{}, fmt.Errorf("GetBlockRootAtSlot: slot too much far behind")
@@ -126,16 +134,11 @@ func (b *BeaconState) GetBlockRootAtSlot(slot uint64) (libcommon.Hash, error) {
 }
 
 func (b *BeaconState) GetDomain(domainType [4]byte, epoch uint64) ([]byte, error) {
-	if epoch == 0 {
-		epoch = b.Epoch()
-	}
-	var forkVersion [4]byte
 	if epoch < b.fork.Epoch {
-		forkVersion = b.fork.PreviousVersion
-	} else {
-		forkVersion = b.fork.CurrentVersion
+		return fork.ComputeDomain(domainType[:], b.fork.PreviousVersion, b.genesisValidatorsRoot)
 	}
-	return fork.ComputeDomain(domainType[:], forkVersion, b.genesisValidatorsRoot)
+	return fork.ComputeDomain(domainType[:], b.fork.CurrentVersion, b.genesisValidatorsRoot)
+
 }
 
 func (b *BeaconState) ComputeShuffledIndexPreInputs(seed [32]byte) [][32]byte {
@@ -189,7 +192,7 @@ func (b *BeaconState) ComputeCommittee(indicies []uint64, seed libcommon.Hash, i
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
 	if shuffledIndicesInterface, ok := b.shuffledSetsCache.Get(seed); ok {
-		shuffledIndicies = shuffledIndicesInterface.([]uint64)
+		shuffledIndicies = shuffledIndicesInterface
 	} else {
 		shuffledIndicies = make([]uint64, lenIndicies)
 		copy(shuffledIndicies, indicies)
@@ -225,7 +228,7 @@ func (b *BeaconState) ComputeProposerIndex(indices []uint64, seed [32]byte) (uin
 		input := append(seed[:], buf...)
 		randomByte := uint64(utils.Keccak256(input)[i%32])
 
-		validator, err := b.ValidatorAt(int(candidateIndex))
+		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return 0, err
 		}
@@ -269,9 +272,15 @@ func (b *BeaconState) BaseRewardPerIncrement() uint64 {
 // BaseReward return base rewards for processing sync committee and duties.
 func (b *BeaconState) BaseReward(index uint64) (uint64, error) {
 	if index >= uint64(len(b.validators)) {
-		return 0, InvalidValidatorIndex
+		return 0, ErrInvalidValidatorIndex
 	}
-	return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
+	if b.totalActiveBalanceCache == nil {
+		b._refreshActiveBalances()
+	}
+	if b.version != clparams.Phase0Version {
+		return (b.validators[index].EffectiveBalance / b.beaconConfig.EffectiveBalanceIncrement) * b.BaseRewardPerIncrement(), nil
+	}
+	return b.validators[index].EffectiveBalance * b.beaconConfig.BaseRewardFactor / b.totalActiveBalanceRootCache / b.beaconConfig.BaseRewardsPerEpoch, nil
 }
 
 // SyncRewards returns the proposer reward and the sync participant reward given the total active balance in state.
@@ -291,10 +300,7 @@ func (b *BeaconState) SyncRewards() (proposerReward, participantReward uint64, e
 
 func (b *BeaconState) ValidatorFromDeposit(deposit *cltypes.Deposit) *cltypes.Validator {
 	amount := deposit.Data.Amount
-	effectiveBalance := amount - amount%b.beaconConfig.EffectiveBalanceIncrement
-	if effectiveBalance > b.beaconConfig.EffectiveBalanceIncrement {
-		effectiveBalance = b.beaconConfig.EffectiveBalanceIncrement
-	}
+	effectiveBalance := utils.Min64(amount-amount%b.beaconConfig.EffectiveBalanceIncrement, b.beaconConfig.MaxEffectiveBalance)
 
 	return &cltypes.Validator{
 		PublicKey:                  deposit.Data.PubKey,
@@ -328,7 +334,7 @@ func (b *BeaconState) GetAttestationParticipationFlagIndicies(data *cltypes.Atte
 		justifiedCheckpoint = b.previousJustifiedCheckpoint
 	}
 	// Matching roots
-	if *data.Source != *justifiedCheckpoint {
+	if !data.Source.Equal(justifiedCheckpoint) {
 		return nil, fmt.Errorf("GetAttestationParticipationFlagIndicies: source does not match")
 	}
 	targetRoot, err := b.GetBlockRoot(data.Target.Epoch)
@@ -359,7 +365,7 @@ func (b *BeaconState) GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, 
 	binary.BigEndian.PutUint64(cacheKey[:], slot)
 	binary.BigEndian.PutUint64(cacheKey[8:], committeeIndex)
 	if cachedCommittee, ok := b.committeeCache.Get(cacheKey); ok {
-		return cachedCommittee.([]uint64), nil
+		return cachedCommittee, nil
 	}
 	epoch := b.GetEpochAtSlot(slot)
 	committeesPerSlot := b.CommitteeCount(epoch)
@@ -391,10 +397,16 @@ func (b *BeaconState) GetIndexedAttestation(attestation *cltypes.Attestation, at
 	}, nil
 }
 
-func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte) ([]uint64, error) {
+// GetAttestingIndicies retrieves attesting indicies for a specific attestation. however some tests will not expect the aggregation bits check.
+// thus, it is a flag now.
+func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error) {
 	committee, err := b.GetBeaconCommitee(attestation.Slot, attestation.Index)
 	if err != nil {
 		return nil, err
+	}
+	aggregationBitsLen := utils.GetBitlistLength(aggregationBits)
+	if checkBitsLength && utils.GetBitlistLength(aggregationBits) != len(committee) {
+		return nil, fmt.Errorf("GetAttestingIndicies: invalid aggregation bits. agg bits size: %d, expect: %d", aggregationBitsLen, len(committee))
 	}
 	attestingIndices := []uint64{}
 	for i, member := range committee {
@@ -414,7 +426,7 @@ func (b *BeaconState) GetAttestingIndicies(attestation *cltypes.AttestationData,
 func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64) {
 	eligibleValidators = make([]uint64, 0, len(b.validators))
 	previousEpoch := b.PreviousEpoch()
-	// TODO(Giulio2002): Proper caching
+
 	for i, validator := range b.validators {
 		if validator.Active(previousEpoch) || (validator.Slashed && previousEpoch+1 < validator.WithdrawableEpoch) {
 			eligibleValidators = append(eligibleValidators, uint64(i))
@@ -423,9 +435,14 @@ func (b *BeaconState) EligibleValidatorsIndicies() (eligibleValidators []uint64)
 	return
 }
 
+// FinalityDelay determines by how many epochs we are late on finality.
+func (b *BeaconState) FinalityDelay() uint64 {
+	return b.PreviousEpoch() - b.finalizedCheckpoint.Epoch
+}
+
 // Implementation of is_in_inactivity_leak. tells us if network is in danger pretty much. defined in ETH 2.0 specs.
 func (b *BeaconState) InactivityLeaking() bool {
-	return (b.PreviousEpoch() - b.finalizedCheckpoint.Epoch) > b.beaconConfig.MinEpochsToInactivityPenalty
+	return b.FinalityDelay() > b.beaconConfig.MinEpochsToInactivityPenalty
 }
 
 func (b *BeaconState) IsUnslashedParticipatingIndex(epoch, index uint64, flagIdx int) bool {
@@ -446,13 +463,131 @@ func (b *BeaconState) IsValidatorEligibleForActivation(validator *cltypes.Valida
 		validator.ActivationEpoch == b.beaconConfig.FarFutureEpoch
 }
 
-// Implementation of get_validator_churn_limit. Specs at: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
-func (b *BeaconState) ValidatorChurnLimit() (limit uint64) {
+// Get the maximum number of validators that can be churned in a single epoch.
+// See: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#get_validator_churn_limit
+func (b *BeaconState) ValidatorChurnLimit() uint64 {
 	activeValidatorsCount := uint64(len(b.GetActiveValidatorsIndices(b.Epoch())))
-	limit = activeValidatorsCount / b.beaconConfig.ChurnLimitQuotient
-	if limit < b.beaconConfig.MinPerEpochChurnLimit {
-		limit = b.beaconConfig.MinPerEpochChurnLimit
-	}
-	return
+	churnLimit := activeValidatorsCount / b.beaconConfig.ChurnLimitQuotient
+	return utils.Max64(b.beaconConfig.MinPerEpochChurnLimit, churnLimit)
+}
 
+// Check whether a merge transition is complete by verifying the presence of a valid execution payload header.
+func (b *BeaconState) IsMergeTransitionComplete() bool {
+	return !b.latestExecutionPayloadHeader.IsZero()
+}
+
+// Compute the Unix timestamp at the specified slot number.
+func (b *BeaconState) ComputeTimestampAtSlot(slot uint64) uint64 {
+	return b.genesisTime + (slot-b.beaconConfig.GenesisSlot)*b.beaconConfig.SecondsPerSlot
+}
+
+// Check whether a validator is fully withdrawable at the given epoch.
+func (b *BeaconState) isFullyWithdrawableValidator(validator *cltypes.Validator, balance uint64, epoch uint64) bool {
+	return validator.WithdrawalCredentials[0] == b.beaconConfig.ETH1AddressWithdrawalPrefixByte &&
+		validator.WithdrawableEpoch <= epoch && balance > 0
+}
+
+// Check whether a validator is partially withdrawable.
+func (b *BeaconState) isPartiallyWithdrawableValidator(validator *cltypes.Validator, balance uint64) bool {
+	return validator.WithdrawalCredentials[0] == b.beaconConfig.ETH1AddressWithdrawalPrefixByte &&
+		validator.EffectiveBalance == b.beaconConfig.MaxEffectiveBalance && balance > b.beaconConfig.MaxEffectiveBalance
+}
+
+// ExpectedWithdrawals calculates the expected withdrawals that can be made by validators in the current epoch
+func (b *BeaconState) ExpectedWithdrawals() []*types.Withdrawal {
+	// Get the current epoch, the next withdrawal index, and the next withdrawal validator index
+	currentEpoch := b.Epoch()
+	nextWithdrawalIndex := b.nextWithdrawalIndex
+	nextWithdrawalValidatorIndex := b.nextWithdrawalValidatorIndex
+
+	// Determine the upper bound for the loop and initialize the withdrawals slice with a capacity of bound
+	maxValidators := uint64(len(b.validators))
+	maxValidatorsPerWithdrawalsSweep := b.beaconConfig.MaxValidatorsPerWithdrawalsSweep
+	bound := utils.Min64(maxValidators, maxValidatorsPerWithdrawalsSweep)
+	withdrawals := make([]*types.Withdrawal, 0, bound)
+
+	// Loop through the validators to calculate expected withdrawals
+	for validatorCount := uint64(0); validatorCount < bound && len(withdrawals) != int(b.beaconConfig.MaxWithdrawalsPerPayload); validatorCount++ {
+		// Get the validator and balance for the current validator index
+		currentValidator := b.validators[nextWithdrawalValidatorIndex]
+		currentBalance := b.balances[nextWithdrawalValidatorIndex]
+
+		// Check if the validator is fully withdrawable
+		if b.isFullyWithdrawableValidator(currentValidator, currentBalance, currentEpoch) {
+			// Add a new withdrawal with the validator's withdrawal credentials and balance
+			newWithdrawal := &types.Withdrawal{
+				Index:     nextWithdrawalIndex,
+				Validator: nextWithdrawalValidatorIndex,
+				Address:   libcommon.BytesToAddress(currentValidator.WithdrawalCredentials[12:]),
+				Amount:    currentBalance,
+			}
+			withdrawals = append(withdrawals, newWithdrawal)
+			nextWithdrawalIndex++
+		} else if b.isPartiallyWithdrawableValidator(currentValidator, currentBalance) { // Check if the validator is partially withdrawable
+			// Add a new withdrawal with the validator's withdrawal credentials and balance minus the maximum effective balance
+			newWithdrawal := &types.Withdrawal{
+				Index:     nextWithdrawalIndex,
+				Validator: nextWithdrawalValidatorIndex,
+				Address:   libcommon.BytesToAddress(currentValidator.WithdrawalCredentials[12:]),
+				Amount:    currentBalance - b.beaconConfig.MaxEffectiveBalance,
+			}
+			withdrawals = append(withdrawals, newWithdrawal)
+			nextWithdrawalIndex++
+		}
+
+		// Increment the validator index, looping back to 0 if necessary
+		nextWithdrawalValidatorIndex = (nextWithdrawalValidatorIndex + 1) % maxValidators
+	}
+
+	// Return the withdrawals slice
+	return withdrawals
+}
+func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error) {
+	beaconConfig := b.beaconConfig
+	optimizedHashFunc := utils.OptimizedKeccak256()
+	epoch := b.Epoch() + 1
+	//math.MaxUint8
+	activeValidatorIndicies := b.GetActiveValidatorsIndices(epoch)
+	activeValidatorCount := uint64(len(activeValidatorIndicies))
+	seed := b.GetSeed(epoch, beaconConfig.DomainSyncCommittee)
+	i := uint64(0)
+	syncCommitteePubKeys := make([][48]byte, 0, cltypes.SyncCommitteeSize)
+	preInputs := b.ComputeShuffledIndexPreInputs(seed)
+	for len(syncCommitteePubKeys) < cltypes.SyncCommitteeSize {
+		shuffledIndex, err := b.ComputeShuffledIndex(i%activeValidatorCount, activeValidatorCount, seed, preInputs, optimizedHashFunc)
+		if err != nil {
+			return nil, err
+		}
+		candidateIndex := activeValidatorIndicies[shuffledIndex]
+		// Compute random byte.
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, i/32)
+		input := append(seed[:], buf...)
+		randomByte := uint64(utils.Keccak256(input)[i%32])
+		// retrieve validator.
+		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
+		if err != nil {
+			return nil, err
+		}
+		if validator.EffectiveBalance*math.MaxUint8 >= beaconConfig.MaxEffectiveBalance*randomByte {
+			syncCommitteePubKeys = append(syncCommitteePubKeys, validator.PublicKey)
+		}
+		i++
+	}
+	// Format public keys.
+	formattedKeys := make([][]byte, cltypes.SyncCommitteeSize)
+	for i := range formattedKeys {
+		formattedKeys[i] = make([]byte, 48)
+		copy(formattedKeys[i], syncCommitteePubKeys[i][:])
+	}
+	aggregatePublicKeyBytes, err := bls.AggregatePublickKeys(formattedKeys)
+	if err != nil {
+		return nil, err
+	}
+	var aggregate [48]byte
+	copy(aggregate[:], aggregatePublicKeyBytes)
+	return &cltypes.SyncCommittee{
+		PubKeys:            syncCommitteePubKeys,
+		AggregatePublicKey: aggregate,
+	}, nil
 }

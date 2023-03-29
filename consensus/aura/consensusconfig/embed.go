@@ -15,6 +15,9 @@ var Gnosis []byte
 //go:embed poachiado.json
 var Chiado []byte
 
+//go:embed test.json
+var Test []byte
+
 func GetConfigByChain(chainName string) []byte {
 	switch chainName {
 	case networkname.SokolChainName:
@@ -24,6 +27,6 @@ func GetConfigByChain(chainName string) []byte {
 	case networkname.ChiadoChainName:
 		return Chiado
 	default:
-		return Sokol
+		return Test
 	}
 }

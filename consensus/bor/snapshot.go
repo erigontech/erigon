@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,8 +15,8 @@ import (
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config   *chain.BorConfig // Consensus engine parameters to fine tune behavior
-	sigcache *lru.ARCCache    // Cache of recent block signatures to speed up ecrecover
+	config   *chain.BorConfig                                  // Consensus engine parameters to fine tune behavior
+	sigcache *lru2.ARCCache[libcommon.Hash, libcommon.Address] // Cache of recent block signatures to speed up ecrecover
 
 	Number       uint64                       `json:"number"`       // Block number where the snapshot was created
 	Hash         libcommon.Hash               `json:"hash"`         // Block hash where the snapshot was created
@@ -38,7 +38,7 @@ const BorSeparate = "BorSeparate"
 // the genesis block.
 func newSnapshot(
 	config *chain.BorConfig,
-	sigcache *lru.ARCCache,
+	sigcache *lru2.ARCCache[libcommon.Hash, libcommon.Address],
 	number uint64,
 	hash libcommon.Hash,
 	validators []*valset.Validator,
@@ -55,7 +55,7 @@ func newSnapshot(
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, hash libcommon.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.BorConfig, sigcache *lru2.ARCCache[libcommon.Hash, libcommon.Address], db kv.RwDB, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -73,6 +73,8 @@ func loadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache, db kv.RwDB, h
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
+
+	snap.ValidatorSet.UpdateValidatorMap()
 
 	snap.config = config
 	snap.sigcache = sigcache

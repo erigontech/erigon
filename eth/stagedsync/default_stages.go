@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
@@ -109,6 +110,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
+			Disabled:    bodies.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
 				return SpawnHashStateStage(s, tx, hashState, ctx, quiet)
 			},
@@ -122,8 +124,9 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
+			Disabled:    bodies.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, quiet bool) error {
-				if exec.chainConfig.IsCancun(0) {
+				if exec.chainConfig.IsPrague(0) {
 					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx)
 					return err
 				}
@@ -131,7 +134,7 @@ func DefaultStages(ctx context.Context, snapshots SnapshotsCfg, headers HeadersC
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx) error {
-				if exec.chainConfig.IsCancun(0) {
+				if exec.chainConfig.IsPrague(0) {
 					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx)
 				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx)

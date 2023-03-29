@@ -51,14 +51,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 		}
 		defer tx.Rollback()
 	}
-	progress := s.BlockNumber
-	var lastRoot libcommon.Hash
-	if progress == 0 {
-		progress = cfg.state.LatestBlockHeader().Slot
-		lastRoot, err = cfg.state.BlockRoot()
-	} else {
-		_, _, _, lastRoot, err = rawdb.ReadBeaconBlockForStorage(tx, progress)
-	}
+	progress := cfg.state.LatestBlockHeader().Slot
+	lastRoot, err := cfg.state.BlockRoot()
 	if err != nil {
 		return err
 	}
@@ -70,9 +64,8 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 
 	log.Info(fmt.Sprintf("[%s] Started", s.LogPrefix()), "start", progress, "target", targetSlot)
 	cfg.downloader.SetHighestProcessedSlot(progress)
-	if cfg.downloader.HighestProcessedRoot() == (libcommon.Hash{}) {
-		cfg.downloader.SetHighestProcessedRoot(lastRoot)
-	}
+	cfg.downloader.SetHighestProcessedRoot(lastRoot)
+
 	cfg.downloader.SetTargetSlot(targetSlot)
 	cfg.downloader.SetLimitSegmentsLength(1024)
 	// On new blocks we just check slot sequencing for now :)
@@ -124,6 +117,15 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 			if err = rawdb.WriteBeaconBlock(tx, block); err != nil {
 				return
 			}
+			var currentRoot libcommon.Hash
+			currentRoot, err = block.Block.HashSSZ()
+			if err != nil {
+				return
+			}
+			// Assume all of them are finalized
+			if err = rawdb.WriteFinalizedBlockRoot(tx, block.Block.Slot, currentRoot); err != nil {
+				return
+			}
 			if cfg.executionClient != nil && block.Version() >= clparams.BellatrixVersion {
 				if err = executionPayloadInsertionBatch.WriteExecutionPayload(block.Block.Body.ExecutionPayload); err != nil {
 					log.Warn("Could not send Execution Payload", "err", err)
@@ -160,6 +162,7 @@ func SpawnStageBeaconsBlocks(cfg StageBeaconsBlockCfg, s *stagedsync.StageState,
 	if err := executionPayloadInsertionBatch.Flush(); err != nil {
 		return err
 	}
+
 	log.Info(fmt.Sprintf("[%s] Processed and collected blocks", s.LogPrefix()), "count", targetSlot-progress)
 	if err := s.Update(tx, cfg.downloader.GetHighestProcessedSlot()); err != nil {
 		return err
