@@ -105,7 +105,7 @@ type genesisSpecMarshaling struct {
 	Difficulty    *math.HexOrDecimal256
 	BaseFee       *math.HexOrDecimal256
 	ExcessDataGas *math.HexOrDecimal256
-	Alloc         map[common.UnprefixedAddress]GenesisAccount
+	Alloc         map[common2.UnprefixedAddress]GenesisAccount
 }
 
 type genesisAccountMarshaling struct {
