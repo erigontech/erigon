@@ -73,7 +73,7 @@ func NewState(db *DB) (*State, error) {
 			MergeNetsplitBlock:    big.NewInt(0),
 		}
 		genesis.Config = &chainConfig
-		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis)
+		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
 		if err != nil {
 			return nil, err
 		}
