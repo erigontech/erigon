@@ -125,7 +125,7 @@ func (b *BeaconState) AddEth1DataVote(vote *cltypes.Eth1Data) {
 
 func (b *BeaconState) ResetEth1DataVotes() {
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.Eth1DataVotesAtReset = b.eth1DataVotes
+		b.reverseChangeset.ReportVotesReset(b.eth1DataVotes)
 	}
 	b.touchedLeaves[Eth1DataVotesLeafIndex] = true
 	b.eth1DataVotes = nil
@@ -213,10 +213,8 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator *cltypes.Validato
 }
 
 func (b *BeaconState) ResetEpochParticipation() {
-	if b.reverseChangeset != nil && len(b.reverseChangeset.CurrentEpochParticipationAtReset) == 0 &&
-		len(b.reverseChangeset.PreviousEpochParticipationAtReset) == 0 {
-		b.reverseChangeset.CurrentEpochParticipationAtReset = b.currentEpochParticipation.Copy()
-		b.reverseChangeset.PreviousEpochParticipationAtReset = b.previousEpochParticipation.Copy()
+	if b.reverseChangeset != nil {
+		b.reverseChangeset.ReportEpochParticipationReset(b.previousEpochParticipation, b.currentEpochParticipation)
 	}
 	b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
 	b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
