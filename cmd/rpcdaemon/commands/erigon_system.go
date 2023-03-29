@@ -77,6 +77,7 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			if err != nil {
 				return 0, err
 			}
+			return hexutil.Uint64(borfinality.CurrentFinalizedBlock(tx, blockNum).NumberU64()), nil
 		}
 		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {
