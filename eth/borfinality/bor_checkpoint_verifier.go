@@ -175,7 +175,7 @@ func rewind(config *chainConfig, head uint64, rewindTo uint64) {
 	}
 	defer tx.Rollback()
 
-	// rewind the chain : Check once
+	// rewind the chain
 	config.stagedSync.UnwindTo(rewindTo, block.Result.Hash)
 	err = config.stagedSync.RunUnwind(config.db, tx)
 	if err != nil {

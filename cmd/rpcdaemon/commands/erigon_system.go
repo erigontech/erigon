@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/eth/borfinality"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -51,6 +52,11 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		rpcBlockNum = *rpcBlockNumPtr
 	}
 
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return 0, err
+	}
+
 	var blockNum uint64
 	switch rpcBlockNum {
 	case rpc.LatestBlockNumber:
@@ -66,6 +72,12 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 			return 0, err
 		}
 	case rpc.FinalizedBlockNumber:
+		if chainConfig.Bor != nil {
+			blockNum, err = borfinality.GetFinalizedBlockNumber(tx)
+			if err != nil {
+				return 0, err
+			}
+		}
 		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {
 			return 0, err
