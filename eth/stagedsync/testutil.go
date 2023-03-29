@@ -9,12 +9,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
@@ -51,13 +50,42 @@ func compareDomain(t *testing.T, agg *state2.AggregatorV3, db1, db2 kv.Tx, bucke
 			ac.DeprecatedLatestAcc(db1.(kv.RwTx), func(k, v []byte) {
 				bucket1[string(k)] = v
 			})
-
+			require.True(t, len(bucket1) > 0)
 			bucket2 := make(map[string][]byte)
 			ac.DeprecatedLatestAcc(db2.(kv.RwTx), func(k, v []byte) {
 				bucket2[string(k)] = v
 			})
+			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
 
-			assert.Equalf(t, bucket1 , bucket2 , "bucket %q", bucketName)
+			bucket1 = make(map[string][]byte)
+			ac.DeprecatedLatestSt(db1.(kv.RwTx), func(k, v []byte) {
+				bucket1[string(k)] = v
+			})
+			bucket2 = make(map[string][]byte)
+			ac.DeprecatedLatestSt(db2.(kv.RwTx), func(k, v []byte) {
+				bucket2[string(k)] = v
+			})
+			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
+		case kv.PlainContractCode:
+			bucket1 := make(map[string][]byte)
+			ac.DeprecatedLatestCode(db1.(kv.RwTx), func(k, v []byte) {
+				bucket1[string(k)] = v
+			})
+			bucket2 := make(map[string][]byte)
+			ac.DeprecatedLatestCode(db2.(kv.RwTx), func(k, v []byte) {
+				bucket2[string(k)] = v
+			})
+			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
+
+			bucket1 = make(map[string][]byte)
+			ac.DeprecatedLatestSt(db1.(kv.RwTx), func(k, v []byte) {
+				bucket1[string(k)] = v
+			})
+			bucket2 = make(map[string][]byte)
+			ac.DeprecatedLatestSt(db2.(kv.RwTx), func(k, v []byte) {
+				bucket2[string(k)] = v
+			})
+			assert.Equalf(t, bucket1, bucket2, "bucket %q", bucketName)
 		default:
 			panic(bucketName)
 		}
