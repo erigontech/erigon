@@ -32,8 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 
-	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
@@ -76,7 +76,7 @@ var Defaults = Config{
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 30,
 	},
-	Ethash: ethash.Config{
+	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
 		CachesLockMmap:   false,
 		DatasetsInMem:    1,
@@ -202,7 +202,7 @@ type Config struct {
 	Miner params.MiningConfig
 
 	// Ethash options
-	Ethash ethash.Config
+	Ethash ethashcfg.Config
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
