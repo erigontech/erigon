@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/core"
@@ -91,9 +92,9 @@ func newTestBackend(t *testing.T) *testBackend {
 	var (
 		key, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr   = crypto.PubkeyToAddress(key.PublicKey)
-		gspec  = &core.Genesis{
+		gspec  = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc:  core.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
+			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		signer = types.LatestSigner(gspec.Config)
 	)
@@ -141,7 +142,7 @@ func (b *testBackend) GetBlockByNumber(number uint64) *types.Block {
 }
 
 func TestSuggestPrice(t *testing.T) {
-	config := gasprice.Config{
+	config := gaspricecfg.Config{
 		Blocks:     2,
 		Percentile: 60,
 		Default:    big.NewInt(params.GWei),

@@ -86,7 +86,7 @@ var erigon4Cmd = &cobra.Command{
 	},
 }
 
-func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
+func Erigon4(genesis *types.Genesis, chainConfig *chain2.Config, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -173,7 +173,7 @@ func Erigon4(genesis *core.Genesis, chainConfig *chain2.Config, logger log.Logge
 
 	interrupt := false
 	if startTxNum == 0 {
-		genBlock, genesisIbs, err := genesis.ToBlock("")
+		genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 		if err != nil {
 			return err
 		}

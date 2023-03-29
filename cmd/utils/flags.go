@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -48,7 +49,6 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
@@ -1193,7 +1193,7 @@ func setDataDirCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	cfg.Dirs = datadir.New(cfg.Dirs.DataDir)
 }
 
-func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
+func setGPO(ctx *cli.Context, cfg *gaspricecfg.Config) {
 	if ctx.IsSet(GpoBlocksFlag.Name) {
 		cfg.Blocks = ctx.Int(GpoBlocksFlag.Name)
 	}
@@ -1206,7 +1206,7 @@ func setGPO(ctx *cli.Context, cfg *gasprice.Config) {
 }
 
 // nolint
-func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
+func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 	if v := f.Int(GpoBlocksFlag.Name, GpoBlocksFlag.Value, GpoBlocksFlag.Usage); v != nil {
 		cfg.Blocks = *v
 	}
@@ -1218,7 +1218,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gasprice.Config) {
 	}
 }
 
-func setTxPool(ctx *cli.Context, cfg *core.TxPoolConfig) {
+func setTxPool(ctx *cli.Context, cfg *ethconfig.TxPoolConfig) {
 	if ctx.IsSet(TxPoolDisableFlag.Name) {
 		cfg.Disable = true
 	}
@@ -1511,7 +1511,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setGPO(ctx, &cfg.GPO)
 
 	setTxPool(ctx, &cfg.DeprecatedTxPool)
-	cfg.TxPool = core.DefaultTxPool2Config(cfg.DeprecatedTxPool)
+	cfg.TxPool = ethconfig.DefaultTxPool2Config(cfg.DeprecatedTxPool)
 	cfg.TxPool.DBDir = nodeConfig.Dirs.TxPool
 
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)

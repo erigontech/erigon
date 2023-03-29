@@ -87,8 +87,8 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
@@ -109,7 +109,7 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
 	t.Cleanup(func() {
 		b.Close()
@@ -120,7 +120,7 @@ func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64)
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
 	t.Cleanup(func() {
 		b.Close()

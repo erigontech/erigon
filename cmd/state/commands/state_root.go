@@ -14,11 +14,11 @@ import (
 	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -42,7 +42,7 @@ var stateRootCmd = &cobra.Command{
 	},
 }
 
-func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
+func StateRoot(genesis *types.Genesis, logger log.Logger, blockNum uint64, datadir string) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -89,7 +89,7 @@ func StateRoot(genesis *core.Genesis, logger log.Logger, blockNum uint64, datadi
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	_, genesisIbs, err4 := genesis.ToBlock("")
+	_, genesisIbs, err4 := core.GenesisToBlock(genesis, "")
 	if err4 != nil {
 		return err4
 	}

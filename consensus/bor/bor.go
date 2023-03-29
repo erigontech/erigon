@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/statefull"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -794,8 +793,8 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 	return nil, types.Receipts{}, nil
 }
 
-func decodeGenesisAlloc(i interface{}) (core.GenesisAlloc, error) {
-	var alloc core.GenesisAlloc
+func decodeGenesisAlloc(i interface{}) (types.GenesisAlloc, error) {
+	var alloc types.GenesisAlloc
 
 	b, err := json.Marshal(i)
 	if err != nil {

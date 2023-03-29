@@ -33,10 +33,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -47,24 +47,24 @@ const HistoryV3AggregationStep = 3_125_000 // 100M / 32
 //const HistoryV3AggregationStep = 3_125_000 / 100 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
-var FullNodeGPO = gasprice.Config{
+var FullNodeGPO = gaspricecfg.Config{
 	Blocks:           20,
 	Default:          big.NewInt(0),
 	Percentile:       60,
 	MaxHeaderHistory: 0,
 	MaxBlockHistory:  0,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	MaxPrice:         gaspricecfg.DefaultMaxPrice,
+	IgnorePrice:      gaspricecfg.DefaultIgnorePrice,
 }
 
 // LightClientGPO contains default gasprice oracle settings for light client.
-var LightClientGPO = gasprice.Config{
+var LightClientGPO = gaspricecfg.Config{
 	Blocks:           2,
 	Percentile:       60,
 	MaxHeaderHistory: 300,
 	MaxBlockHistory:  5,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
+	MaxPrice:         gaspricecfg.DefaultMaxPrice,
+	IgnorePrice:      gaspricecfg.DefaultIgnorePrice,
 }
 
 // Defaults contains default settings for use on the Ethereum main net.
@@ -90,7 +90,7 @@ var Defaults = Config{
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
 	},
-	DeprecatedTxPool: core.DeprecatedDefaultTxPoolConfig,
+	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
 	RPCGasCap:        50000000,
 	GPO:              FullNodeGPO,
 	RPCTxFeeCap:      1, // 1 ether
@@ -168,7 +168,7 @@ type Config struct {
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
-	Genesis *core.Genesis `toml:",omitempty"`
+	Genesis *types.Genesis `toml:",omitempty"`
 
 	// Protocol options
 	NetworkID uint64 // Network ID to use for selecting peers to connect to
@@ -210,11 +210,11 @@ type Config struct {
 	Bor    chain.BorConfig
 
 	// Transaction pool options
-	DeprecatedTxPool core.TxPoolConfig
+	DeprecatedTxPool TxPoolConfig
 	TxPool           txpool2.Config
 
 	// Gas Price Oracle options
-	GPO gasprice.Config
+	GPO gaspricecfg.Config
 
 	// RPCGasCap is the global gas cap for eth-call variants.
 	RPCGasCap uint64 `toml:",omitempty"`

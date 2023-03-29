@@ -56,7 +56,7 @@ var history22Cmd = &cobra.Command{
 	},
 }
 
-func History22(genesis *core.Genesis, logger log.Logger) error {
+func History22(genesis *types.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
