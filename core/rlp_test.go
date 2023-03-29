@@ -45,11 +45,11 @@ func getBlock(transactions int, uncles int, dataSize int, tmpDir string) *types.
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &Genesis{
+		gspec   = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc:  GenesisAlloc{address: {Balance: funds}},
+			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = gspec.MustCommit(db, tmpDir)
+		genesis = MustCommitGenesis(gspec, db, tmpDir)
 	)
 
 	// We need to generate as many blocks +1 as uncles

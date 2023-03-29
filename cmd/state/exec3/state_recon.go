@@ -229,7 +229,7 @@ type ReconWorker struct {
 	engine      consensus.Engine
 	chainConfig *chain.Config
 	logger      log.Logger
-	genesis     *core.Genesis
+	genesis     *types.Genesis
 	epoch       EpochReader
 	chain       ChainReader
 	isPoSA      bool
@@ -241,7 +241,7 @@ type ReconWorker struct {
 
 func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
-	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	rw := &ReconWorker{
@@ -302,7 +302,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			return err
 		}

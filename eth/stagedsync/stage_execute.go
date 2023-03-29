@@ -85,7 +85,7 @@ type ExecuteBlockCfg struct {
 	dirs      datadir.Dirs
 	historyV3 bool
 	syncCfg   ethconfig.Sync
-	genesis   *core.Genesis
+	genesis   *types.Genesis
 	agg       *libstate.AggregatorV3
 }
 
@@ -105,7 +105,7 @@ func StageExecuteBlocksCfg(
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
-	genesis *core.Genesis,
+	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {

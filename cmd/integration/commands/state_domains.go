@@ -425,9 +425,9 @@ func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Durat
 	}
 }
 
-func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
+func (b *blockProcessor) ApplyGenesis(genesis *types.Genesis) error {
 	b.logger.Info("apply genesis", "chain_id", genesis.Config.ChainID)
-	genBlock, genesisIbs, err := genesis.ToBlock("")
+	genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 	if err != nil {
 		return err
 	}
