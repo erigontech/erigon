@@ -20,8 +20,10 @@ import (
 
 func (c *ConsensusHandlers) blocksByRangeHandler(stream network.Stream) {
 	log.Trace("Got block by range handler call")
+	stream.Close()
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(stream network.Stream) {
 	log.Trace("Got beacon block by root handler call")
+	stream.Close()
 }
