@@ -1059,7 +1059,6 @@ func NewBlockRetire(workers int, tmpDir string, snapshots *RoSnapshots, db kv.Ro
 	return &BlockRetire{workers: workers, tmpDir: tmpDir, snapshots: snapshots, db: db, downloader: downloader, notifier: notifier}
 }
 func (br *BlockRetire) Snapshots() *RoSnapshots { return br.snapshots }
-func (br *BlockRetire) Working() bool           { return br.working.Load() }
 func (br *BlockRetire) NeedSaveFilesListInDB() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
@@ -1955,15 +1954,15 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 }
 
 type Merger struct {
-	lvl      log.Lvl
-	workers  int
-	tmpDir   string
-	chainID  uint256.Int
-	notifier DBEventNotifier
+	lvl             log.Lvl
+	compressWorkers int
+	tmpDir          string
+	chainID         uint256.Int
+	notifier        DBEventNotifier
 }
 
-func NewMerger(tmpDir string, workers int, lvl log.Lvl, chainID uint256.Int, notifier DBEventNotifier) *Merger {
-	return &Merger{tmpDir: tmpDir, workers: workers, lvl: lvl, chainID: chainID, notifier: notifier}
+func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainID uint256.Int, notifier DBEventNotifier) *Merger {
+	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainID: chainID, notifier: notifier}
 }
 
 type Range struct {
@@ -2078,7 +2077,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.workers, log.LvlTrace)
+	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.compressWorkers, log.LvlTrace)
 	if err != nil {
 		return err
 	}
