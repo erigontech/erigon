@@ -73,11 +73,11 @@ func (api *ErigonImpl) BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.Bloc
 		}
 	case rpc.FinalizedBlockNumber:
 		if chainConfig.Bor != nil {
-			blockNum, err = borfinality.GetFinalizedBlockNumber(tx)
+			num, err := borfinality.GetFinalizedBlockNumber(tx)
 			if err != nil {
 				return 0, err
 			}
-			return hexutil.Uint64(borfinality.CurrentFinalizedBlock(tx, blockNum).NumberU64()), nil
+			blockNum = borfinality.CurrentFinalizedBlock(tx, num).NumberU64()
 		}
 		blockNum, err = rpchelper.GetFinalizedBlockNumber(tx)
 		if err != nil {

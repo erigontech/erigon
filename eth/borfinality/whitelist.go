@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type chainConfig struct {
+type config struct {
 	engine     consensus.Engine
 	stagedSync *stagedsync.Sync
 	db         kv.RwDB
@@ -21,7 +21,7 @@ type chainConfig struct {
 }
 
 func Whitelist(engine consensus.Engine, stagedsync *stagedsync.Sync, db kv.RwDB, closeCh chan struct{}) {
-	config := &chainConfig{
+	config := &config{
 		engine:     engine,
 		stagedSync: stagedsync,
 		db:         db,
@@ -46,7 +46,7 @@ const (
 
 // StartCheckpointWhitelistService starts the goroutine to fetch checkpoints and update the
 // checkpoint whitelist map.
-func startCheckpointWhitelistService(config *chainConfig) {
+func startCheckpointWhitelistService(config *config) {
 	const (
 		tickerDuration = 100 * time.Second
 		fnName         = "whitelist checkpoint"
@@ -57,7 +57,7 @@ func startCheckpointWhitelistService(config *chainConfig) {
 
 // startMilestoneWhitelistService starts the goroutine to fetch milestiones and update the
 // milestone whitelist map.
-func startMilestoneWhitelistService(config *chainConfig) {
+func startMilestoneWhitelistService(config *config) {
 	const (
 		tickerDuration = 32 * time.Second
 		fnName         = "whitelist milestone"
@@ -66,7 +66,7 @@ func startMilestoneWhitelistService(config *chainConfig) {
 	RetryHeimdallHandler(handleMilestone, config, tickerDuration, whitelistTimeout, fnName)
 }
 
-func startNoAckMilestoneService(config *chainConfig) {
+func startNoAckMilestoneService(config *config) {
 	const (
 		tickerDuration = 4 * time.Second
 		fnName         = "no-ack-milestone service"
@@ -75,7 +75,7 @@ func startNoAckMilestoneService(config *chainConfig) {
 	RetryHeimdallHandler(handleNoAckMilestone, config, tickerDuration, noAckMilestoneTimeout, fnName)
 }
 
-func startNoAckMilestoneByIDService(config *chainConfig) {
+func startNoAckMilestoneByIDService(config *config) {
 	const (
 		tickerDuration = 1 * time.Minute
 		fnName         = "no-ack-milestone-by-id service"
@@ -84,11 +84,11 @@ func startNoAckMilestoneByIDService(config *chainConfig) {
 	RetryHeimdallHandler(handleNoAckMilestoneByID, config, tickerDuration, noAckMilestoneTimeout, fnName)
 }
 
-func RetryHeimdallHandler(fn heimdallHandler, config *chainConfig, tickerDuration time.Duration, timeout time.Duration, fnName string) {
+func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName, getBorHandler)
 }
 
-func retryHeimdallHandler(fn heimdallHandler, config *chainConfig, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *chainConfig) (*bor.Bor, *Handler, error)) {
+func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string, getBorHandler func(chain *config) (*BorHandler, *bor.Bor, error)) {
 	// a shortcut helps with tests and early exit
 	select {
 	case <-config.closeCh:
@@ -104,7 +104,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *chainConfig, tickerDuratio
 
 	// first run for fetching milestones
 	firstCtx, cancel := context.WithTimeout(context.Background(), timeout)
-	err = fn(firstCtx, borHandler, bor, config)
+	err = fn(firstCtx, bor, borHandler, config)
 
 	cancel()
 
@@ -119,7 +119,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *chainConfig, tickerDuratio
 		select {
 		case <-ticker.C:
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
-			err := fn(ctx, borHandler, bor, config)
+			err := fn(ctx, bor, borHandler, config)
 
 			cancel()
 
@@ -133,7 +133,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *chainConfig, tickerDuratio
 }
 
 // handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, borHandler *Handler, bor *bor.Bor, config *chainConfig) error {
+func handleWhitelistCheckpoint(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
 
@@ -150,10 +150,10 @@ func handleWhitelistCheckpoint(ctx context.Context, borHandler *Handler, bor *bo
 	return nil
 }
 
-type heimdallHandler func(ctx context.Context, borHandler *Handler, bor *bor.Bor, config *chainConfig) error
+type heimdallHandler func(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error
 
 // handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, borHandler *Handler, bor *bor.Bor, config *chainConfig) error {
+func handleMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
 	verifier := newBorVerifier()
 	num, hash, err := borHandler.fetchWhitelistMilestone(ctx, bor, verifier, config)
@@ -174,7 +174,7 @@ func handleMilestone(ctx context.Context, borHandler *Handler, bor *bor.Bor, con
 	return nil
 }
 
-func handleNoAckMilestone(ctx context.Context, borHandler *Handler, bor *bor.Bor, config *chainConfig) error {
+func handleNoAckMilestone(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
 	milestoneID, err := borHandler.fetchNoAckMilestone(ctx, bor)
 
 	//If failed to fetch the no-ack milestone then it give the error.
@@ -187,7 +187,7 @@ func handleNoAckMilestone(ctx context.Context, borHandler *Handler, bor *bor.Bor
 	return nil
 }
 
-func handleNoAckMilestoneByID(ctx context.Context, borHandler *Handler, bor *bor.Bor, config *chainConfig) error {
+func handleNoAckMilestoneByID(ctx context.Context, borHandler *BorHandler, bor *bor.Bor, config *config) error {
 	milestoneIDs := borHandler.GetMilestoneIDsList()
 
 	for _, milestoneID := range milestoneIDs {
@@ -201,7 +201,7 @@ func handleNoAckMilestoneByID(ctx context.Context, borHandler *Handler, bor *bor
 	return nil
 }
 
-func getBorHandler(config *chainConfig) (*bor.Bor, *Handler, error) {
+func getBorHandler(config *config) (*BorHandler, *bor.Bor, error) {
 
 	bor, ok := config.engine.(*bor.Bor)
 	if !ok {
@@ -212,7 +212,7 @@ func getBorHandler(config *chainConfig) (*bor.Bor, *Handler, error) {
 		return nil, nil, ErrBorConsensusWithoutHeimdall
 	}
 
-	handler := &Handler{}
+	borhandler := &BorHandler{}
 
-	return bor, handler, nil
+	return borhandler, bor, nil
 }

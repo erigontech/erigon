@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type Handler struct {
+type BorHandler struct {
 	BorAPI *bor.API
 	eth.ChainValidator
 }
@@ -29,7 +29,7 @@ var (
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
 // and verifies the data against bor data.
-func (h *Handler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *chainConfig) (uint64, common.Hash, error) {
+func (h *BorHandler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		blockNum  uint64
 		blockHash common.Hash
@@ -59,7 +59,7 @@ func (h *Handler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor, ve
 
 // fetchWhitelistMilestone fetches the latest milestone from it's local heimdall
 // and verifies the data against bor data.
-func (h *Handler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *chainConfig) (uint64, common.Hash, error) {
+func (h *BorHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, verifier *borVerifier, config *config) (uint64, common.Hash, error) {
 	var (
 		num  uint64
 		hash common.Hash
@@ -87,7 +87,7 @@ func (h *Handler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, ver
 	return num, hash, nil
 }
 
-func (h *Handler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
+func (h *BorHandler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string, error) {
 	var (
 		milestoneID string
 	)
@@ -103,7 +103,7 @@ func (h *Handler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (string
 	return milestoneID, nil
 }
 
-func (h *Handler) fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
+func (h *BorHandler) fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
 	// fetch latest milestone
 	err := bor.HeimdallClient.FetchNoAckMilestone(ctx, milestoneID)
 

@@ -37,19 +37,19 @@ var (
 )
 
 type borVerifier struct {
-	verify func(ctx context.Context, handler *Handler, config *chainConfig, start uint64, end uint64, hash string, isCheckpoint bool) (string, error)
+	verify func(ctx context.Context, borHandler *BorHandler, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error)
 }
 
 func newBorVerifier() *borVerifier {
 	return &borVerifier{borVerify}
 }
 
-func borVerify(ctx context.Context, handler *Handler, config *chainConfig, start uint64, end uint64, hash string, isCheckpoint bool) (string, error) {
-	tx, err := config.db.BeginRo(ctx)
+func borVerify(ctx context.Context, borHandler *BorHandler, config *config, start uint64, end uint64, hash string, isCheckpoint bool) (string, error) {
+	roTx, err := config.db.BeginRo(ctx)
 	if err != nil {
 		return hash, err
 	}
-	defer tx.Rollback()
+	defer roTx.Rollback()
 
 	str := "milestone"
 	if isCheckpoint {
@@ -57,7 +57,7 @@ func borVerify(ctx context.Context, handler *Handler, config *chainConfig, start
 	}
 
 	// check if we have the given blocks
-	currentBlock := rawdb.ReadCurrentBlock(tx)
+	currentBlock := rawdb.ReadCurrentBlock(roTx)
 	if currentBlock == nil {
 		log.Debug(fmt.Sprintf("Failed to fetch current block from blockchain while verifying incoming %s", str))
 		return hash, errMissingBlocks
@@ -77,7 +77,7 @@ func borVerify(ctx context.Context, handler *Handler, config *chainConfig, start
 		var err error
 
 		// in case of checkpoint get the rootHash
-		localHash, err = handler.BorAPI.GetRootHash(start, end)
+		localHash, err = borHandler.BorAPI.GetRootHash(start, end)
 
 		if err != nil {
 			log.Debug("Failed to get root hash of given block range while whitelisting checkpoint", "start", start, "end", end, "err", err)
@@ -108,9 +108,9 @@ func borVerify(ctx context.Context, handler *Handler, config *chainConfig, start
 			doExist  bool
 		)
 
-		if doExist, rewindTo, _ = handler.GetWhitelistedMilestone(); doExist {
+		if doExist, rewindTo, _ = borHandler.GetWhitelistedMilestone(); doExist {
 
-		} else if doExist, rewindTo, _ = handler.GetWhitelistedCheckpoint(); doExist {
+		} else if doExist, rewindTo, _ = borHandler.GetWhitelistedCheckpoint(); doExist {
 
 		} else {
 			if start <= 0 {
@@ -142,7 +142,7 @@ func borVerify(ctx context.Context, handler *Handler, config *chainConfig, start
 }
 
 // Stop the miner if the mining process is running and rewind back the chain
-func rewindBack(config *chainConfig, head uint64, rewindTo uint64) {
+func rewindBack(config *config, head uint64, rewindTo uint64) {
 	// TODO: Uncomment once minning is added
 
 	// if eth.Miner().Mining() {
@@ -158,7 +158,7 @@ func rewindBack(config *chainConfig, head uint64, rewindTo uint64) {
 	// }
 }
 
-func rewind(config *chainConfig, head uint64, rewindTo uint64) {
+func rewind(config *config, head uint64, rewindTo uint64) {
 	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
 
 	// fetch the end block hash
