@@ -1,4 +1,4 @@
-//go:build !erigon3 && !erigon4
+//go:build !erigon3 && !e3 && !erigon4 && !e4
 
 package ethconfig
 

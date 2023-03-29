@@ -523,10 +523,6 @@ type StateWriterV4 struct {
 	w *libstate.Aggregator
 }
 
-func NewStateWriterV4(w *libstate.Aggregator) {
-
-}
-
 func (rw *StateReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
 	enc, err := rw.ac.ReadAccountData(address.Bytes(), rw.roTx)
 	if err != nil {
