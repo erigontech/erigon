@@ -168,7 +168,20 @@ func rewind(config *chainConfig, head uint64, rewindTo uint64) {
 		return
 	}
 
+	tx, err := config.db.BeginRw(context.Background())
+	if err != nil {
+		log.Error("Failed to start a database transaction", "err", err)
+		return
+	}
+	defer tx.Rollback()
+
+	// rewind the chain : Check once
 	config.stagedSync.UnwindTo(rewindTo, block.Result.Hash)
+	err = config.stagedSync.RunUnwind(config.db, tx)
+	if err != nil {
+		log.Error("Failed to unwind chain", "err", err)
+		return
+	}
 
 	// TODO: Uncomment once metrics is added
 	// else {
