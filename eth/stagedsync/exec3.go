@@ -1094,8 +1094,12 @@ func reconstituteStep(last bool,
 
 					select {
 					case workCh <- txTask:
-					case <-ctx.Done():
-						return ctx.Err()
+					case <-reconstWorkersCtx.Done():
+						// if ctx canceled, then maybe it's because of error in errgroup
+						//
+						// errgroup doesn't play with pattern where some 1 goroutine-producer is outside of errgroup
+						// but RwTx doesn't allow move between goroutines
+						return g.Wait()
 					}
 				}
 				inputTxNum++
