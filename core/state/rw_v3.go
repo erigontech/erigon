@@ -234,7 +234,9 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 		return err
 	}
 	rs.chIncs = map[string][]byte{}
-	rs.shared.Flush()
+	if err := rs.shared.Flush(); err != nil {
+		return err
+	}
 	//if err := rs.flushMap(ctx, rwTx, kv.CommitmentVals, rs.chCommitment, logPrefix, logEvery); err != nil {
 	//	return err
 	//}
