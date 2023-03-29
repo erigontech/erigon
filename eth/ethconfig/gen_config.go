@@ -36,7 +36,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Clique                         params.ConsensusSnapshotConfig
 		Aura                           chain.AuRaConfig
 		Parlia                         chain.ParliaConfig
-		TxPool                         TxPoolConfig
+		TxPool                         DeprecatedTxPoolConfig
 		GPO                            gaspricecfg.Config
 		RPCGasCap                      uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    float64 `toml:",omitempty"`
@@ -89,7 +89,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Clique                         *params.ConsensusSnapshotConfig
 		Aura                           *chain.AuRaConfig
 		Parlia                         *chain.ParliaConfig
-		TxPool                         *TxPoolConfig
+		TxPool                         *DeprecatedTxPoolConfig
 		GPO                            *gaspricecfg.Config
 		RPCGasCap                      *uint64  `toml:",omitempty"`
 		RPCTxFeeCap                    *float64 `toml:",omitempty"`

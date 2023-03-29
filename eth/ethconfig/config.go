@@ -210,7 +210,7 @@ type Config struct {
 	Bor    chain.BorConfig
 
 	// Transaction pool options
-	DeprecatedTxPool TxPoolConfig
+	DeprecatedTxPool DeprecatedTxPoolConfig
 	TxPool           txpoolcfg.Config
 
 	// Gas Price Oracle options

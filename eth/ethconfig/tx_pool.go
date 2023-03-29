@@ -23,8 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 )
 
-// TxPoolConfig are the configuration parameters of the transaction pool.
-type TxPoolConfig struct {
+// DeprecatedTxPoolConfig are the configuration parameters of the transaction pool.
+type DeprecatedTxPoolConfig struct {
 	Disable  bool
 	Locals   []common.Address // Addresses that should be treated by default as local
 	NoLocals bool             // Whether local transaction handling should be disabled
@@ -47,7 +47,7 @@ type TxPoolConfig struct {
 
 // DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
-var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
+var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	PriceLimit: 1,
 	PriceBump:  10,
 
@@ -60,7 +60,7 @@ var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	Lifetime: 3 * time.Hour,
 }
 
-var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpoolcfg.Config {
+var DefaultTxPool2Config = func(pool1Cfg DeprecatedTxPoolConfig) txpoolcfg.Config {
 	cfg := txpoolcfg.DefaultConfig
 	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
 	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
