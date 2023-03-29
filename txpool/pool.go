@@ -38,6 +38,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -70,38 +71,6 @@ var (
 	queuedSubCounter        = metrics.GetOrCreateCounter(`txpool_queued`)
 	basefeeSubCounter       = metrics.GetOrCreateCounter(`txpool_basefee`)
 )
-
-type Config struct {
-	DBDir                 string
-	TracedSenders         []string // List of senders for which tx pool should print out debugging info
-	SyncToNewPeersEvery   time.Duration
-	ProcessRemoteTxsEvery time.Duration
-	CommitEvery           time.Duration
-	LogEvery              time.Duration
-	PendingSubPoolLimit   int
-	BaseFeeSubPoolLimit   int
-	QueuedSubPoolLimit    int
-	MinFeeCap             uint64
-	AccountSlots          uint64 // Number of executable transaction slots guaranteed per account
-	PriceBump             uint64 // Price bump percentage to replace an already existing transaction
-	OverrideShanghaiTime  *big.Int
-}
-
-var DefaultConfig = Config{
-	SyncToNewPeersEvery:   2 * time.Minute,
-	ProcessRemoteTxsEvery: 100 * time.Millisecond,
-	CommitEvery:           15 * time.Second,
-	LogEvery:              30 * time.Second,
-
-	PendingSubPoolLimit: 10_000,
-	BaseFeeSubPoolLimit: 10_000,
-	QueuedSubPoolLimit:  10_000,
-
-	MinFeeCap:            1,
-	AccountSlots:         16, //TODO: to choose right value (16 to be compatible with Geth)
-	PriceBump:            10, // Price bump percentage to replace an already existing transaction
-	OverrideShanghaiTime: nil,
-}
 
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
@@ -320,7 +289,7 @@ type TxPool struct {
 	all                     *BySenderAndNonce                // senderID => (sorted map of tx nonce => *metaTx)
 	deletedTxs              []*metaTx                        // list of discarded txs since last db commit
 	promoted                types.Announcements
-	cfg                     Config
+	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	lastSeenBlock           atomic.Uint64
 	started                 atomic.Bool
@@ -330,7 +299,7 @@ type TxPool struct {
 	isPostShanghai          atomic.Bool
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
