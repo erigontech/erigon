@@ -138,37 +138,27 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	if touched {
 		b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	}
-	// This is a special case, as reset will lead to complete change of votes
-	if len(changeset.Eth1DataVotesAtReset) == 0 {
-		b.eth1DataVotes, touched = changeset.ApplyEth1DataVotesChanges(b.eth1DataVotes)
-		if touched {
-			b.touchedLeaves[Eth1DataVotesLeafIndex] = true
-		}
-	} else {
-		b.eth1DataVotes = changeset.Eth1DataVotesAtReset
+	// Process votes changes
+	b.eth1DataVotes, touched = changeset.ApplyEth1DataVotesChanges(b.eth1DataVotes)
+	if touched {
 		b.touchedLeaves[Eth1DataVotesLeafIndex] = true
 	}
 	b.balances, touched = changeset.BalancesChanges.ApplyChanges(b.balances)
 	if touched {
 		b.touchedLeaves[BalancesLeafIndex] = true
 	}
-	// This also a special case, as this is another victim of reset, we use rotation with curr and prev to handle it efficiently
-	if len(changeset.PreviousEpochParticipationAtReset) == 0 && len(changeset.CurrentEpochParticipationAtReset) == 0 {
-		b.previousEpochParticipation, touched = changeset.PreviousEpochParticipationChanges.ApplyChanges(b.previousEpochParticipation)
-		if touched {
-			b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
-		}
-		b.currentEpochParticipation, touched = changeset.CurrentEpochParticipationChanges.ApplyChanges(b.currentEpochParticipation)
-		if touched {
-			b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-		}
-	} else {
+	// Process epoch participation changes
+	var touchedPreviousEpochParticipation, touchedCurrentEpochParticipation bool
+	b.previousEpochParticipation, b.currentEpochParticipation,
+		touchedPreviousEpochParticipation,
+		touchedCurrentEpochParticipation = changeset.ApplyEpochParticipationChanges(b.previousEpochParticipation, b.currentEpochParticipation)
+	if touchedPreviousEpochParticipation {
 		b.touchedLeaves[PreviousEpochParticipationLeafIndex] = true
-		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
-		b.previousEpochParticipation = changeset.PreviousEpochParticipationAtReset.Copy()
-		b.currentEpochParticipation = changeset.CurrentEpochParticipationAtReset.Copy()
 	}
-
+	if touchedCurrentEpochParticipation {
+		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
+	}
+	// Process inactivity scores changes.
 	b.inactivityScores, touched = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores)
 	if touched {
 		b.touchedLeaves[InactivityScoresLeafIndex] = true
@@ -243,17 +233,18 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 }
 
 func (b *BeaconState) revertCachesOnBoundary(beforeSlot uint64) {
-	b.activeValidatorsCache.Purge()
 	beforeEpoch := beforeSlot / b.beaconConfig.SlotsPerEpoch
 	epoch := b.Epoch()
-	b.committeeCache.Purge()
 	b.previousStateRoot = libcommon.Hash{}
 	b.proposerIndex = nil
 	b.totalActiveBalanceCache = nil
 	if epoch <= beforeEpoch {
 		return
 	}
+	b.totalActiveBalanceCache = nil
+	b.committeeCache.Purge()
 	for epochToBeRemoved := beforeEpoch; epochToBeRemoved < epoch+1; beforeEpoch++ {
+		b.activeValidatorsCache.Remove(epochToBeRemoved)
 		b.shuffledSetsCache.Remove(b.GetSeed(epochToBeRemoved, b.beaconConfig.DomainBeaconAttester))
 		b.activeValidatorsCache.Remove(epochToBeRemoved)
 	}
