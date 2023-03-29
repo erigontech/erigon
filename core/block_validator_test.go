@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
@@ -31,7 +32,7 @@ import (
 func TestHeaderVerification(t *testing.T) {
 	// Create a simple chain to verify
 	var (
-		gspec  = &core.Genesis{Config: params.TestChainConfig}
+		gspec  = &types.Genesis{Config: params.TestChainConfig}
 		engine = ethash.NewFaker()
 	)
 	m := stages.MockWithGenesisEngine(t, gspec, engine, false)
@@ -68,7 +69,7 @@ func TestHeaderVerification(t *testing.T) {
 func TestHeaderWithSealVerification(t *testing.T) {
 	// Create a simple chain to verify
 	var (
-		gspec  = &core.Genesis{Config: params.TestChainAuraConfig}
+		gspec  = &types.Genesis{Config: params.TestChainAuraConfig}
 		engine = ethash.NewFaker()
 	)
 	m := stages.MockWithGenesisEngine(t, gspec, engine, false)

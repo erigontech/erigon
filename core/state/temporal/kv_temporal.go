@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 //Variables Naming:
@@ -286,6 +287,9 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
 	switch name {
 	case AccountsDomain:
 		v, err = tx.GetOne(kv.PlainState, key)
@@ -301,6 +305,9 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, er
 	}
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+	}
 	switch name {
 	case AccountsDomain:
 		v, ok, err = tx.HistoryGet(AccountsHistory, key, ts)

@@ -25,7 +25,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -80,16 +79,16 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		GasLimit:    uint64(6000000),
 	}
 	context.BaseFee = uint256.NewInt(0)
-	alloc := core.GenesisAlloc{}
+	alloc := types.GenesisAlloc{}
 
 	// The code pushes 'deadbeef' into memory, then the other params, and calls CREATE2, then returns
 	// the address
-	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = core.GenesisAccount{
+	alloc[libcommon.HexToAddress("0x00000000000000000000000000000000deadbeef")] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    hexutil.MustDecode("0x63deadbeef60005263cafebabe6004601c6000F560005260206000F3"),
 		Balance: big.NewInt(1),
 	}
-	alloc[origin] = core.GenesisAccount{
+	alloc[origin] = types.GenesisAccount{
 		Nonce:   1,
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),

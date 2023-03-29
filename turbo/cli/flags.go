@@ -2,9 +2,10 @@ package cli
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/txpool"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -199,7 +200,7 @@ var (
 	TxPoolCommitEvery = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
-		Value: txpool.DefaultConfig.CommitEvery,
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 )
 

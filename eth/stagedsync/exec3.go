@@ -545,7 +545,7 @@ Loop:
 			defer getHashFnMute.Unlock()
 			return f(n)
 		}
-		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+		blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, nil /*excessDataGas*/)
 
 		if parallel {
 			select {
@@ -825,7 +825,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
-	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
 	var startOk, endOk bool
@@ -1071,7 +1071,7 @@ func reconstituteStep(last bool,
 				defer getHashFnMute.Unlock()
 				return f(n)
 			}
-			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */)
+			blockContext := core.NewEVMBlockContext(header, getHashFn, engine, nil /* author */, nil /*excessDataGas*/)
 			rules := chainConfig.Rules(bn, b.Time())
 
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -1345,7 +1345,7 @@ func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
-	chainConfig *chain.Config, genesis *core.Genesis) (err error) {
+	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 	defer agg.EnableMadvNormal().DisableReadAhead()
 	blockSnapshots := blockReader.(WithSnapshots).Snapshots()

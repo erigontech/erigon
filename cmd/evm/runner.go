@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -60,7 +61,7 @@ var runCommand = cli.Command{
 
 // readGenesis will read the given JSON format genesis file and return
 // the initialized Genesis structure
-func readGenesis(genesisPath string) *core.Genesis {
+func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
 	//genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
@@ -77,7 +78,7 @@ func readGenesis(genesisPath string) *core.Genesis {
 		}
 	}(file)
 
-	genesis := new(core.Genesis)
+	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
 		utils.Fatalf("invalid genesis file: %v", err)
 	}
@@ -137,7 +138,7 @@ func runCmd(ctx *cli.Context) error {
 		chainConfig   *chain.Config
 		sender        = libcommon.BytesToAddress([]byte("sender"))
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
-		genesisConfig *core.Genesis
+		genesisConfig *types.Genesis
 	)
 	if ctx.Bool(MachineFlag.Name) {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
@@ -150,11 +151,11 @@ func runCmd(ctx *cli.Context) error {
 	db := memdb.New("")
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		gen.MustCommit(db, "")
+		core.MustCommitGenesis(gen, db, "")
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {
-		genesisConfig = new(core.Genesis)
+		genesisConfig = new(types.Genesis)
 	}
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {

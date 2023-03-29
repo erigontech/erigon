@@ -40,7 +40,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	logger   log.Logger
-	genesis  *core.Genesis
+	genesis  *types.Genesis
 	resultCh chan *exec22.TxTask
 	epoch    EpochReader
 	chain    ChainReader
@@ -54,7 +54,7 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
@@ -147,7 +147,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			panic(err)
 		}
@@ -209,7 +209,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		blockContext := txTask.EvmBlockContext
 		if !rw.background {
 			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, nil /*excessDataGas*/)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm
@@ -330,7 +330,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
 	queueSize := workerCount * 256
 	reconWorkers = make([]*Worker, workerCount)
 	resultCh = make(chan *exec22.TxTask, queueSize)

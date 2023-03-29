@@ -392,10 +392,10 @@ func TestChainTxReorgs(t *testing.T) {
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		addr3   = crypto.PubkeyToAddress(key3.PublicKey)
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config:   params.TestChainConfig,
 			GasLimit: 3141592,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				addr1: {Balance: big.NewInt(1000000)},
 				addr2: {Balance: big.NewInt(1000000)},
 				addr3: {Balance: big.NewInt(1000000)},
@@ -572,9 +572,9 @@ func TestEIP155Transition(t *testing.T) {
 		address    = crypto.PubkeyToAddress(key.PublicKey)
 		funds      = big.NewInt(1000000000)
 		deleteAddr = libcommon.Address{1}
-		gspec      = &core.Genesis{
+		gspec      = &types.Genesis{
 			Config: &chain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
-			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
+			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key, false)
@@ -695,9 +695,9 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		address    = crypto.PubkeyToAddress(key.PublicKey)
 		funds      = big.NewInt(1000000000)
 		deleteAddr = libcommon.Address{1}
-		gspec      = &core.Genesis{
+		gspec      = &types.Genesis{
 			Config: &chain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
-			Alloc:  core.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
+			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
 	m := stages.MockWithGenesisPruneMode(t, gspec, key, pm, false)
@@ -889,14 +889,14 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
 		theAddr = libcommon.Address{1}
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: &chain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),
 				SpuriousDragonBlock:   big.NewInt(2),
 			},
-			Alloc: core.GenesisAlloc{address: {Balance: funds}},
+			Alloc: types.GenesisAlloc{address: {Balance: funds}},
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, key, false)
@@ -970,9 +970,9 @@ func TestDoubleAccountRemoval(t *testing.T) {
 		contract    = hexutil.MustDecode("0x60606040526040516102eb3803806102eb8339016040526060805160600190602001505b33600060006101000a81548173ffffffffffffffffffffffffffffffffffffffff02191690830217905550806001600050908051906020019082805482825590600052602060002090601f01602090048101928215609c579182015b82811115609b578251826000505591602001919060010190607f565b5b50905060c3919060a7565b8082111560bf576000818150600090555060010160a7565b5090565b50505b50610215806100d66000396000f30060606040526000357c01000000000000000000000000000000000000000000000000000000009004806341c0e1b51461004f578063adbd84651461005c578063cfae32171461007d5761004d565b005b61005a6004506100f6565b005b610067600450610208565b6040518082815260200191505060405180910390f35b61008860045061018a565b60405180806020018281038252838181518152602001915080519060200190808383829060006004602084601f0104600302600f01f150905090810190601f1680156100e85780820380516001836020036101000a031916815260200191505b509250505060405180910390f35b600060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16141561018757600060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16ff5b5b565b60206040519081016040528060008152602001506001600050805480601f016020809104026020016040519081016040528092919081815260200182805480156101f957820191906000526020600020905b8154815290600101906020018083116101dc57829003601f168201915b50505050509050610205565b90565b6000439050610212565b90560000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d5468697320697320437972757300000000000000000000000000000000000000")
 		input       = hexutil.MustDecode("0xadbd8465")
 		kill        = hexutil.MustDecode("0x41c0e1b5")
-		gspec       = &core.Genesis{
+		gspec       = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc:  core.GenesisAlloc{bankAddress: {Balance: bankFunds}},
+			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 		}
 	)
 	m := stages.MockWithGenesis(t, gspec, bankKey, false)
@@ -1231,9 +1231,9 @@ func TestDeleteCreateRevert(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAAA selfdestructs if called
 				aa: {
@@ -1347,9 +1347,9 @@ func TestDeleteRecreateSlots(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
 			aa: {
@@ -1462,9 +1462,9 @@ func TestCVE2020_26265(t *testing.T) {
 			byte(vm.RETURN),
 		} // Code for CALLER
 	)
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
 			aa: {
@@ -1536,9 +1536,9 @@ func TestDeleteRecreateAccount(t *testing.T) {
 	aaStorage[libcommon.HexToHash("01")] = libcommon.HexToHash("01")
 	aaStorage[libcommon.HexToHash("02")] = libcommon.HexToHash("02")
 
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
 			aa: {
@@ -1657,9 +1657,9 @@ func TestDeleteRecreateSlotsAcrossManyBlocks(t *testing.T) {
 	initHash := crypto.Keccak256Hash(initCode)
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address 0xAAAAA selfdestructs if called
 			aa: {
@@ -1852,9 +1852,9 @@ func TestInitThenFailCreateContract(t *testing.T) {
 	aa := crypto.CreateAddress2(bb, [32]byte{}, initHash[:])
 	t.Logf("Destination address: %x\n", aa)
 
-	gspec := &core.Genesis{
+	gspec := &types.Genesis{
 		Config: params.TestChainConfig,
-		Alloc: core.GenesisAlloc{
+		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 			// The address aa has some funds
 			aa: {Balance: big.NewInt(100000)},
@@ -1924,9 +1924,9 @@ func TestEIP2718Transition(t *testing.T) {
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)
 		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: params.TestChainConfig,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				address: {Balance: funds},
 				// The address 0xAAAA sloads 0x00 and 0x01
 				aa: {
@@ -2017,9 +2017,9 @@ func TestEIP1559Transition(t *testing.T) {
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
 		addr2   = crypto.PubkeyToAddress(key2.PublicKey)
 		funds   = new(uint256.Int).Mul(u256.Num1, new(uint256.Int).SetUint64(params.Ether))
-		gspec   = &core.Genesis{
+		gspec   = &types.Genesis{
 			Config: params.GoerliChainConfig,
-			Alloc: core.GenesisAlloc{
+			Alloc: types.GenesisAlloc{
 				addr1: {Balance: funds.ToBig()},
 				addr2: {Balance: funds.ToBig()},
 				// The address 0xAAAA sloads 0x00 and 0x01

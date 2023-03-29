@@ -25,12 +25,10 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -67,7 +65,7 @@ func TestWaitDeployed(t *testing.T) {
 
 		t.Run(name, func(t *testing.T) {
 			backend := backends.NewSimulatedBackend(t,
-				core.GenesisAlloc{
+				types.GenesisAlloc{
 					crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 				},
 				10000000,
@@ -121,7 +119,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 		t.Skip("fix me on win please")
 	}
 	backend := backends.NewSimulatedBackend(t,
-		core.GenesisAlloc{
+		types.GenesisAlloc{
 			crypto.PubkeyToAddress(testKey.PublicKey): {Balance: big.NewInt(10000000000)},
 		},
 		10000000,

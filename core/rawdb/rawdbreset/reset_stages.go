@@ -171,7 +171,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 		}
 		if !historyV3 {
 			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := genesis.WriteGenesisState(tx, tmpDir); err != nil {
+			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
 				return err
 			}
 		}
