@@ -28,15 +28,15 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
-
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
@@ -184,7 +184,7 @@ type Config struct {
 
 	ImportMode bool
 
-	BadBlockHash libcommon.Hash // hash of the block marked as bad
+	BadBlockHash common.Hash // hash of the block marked as bad
 
 	Snapshot   Snapshot
 	Downloader *downloadercfg.Cfg
@@ -196,7 +196,7 @@ type Config struct {
 	ExternalSnapshotDownloaderAddr string
 
 	// Whitelist of required block number -> hash values to accept
-	Whitelist map[uint64]libcommon.Hash `toml:"-"`
+	Whitelist map[uint64]common.Hash `toml:"-"`
 
 	// Mining options
 	Miner params.MiningConfig
@@ -211,7 +211,7 @@ type Config struct {
 
 	// Transaction pool options
 	DeprecatedTxPool TxPoolConfig
-	TxPool           txpool2.Config
+	TxPool           txpoolcfg.Config
 
 	// Gas Price Oracle options
 	GPO gaspricecfg.Config

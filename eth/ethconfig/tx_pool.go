@@ -21,7 +21,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 )
 
 var (
@@ -95,8 +95,8 @@ var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	Lifetime: 3 * time.Hour,
 }
 
-var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpool.Config {
-	cfg := txpool.DefaultConfig
+var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpoolcfg.Config {
+	cfg := txpoolcfg.DefaultConfig
 	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
 	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
 	cfg.QueuedSubPoolLimit = int(pool1Cfg.GlobalQueue)

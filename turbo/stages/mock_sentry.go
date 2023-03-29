@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -305,7 +306,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	blockPropagator := func(Ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {}
 
 	if !cfg.DeprecatedTxPool.Disable {
-		poolCfg := txpool.DefaultConfig
+		poolCfg := txpoolcfg.DefaultConfig
 		newTxs := make(chan types2.Announcements, 1024)
 		if t != nil {
 			t.Cleanup(func() {

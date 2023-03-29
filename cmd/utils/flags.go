@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	common2 "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
@@ -157,7 +157,7 @@ var (
 	TxPoolPriceBumpFlag = cli.Uint64Flag{
 		Name:  "txpool.pricebump",
 		Usage: "Price bump percentage to replace an already existing transaction",
-		Value: txpool.DefaultConfig.PriceBump,
+		Value: txpoolcfg.DefaultConfig.PriceBump,
 	}
 	TxPoolAccountSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.accountslots",
@@ -197,7 +197,7 @@ var (
 	TxPoolCommitEveryFlag = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
-		Value: txpool.DefaultConfig.CommitEvery,
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
