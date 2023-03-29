@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type State struct {
@@ -28,10 +29,7 @@ type State struct {
 }
 
 // Account that is used to perform withdraws/deposits
-const ownerAccount string = "0x0000000000000000000000000000000000000000"
-
-//TODO: uncomment this when ic agent registration is implemented is implemented
-//const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
+const ownerAccount string = "0xb0e5863d0ddf7e105e409fee0ecc0123a362e14b"
 const chainID int64 = 355113
 
 func NewState(db *DB) (*State, error) {
@@ -110,9 +108,17 @@ func (state *State) ProcessBlock(block types.Block) error {
 	// Set v equal to 27, otherwise the wrong chain ID will be derived for legacy transaction
 	// TODO: remove it when all the transactions are signed
 	// https: //infinityswap.atlassian.net/browse/EPROD-203
+	log.Info(block.Number().String())
 	for _, tr := range block.Transactions() {
-		if legacyTr, ok := tr.(*types.LegacyTx); ok && legacyTr.V.IsZero() {
-			legacyTr.V = *uint256.NewInt(27)
+		if legacyTr, ok := tr.(*types.LegacyTx); ok {
+			if legacyTr.V.IsZero() {
+				legacyTr.V = *uint256.NewInt(27)
+			}
+
+			signer := types.MakeSigner(state.chainConfig, block.NumberU64())
+			from, _ := legacyTr.Sender(*signer)
+
+			log.Info(fmt.Sprintf("from: %s, to: %x , nonce: %d", from.Hex(), legacyTr.To, legacyTr.Nonce))
 		}
 	}
 
@@ -197,6 +203,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 
 	state.blockNum.Add(state.blockNum, big.NewInt(1))
 
+	log.Info(fmt.Sprintf("processed block %d", block.NumberU64()))
 	return tx.Commit()
 }
 
