@@ -273,11 +273,11 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	GoerliNetwork: {
 		"https://goerli.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 		"https://goerli-sync.invis.tools/eth/v2/debug/beacon/states/finalized",
-		"https://goerli.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://goerli.checkpoint-sync.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://sepolia.checkpoint-sync.ethdevops.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.checkpoint-sync.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
