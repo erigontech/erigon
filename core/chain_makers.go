@@ -454,6 +454,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
+		//TODO: genblock must call agg.SetTxNum after each txNum???
 		txNum += uint64(block.Transactions().Len() + 2) //2 system txsr
 	}
 
