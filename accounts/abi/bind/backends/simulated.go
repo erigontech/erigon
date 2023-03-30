@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -79,6 +78,7 @@ type SimulatedBackend struct {
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
 	pendingReader   *state.PlainStateReader
+	pendingReaderTx kv.Tx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	rmLogsFeed event.Feed
@@ -112,23 +112,19 @@ func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Confi
 // A simulated backend always uses chainID 1337.
 func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 
 func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
@@ -141,6 +137,9 @@ func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
 	b.m.Close()
 }
 
@@ -194,7 +193,15 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 			defer agg.StartUnbufferedWrites().FinishWrites()
 		*/
 	}
-	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	b.pendingReaderTx = tx
+	b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
 	b.pendingState = state.New(b.pendingReader)
 }
 
