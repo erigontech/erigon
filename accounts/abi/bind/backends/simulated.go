@@ -115,9 +115,9 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	t.Cleanup(func() {
 		b.Close()
 	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 
@@ -126,9 +126,9 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	t.Cleanup(func() {
 		b.Close()
 	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
