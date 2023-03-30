@@ -1,4 +1,4 @@
-//go:build erigon4
+//go:build erigon4 || e4
 
 package ethconfig
 

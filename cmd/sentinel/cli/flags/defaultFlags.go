@@ -18,6 +18,7 @@ var CLDefaultFlags = []cli.Flag{
 	&GenesisSSZFlag,
 	&CheckpointSyncUrlFlag,
 	&SentinelStaticPeersFlag,
+	&TransitionChainFlag,
 }
 
 var LCDefaultFlags = []cli.Flag{
@@ -37,5 +38,4 @@ var LCDefaultFlags = []cli.Flag{
 	&CheckpointSyncUrlFlag,
 	&SentinelStaticPeersFlag,
 	&ErigonPrivateApiFlag,
-	&TransitionChainFlag,
 }

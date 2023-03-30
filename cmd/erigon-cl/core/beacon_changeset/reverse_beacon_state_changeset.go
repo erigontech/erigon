@@ -46,9 +46,11 @@ type ReverseBeaconStateChangeSet struct {
 	ExitEpochChange                  *ListChangeSet[uint64]
 	WithdrawalEpochChange            *ListChangeSet[uint64]
 	// Efficient unwinding on reset (only applicable at epoch boundaries)
-	PreviousEpochParticipationAtReset cltypes.ParticipationFlagsList
-	CurrentEpochParticipationAtReset  cltypes.ParticipationFlagsList
-	Eth1DataVotesAtReset              []*cltypes.Eth1Data
+	previousEpochParticipationAtReset cltypes.ParticipationFlagsList
+	currentEpochParticipationAtReset  cltypes.ParticipationFlagsList
+	eth1DataVotesAtReset              []*cltypes.Eth1Data
+	wasEth1DataVotesReset             bool
+	wasEpochParticipationReset        bool
 }
 
 func (r *ReverseBeaconStateChangeSet) OnSlotChange(prevSlot uint64) {
@@ -176,25 +178,9 @@ func (r *ReverseBeaconStateChangeSet) HasValidatorSetNotChanged(validatorSetLeng
 		r.EffectiveBalanceChange.Empty() && r.SlashedChange.Empty() && r.ExitEpochChange.Empty() && r.WithdrawalEpochChange.Empty()
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyEth1DataVotesChanges(input []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
-	output = input
-	if r.Eth1DataVotesChanges.Empty() && r.Eth1DataVotesChanges.ListLength() == len(output) {
-		return
-	}
-	changed = true
-	if r.Eth1DataVotesChanges.ListLength() != len(output) {
-		output = make([]*cltypes.Eth1Data, r.Eth1DataVotesChanges.ListLength())
-		copy(output, input)
-	}
-	r.Eth1DataVotesChanges.ChangesWithHandler(func(value cltypes.Eth1Data, index int) {
-		*output[index] = value
-	})
-	return
-}
-
 func (r *ReverseBeaconStateChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSummary) (output []*cltypes.HistoricalSummary, changed bool) {
 	output = input
-	if r.HistoricalSummaryChange.Empty() && r.Eth1DataVotesChanges.ListLength() == len(output) {
+	if r.HistoricalSummaryChange.Empty() && r.HistoricalSummaryChange.ListLength() == len(output) {
 		return
 	}
 	changed = true
@@ -217,12 +203,12 @@ func (r *ReverseBeaconStateChangeSet) CompactChanges() {
 	r.SlashingsChanges.CompactChangesReverse()
 	r.RandaoMixesChanges.CompactChangesReverse()
 	r.BalancesChanges.CompactChangesReverse()
-	if len(r.Eth1DataVotesAtReset) > 0 {
+	if len(r.eth1DataVotesAtReset) > 0 {
 		r.Eth1DataVotesChanges = nil
 	} else {
 		r.Eth1DataVotesChanges.CompactChangesReverse()
 	}
-	if len(r.PreviousEpochParticipationAtReset) > 0 {
+	if len(r.previousEpochParticipationAtReset) > 0 {
 		r.PreviousEpochParticipationChanges = nil
 		r.CurrentEpochParticipationChanges = nil
 	} else {
@@ -238,4 +224,56 @@ func (r *ReverseBeaconStateChangeSet) CompactChanges() {
 	r.ActivationEpochChange.CompactChangesReverse()
 	r.SlashedChange.CompactChangesReverse()
 	r.WithdrawalEpochChange.CompactChangesReverse()
+}
+
+func (r *ReverseBeaconStateChangeSet) ReportVotesReset(previousVotes []*cltypes.Eth1Data) {
+	if r.wasEth1DataVotesReset {
+		return
+	}
+	// Copy the slice over
+	for _, vote := range previousVotes {
+		copyVote := *vote
+		r.eth1DataVotesAtReset = append(r.eth1DataVotesAtReset, &copyVote)
+	}
+	r.wasEth1DataVotesReset = true
+}
+
+func (r *ReverseBeaconStateChangeSet) ReportEpochParticipationReset(prevParticipation, currParticpation cltypes.ParticipationFlagsList) {
+	if r.wasEpochParticipationReset {
+		return
+	}
+	r.previousEpochParticipationAtReset = prevParticipation.Copy()
+	r.currentEpochParticipationAtReset = currParticpation.Copy()
+	r.wasEpochParticipationReset = true
+}
+
+func (r *ReverseBeaconStateChangeSet) ApplyEth1DataVotesChanges(initialVotes []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
+	if r.wasEth1DataVotesReset {
+		return r.eth1DataVotesAtReset, true
+	}
+	output = initialVotes
+	if r.Eth1DataVotesChanges.Empty() && r.Eth1DataVotesChanges.ListLength() == len(output) {
+		return
+	}
+	changed = true
+	if r.Eth1DataVotesChanges.ListLength() != len(output) {
+		output = make([]*cltypes.Eth1Data, r.Eth1DataVotesChanges.ListLength())
+		copy(output, initialVotes)
+	}
+	r.Eth1DataVotesChanges.ChangesWithHandler(func(value cltypes.Eth1Data, index int) {
+		*output[index] = value
+	})
+	return
+}
+
+func (r *ReverseBeaconStateChangeSet) ApplyEpochParticipationChanges(
+	previousEpochParticipation cltypes.ParticipationFlagsList,
+	currentEpochParticipation cltypes.ParticipationFlagsList) (newPreviousEpochParticipation cltypes.ParticipationFlagsList, newCurrentEpochParticipation cltypes.ParticipationFlagsList,
+	previousParticipationChanged bool, currentParticipationChanged bool) {
+	if r.wasEpochParticipationReset {
+		return r.previousEpochParticipationAtReset, r.currentEpochParticipationAtReset, true, true
+	}
+	newPreviousEpochParticipation, previousParticipationChanged = r.PreviousEpochParticipationChanges.ApplyChanges(previousEpochParticipation)
+	newCurrentEpochParticipation, currentParticipationChanged = r.CurrentEpochParticipationChanges.ApplyChanges(currentEpochParticipation)
+	return
 }

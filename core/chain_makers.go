@@ -24,9 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -434,8 +433,19 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	for i := 0; i < n; i++ {
 		var stateReader state.StateReader
 		var stateWriter state.StateWriter
-		if ethconfig.EnableHistoryV4InTest {
 
+		if ethconfig.EnableHistoryV4InTest {
+			panic("implent me")
+			/*
+				agg := db.(*temporal.DB).GetAgg()
+				agg.SetTx(tx)
+				rs = state.NewStateV3("", agg.BufferedDomains())
+				stateWriter = state.NewStateWriterV3(rs)
+				r := state.NewStateReaderV3(rs)
+				r.SetTx(tx)
+				stateReader = r
+				defer agg.StartUnbufferedWrites().FinishWrites()
+			*/
 		} else {
 			stateReader = state.NewPlainStateReader(tx)
 			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
@@ -445,6 +455,19 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
+		/*
+			if ethconfig.EnableHistoryV4InTest {
+				logEvery := time.NewTicker(20 * time.Second)
+				defer logEvery.Stop()
+				if err := rs.Flush(context.Background(), tx, "", logEvery); err != nil {
+					return nil, err
+				}
+
+				//if err := rs.ApplyHistory(txTask, agg); err != nil {
+				//	return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
+				//}
+			}
+		*/
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt

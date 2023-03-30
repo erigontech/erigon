@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -114,9 +115,9 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	t.Cleanup(func() {
 		b.Close()
 	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 
@@ -125,9 +126,9 @@ func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, c
 	t.Cleanup(func() {
 		b.Close()
 	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
@@ -179,6 +180,20 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement domain state reader")
+		/*
+			agg := db.(*temporal.DB).GetAgg()
+			agg.SetTx(tx)
+
+			rs := state.NewStateV3("", agg.BufferedDomains())
+			stateWriter = state.NewStateWriterV3(rs)
+			r := state.NewStateReaderV3(rs)
+			r.SetTx(tx)
+			stateReader = r
+			defer agg.StartUnbufferedWrites().FinishWrites()
+		*/
+	}
 	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
 	b.pendingState = state.New(b.pendingReader)
 }
