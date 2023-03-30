@@ -149,6 +149,7 @@ func runCmd(ctx *cli.Context) error {
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	db := memdb.New("")
+	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
 		core.MustCommitGenesis(gen, db, "")
