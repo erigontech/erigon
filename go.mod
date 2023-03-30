@@ -94,7 +94,7 @@ require (
 	google.golang.org/protobuf v1.30.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
 	gopkg.in/yaml.v2 v2.4.0
-	modernc.org/sqlite v1.21.0
+	modernc.org/sqlite v1.21.1
 	pgregory.net/rapid v0.5.5
 )
 
