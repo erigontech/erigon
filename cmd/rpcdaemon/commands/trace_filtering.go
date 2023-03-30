@@ -961,7 +961,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	}
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, block.HeaderNoCopy(), block.Transactions(), block.Uncles(), cfg, stateDb, nil /*excessDataGas*/)
 	if err != nil {
 		return nil, err
 	}
@@ -982,7 +982,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 		// gnosis might have a fee free account here
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, stateDb, header, engine, true /* constCall */, nil /*excessDataGas*/)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

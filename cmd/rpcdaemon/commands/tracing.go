@@ -120,7 +120,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *chainConfig, ibs, block.Header(), engine, true /* constCall */, nil /*excessDataGas*/)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
