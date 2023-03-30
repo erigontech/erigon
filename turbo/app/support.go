@@ -97,7 +97,7 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	// Create TLS configuration with the certificate of the server
 	tlsConfig := &tls.Config{
 		RootCAs:            certPool,
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, //nolint:gosec
 	}
 
 	reader, writer := io.Pipe()
