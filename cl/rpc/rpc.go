@@ -8,10 +8,10 @@ import (
 	"io"
 
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/sentinel"
 	"github.com/golang/snappy"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 

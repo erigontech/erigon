@@ -3,10 +3,10 @@ package lightclient
 import (
 	"time"
 
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/remote"
-	"github.com/chainstack/erigon-lib/gointerfaces/types"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"

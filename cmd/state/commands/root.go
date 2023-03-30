@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	chain2 "github.com/chainstack/erigon-lib/chain"
-	"github.com/chainstack/erigon-lib/common"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/erigon/turbo/debug"

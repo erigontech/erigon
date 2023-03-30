@@ -4,7 +4,7 @@ import (
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/chainstack/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/pbnjay/memory"
 )
 

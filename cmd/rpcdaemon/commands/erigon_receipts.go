@@ -7,10 +7,10 @@ import (
 	"fmt"
 
 	"github.com/RoaringBitmap/roaring"
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/hexutility"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"

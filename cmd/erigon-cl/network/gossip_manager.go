@@ -3,7 +3,7 @@ package network
 import (
 	"context"
 
-	"github.com/chainstack/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"

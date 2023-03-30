@@ -169,8 +169,8 @@ github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA
 github.com/cespare/xxhash/v2 v2.1.1/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
 github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
-github.com/chainstack/erigon-lib v0.0.0-20230322081954-d9dc1fc2b51b h1:OaVfefWGTiS3tjObUopObi+BD5bZTFjQKsS6gY88k9g=
-github.com/chainstack/erigon-lib v0.0.0-20230322081954-d9dc1fc2b51b/go.mod h1:RoN/r3LyCYSbX5Jpt4rg6UjreCAeQBxLOywc/euiB8g=
+github.com/chainstack/erigon-lib v0.0.0-20230330095146-244f7bd553e0 h1:V2b8K4BYaot5zY+Hg411RBbshsQmHaofkiHVfnNvT9U=
+github.com/chainstack/erigon-lib v0.0.0-20230330095146-244f7bd553e0/go.mod h1:I+1Oys00tH9C8Ow1u5atjh3XasMPE4VoAG5lq8Bi1Zs=
 github.com/cilium/ebpf v0.2.0/go.mod h1:To2CFviqOWL/M0gIMsvSMlqe7em/l1ALkX1PyjrX2Qs=
 github.com/clbanning/x2j v0.0.0-20191024224557-825249438eec/go.mod h1:jMjuTZXRI4dUb/I5gc9Hdhagfvm9+RyrPryS/auMzxE=
 github.com/client9/misspell v0.3.4/go.mod h1:qj6jICC3Q7zFZvVWo7KLAzC3yx5G7kyvSDkc90ppPyw=

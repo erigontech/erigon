@@ -21,7 +21,7 @@ import (
 	"errors"
 	"time"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"

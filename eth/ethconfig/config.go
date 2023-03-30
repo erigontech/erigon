@@ -27,11 +27,11 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/datadir"
-	"github.com/chainstack/erigon-lib/downloader/downloadercfg"
-	txpool2 "github.com/chainstack/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
 
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/memdb"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"

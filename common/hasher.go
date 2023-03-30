@@ -4,7 +4,7 @@ import (
 	"hash"
 	"sync"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 )
 

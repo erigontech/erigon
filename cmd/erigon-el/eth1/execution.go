@@ -7,12 +7,12 @@ import (
 	"math/big"
 	"sync"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/execution"
-	types2 "github.com/chainstack/erigon-lib/gointerfaces/types"
-	"github.com/chainstack/erigon-lib/kv"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/log/v3"
 

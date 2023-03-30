@@ -3,7 +3,7 @@ package state
 import (
 	"fmt"
 
-	"github.com/chainstack/erigon-lib/common/math"
+	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )

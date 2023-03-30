@@ -8,8 +8,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/chainstack/erigon-lib/etl"
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/ethdb"

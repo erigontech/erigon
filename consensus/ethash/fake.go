@@ -3,8 +3,8 @@ package ethash
 import (
 	"time"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
 	mapset "github.com/deckarep/golang-set"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"

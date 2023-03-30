@@ -6,8 +6,8 @@ import (
 
 	"github.com/emirpasic/gods/maps/treemap"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces/remote"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"go.uber.org/atomic"

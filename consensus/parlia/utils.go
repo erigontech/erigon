@@ -5,7 +5,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"math/rand"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func backOffTime(snap *Snapshot, val libcommon.Address) uint64 {

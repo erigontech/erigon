@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	txpool_proto "github.com/chainstack/erigon-lib/gointerfaces/txpool"
-	"github.com/chainstack/erigon-lib/kv"
-	types2 "github.com/chainstack/erigon-lib/types"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 

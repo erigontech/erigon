@@ -5,8 +5,8 @@ import (
 
 	"github.com/minio/sha256-simd"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
 	lru2 "github.com/hashicorp/golang-lru/v2"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"

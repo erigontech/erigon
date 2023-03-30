@@ -21,8 +21,8 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/chainstack/erigon-lib/chain"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 
 	"github.com/ledgerwatch/erigon/turbo/stages"
 

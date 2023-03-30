@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chainstack/erigon-lib/kv/bitmapdb"
-	"github.com/chainstack/erigon-lib/kv/mdbx"
-	"github.com/chainstack/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 )

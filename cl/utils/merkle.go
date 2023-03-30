@@ -1,7 +1,7 @@
 package utils
 
 import (
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Check if leaf at index verifies against the Merkle root and branch

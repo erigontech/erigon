@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/chainstack/erigon-lib/kv"
 	"github.com/huandu/xstrings"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 

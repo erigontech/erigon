@@ -3,8 +3,8 @@ package stagedsync
 import (
 	"fmt"
 
-	"github.com/chainstack/erigon-lib/chain"
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/consensus"
