@@ -563,12 +563,10 @@ func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	//rh, err := rs.shared.Commit(txTask.TxNum, false, false)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	rh := []byte{}
+	rh, err := rs.shared.Commit(txTask.TxNum, false, false)
+	if err != nil {
+		return nil, err
+	}
 	returnReadList(txTask.ReadLists)
 	returnWriteList(txTask.WriteLists)
 

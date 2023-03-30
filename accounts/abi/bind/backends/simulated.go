@@ -77,7 +77,7 @@ type SimulatedBackend struct {
 	pendingHeader   *types.Header
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
-	pendingReader   *state.PlainStateReader
+	pendingReader   state.StateReader
 	pendingReaderTx kv.Tx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
@@ -179,20 +179,6 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	if ethconfig.EnableHistoryV4InTest {
-		panic("implement domain state reader")
-		/*
-			agg := db.(*temporal.DB).GetAgg()
-			agg.SetTx(tx)
-
-			rs := state.NewStateV3("", agg.BufferedDomains())
-			stateWriter = state.NewStateWriterV3(rs)
-			r := state.NewStateReaderV3(rs)
-			r.SetTx(tx)
-			stateReader = r
-			defer agg.StartUnbufferedWrites().FinishWrites()
-		*/
-	}
 	if b.pendingReaderTx != nil {
 		b.pendingReaderTx.Rollback()
 	}
@@ -201,7 +187,12 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 		panic(err)
 	}
 	b.pendingReaderTx = tx
-	b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
+
+	if ethconfig.EnableHistoryV4InTest {
+		b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+	} else {
+		b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
+	}
 	b.pendingState = state.New(b.pendingReader)
 }
 

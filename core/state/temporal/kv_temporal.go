@@ -71,7 +71,7 @@ func New(db kv.RwDB, agg *state.AggregatorV3, cb1 tConvertV3toV2, cb2 tRestoreCo
 
 	return &DB{RwDB: db, agg: agg, convertV3toV2: cb1, restoreCodeHash: cb2, parseInc: cb3, systemContractLookup: systemContractLookup}, nil
 }
-func (db *DB) GetAgg() *state.AggregatorV3 { return db.agg }
+func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
 	kvTx, err := db.RwDB.BeginRo(ctx)
@@ -162,6 +162,8 @@ type Tx struct {
 	resourcesToClose []kv.Closer
 }
 
+func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.agg }
+func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	for _, closer := range tx.resourcesToClose {
 		closer.Close()
@@ -289,7 +291,16 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 }
 func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, err error) {
 	if ethconfig.EnableHistoryV4InTest {
-		panic("implement me")
+		switch name {
+		case AccountsDomain:
+			return tx.agg.AccountLatest(key, tx.MdbxTx)
+		case StorageDomain:
+			return tx.agg.StorageLatest(key, key2, tx.MdbxTx)
+		case CodeDomain:
+			return tx.agg.CodeLatest(key, tx.MdbxTx)
+		default:
+			panic(fmt.Sprintf("unexpected: %s", name))
+		}
 	}
 	switch name {
 	case AccountsDomain:
