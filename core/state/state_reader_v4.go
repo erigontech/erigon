@@ -67,3 +67,15 @@ func (r *ReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, er
 	panic(1)
 	return 0, nil
 }
+
+func (r *ReaderV4) ReadCommitment(prefix []byte) ([]byte, error) {
+	enc, ok, err := r.tx.DomainGet(temporal.CommitmentDomain, prefix, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(enc) == 0 {
+		return nil, nil
+	}
+	return enc, nil
+
+}

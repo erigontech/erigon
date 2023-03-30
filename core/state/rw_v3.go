@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -35,7 +34,8 @@ const StorageTable = "Storage"
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
-	shared         *libstate.SharedDomains
+	sharedWriter   *WriterV4
+	sharedReader   *ReaderV4
 	chCode         map[string][]byte
 	chAccs         map[string][]byte
 	chStorage      *btree2.Map[string, []byte]
@@ -58,10 +58,11 @@ type StateV3 struct {
 	addrIncBuf          []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
 }
 
-func NewStateV3(tmpdir string, shared *libstate.SharedDomains) *StateV3 {
+func NewStateV3(tmpdir string, sr *ReaderV4, wr *WriterV4) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
-		shared:         shared,
+		sharedWriter:   wr,
+		sharedReader:   sr,
 		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
@@ -214,35 +215,33 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
 
-	if err := rs.flushMap(ctx, rwTx, kv.PlainState, rs.chAccs, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chAccs = map[string][]byte{}
-	if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chStorage.Clear()
-	if err := rs.flushMap(ctx, rwTx, kv.Code, rs.chCode, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chCode = map[string][]byte{}
-	if err := rs.flushMap(ctx, rwTx, kv.PlainContractCode, rs.chContractCode, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chContractCode = map[string][]byte{}
-	if err := rs.flushMap(ctx, rwTx, kv.IncarnationMap, rs.chIncs, logPrefix, logEvery); err != nil {
-		return err
-	}
-	rs.chIncs = map[string][]byte{}
-	if err := rs.shared.Flush(); err != nil {
-		return err
-	}
-	//if err := rs.flushMap(ctx, rwTx, kv.CommitmentVals, rs.chCommitment, logPrefix, logEvery); err != nil {
+	//if err := rs.flushMap(ctx, rwTx, kv.PlainState, rs.chAccs, logPrefix, logEvery); err != nil {
 	//	return err
 	//}
-	//rs.chCommitment = map[string][]byte{}
-
+	rs.chAccs = map[string][]byte{}
+	//if err := rs.flushBtree(ctx, rwTx, kv.PlainState, rs.chStorage, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	rs.chStorage.Clear()
+	//if err := rs.flushMap(ctx, rwTx, kv.Code, rs.chCode, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	rs.chCode = map[string][]byte{}
+	//if err := rs.flushMap(ctx, rwTx, kv.PlainContractCode, rs.chContractCode, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	rs.chContractCode = map[string][]byte{}
+	//if err := rs.flushMap(ctx, rwTx, kv.IncarnationMap, rs.chIncs, logPrefix, logEvery); err != nil {
+	//	return err
+	//}
+	rs.chIncs = map[string][]byte{}
 	rs.sizeEstimate = 0
+
+	//log.Warn("shared flush")
+	//if err := rs.shared.Flush(); err != nil {
+	//	return err
+	//}
+	//log.Warn("shared flush done")
 	return nil
 }
 
@@ -457,41 +456,41 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 	return nil
 }
 
-func (rs *StateV3) applyUpdates(roTx kv.Tx, task *exec22.TxTask, agg *libstate.AggregatorV3) {
-	//emptyRemoval := task.Rules.IsSpuriousDragon
-	rs.lock.Lock()
-	defer rs.lock.Unlock()
-
-	var p2 []byte
-	for table, wl := range task.WriteLists {
-		var d *libstate.DomainMem
-		switch table {
-		case kv.PlainState:
-			d = rs.shared.Account
-		case kv.Code:
-			d = rs.shared.Code
-		case StorageTable:
-			d = rs.shared.Storage
-		default:
-			panic(fmt.Errorf("unknown table %s", table))
-		}
-
-		for i := 0; i < len(wl.Keys); i++ {
-			addr, err := hex.DecodeString(wl.Keys[i])
-			if err != nil {
-				panic(err)
-			}
-			if len(addr) > 28 {
-				p2 = addr[length.Addr+8:]
-			}
-			if err := d.Put(addr[:length.Addr], p2, wl.Vals[i]); err != nil {
-				panic(err)
-			}
-			p2 = p2[:0]
-		}
-	}
-	//rs.shared.Commitment.Compu()
-}
+//func (rs *StateV3) applyUpdates(roTx kv.Tx, task *exec22.TxTask, agg *libstate.AggregatorV3) {
+//	//emptyRemoval := task.Rules.IsSpuriousDragon
+//	rs.lock.Lock()
+//	defer rs.lock.Unlock()
+//
+//	var p2 []byte
+//	for table, wl := range task.WriteLists {
+//		var d *libstate.DomainMem
+//		switch table {
+//		case kv.PlainState:
+//			d = rs.shared.Account
+//		case kv.Code:
+//			d = rs.shared.Code
+//		case StorageTable:
+//			d = rs.shared.Storage
+//		default:
+//			panic(fmt.Errorf("unknown table %s", table))
+//		}
+//
+//		for i := 0; i < len(wl.Keys); i++ {
+//			addr, err := hex.DecodeString(wl.Keys[i])
+//			if err != nil {
+//				panic(err)
+//			}
+//			if len(addr) > 28 {
+//				p2 = addr[length.Addr+8:]
+//			}
+//			if err := d.Put(addr[:length.Addr], p2, wl.Vals[i]); err != nil {
+//				panic(err)
+//			}
+//			p2 = p2[:0]
+//		}
+//	}
+//	//rs.shared.Commitment.Compu()
+//}
 
 func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
@@ -563,7 +562,7 @@ func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	rh, err := rs.shared.Commit(txTask.TxNum, false, false)
+	rh, err := rs.sharedWriter.Commitment(txTask.TxNum, false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -786,7 +785,7 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 }
 
 func (rs *StateV3) CalcCommitment(saveAfter, trace bool) ([]byte, error) {
-	return rs.shared.Commit(rs.txsDone.Load(), saveAfter, trace)
+	return rs.sharedWriter.Commitment(rs.txsDone.Load(), saveAfter, trace)
 }
 
 type StateWriterV3 struct {
@@ -808,7 +807,6 @@ func NewStateWriterV3(rs *StateV3) *StateWriterV3 {
 
 func (w *StateWriterV3) SetTxNum(txNum uint64) {
 	w.txNum = txNum
-	w.rs.shared.SetTxNum(txNum)
 }
 
 func (w *StateWriterV3) ResetWriteSet() {
@@ -823,10 +821,6 @@ func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
-func (w *StateWriterV3) CommitSets() ([][]byte, [][]byte, []commitment.Update) {
-	return w.rs.shared.Updates.List()
-}
-
 func (w *StateWriterV3) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return w.accountPrevs, w.accountDels, w.storagePrevs, w.codePrevs
 }
@@ -838,11 +832,11 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
 	w.writeLists[kv.PlainState].Keys = append(w.writeLists[kv.PlainState].Keys, string(addressBytes))
 	w.writeLists[kv.PlainState].Vals = append(w.writeLists[kv.PlainState].Vals, value)
-	//w.rs.shared.Updates.TouchPlainKey(addressBytes, value, w.rs.shared.Updates.TouchPlainKeyAccount)
-	enc := libstate.EncodeAccountBytes(account.Nonce, &account.Balance, account.CodeHash[:], 0)
-	if err := w.rs.shared.UpdateAccountData(addressBytes, enc); err != nil {
+
+	if err := w.rs.sharedWriter.UpdateAccountData(address, original, account); err != nil {
 		return err
 	}
+
 	var prev []byte
 	if original.Initialised {
 		prev = accounts.SerialiseV3(original)
@@ -863,9 +857,7 @@ func (w *StateWriterV3) UpdateAccountCode(address common.Address, incarnation ui
 		w.writeLists[kv.PlainContractCode].Keys = append(w.writeLists[kv.PlainContractCode].Keys, string(dbutils.PlainGenerateStoragePrefix(addressBytes, incarnation)))
 		w.writeLists[kv.PlainContractCode].Vals = append(w.writeLists[kv.PlainContractCode].Vals, codeHashBytes)
 	}
-	//w.rs.shared.Updates.TouchPlainKey(addressBytes, codeHashBytes, w.rs.shared.Updates.TouchPlainKeyCode)
-	//
-	if err := w.rs.shared.UpdateAccountCode(addressBytes, codeHashBytes); err != nil {
+	if err := w.rs.sharedWriter.UpdateAccountCode(address, incarnation, codeHash, code); err != nil {
 		return err
 	}
 	if w.codePrevs == nil {
@@ -885,12 +877,9 @@ func (w *StateWriterV3) DeleteAccount(address common.Address, original *accounts
 		w.writeLists[kv.IncarnationMap].Keys = append(w.writeLists[kv.IncarnationMap].Keys, string(addressBytes))
 		w.writeLists[kv.IncarnationMap].Vals = append(w.writeLists[kv.IncarnationMap].Vals, b[:])
 	}
-	if err := w.rs.shared.DeleteAccount(addressBytes); err != nil {
+	if err := w.rs.sharedWriter.DeleteAccount(address, original); err != nil {
 		return err
 	}
-	//w.rs.shared.Updates.TouchPlainKey(addressBytes, nil, w.rs.shared.Updates.TouchPlainKeyAccount)
-	//w.rs.shared.Updates.TouchPlainKey(addressBytes, nil, w.rs.shared.Updates.TouchPlainKeyCode)
-	//TODO STORAGE
 	if original.Initialised {
 		if w.accountDels == nil {
 			w.accountDels = map[string]*accounts.Account{}
@@ -909,8 +898,8 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	w.writeLists[StorageTable].Keys = append(w.writeLists[StorageTable].Keys, cmpositeS)
 	w.writeLists[StorageTable].Vals = append(w.writeLists[StorageTable].Vals, value.Bytes())
 	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
-	//w.rs.shared.Updates.TouchPlainKey(composite, value.Bytes(), w.rs.shared.Updates.TouchPlainKeyStorage)
-	if err := w.rs.shared.WriteAccountStorage(address[:], key.Bytes(), value.Bytes()); err != nil {
+
+	if err := w.rs.sharedWriter.WriteAccountStorage(address, incarnation, key, original, value); err != nil {
 		return err
 	}
 	if w.storagePrevs == nil {
@@ -950,6 +939,7 @@ func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
 func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	return r.rs.sharedReader.ReadAccountData(address)
 	addr := address.Bytes()
 	enc, ok := r.rs.Get(kv.PlainState, addr)
 	if !ok {
@@ -978,6 +968,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	return r.rs.sharedReader.ReadAccountStorage(address, incarnation, key)
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, ok := r.rs.Get(StorageTable, composite)
 	if !ok || enc == nil {
@@ -1005,6 +996,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	return r.rs.sharedReader.ReadAccountCode(address, incarnation, codeHash)
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1025,6 +1017,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	return r.ReadAccountCodeSize(address, incarnation, codeHash)
 	codeHashBytes := codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1117,4 +1110,92 @@ func returnReadList(v map[string]*exec22.KvList) {
 		return
 	}
 	readListPool.Put(v)
+}
+
+type StateWriter4 struct {
+	*libstate.SharedDomains
+}
+
+func WrapStateIO(s *libstate.SharedDomains) (*StateWriter4, *StateReader4) {
+	w, r := &StateWriter4{s}, &StateReader4{s}
+	return w, r
+}
+
+func (w *StateWriter4) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+	//fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x} txNum: %d\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash, w.txNum)
+	//enc := libstate.EncodeAccountBytes(account.Nonce, &account.Balance, account.CodeHash[:], 0)
+	enc := accounts.SerialiseV3(account)
+	return w.SharedDomains.UpdateAccountData(address.Bytes(), enc)
+}
+
+func (w *StateWriter4) UpdateAccountCode(address common.Address, incarnation uint64, codeHash common.Hash, code []byte) error {
+	//addressBytes, codeHashBytes := address.Bytes(), codeHash.Bytes()
+	//fmt.Printf("code [%x] => [%x] CodeHash: %x, txNum: %d\n", address, code, codeHash, w.txNum)
+	return w.SharedDomains.UpdateAccountCode(address.Bytes(), codeHash.Bytes())
+}
+
+func (w *StateWriter4) DeleteAccount(address common.Address, original *accounts.Account) error {
+	addressBytes := address.Bytes()
+	return w.SharedDomains.DeleteAccount(addressBytes)
+}
+
+func (w *StateWriter4) WriteAccountStorage(address common.Address, incarnation uint64, key *common.Hash, original, value *uint256.Int) error {
+	if *original == *value {
+		return nil
+	}
+	//fmt.Printf("storage [%x] [%x] => [%x], txNum: %d\n", address, *key, v, w.txNum)
+	return w.SharedDomains.WriteAccountStorage(address[:], key.Bytes(), value.Bytes())
+}
+
+func (w *StateWriter4) CreateContract(address common.Address) error { return nil }
+func (w *StateWriter4) WriteChangeSets() error                      { return nil }
+func (w *StateWriter4) WriteHistory() error                         { return nil }
+
+type StateReader4 struct {
+	*libstate.SharedDomains
+}
+
+func (s *StateReader4) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	enc, err := s.Account.Get(address.Bytes(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	var a accounts.Account
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+func (s *StateReader4) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	enc, err := s.Storage.Get(address.Bytes(), key.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if enc == nil {
+		return nil, nil
+	}
+	if len(enc) == 1 && enc[0] == 0 {
+		return nil, nil
+	}
+	return enc, nil
+}
+
+func (s *StateReader4) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
+	return s.Code.Get(codeHash.Bytes(), nil)
+}
+
+func (s *StateReader4) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
+	c, err := s.ReadAccountCode(address, incarnation, codeHash)
+	if err != nil {
+		return 0, err
+	}
+	return len(c), nil
+}
+
+func (s *StateReader4) ReadAccountIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
 }

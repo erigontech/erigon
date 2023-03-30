@@ -458,9 +458,6 @@ func ExecV3(ctx context.Context,
 			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 				return err
 			}
-			//if err = execStage.Update(tx, stageProgress); err != nil {
-			//	panic(err)
-			//}
 			if err = tx.Commit(); err != nil {
 				return err
 			}
@@ -655,13 +652,6 @@ Loop:
 					break Loop
 				}
 
-				rh, err := rs.ApplyState4(applyTx, txTask, agg)
-				if err != nil {
-					return fmt.Errorf("StateV3.Apply: %w", err)
-				}
-				if !bytes.Equal(header.Root.Bytes(), rh) {
-					return fmt.Errorf("root hash mismatch: %x != %x", header.Root.Bytes(), rh)
-				}
 				triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Add(1)
 
@@ -671,6 +661,15 @@ Loop:
 			}
 			stageProgress = blockNum
 			inputTxNum++
+		}
+
+		rh, err := rs.CalcCommitment(true, false)
+		if err != nil {
+			return fmt.Errorf("StateV3.Apply: %w", err)
+		}
+
+		if !bytes.Equal(header.Root.Bytes(), rh) {
+			return fmt.Errorf("root hash mismatch: %x != %x bn =%d", header.Root.Bytes(), rh, blockNum)
 		}
 
 		if !parallel {
@@ -805,6 +804,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			panic(err)
 		}
 		if !bytes.Equal(rh, txTask.BlockRoot[:]) {
+			log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
 			panic(fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum))
 		}
 

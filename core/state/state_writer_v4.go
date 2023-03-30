@@ -2,6 +2,7 @@ package state
 
 import (
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -47,4 +48,15 @@ func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation ui
 
 func (w *WriterV4) CreateContract(address libcommon.Address) error {
 	return nil
+}
+
+func (w *WriterV4) WriteChangeSets() error { return nil }
+func (w *WriterV4) WriteHistory() error    { return nil }
+
+func (w *WriterV4) Commitment(txNum uint64, saveStateAfter, trace bool) (rootHash []byte, err error) {
+	agg := w.tx.(*temporal.Tx).Agg()
+	agg.SetTx(w.tx.(kv.RwTx))
+	agg.SetTxNum(txNum)
+
+	return agg.ComputeCommitment(saveStateAfter, trace)
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
@@ -786,8 +787,12 @@ func stageExec(db kv.RwDB, ctx context.Context) error {
 		}
 		return nil
 	}
+	tx, err := db.(*temporal.DB).BeginRw(ctx)
+	if err != nil {
+		return err
+	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, nil, block, ctx, cfg, true /* initialCycle */, false /* quiet */)
+	err = stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, false /* quiet */)
 	if err != nil {
 		return err
 	}
@@ -1196,6 +1201,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		dirs := datadir.New(datadirCli)
 		dir.MustExist(dirs.SnapHistory)
 
+		useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 

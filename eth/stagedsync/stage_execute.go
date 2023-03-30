@@ -1,6 +1,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -144,10 +145,15 @@ func executeBlock(
 	stateStream bool,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
-	if err != nil {
-		return err
-	}
+	//stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
+	//if err != nil {
+	//	return err
+	//}
+
+	//stateWriter, _ := state.WrapStateIO(cfg.agg.SharedDomains())
+	var err error
+	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
+	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -196,9 +202,9 @@ func executeBlock(
 	}
 
 	if cfg.changeSetHook != nil {
-		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
-		}
+		//if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+		//	cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		//}
 	}
 	if writeCallTraces {
 		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
@@ -283,7 +289,11 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 	if to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	rs := state.NewStateV3(cfg.dirs.Tmp, cfg.agg.BufferedDomains())
+
+	writer := state.NewWriterV4(tx.(kv.TemporalTx))
+	reader := state.NewReaderV4(tx.(kv.TemporalTx))
+
+	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 	parallel := initialCycle && tx == nil
 	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
 		log.New(), to); err != nil {
@@ -314,7 +324,10 @@ func reconstituteBlock(agg *libstate.AggregatorV3, db kv.RoDB, tx kv.Tx) (n uint
 
 func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, accumulator *shards.Accumulator) (err error) {
 	cfg.agg.SetLogPrefix(s.LogPrefix())
-	rs := state.NewStateV3(cfg.dirs.Tmp, cfg.agg.BufferedDomains())
+	reader := state.NewReaderV4(tx.(kv.TemporalTx))
+	writer := state.NewWriterV4(tx.(kv.TemporalTx))
+
+	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(tx, u.UnwindPoint+1)
 	if err != nil {
@@ -424,6 +437,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	defer func() {
 		batch.Rollback()
 	}()
+	defer cfg.agg.StartWrites().FinishWrites()
 
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
@@ -462,6 +476,14 @@ Loop:
 			}
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
+		}
+		rh, err := cfg.agg.SharedDomains().Commit(0, false, false)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(rh, block.Root().Bytes()) {
+			log.Info("match root hash", "block", blockNum, "root", rh)
+			//return fmt.Errorf("block=%d root hash mismatch: %x != %x", blockNum, rh, block.Root().Bytes())
 		}
 		stageProgress = blockNum
 

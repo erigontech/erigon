@@ -238,7 +238,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		}
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
-		txTask.CommitPlainKeys, txTask.CommitHashKeys, txTask.CommitUpdates = rw.stateWriter.CommitSets()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
 		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
 		for _, list := range txTask.ReadLists {

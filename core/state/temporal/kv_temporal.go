@@ -182,15 +182,17 @@ func (tx *Tx) Commit() error {
 }
 
 const (
-	AccountsDomain kv.Domain = "AccountsDomain"
-	StorageDomain  kv.Domain = "StorageDomain"
-	CodeDomain     kv.Domain = "CodeDomain"
+	AccountsDomain   kv.Domain = "AccountsDomain"
+	StorageDomain    kv.Domain = "StorageDomain"
+	CodeDomain       kv.Domain = "CodeDomain"
+	CommitmentDomain kv.Domain = "CommitmentDomain"
 )
 
 const (
-	AccountsHistory kv.History = "AccountsHistory"
-	StorageHistory  kv.History = "StorageHistory"
-	CodeHistory     kv.History = "CodeHistory"
+	AccountsHistory   kv.History = "AccountsHistory"
+	StorageHistory    kv.History = "StorageHistory"
+	CodeHistory       kv.History = "CodeHistory"
+	CommitmentHistory kv.History = "CommitmentHistory"
 )
 
 const (
@@ -298,6 +300,8 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, er
 			return tx.agg.StorageLatest(key, key2, tx.MdbxTx)
 		case CodeDomain:
 			return tx.agg.CodeLatest(key, tx.MdbxTx)
+		case CommitmentDomain:
+			return tx.agg.CommitmentLatest(key, tx.MdbxTx)
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
