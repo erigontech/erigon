@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	types2 "github.com/chainstack/erigon-lib/types"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"

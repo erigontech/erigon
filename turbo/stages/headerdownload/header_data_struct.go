@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/etl"
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/etl"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"

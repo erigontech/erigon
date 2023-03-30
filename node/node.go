@@ -31,10 +31,10 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/mdbx"
-	"github.com/chainstack/erigon-lib/kv/memdb"
 	"github.com/gofrs/flock"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/log/v3"
 )

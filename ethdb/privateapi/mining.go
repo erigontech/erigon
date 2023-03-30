@@ -6,9 +6,9 @@ import (
 	"errors"
 	"sync"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	proto_txpool "github.com/chainstack/erigon-lib/gointerfaces/txpool"
-	types2 "github.com/chainstack/erigon-lib/gointerfaces/types"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/protobuf/types/known/emptypb"
 

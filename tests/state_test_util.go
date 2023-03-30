@@ -25,12 +25,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/kv"
-	types2 "github.com/chainstack/erigon-lib/types"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"

@@ -6,9 +6,9 @@ import (
 	"io"
 	"math/bits"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	length2 "github.com/chainstack/erigon-lib/common/length"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon/common"

@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
 	lru "github.com/hashicorp/golang-lru"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/accounts/abi"

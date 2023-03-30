@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
 

@@ -24,8 +24,8 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/slices"
 

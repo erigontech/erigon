@@ -6,8 +6,8 @@ import (
 	"math/bits"
 	"unsafe"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/google/btree"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"

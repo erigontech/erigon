@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 func TestBytesConversion(t *testing.T) {

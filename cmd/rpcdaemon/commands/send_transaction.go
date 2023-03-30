@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/chainstack/erigon-lib/common"
-	txPoolProto "github.com/chainstack/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/common"
+	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"

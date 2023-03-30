@@ -4,9 +4,9 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/kv"
-	libstate "github.com/chainstack/erigon-lib/state"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )

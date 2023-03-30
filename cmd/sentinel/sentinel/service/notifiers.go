@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/chainstack/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 )
 
 const (

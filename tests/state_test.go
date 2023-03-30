@@ -27,7 +27,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/chainstack/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/log/v3"

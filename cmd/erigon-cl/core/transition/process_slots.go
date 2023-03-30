@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state/state_encoding"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/log/v3"
 )

@@ -9,11 +9,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/remote"
-	types2 "github.com/chainstack/erigon-lib/gointerfaces/types"
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
