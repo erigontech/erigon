@@ -17,6 +17,7 @@ import (
 type DomainMem struct {
 	*Domain
 
+	tmpdir string
 	etl    *etl.Collector
 	mu     sync.RWMutex
 	values map[string]*KVList
@@ -69,6 +70,7 @@ func (l *KVList) Reset() {
 func NewDomainMem(d *Domain, tmpdir string) *DomainMem {
 	return &DomainMem{
 		Domain: d,
+		tmpdir: tmpdir,
 		etl:    etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM)),
 		values: make(map[string]*KVList, 128),
 	}
@@ -86,7 +88,11 @@ func (d *DomainMem) Get(k1, k2 []byte) ([]byte, error) {
 		_, v := value.Latest()
 		return v, nil
 	}
-	return nil, nil
+	v, found := d.Domain.MakeContext().readFromFiles(key, d.txNum)
+	if !found {
+		return nil, nil
+	}
+	return v, nil
 }
 
 // TODO:
@@ -96,7 +102,15 @@ func (d *DomainMem) Get(k1, k2 []byte) ([]byte, error) {
 
 func (d *DomainMem) Flush() error {
 	//etl.TransformArgs{Quit: ctx.Done()}
-	return d.etl.Load(d.tx, d.valsTable, d.etlLoader(), etl.TransformArgs{})
+	err := d.etl.Load(d.tx, d.valsTable, d.etlLoader(), etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+	if d.etl != nil {
+		d.etl.Close()
+	}
+	d.etl = etl.NewCollector(d.valsTable, d.tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+	return nil
 }
 
 func (d *DomainMem) Close() {
@@ -105,29 +119,7 @@ func (d *DomainMem) Close() {
 }
 
 func (d *DomainMem) etlLoader() etl.LoadFunc {
-	//stepSize := d.aggregationStep
-	//assert := func(k []byte) { }
 	return func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		//if its ordered we could put to history each key excluding last one
-		// write inverted index with state and lookup if it's last update for this key
-		// and prune here without db for that case.
-		//ksz := len(k) - 8
-		//txnum := binary.BigEndian.Uint64(k[ksz:])
-		//
-		//keySuffix := make([]byte, len(k))
-		//binary.BigEndian.PutUint64(keySuffix[ksz:], ^(txnum / stepSize))
-		//
-		//var k2 []byte
-		//ek := ksz
-		//if ksz == length.Hash+length.Addr {
-		//	k2 = k[length.Addr:ksz]
-		//	ek = length.Addr
-		//}
-		//
-		//d.SetTxNum(txnum)
-		//if err := d.Put(k[:ek], k2, value); err != nil {
-		//	return err
-		//}
 		return next(k, k, value)
 	}
 }
@@ -301,7 +293,7 @@ func (sd *SharedDomains) Commit(txNum uint64, saveStateAfter, trace bool) (rootH
 	}
 
 	if saveStateAfter {
-		if err := sd.Commitment.c.storeCommitmentState(0, txNum); err != nil {
+		if err := sd.Commitment.c.storeCommitmentState(0, sd.Commitment.txNum); err != nil {
 			return nil, err
 		}
 	}

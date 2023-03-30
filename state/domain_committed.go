@@ -204,6 +204,7 @@ type DomainCommitted struct {
 	keccak       hash.Hash
 	patriciaTrie commitment.Trie
 	branchMerger *commitment.BranchMerger
+	prevState    []byte
 
 	comKeys uint64
 	comTook time.Duration
@@ -374,8 +375,16 @@ func (d *DomainCommitted) storeCommitmentState(blockNum, txNum uint64) error {
 	var stepbuf [2]byte
 	step := uint16(txNum / d.aggregationStep)
 	binary.BigEndian.PutUint16(stepbuf[:], step)
-	if err = d.Domain.Put(keyCommitmentState, stepbuf[:], encoded); err != nil {
-		return err
+	switch d.Domain.wal {
+	case nil:
+		if err = d.Domain.Put(keyCommitmentState, stepbuf[:], encoded); err != nil {
+			return err
+		}
+	default:
+		if err := d.Domain.PutWithPrev(keyCommitmentState, stepbuf[:], encoded, d.prevState); err != nil {
+			return err
+		}
+		d.prevState = encoded
 	}
 	return nil
 }

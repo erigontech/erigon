@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -142,6 +143,7 @@ type Domain struct {
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
+	wal       *domainWAL
 }
 
 func NewDomain(dir, tmpdir string, aggregationStep uint64,
@@ -165,11 +167,14 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 
 func (d *Domain) StartWrites() {
 	d.defaultDc = d.MakeContext()
+	d.wal = d.newWriter(d.tmpdir, true, false)
 	d.History.StartWrites()
 }
 
 func (d *Domain) FinishWrites() {
 	d.defaultDc.Close()
+	d.wal.close()
+	d.wal = nil
 	d.History.FinishWrites()
 }
 
@@ -418,30 +423,26 @@ func (d *Domain) Close() {
 	d.reCalcRoFiles()
 }
 
-func (d *Domain) update(key, original []byte) error {
-	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
-	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (d *Domain) PutWitPrev(key1, key2, val, preval []byte) error {
-	key := common.Append(key1, key2)
-
+func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-	if err := d.update(key, preval); err != nil {
+	return d.wal.addValue(key1, key2, val, d.txNum)
+}
+
+func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
+	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
+	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
-	invertedStep := ^(d.txNum / d.aggregationStep)
-	keySuffix := make([]byte, len(key)+8)
-	copy(keySuffix, key)
-	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-	if err := d.tx.Put(d.valsTable, keySuffix, val); err != nil {
+	return d.wal.addValue(key1, key2, nil, d.txNum)
+}
+
+func (d *Domain) update(key, original []byte) error {
+	var invertedStep [8]byte
+	binary.BigEndian.PutUint64(invertedStep[:], ^(d.txNum / d.aggregationStep))
+	if err := d.tx.Put(d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
@@ -473,33 +474,6 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 	return nil
 }
 
-func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
-	key := common.Append(key1, key2)
-	//original, found, err := d.defaultDc.get(key, d.txNum, d.tx)
-	//if err != nil {
-	//	return err
-	//}
-	//if !found {
-	//	return nil
-	//}
-	var err error
-	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-	if err = d.History.AddPrevValue(key1, key2, prev); err != nil {
-		return err
-	}
-	if err = d.update(key, prev); err != nil {
-		return err
-	}
-	invertedStep := ^(d.txNum / d.aggregationStep)
-	keySuffix := make([]byte, len(key)+8)
-	copy(keySuffix, key)
-	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-	if err = d.tx.Delete(d.valsTable, keySuffix); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (d *Domain) Delete(key1, key2 []byte) error {
 	key := common.Append(key1, key2)
 	original, found, err := d.defaultDc.get(key, d.txNum, d.tx)
@@ -521,6 +495,103 @@ func (d *Domain) Delete(key1, key2 []byte) error {
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	if err = d.tx.Delete(d.valsTable, keySuffix); err != nil {
+		return err
+	}
+	return nil
+}
+
+type domainWAL struct {
+	d           *Domain
+	values      *etl.Collector
+	tmpdir      string
+	key         []byte
+	buffered    bool
+	discard     bool
+	largeValues bool
+}
+
+func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
+	w := &domainWAL{d: d,
+		tmpdir:      tmpdir,
+		buffered:    buffered,
+		discard:     discard,
+		key:         make([]byte, 0, 128),
+		largeValues: true,
+	}
+	if buffered {
+		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.values.LogLvl(log.LvlTrace)
+	}
+	return w
+}
+
+func (d *Domain) etlLoader() etl.LoadFunc {
+	return func(k []byte, value []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if value == nil {
+			// instead of tx.Delete just skip its insertion
+			return nil
+		}
+		nk := common.Copy(k)
+		binary.BigEndian.PutUint64(nk[:len(nk)-8], ^(binary.BigEndian.Uint64(k[len(k)-8:]) / d.aggregationStep))
+		return next(k, nk, value)
+	}
+}
+
+func (h *domainWAL) close() {
+	if h == nil { // allow dobule-close
+		return
+	}
+	if h.values != nil {
+		h.values.Close()
+	}
+}
+
+func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
+	if h.discard {
+		return nil
+	}
+	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	h.close()
+	return nil
+}
+
+func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
+	if h.discard {
+		return nil
+	}
+
+	if h.largeValues {
+		lk := len(key1) + len(key2)
+		fullkey := h.key[:lk+8]
+		copy(fullkey, key1)
+		if len(key2) > 0 {
+			copy(fullkey[len(key1):], key2)
+		}
+		binary.BigEndian.PutUint64(fullkey[lk:], txnum)
+
+		if !h.buffered {
+			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
+				return err
+			}
+			return nil
+		}
+		if err := h.values.Collect(fullkey, original); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	lk := len(key1) + len(key2)
+	fullKey := h.key[:lk+8+len(original)]
+	copy(fullKey, key1)
+	copy(fullKey[len(key1):], key2)
+	binary.BigEndian.PutUint64(fullKey[lk:], txnum)
+	copy(fullKey[lk+8:], original)
+	historyKey1 := fullKey[:lk]
+	historyVal := fullKey[lk:]
+	if err := h.values.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
 	return nil
@@ -1595,7 +1666,6 @@ func (dc *DomainContext) statelessBtree(i int) *BtIndex {
 }
 
 func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	//var invertedStep [8]byte
 	dc.d.stats.TotalQueries.Add(1)
 
 	invertedStep := dc.numBuf
@@ -1614,7 +1684,6 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		v, found := dc.readFromFiles(key, fromTxNum)
 		return v, found, nil
 	}
-	//keySuffix := make([]byte, len(key)+8)
 	copy(dc.keyBuf[:], key)
 	copy(dc.keyBuf[len(key):], foundInvStep)
 	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
@@ -1622,6 +1691,12 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	return v, true, nil
+}
+func (d *Domain) Rotate() flusher {
+	hf := d.History.Rotate()
+	hf.d = d.wal
+	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
+	return hf
 }
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	//var invertedStep [8]byte
@@ -1637,11 +1712,11 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		panic("how to implement getLatest for files?")
-		return nil, false, nil
-		//dc.d.stats.HistoryQueries.Add(1)
-		//v, found := dc.readFromFiles(key, fromTxNum)
-		//return v, found, nil
+		//panic("how to implement getLatest for files?")
+		//return nil, false, nil
+		dc.d.stats.HistoryQueries.Add(1)
+		v, found := dc.readFromFiles(key, 0)
+		return v, found, nil
 	}
 	//keySuffix := make([]byte, len(key)+8)
 	copy(dc.keyBuf[:], key)

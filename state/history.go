@@ -483,15 +483,21 @@ func (h *History) FinishWrites() {
 func (h *History) Rotate() historyFlusher {
 	w := h.wal
 	h.wal = h.newWriter(h.wal.tmpdir, h.wal.buffered, h.wal.discard)
-	return historyFlusher{w, h.InvertedIndex.Rotate()}
+	return historyFlusher{h: w, i: h.InvertedIndex.Rotate()}
 }
 
 type historyFlusher struct {
 	h *historyWAL
 	i *invertedIndexWAL
+	d *domainWAL
 }
 
 func (f historyFlusher) Flush(ctx context.Context, tx kv.RwTx) error {
+	if f.d != nil {
+		if err := f.h.flush(ctx, tx); err != nil {
+			return err
+		}
+	}
 	if err := f.i.Flush(ctx, tx); err != nil {
 		return err
 	}

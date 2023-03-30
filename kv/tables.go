@@ -369,6 +369,10 @@ const (
 	// Domains and Inverted Indices
 	AccountKeys        = "AccountKeys"
 	AccountVals        = "AccountVals"
+	AccountDomain      = "AccountDomain"
+	StorageDomain      = "StorageDomain"
+	CodeDomain         = "CodeDomain"
+	CommitmentDomain   = "CommitmentDomain"
 	AccountHistoryKeys = "AccountHistoryKeys"
 	AccountHistoryVals = "AccountHistoryVals"
 	AccountIdx         = "AccountIdx"

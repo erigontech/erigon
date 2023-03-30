@@ -25,7 +25,6 @@ import (
 	math2 "math"
 	"path"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -40,6 +39,7 @@ import (
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -91,16 +91,16 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountVals, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageVals, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
 		return nil, err
 	}
-	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeVals, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
+	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -747,22 +747,22 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 }
 
 func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) (err error) {
-	closeAll := true
-	log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
-	sf, err := a.buildFiles(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeAll {
-			sf.Close()
-		}
-	}()
-	a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	//a.notifyAboutNewSnapshots()
-
-	closeAll = false
-	return nil
+	//closeAll := true
+	//log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
+	//sf, err := a.buildFiles(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep)
+	//if err != nil {
+	//	return err
+	//}
+	//defer func() {
+	//	if closeAll {
+	//		sf.Close()
+	//	}
+	//}()
+	//a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
+	////a.notifyAboutNewSnapshots()
+	//
+	//closeAll = false
+	return a.aggregate(ctx, step)
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {
@@ -983,8 +983,11 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (a *AggregatorV3) BufferedDomains() *SharedDomains {
-	return NewSharedDomains(path.Join(a.tmpdir, "shared"), a.accounts, a.code, a.storage, a.commitment)
+func (a *AggregatorV3) SharedDomains() *SharedDomains {
+	if a.shared == nil {
+		NewSharedDomains(path.Join(a.tmpdir, "shared"), a.accounts, a.code, a.storage, a.commitment)
+	}
+	return a.shared
 }
 
 func (a *AggregatorV3) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
@@ -1530,7 +1533,7 @@ func (a *AggregatorV3) AddLogTopic(topic []byte) error {
 
 func (a *AggregatorV3) UpdateAccount(addr []byte, data, prevData []byte) error {
 	a.commitment.TouchPlainKey(addr, data, a.commitment.TouchPlainKeyAccount)
-	return a.accounts.PutWitPrev(addr, nil, data, prevData)
+	return a.accounts.PutWithPrev(addr, nil, data, prevData)
 }
 
 func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
@@ -1538,7 +1541,7 @@ func (a *AggregatorV3) UpdateCode(addr []byte, code, prevCode []byte) error {
 	if len(code) == 0 {
 		return a.code.DeleteWithPrev(addr, nil, prevCode)
 	}
-	return a.code.PutWitPrev(addr, nil, code, prevCode)
+	return a.code.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
@@ -1551,10 +1554,10 @@ func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 		return err
 	}
 	var e error
-	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, _ []byte) {
+	if err := a.storage.defaultDc.IteratePrefix(addr, func(k, v []byte) {
 		a.commitment.TouchPlainKey(k, nil, a.commitment.TouchPlainKeyStorage)
 		if e == nil {
-			e = a.storage.Delete(k, nil)
+			e = a.storage.DeleteWithPrev(k, nil, v)
 		}
 	}); err != nil {
 		return err
@@ -1567,13 +1570,18 @@ func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) err
 	if len(value) == 0 {
 		return a.storage.Delete(addr, loc)
 	}
-	return a.storage.PutWitPrev(addr, loc, value, preVal)
+	return a.storage.PutWithPrev(addr, loc, value, preVal)
 }
 
 // ComputeCommitment evaluates commitment for processed state.
 // If `saveStateAfter`=true, then trie state will be saved to DB after commitment evaluation.
 func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash []byte, err error) {
 	// if commitment mode is Disabled, there will be nothing to compute on.
+	ctx := a.MakeContext()
+	defer ctx.Close()
+
+	a.commitment.ResetFns(ctx.branchFn, ctx.accountFn, ctx.storageFn)
+
 	mxCommitmentRunning.Inc()
 	rootHash, branchNodeUpdates, err := a.commitment.ComputeCommitment(trace)
 	mxCommitmentRunning.Dec()
@@ -1581,29 +1589,16 @@ func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash [
 	if err != nil {
 		return nil, err
 	}
-	//if a.seekTxNum > a.txNum {
-	//	saveStateAfter = false
-	//}
 
 	mxCommitmentKeys.Add(int(a.commitment.comKeys))
 	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
 
 	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
 
-	sortedPrefixes := make([]string, len(branchNodeUpdates))
-	for pref := range branchNodeUpdates {
-		sortedPrefixes = append(sortedPrefixes, pref)
-	}
-	sort.Strings(sortedPrefixes)
-
-	cct := a.commitment.MakeContext()
-	defer cct.Close()
-
-	for _, pref := range sortedPrefixes {
+	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
-		update := branchNodeUpdates[pref]
 
-		stateValue, err := cct.Get(prefix, nil, a.rwTx)
+		stateValue, _, err := ctx.CommitmentLatest(prefix, a.rwTx)
 		if err != nil {
 			return nil, err
 		}
@@ -1619,7 +1614,7 @@ func (a *AggregatorV3) ComputeCommitment(saveStateAfter, trace bool) (rootHash [
 		if trace {
 			fmt.Printf("computeCommitment merge [%x] [%x]+[%x]=>[%x]\n", prefix, stated, update, merged)
 		}
-		if err = a.commitment.Put(prefix, nil, merged); err != nil {
+		if err = a.commitment.PutWithPrev(prefix, nil, merged, stated); err != nil {
 			return nil, err
 		}
 		mxCommitmentUpdatesApplied.Inc()
@@ -1825,6 +1820,61 @@ func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
 		tracesTo:   a.tracesTo.MakeContext(),
 	}
 }
+
+func (ac *AggregatorV3Context) branchFn(prefix []byte) ([]byte, error) {
+	stateValue, ok, err := ac.CommitmentLatest(prefix, ac.a.rwTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed read branch %x: %w", commitment.CompactedKeyToHex(prefix), err)
+	}
+	if !ok || stateValue == nil {
+		return nil, nil
+	}
+	// fmt.Printf("Returning branch data prefix [%x], mergeVal=[%x]\n", commitment.CompactedKeyToHex(prefix), stateValue)
+	return stateValue[2:], nil // Skip touchMap but keep afterMap
+}
+
+func (ac *AggregatorV3Context) accountFn(plainKey []byte, cell *commitment.Cell) error {
+	encAccount, _, err := ac.AccountLatest(plainKey, ac.a.rwTx)
+	if err != nil {
+		return err
+	}
+	cell.Nonce = 0
+	cell.Balance.Clear()
+	copy(cell.CodeHash[:], commitment.EmptyCodeHash)
+	if len(encAccount) > 0 {
+		nonce, balance, chash := DecodeAccountBytes(encAccount)
+		cell.Nonce = nonce
+		cell.Balance.Set(balance)
+		if chash != nil {
+			copy(cell.CodeHash[:], chash)
+		}
+	}
+
+	code, ok, err := ac.CodeLatest(plainKey, ac.a.rwTx)
+	if err != nil {
+		return err
+	}
+	if ok && code != nil {
+		ac.a.commitment.keccak.Reset()
+		ac.a.commitment.keccak.Write(code)
+		copy(cell.CodeHash[:], ac.a.commitment.keccak.Sum(nil))
+	}
+	cell.Delete = len(encAccount) == 0 && len(code) == 0
+	return nil
+}
+
+func (ac *AggregatorV3Context) storageFn(plainKey []byte, cell *commitment.Cell) error {
+	// Look in the summary table first
+	enc, _, err := ac.StorageLatest(plainKey[:length.Addr], plainKey[length.Addr:], ac.a.rwTx)
+	if err != nil {
+		return err
+	}
+	cell.StorageLen = len(enc)
+	copy(cell.Storage[:], enc)
+	cell.Delete = cell.StorageLen == 0
+	return nil
+}
+
 func (ac *AggregatorV3Context) Close() {
 	ac.accounts.Close()
 	ac.storage.Close()
@@ -1930,6 +1980,13 @@ func (ac *AggregatorV3Context) CodeLatest(addr []byte, roTx kv.Tx) ([]byte, bool
 func (ac *AggregatorV3Context) IterAcc(prefix []byte, it func(k, v []byte), tx kv.RwTx) error {
 	ac.a.SetTx(tx)
 	return ac.accounts.IteratePrefix(prefix, it)
+}
+func (ac *AggregatorV3Context) CommitmentLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.commitment.GetLatest(addr, nil, roTx)
+}
+func (ac *AggregatorV3Context) IterStorage(prefix []byte, it func(k, v []byte), tx kv.RwTx) error {
+	ac.a.SetTx(tx)
+	return ac.storage.IteratePrefix(prefix, it)
 }
 
 // --- Domain part END ---
