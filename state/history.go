@@ -1862,6 +1862,7 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 	if len(hc.ic.files) == 0 {
 		return iter.EmptyKV, nil
 	}
+
 	if fromTxNum >= 0 && hc.ic.files[len(hc.ic.files)-1].endTxNum <= uint64(fromTxNum) {
 		return iter.EmptyKV, nil
 	}
@@ -1897,10 +1898,11 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 }
 
 func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KV, error) {
-	if asc == false {
+	if asc == order.Desc {
 		panic("not supported yet")
 	}
-	if len(hc.ic.files) > 0 && (fromTxNum >= 0 && hc.ic.files[len(hc.ic.files)-1].endTxNum >= uint64(fromTxNum)) {
+	rangeIsInFiles := toTxNum >= 0 && len(hc.ic.files) > 0 && hc.ic.files[len(hc.ic.files)-1].endTxNum >= uint64(toTxNum)
+	if rangeIsInFiles {
 		return iter.EmptyKV, nil
 	}
 	if hc.h.largeValues {
