@@ -2,6 +2,7 @@ package fork_graph_test
 
 import (
 	_ "embed"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -43,12 +44,12 @@ func TestForkGraph(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.Success)
 	// Now make blockC a bad block
-	blockC.Block.Slot = 8549 // some invalid thing
+	blockC.Block.ProposerIndex = 81214459 // some invalid thing
+	fmt.Println("A")
 	status, err = graph.AddChainSegment(blockC)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
 	haveStateHashPostFail, err := graph.LastState().HashSSZ()
-	// Ensure it ends up on correct state.
 	require.NoError(t, err)
 	require.Equal(t, expectedStateHashPostFail, haveStateHashPostFail)
 }
