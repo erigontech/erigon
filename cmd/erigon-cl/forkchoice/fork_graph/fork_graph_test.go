@@ -42,7 +42,7 @@ func TestForkGraph(t *testing.T) {
 	// Try again with same should yield success
 	status, err = graph.AddChainSegment(blockB)
 	require.NoError(t, err)
-	require.Equal(t, status, fork_graph.Success)
+	require.Equal(t, status, fork_graph.PreValidated)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	fmt.Println("A")

@@ -17,6 +17,16 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 	}
 }
 
+// updateCheckpoints updates the justified and finalized checkpoints if new checkpoints have higher epochs.
+func (f *ForkChoiceStore) updateUnrealizedCheckpoints(justifiedCheckpoint, finalizedCheckpoint *cltypes.Checkpoint) {
+	if justifiedCheckpoint.Epoch > f.unrealizedJustifiedCheckpoint.Epoch {
+		f.unrealizedJustifiedCheckpoint = justifiedCheckpoint
+	}
+	if finalizedCheckpoint.Epoch > f.unrealizedFinalizedCheckpoint.Epoch {
+		f.unrealizedFinalizedCheckpoint = finalizedCheckpoint
+	}
+}
+
 // computeEpochAtSlot calculates the epoch at a given slot number.
 func (f *ForkChoiceStore) computeEpochAtSlot(slot uint64) uint64 {
 	return slot / f.forkGraph.Config().SlotsPerEpoch

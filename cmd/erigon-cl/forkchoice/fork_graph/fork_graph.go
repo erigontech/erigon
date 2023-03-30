@@ -1,8 +1,6 @@
 package fork_graph
 
 import (
-	"fmt"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -21,6 +19,7 @@ const (
 	MissingSegment ChainSegmentInsertionResult = 2
 	BelowAnchor    ChainSegmentInsertionResult = 3
 	LogisticError  ChainSegmentInsertionResult = 4
+	PreValidated   ChainSegmentInsertionResult = 5
 )
 
 const maxGraphExtension = 256
@@ -85,10 +84,9 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	if err != nil {
 		return LogisticError, err
 	}
-	fmt.Println(block)
 
 	if _, ok := f.forwardEdges.Get(blockRoot); ok {
-		return Success, nil
+		return PreValidated, nil
 	}
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
