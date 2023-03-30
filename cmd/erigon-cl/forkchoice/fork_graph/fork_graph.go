@@ -5,6 +5,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/beacon_changeset"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
@@ -38,7 +39,7 @@ const maxGraphExtension = 256
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type ForkGraph struct {
-	inverseEdges          *lru.Cache[inverseForkStoreEdge, *beacon_changeset.ReverseBeaconStateChangeSet]
+	inverseEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ReverseBeaconStateChangeSet]
 	forwardEdges          *lru.Cache[libcommon.Hash, *cltypes.SignedBeaconBlock]
 	farthestExtendingPath *lru.Cache[libcommon.Hash, bool] // The longest path is used as the "canonical"
 	badBlocks             *lru.Cache[libcommon.Hash, bool] // blocks that are invalid and that leads to automatic fail of extension.
@@ -47,15 +48,9 @@ type ForkGraph struct {
 	anchorSlot uint64
 }
 
-// StateStoreEdge is the path beetwen 2 nodes unidirectionally.
-type inverseForkStoreEdge struct {
-	destinationStateBlockRoot libcommon.Hash
-	sourceStateBlockRoot      libcommon.Hash
-}
-
 // Initialize fork graph with a new state
 func New(anchorState *state.BeaconState) *ForkGraph {
-	inverseEdges, err := lru.New[inverseForkStoreEdge, *beacon_changeset.ReverseBeaconStateChangeSet](maxGraphExtension)
+	inverseEdges, err := lru.New[libcommon.Hash, *beacon_changeset.ReverseBeaconStateChangeSet](maxGraphExtension)
 	if err != nil {
 		panic(err)
 	}
@@ -85,7 +80,6 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 
 // Add a new node and edge to the graph
 func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (ChainSegmentInsertionResult, error) {
-	f.cleanOldNodesAndEdges()
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -126,10 +120,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 			return InvalidBlock, nil
 		}
 		// if it is finished then update the graph
-		f.inverseEdges.Add(inverseForkStoreEdge{
-			destinationStateBlockRoot: block.ParentRoot,
-			sourceStateBlockRoot:      blockRoot,
-		}, f.lastState.StopCollectingReverseChangeSet())
+		f.inverseEdges.Add(blockRoot, f.lastState.StopCollectingReverseChangeSet())
 		f.forwardEdges.Add(blockRoot, signedBlock)
 		f.farthestExtendingPath.Add(blockRoot, true)
 		return Success, nil
@@ -151,14 +142,11 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		blockRootsFromFarthestExtendingPath = append(blockRootsFromFarthestExtendingPath, currentRoot)
 	}
 	// Initalize edge.
-	edge := inverseForkStoreEdge{
-		sourceStateBlockRoot:      currentBlockRoot,
-		destinationStateBlockRoot: f.lastState.LatestBlockHeader().ParentRoot,
-	}
+	edge := currentBlockRoot
 	inverselyTraversedRoots := []libcommon.Hash{currentBlockRoot}
 
 	// Unwind to the recconection root.
-	for edge.sourceStateBlockRoot != currentIteratorRoot {
+	for edge != currentIteratorRoot {
 		changeset, isChangesetPreset := f.inverseEdges.Get(edge)
 		if !isChangesetPreset {
 			return MissingSegment, nil
@@ -171,10 +159,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		}
 		inverselyTraversedRoots = append(inverselyTraversedRoots, currentBlockRoot)
 		// go on.
-		edge = inverseForkStoreEdge{
-			sourceStateBlockRoot:      currentBlockRoot,
-			destinationStateBlockRoot: f.lastState.LatestBlockHeader().ParentRoot,
-		}
+		edge = currentBlockRoot
 	}
 	// Traverse the graph forward now (the nodes are in reverse order).
 	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
@@ -205,27 +190,12 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	}
 
 	// if it is finished then update the graph
-	f.inverseEdges.Add(inverseForkStoreEdge{
-		destinationStateBlockRoot: block.ParentRoot,
-		sourceStateBlockRoot:      blockRoot,
-	}, f.lastState.StopCollectingReverseChangeSet())
+	f.inverseEdges.Add(blockRoot, f.lastState.StopCollectingReverseChangeSet())
 
 	f.forwardEdges.Add(blockRoot, signedBlock)
 	f.farthestExtendingPath.Add(blockRoot, true)
 
 	return Success, nil
-}
-
-// Graph needs to be constant in extension so clean old nodes and edges periodically.
-func (f *ForkGraph) cleanOldNodesAndEdges() {
-	/*for edge := range f.inverseEdges {
-		if edge.sourceSlot+maxGraphExtension <= f.lastState.Slot() {
-			delete(f.forwardEdges, edge.destinationStateBlockRoot)
-			delete(f.forwardEdges, edge.sourceStateBlockRoot)
-			delete(f.farthestExtendingPath, edge.destinationStateBlockRoot)
-			delete(f.farthestExtendingPath, edge.sourceStateBlockRoot)
-		}
-	}*/
 }
 
 // LastState returns the last state.
@@ -235,6 +205,10 @@ func (f *ForkGraph) LastState() *state.BeaconState {
 
 func (f *ForkGraph) GenesisTime() uint64 {
 	return f.lastState.GenesisTime()
+}
+
+func (f *ForkGraph) Config() *clparams.BeaconChainConfig {
+	return f.lastState.BeaconConfig()
 }
 
 func (f *ForkGraph) GetBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, bool) {
