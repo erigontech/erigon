@@ -936,7 +936,7 @@ func reconstituteStep(last bool,
 	commitThreshold := batchSize.Bytes()
 	prevRollbackCount := uint64(0)
 	prevTime := time.Now()
-	reconDone := make(chan struct{})
+	reconDone := make(chan struct{}, 1)
 
 	defer close(reconDone)
 
