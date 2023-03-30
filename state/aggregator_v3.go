@@ -1917,6 +1917,23 @@ func (as *AggregatorStep) ReadAccountDataNoState(addr []byte, txNum uint64) ([]b
 	return as.accounts.GetNoState(addr, txNum)
 }
 
+// --- Domain part START ---
+func (ac *AggregatorV3Context) AccountLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.accounts.GetLatest(addr, nil, roTx)
+}
+func (ac *AggregatorV3Context) StorageLatest(addr []byte, loc []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.storage.GetLatest(addr, loc, roTx)
+}
+func (ac *AggregatorV3Context) CodeLatest(addr []byte, roTx kv.Tx) ([]byte, bool, error) {
+	return ac.code.GetLatest(addr, nil, roTx)
+}
+func (ac *AggregatorV3Context) IterAcc(prefix []byte, it func(k, v []byte), tx kv.RwTx) error {
+	ac.a.SetTx(tx)
+	return ac.accounts.IteratePrefix(prefix, it)
+}
+
+// --- Domain part END ---
+
 func (as *AggregatorStep) ReadAccountStorageNoState(addr []byte, loc []byte, txNum uint64) ([]byte, bool, uint64) {
 	if cap(as.keyBuf) < len(addr)+len(loc) {
 		as.keyBuf = make([]byte, len(addr)+len(loc))

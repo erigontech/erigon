@@ -1495,7 +1495,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 	if k, v, err = keysCursor.Seek(prefix); err != nil {
 		return err
 	}
-	if bytes.HasPrefix(k, prefix) {
+	if k != nil && bytes.HasPrefix(k, prefix) {
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
@@ -1519,7 +1519,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 
 		g := dc.statelessGetter(i)
 		key := cursor.Key()
-		if bytes.HasPrefix(key, prefix) {
+		if key != nil && bytes.HasPrefix(key, prefix) {
 			val := cursor.Value()
 			heap.Push(&cp, &CursorItem{t: FILE_CURSOR, key: key, val: val, dg: g, endTxNum: item.endTxNum, reverse: true})
 		}
@@ -1534,7 +1534,7 @@ func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) erro
 			case FILE_CURSOR:
 				if ci1.dg.HasNext() {
 					ci1.key, _ = ci1.dg.Next(ci1.key[:0])
-					if bytes.HasPrefix(ci1.key, prefix) {
+					if ci1.key != nil && bytes.HasPrefix(ci1.key, prefix) {
 						ci1.val, _ = ci1.dg.Next(ci1.val[:0])
 						heap.Fix(&cp, 0)
 					} else {
@@ -1623,6 +1623,35 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 	}
 	return v, true, nil
 }
+func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
+	//var invertedStep [8]byte
+	dc.d.stats.TotalQueries.Add(1)
+
+	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
+	if err != nil {
+		return nil, false, err
+	}
+	defer keyCursor.Close()
+	foundInvStep, err := keyCursor.SeekBothRange(key, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(foundInvStep) == 0 {
+		panic("how to implement getLatest for files?")
+		return nil, false, nil
+		//dc.d.stats.HistoryQueries.Add(1)
+		//v, found := dc.readFromFiles(key, fromTxNum)
+		//return v, found, nil
+	}
+	//keySuffix := make([]byte, len(key)+8)
+	copy(dc.keyBuf[:], key)
+	copy(dc.keyBuf[len(key):], foundInvStep)
+	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
+	if err != nil {
+		return nil, false, err
+	}
+	return v, true, nil
+}
 
 func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 	//key := make([]byte, len(key1)+len(key2))
@@ -1631,4 +1660,10 @@ func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 	// keys larger than 52 bytes will panic
 	v, _, err := dc.get(dc.keyBuf[:len(key1)+len(key2)], dc.d.txNum, roTx)
 	return v, err
+}
+
+func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+	copy(dc.keyBuf[:], key1)
+	copy(dc.keyBuf[len(key1):], key2)
+	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }
