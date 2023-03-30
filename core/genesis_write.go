@@ -49,6 +49,9 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+//go:embed allocs
+var allocs embed.FS
+
 // CommitGenesisBlock writes or updates the genesis block in db.
 // The block that will be used is:
 //
@@ -644,9 +647,6 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 	slices.Sort(keys)
 	return keys
 }
-
-//go:embed allocs
-var allocs embed.FS
 
 func readPrealloc(filename string) types.GenesisAlloc {
 	f, err := allocs.Open(filename)

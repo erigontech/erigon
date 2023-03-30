@@ -1,9 +1,6 @@
 package state
 
 import (
-	"encoding/binary"
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -26,7 +23,6 @@ func (r *ReaderV4) ReadAccountData(address libcommon.Address) (*accounts.Account
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("read: %x, %d\n", address, len(enc))
 	if !ok || len(enc) == 0 {
 		return nil, nil
 	}
@@ -69,12 +65,5 @@ func (r *ReaderV4) ReadAccountCodeSize(address libcommon.Address, incarnation ui
 
 func (r *ReaderV4) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
 	panic(1)
-	b, err := r.tx.GetOne(kv.IncarnationMap, address.Bytes())
-	if err != nil {
-		return 0, err
-	}
-	if len(b) == 0 {
-		return 0, nil
-	}
-	return binary.BigEndian.Uint64(b), nil
+	return 0, nil
 }

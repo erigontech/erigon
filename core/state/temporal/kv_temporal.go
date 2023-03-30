@@ -293,11 +293,11 @@ func (tx *Tx) DomainGet(name kv.Domain, key, key2 []byte) (v []byte, ok bool, er
 	if ethconfig.EnableHistoryV4InTest {
 		switch name {
 		case AccountsDomain:
-			return tx.agg.ReadAccount(key, tx.MdbxTx)
+			return tx.agg.AccountLatest(key, tx.MdbxTx)
 		case StorageDomain:
-			return tx.agg.ReadStorage(key, key2, tx.MdbxTx)
+			return tx.agg.StorageLatest(key, key2, tx.MdbxTx)
 		case CodeDomain:
-			return tx.agg.ReadCode(key, tx.MdbxTx)
+			return tx.agg.CodeLatest(key, tx.MdbxTx)
 		default:
 			panic(fmt.Sprintf("unexpected: %s", name))
 		}
