@@ -17,6 +17,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"os"
@@ -35,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 )
 
 func TestDefaults(t *testing.T) {
@@ -152,13 +152,17 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{}
-	db := olddb.NewObjectDatabase(memdb.New(""))
+	db := memdb.New("")
 	defer db.Close()
-	cfg.r = state.NewDbStateReader(db)
-	cfg.w = state.NewDbStateWriter(db, 0)
+	tx, err := db.BeginRw(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	cfg.r = state.NewPlainStateReader(tx)
+	cfg.w = state.NewPlainStateWriter(tx, tx, 0)
 	cfg.State = state.New(cfg.r)
 
-	cfg.State = state.New(cfg.r)
 	cfg.Debug = true
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

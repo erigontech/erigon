@@ -17,13 +17,14 @@
 package core_test
 
 import (
+	"context"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
@@ -44,19 +45,23 @@ func TestHeaderVerification(t *testing.T) {
 
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
-		for j, valid := range []bool{true, false} {
-			if valid {
-				engine := ethash.NewFaker()
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
-			} else {
-				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+			for j, valid := range []bool{true, false} {
+				if valid {
+					engine := ethash.NewFaker()
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx}, chain.Headers[i], true)
+				} else {
+					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainConfig, Db: tx}, chain.Headers[i], true)
+				}
+				if (err == nil) != valid {
+					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
+				}
 			}
-			if (err == nil) != valid {
-				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
-			}
+			return nil
+		}); err != nil {
+			panic(err)
 		}
-
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
@@ -81,19 +86,23 @@ func TestHeaderWithSealVerification(t *testing.T) {
 
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
 	for i := 0; i < chain.Length(); i++ {
-		for j, valid := range []bool{true, false} {
-			if valid {
-				engine := ethash.NewFaker()
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
-			} else {
-				engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
-				err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: olddb.NewObjectDatabase(m.DB)}, chain.Headers[i], true)
+		if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+			for j, valid := range []bool{true, false} {
+				if valid {
+					engine := ethash.NewFaker()
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx}, chain.Headers[i], true)
+				} else {
+					engine := ethash.NewFakeFailer(chain.Headers[i].Number.Uint64())
+					err = engine.VerifyHeader(stagedsync.ChainReader{Cfg: *params.TestChainAuraConfig, Db: tx}, chain.Headers[i], true)
+				}
+				if (err == nil) != valid {
+					t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
+				}
 			}
-			if (err == nil) != valid {
-				t.Errorf("test %d.%d: validity mismatch: have %v, want %v", i, j, err, valid)
-			}
+			return nil
+		}); err != nil {
+			panic(err)
 		}
-
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
 			t.Fatalf("test %d: error inserting the block: %v", i, err)
 		}
