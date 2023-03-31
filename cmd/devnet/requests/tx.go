@@ -35,7 +35,7 @@ func TxpoolContent(reqId int) (int, int, int, error) {
 
 	if resp["queue"] != nil {
 		queued = resp["queue"].(map[string]interface{})
-		for _, txs := range pending {
+		for _, txs := range queued {
 			queuedLen += len(txs.(map[string]interface{}))
 		}
 	}
