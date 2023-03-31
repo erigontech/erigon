@@ -74,7 +74,6 @@ func testSanityFunction(context testContext) error {
 	for i := len(changes) - 1; i >= 0; i-- {
 		testState.RevertWithChangeset(changes[i])
 	}
-
 	expectedRoot, err := initialState.HashSSZ()
 	if err != nil {
 		return err
@@ -90,7 +89,6 @@ func testSanityFunction(context testContext) error {
 	}
 	// Execute them back (ensure cache is good.)
 	for _, block = range blocks {
-		testState.StartCollectingReverseChangeSet()
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break

@@ -44,64 +44,53 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBea
 	beforeSlot := b.slot
 	var touched bool
 	// Updates all single types accordingly.
-	if changeset.SlotChange != nil {
-		b.slot = *changeset.SlotChange
+	if b.slot, touched = changeset.ApplySlotChange(b.slot); touched {
 		b.touchedLeaves[SlotLeafIndex] = true
 	}
-	if changeset.ForkChange != nil {
-		b.fork = changeset.ForkChange
+	if b.fork, touched = changeset.ApplyForkChange(b.fork); touched {
 		b.touchedLeaves[ForkLeafIndex] = true
 	}
-	if changeset.LatestBlockHeaderChange != nil {
-		b.latestBlockHeader = changeset.LatestBlockHeaderChange
+	if b.latestBlockHeader, touched = changeset.ApplyLatestBlockHeader(b.latestBlockHeader); touched {
 		b.touchedLeaves[LatestBlockHeaderLeafIndex] = true
 	}
-	if changeset.Eth1DataChange != nil {
-		b.eth1Data = changeset.Eth1DataChange
+	if b.eth1Data, touched = changeset.ApplyEth1DataChange(b.eth1Data); touched {
 		b.touchedLeaves[Eth1DataLeafIndex] = true
 	}
-	if changeset.Eth1DepositIndexChange != nil {
-		b.eth1DepositIndex = *changeset.Eth1DepositIndexChange
+	if b.eth1DepositIndex, touched = changeset.ApplyEth1DepositIndexChange(b.eth1DepositIndex); touched {
 		b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
 	}
-	if changeset.JustificationBitsChange != nil {
-		b.justificationBits = *changeset.JustificationBitsChange
+	if b.justificationBits, touched = changeset.ApplyJustificationBitsChange(b.justificationBits); touched {
 		b.touchedLeaves[JustificationBitsLeafIndex] = true
 	}
-	if changeset.PreviousJustifiedCheckpointChange != nil {
-		b.previousJustifiedCheckpoint = changeset.PreviousJustifiedCheckpointChange
+	if b.previousJustifiedCheckpoint, touched = changeset.ApplyPreviousJustifiedCheckpointChange(b.previousJustifiedCheckpoint); touched {
 		b.touchedLeaves[PreviousJustifiedCheckpointLeafIndex] = true
 	}
-	if changeset.CurrentJustifiedCheckpointChange != nil {
-		b.currentJustifiedCheckpoint = changeset.CurrentJustifiedCheckpointChange
+	if b.currentJustifiedCheckpoint, touched = changeset.ApplyCurrentJustifiedCheckpointChange(b.currentJustifiedCheckpoint); touched {
 		b.touchedLeaves[CurrentJustifiedCheckpointLeafIndex] = true
 	}
-	if changeset.FinalizedCheckpointChange != nil {
-		b.finalizedCheckpoint = changeset.FinalizedCheckpointChange
+	if b.finalizedCheckpoint, touched = changeset.ApplyFinalizedCheckpointChange(b.finalizedCheckpoint); touched {
 		b.touchedLeaves[FinalizedCheckpointLeafIndex] = true
 	}
-	if changeset.CurrentSyncCommitteeChange != nil {
-		b.currentSyncCommittee = changeset.CurrentSyncCommitteeChange
+	if b.currentSyncCommittee, touched = changeset.ApplyCurrentSyncCommitteeChange(b.currentSyncCommittee); touched {
 		b.touchedLeaves[CurrentSyncCommitteeLeafIndex] = true
 	}
-	if changeset.NextSyncCommitteeChange != nil {
-		b.nextSyncCommittee = changeset.NextSyncCommitteeChange
+	if b.nextSyncCommittee, touched = changeset.ApplyNextSyncCommitteeChange(b.nextSyncCommittee); touched {
 		b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
 	}
-	if changeset.LatestExecutionPayloadHeaderChange != nil {
-		b.latestExecutionPayloadHeader = changeset.LatestExecutionPayloadHeaderChange
-		b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
+	if b.version >= clparams.BellatrixVersion {
+		if b.latestExecutionPayloadHeader, touched = changeset.ApplyLatestExecutionPayloadHeaderChange(b.latestExecutionPayloadHeader); touched {
+			b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
+		}
 	}
-	if changeset.NextWithdrawalIndexChange != nil {
-		b.nextWithdrawalIndex = *changeset.NextWithdrawalIndexChange
-		b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
+	if b.version >= clparams.CapellaVersion {
+		if b.nextWithdrawalIndex, touched = changeset.ApplyNextWithdrawalIndexChange(b.nextWithdrawalIndex); touched {
+			b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
+		}
+		if b.nextWithdrawalValidatorIndex, touched = changeset.ApplyNextValidatorWithdrawalIndexChange(b.nextWithdrawalValidatorIndex); touched {
+			b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
+		}
 	}
-	if changeset.NextWithdrawalValidatorIndexChange != nil {
-		b.nextWithdrawalValidatorIndex = *changeset.NextWithdrawalValidatorIndexChange
-		b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
-	}
-	if changeset.VersionChange != nil {
-		b.version = *changeset.VersionChange
+	if b.version, touched = changeset.ApplyVersionChange(b.version); touched {
 		if b.version == clparams.AltairVersion {
 			b.leaves[LatestExecutionPayloadHeaderLeafIndex] = libcommon.Hash{}
 			b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = false

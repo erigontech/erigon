@@ -12,7 +12,7 @@ const maxEth1Votes = 2048
 
 func (b *BeaconState) SetSlot(slot uint64) {
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnSlotChange(b.slot)
+		b.reverseChangeset.OnSlotChange(b.slot, false)
 	}
 	b.touchedLeaves[SlotLeafIndex] = true
 	b.slot = slot
@@ -25,7 +25,7 @@ func (b *BeaconState) SetSlot(slot uint64) {
 func (b *BeaconState) SetFork(fork *cltypes.Fork) {
 	b.touchedLeaves[ForkLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnForkChange(b.fork)
+		b.reverseChangeset.OnForkChange(b.fork, false)
 	}
 	b.fork = fork
 }
@@ -33,7 +33,7 @@ func (b *BeaconState) SetFork(fork *cltypes.Fork) {
 func (b *BeaconState) SetLatestBlockHeader(header *cltypes.BeaconBlockHeader) {
 	b.touchedLeaves[LatestBlockHeaderLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader)
+		b.reverseChangeset.OnLatestHeaderChange(b.latestBlockHeader, false)
 	}
 	b.latestBlockHeader = header
 }
@@ -113,7 +113,7 @@ func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int
 func (b *BeaconState) SetEth1Data(eth1Data *cltypes.Eth1Data) {
 	b.touchedLeaves[Eth1DataLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1DataChange(eth1Data)
+		b.reverseChangeset.OnEth1DataChange(eth1Data, false)
 	}
 	b.eth1Data = eth1Data
 }
@@ -134,7 +134,7 @@ func (b *BeaconState) ResetEth1DataVotes() {
 func (b *BeaconState) SetEth1DepositIndex(eth1DepositIndex uint64) {
 	b.touchedLeaves[Eth1DepositIndexLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1DepositIndexChange(b.eth1DepositIndex)
+		b.reverseChangeset.OnEth1DepositIndexChange(b.eth1DepositIndex, false)
 	}
 	b.eth1DepositIndex = eth1DepositIndex
 }
@@ -225,7 +225,7 @@ func (b *BeaconState) ResetEpochParticipation() {
 func (b *BeaconState) SetJustificationBits(justificationBits cltypes.JustificationBits) {
 	b.touchedLeaves[JustificationBitsLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnJustificationBitsChange(b.justificationBits)
+		b.reverseChangeset.OnJustificationBitsChange(b.justificationBits, false)
 	}
 	b.justificationBits = justificationBits
 }
@@ -233,7 +233,7 @@ func (b *BeaconState) SetJustificationBits(justificationBits cltypes.Justificati
 func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[PreviousJustifiedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnPreviousJustifiedCheckpointChange(b.previousJustifiedCheckpoint)
+		b.reverseChangeset.OnPreviousJustifiedCheckpointChange(b.previousJustifiedCheckpoint, false)
 	}
 	b.previousJustifiedCheckpoint = previousJustifiedCheckpoint
 }
@@ -241,7 +241,7 @@ func (b *BeaconState) SetPreviousJustifiedCheckpoint(previousJustifiedCheckpoint
 func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[CurrentJustifiedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnCurrentJustifiedCheckpointChange(b.currentJustifiedCheckpoint)
+		b.reverseChangeset.OnCurrentJustifiedCheckpointChange(b.currentJustifiedCheckpoint, false)
 	}
 	b.currentJustifiedCheckpoint = currentJustifiedCheckpoint
 }
@@ -249,7 +249,7 @@ func (b *BeaconState) SetCurrentJustifiedCheckpoint(currentJustifiedCheckpoint *
 func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkpoint) {
 	b.touchedLeaves[FinalizedCheckpointLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnFinalizedCheckpointChange(b.finalizedCheckpoint)
+		b.reverseChangeset.OnFinalizedCheckpointChange(b.finalizedCheckpoint, false)
 	}
 	b.finalizedCheckpoint = finalizedCheckpoint
 }
@@ -257,7 +257,7 @@ func (b *BeaconState) SetFinalizedCheckpoint(finalizedCheckpoint *cltypes.Checkp
 func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[CurrentSyncCommitteeLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnCurrentSyncCommitteeChange(b.currentSyncCommittee)
+		b.reverseChangeset.OnCurrentSyncCommitteeChange(b.currentSyncCommittee, false)
 	}
 	b.currentSyncCommittee = currentSyncCommittee
 }
@@ -265,7 +265,7 @@ func (b *BeaconState) SetCurrentSyncCommittee(currentSyncCommittee *cltypes.Sync
 func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommittee) {
 	b.touchedLeaves[NextSyncCommitteeLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnNextSyncCommitteeChange(b.nextSyncCommittee)
+		b.reverseChangeset.OnNextSyncCommitteeChange(b.nextSyncCommittee, false)
 	}
 	b.nextSyncCommittee = nextSyncCommittee
 }
@@ -273,7 +273,7 @@ func (b *BeaconState) SetNextSyncCommittee(nextSyncCommittee *cltypes.SyncCommit
 func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header) {
 	b.touchedLeaves[LatestExecutionPayloadHeaderLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader)
+		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader, false)
 	}
 	b.latestExecutionPayloadHeader = header
 }
@@ -281,7 +281,7 @@ func (b *BeaconState) SetLatestExecutionPayloadHeader(header *cltypes.Eth1Header
 func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
 	b.touchedLeaves[NextWithdrawalIndexLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnNextWithdrawalIndexChange(b.nextWithdrawalIndex)
+		b.reverseChangeset.OnNextWithdrawalIndexChange(b.nextWithdrawalIndex, false)
 	}
 	b.nextWithdrawalIndex = index
 }
@@ -289,7 +289,7 @@ func (b *BeaconState) SetNextWithdrawalIndex(index uint64) {
 func (b *BeaconState) SetNextWithdrawalValidatorIndex(index uint64) {
 	b.touchedLeaves[NextWithdrawalValidatorIndexLeafIndex] = true
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnNextWithdrawalValidatorIndexChange(b.nextWithdrawalValidatorIndex)
+		b.reverseChangeset.OnNextWithdrawalValidatorIndexChange(b.nextWithdrawalValidatorIndex, false)
 	}
 	b.nextWithdrawalValidatorIndex = index
 }

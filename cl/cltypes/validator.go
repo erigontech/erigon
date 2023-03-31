@@ -210,6 +210,14 @@ type SyncCommittee struct {
 	AggregatePublicKey [48]byte   `ssz-size:"48"`
 }
 
+func (s *SyncCommittee) Copy() *SyncCommittee {
+	copied := new(SyncCommittee)
+	copied.AggregatePublicKey = s.AggregatePublicKey
+	copied.PubKeys = make([][48]byte, len(s.PubKeys))
+	copy(copied.PubKeys, s.PubKeys)
+	return copied
+}
+
 // MarshalSSZTo ssz marshals the SyncCommittee object to a target array
 func (s *SyncCommittee) EncodeSSZ(buf []byte) ([]byte, error) {
 	dst := buf

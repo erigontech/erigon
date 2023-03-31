@@ -60,8 +60,8 @@ func (b *BeaconState) UpgradeToBellatrix() error {
 	b.previousStateRoot = libcommon.Hash{}
 	epoch := b.Epoch()
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnVersionChange(b.version)
-		b.reverseChangeset.OnForkChange(b.fork)
+		b.reverseChangeset.OnVersionChange(b.version, false)
+		b.reverseChangeset.OnForkChange(b.fork, false)
 	}
 	// update version
 	b.fork.Epoch = epoch
@@ -79,9 +79,9 @@ func (b *BeaconState) UpgradeToCapella() error {
 	b.previousStateRoot = libcommon.Hash{}
 	epoch := b.Epoch()
 	if b.reverseChangeset != nil {
-		b.reverseChangeset.OnVersionChange(b.version)
-		b.reverseChangeset.OnForkChange(b.fork)
-		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader)
+		b.reverseChangeset.OnVersionChange(b.version, false)
+		b.reverseChangeset.OnForkChange(b.fork, false)
+		b.reverseChangeset.OnEth1Header(b.latestExecutionPayloadHeader, false)
 	}
 	// update version
 	b.fork.Epoch = epoch

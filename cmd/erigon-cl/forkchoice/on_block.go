@@ -1,6 +1,8 @@
 package forkchoice
 
 import (
+	"fmt"
+
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice/fork_graph"
@@ -13,6 +15,11 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
+	}
+	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch)
+	if block.Block.Slot <= finalizedSlot {
+		return fmt.Errorf("block is too late compared to finalized")
 	}
 
 	config := f.forkGraph.Config()
