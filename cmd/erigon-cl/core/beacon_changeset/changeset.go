@@ -6,9 +6,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-// This type of changeset is the diff beetwen next state and input state and is used to reverse beacon state.
-// It does not work the other way around. So they apply [curr state] + [reverse change set] = [prev state]
-type ReverseBeaconStateChangeSet struct {
+// This type of changeset is the diff beetwen next state and input state and is used to reverse/forward beacon state.
+type ChangeSet struct {
 	// Single types.
 	slotChange                         *uint64
 	forkChange                         *cltypes.Fork
@@ -36,7 +35,7 @@ type ReverseBeaconStateChangeSet struct {
 	PreviousEpochParticipationChanges *ListChangeSet[cltypes.ParticipationFlags]
 	CurrentEpochParticipationChanges  *ListChangeSet[cltypes.ParticipationFlags]
 	InactivityScoresChanges           *ListChangeSet[uint64]
-	HistoricalSummaryChange           *ListChangeSet[cltypes.HistoricalSummary]
+	historicalSummaryChange           *ListChangeSet[cltypes.HistoricalSummary]
 	// Validator fields.
 	WithdrawalCredentialsChange      *ListChangeSet[libcommon.Hash]
 	EffectiveBalanceChange           *ListChangeSet[uint64]
@@ -53,7 +52,31 @@ type ReverseBeaconStateChangeSet struct {
 	wasEpochParticipationReset        bool
 }
 
-func (r *ReverseBeaconStateChangeSet) OnSlotChange(prevSlot uint64, replaceExisting bool) {
+func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, historicalSummariesLength, historicalRootsLength, votesLength, randaoMixesLength int) *ChangeSet {
+	return &ChangeSet{
+		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength),
+		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength),
+		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength),
+		Eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength),
+		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize),
+		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength),
+		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength),
+		PreviousEpochParticipationChanges: NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
+		CurrentEpochParticipationChanges:  NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
+		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize),
+		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength),
+		// Validators section
+		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize),
+		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize),
+		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize),
+		ActivationEpochChange:            NewListChangeSet[uint64](validatorSetSize),
+		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize),
+		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize),
+		SlashedChange:                    NewListChangeSet[bool](validatorSetSize),
+	}
+}
+
+func (r *ChangeSet) OnSlotChange(prevSlot uint64, replaceExisting bool) {
 	if !replaceExisting && r.slotChange != nil {
 		return
 	}
@@ -61,7 +84,7 @@ func (r *ReverseBeaconStateChangeSet) OnSlotChange(prevSlot uint64, replaceExist
 	*r.slotChange = prevSlot
 }
 
-func (r *ReverseBeaconStateChangeSet) OnForkChange(fork *cltypes.Fork, replaceExisting bool) {
+func (r *ChangeSet) OnForkChange(fork *cltypes.Fork, replaceExisting bool) {
 	if !replaceExisting && r.forkChange != nil {
 		return
 	}
@@ -69,7 +92,7 @@ func (r *ReverseBeaconStateChangeSet) OnForkChange(fork *cltypes.Fork, replaceEx
 	*r.forkChange = *fork
 }
 
-func (r *ReverseBeaconStateChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader, replaceExisting bool) {
+func (r *ChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader, replaceExisting bool) {
 	if !replaceExisting && r.latestBlockHeaderChange != nil {
 		return
 	}
@@ -77,7 +100,7 @@ func (r *ReverseBeaconStateChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBloc
 	*r.latestBlockHeaderChange = *h
 }
 
-func (r *ReverseBeaconStateChangeSet) OnEth1DataChange(e *cltypes.Eth1Data, replaceExisting bool) {
+func (r *ChangeSet) OnEth1DataChange(e *cltypes.Eth1Data, replaceExisting bool) {
 	if !replaceExisting && r.latestBlockHeaderChange != nil {
 		return
 	}
@@ -85,7 +108,7 @@ func (r *ReverseBeaconStateChangeSet) OnEth1DataChange(e *cltypes.Eth1Data, repl
 	*r.eth1DataChange = *e
 }
 
-func (r *ReverseBeaconStateChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits, replaceExisting bool) {
+func (r *ChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits, replaceExisting bool) {
 	if !replaceExisting && r.justificationBitsChange != nil {
 		return
 	}
@@ -93,7 +116,7 @@ func (r *ReverseBeaconStateChangeSet) OnJustificationBitsChange(j cltypes.Justif
 	*r.justificationBitsChange = j.Copy()
 }
 
-func (r *ReverseBeaconStateChangeSet) OnEth1DepositIndexChange(e uint64, replaceExisting bool) {
+func (r *ChangeSet) OnEth1DepositIndexChange(e uint64, replaceExisting bool) {
 	if !replaceExisting && r.eth1DepositIndexChange != nil {
 		return
 	}
@@ -101,28 +124,28 @@ func (r *ReverseBeaconStateChangeSet) OnEth1DepositIndexChange(e uint64, replace
 	*r.eth1DepositIndexChange = e
 }
 
-func (r *ReverseBeaconStateChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
+func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
 	if !replaceExisting && r.previousJustifiedCheckpointChange != nil {
 		return
 	}
 	r.previousJustifiedCheckpointChange = c.Copy()
 }
 
-func (r *ReverseBeaconStateChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
+func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
 	if !replaceExisting && r.currentJustifiedCheckpointChange != nil {
 		return
 	}
 	r.currentJustifiedCheckpointChange = c.Copy()
 }
 
-func (r *ReverseBeaconStateChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
+func (r *ChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
 	if !replaceExisting && r.finalizedCheckpointChange != nil {
 		return
 	}
 	r.finalizedCheckpointChange = c.Copy()
 }
 
-func (r *ReverseBeaconStateChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
+func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
 	if !replaceExisting && r.currentSyncCommitteeChange != nil {
 		return
 	}
@@ -132,7 +155,7 @@ func (r *ReverseBeaconStateChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.Sy
 	copy(r.currentSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ReverseBeaconStateChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
+func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
 	if !replaceExisting && r.nextSyncCommitteeChange != nil {
 		return
 	}
@@ -142,7 +165,7 @@ func (r *ReverseBeaconStateChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncC
 	copy(r.nextSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ReverseBeaconStateChangeSet) OnEth1Header(e *cltypes.Eth1Header, replaceExisting bool) {
+func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header, replaceExisting bool) {
 	if !replaceExisting && r.latestExecutionPayloadHeaderChange != nil {
 		return
 	}
@@ -151,7 +174,7 @@ func (r *ReverseBeaconStateChangeSet) OnEth1Header(e *cltypes.Eth1Header, replac
 	r.latestExecutionPayloadHeaderChange.Extra = libcommon.Copy(e.Extra)
 }
 
-func (r *ReverseBeaconStateChangeSet) OnNextWithdrawalIndexChange(index uint64, replaceExisting bool) {
+func (r *ChangeSet) OnNextWithdrawalIndexChange(index uint64, replaceExisting bool) {
 	if !replaceExisting && r.nextWithdrawalIndexChange != nil {
 		return
 	}
@@ -159,7 +182,7 @@ func (r *ReverseBeaconStateChangeSet) OnNextWithdrawalIndexChange(index uint64, 
 	*r.nextWithdrawalIndexChange = index
 }
 
-func (r *ReverseBeaconStateChangeSet) OnNextWithdrawalValidatorIndexChange(index uint64, replaceExisting bool) {
+func (r *ChangeSet) OnNextWithdrawalValidatorIndexChange(index uint64, replaceExisting bool) {
 	if !replaceExisting && r.nextWithdrawalValidatorIndexChange != nil {
 		return
 	}
@@ -167,7 +190,7 @@ func (r *ReverseBeaconStateChangeSet) OnNextWithdrawalValidatorIndexChange(index
 	*r.nextWithdrawalValidatorIndexChange = index
 }
 
-func (r *ReverseBeaconStateChangeSet) OnVersionChange(v clparams.StateVersion, replaceExisting bool) {
+func (r *ChangeSet) OnVersionChange(v clparams.StateVersion, replaceExisting bool) {
 	if !replaceExisting && r.versionChange != nil {
 		return
 	}
@@ -175,29 +198,29 @@ func (r *ReverseBeaconStateChangeSet) OnVersionChange(v clparams.StateVersion, r
 	*r.versionChange = v
 }
 
-func (r *ReverseBeaconStateChangeSet) HasValidatorSetNotChanged(validatorSetLength int) bool {
+func (r *ChangeSet) HasValidatorSetNotChanged(validatorSetLength int) bool {
 	return validatorSetLength == r.WithdrawalCredentialsChange.ListLength() && r.WithdrawalCredentialsChange.Empty() && r.ActivationEligibilityEpochChange.Empty() && r.ActivationEpochChange.Empty() &&
 		r.EffectiveBalanceChange.Empty() && r.SlashedChange.Empty() && r.ExitEpochChange.Empty() && r.WithdrawalEpochChange.Empty()
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSummary) (output []*cltypes.HistoricalSummary, changed bool) {
+func (r *ChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSummary) (output []*cltypes.HistoricalSummary, changed bool) {
 	output = input
-	if r.HistoricalSummaryChange.Empty() && r.HistoricalSummaryChange.ListLength() == len(output) {
+	if r.historicalSummaryChange.Empty() && r.historicalSummaryChange.ListLength() == len(output) {
 		return
 	}
 	changed = true
-	historicalSummarryLength := r.HistoricalSummaryChange.ListLength()
+	historicalSummarryLength := r.historicalSummaryChange.ListLength()
 	if historicalSummarryLength != len(output) {
 		output = make([]*cltypes.HistoricalSummary, historicalSummarryLength)
 		copy(output, input)
 	}
-	r.HistoricalSummaryChange.ChangesWithHandler(func(value cltypes.HistoricalSummary, index int) {
+	r.historicalSummaryChange.ChangesWithHandler(func(value cltypes.HistoricalSummary, index int) {
 		*output[index] = value
 	})
 	return
 }
 
-func (r *ReverseBeaconStateChangeSet) CompactChanges() {
+func (r *ChangeSet) CompactChanges() {
 
 	r.BlockRootsChanges.CompactChangesReverse()
 	r.StateRootsChanges.CompactChangesReverse()
@@ -228,7 +251,7 @@ func (r *ReverseBeaconStateChangeSet) CompactChanges() {
 	r.WithdrawalEpochChange.CompactChangesReverse()
 }
 
-func (r *ReverseBeaconStateChangeSet) ReportVotesReset(previousVotes []*cltypes.Eth1Data) {
+func (r *ChangeSet) ReportVotesReset(previousVotes []*cltypes.Eth1Data) {
 	if r.wasEth1DataVotesReset {
 		return
 	}
@@ -240,7 +263,7 @@ func (r *ReverseBeaconStateChangeSet) ReportVotesReset(previousVotes []*cltypes.
 	r.wasEth1DataVotesReset = true
 }
 
-func (r *ReverseBeaconStateChangeSet) ReportEpochParticipationReset(prevParticipation, currParticpation cltypes.ParticipationFlagsList) {
+func (r *ChangeSet) ReportEpochParticipationReset(prevParticipation, currParticpation cltypes.ParticipationFlagsList) {
 	if r.wasEpochParticipationReset {
 		return
 	}
@@ -249,7 +272,7 @@ func (r *ReverseBeaconStateChangeSet) ReportEpochParticipationReset(prevParticip
 	r.wasEpochParticipationReset = true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyEth1DataVotesChanges(initialVotes []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
+func (r *ChangeSet) ApplyEth1DataVotesChanges(initialVotes []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
 	if r.wasEth1DataVotesReset {
 		return r.eth1DataVotesAtReset, true
 	}
@@ -268,7 +291,7 @@ func (r *ReverseBeaconStateChangeSet) ApplyEth1DataVotesChanges(initialVotes []*
 	return
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyEpochParticipationChanges(
+func (r *ChangeSet) ApplyEpochParticipationChanges(
 	previousEpochParticipation cltypes.ParticipationFlagsList,
 	currentEpochParticipation cltypes.ParticipationFlagsList) (newPreviousEpochParticipation cltypes.ParticipationFlagsList, newCurrentEpochParticipation cltypes.ParticipationFlagsList,
 	previousParticipationChanged bool, currentParticipationChanged bool) {
@@ -280,105 +303,105 @@ func (r *ReverseBeaconStateChangeSet) ApplyEpochParticipationChanges(
 	return
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplySlotChange(prevSlot uint64) (uint64, bool) {
+func (r *ChangeSet) ApplySlotChange(prevSlot uint64) (uint64, bool) {
 	if r.slotChange == nil {
 		return prevSlot, false
 	}
 	return *r.slotChange, true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyForkChange(fork *cltypes.Fork) (*cltypes.Fork, bool) {
+func (r *ChangeSet) ApplyForkChange(fork *cltypes.Fork) (*cltypes.Fork, bool) {
 	if r.forkChange == nil {
 		return fork, false
 	}
 	return r.forkChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyLatestBlockHeader(header *cltypes.BeaconBlockHeader) (*cltypes.BeaconBlockHeader, bool) {
+func (r *ChangeSet) ApplyLatestBlockHeader(header *cltypes.BeaconBlockHeader) (*cltypes.BeaconBlockHeader, bool) {
 	if r.latestBlockHeaderChange == nil {
 		return header, false
 	}
 	return r.latestBlockHeaderChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyEth1DataChange(data *cltypes.Eth1Data) (*cltypes.Eth1Data, bool) {
+func (r *ChangeSet) ApplyEth1DataChange(data *cltypes.Eth1Data) (*cltypes.Eth1Data, bool) {
 	if r.eth1DataChange == nil {
 		return data, false
 	}
 	return r.eth1DataChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyEth1DepositIndexChange(depositIndex uint64) (uint64, bool) {
+func (r *ChangeSet) ApplyEth1DepositIndexChange(depositIndex uint64) (uint64, bool) {
 	if r.eth1DepositIndexChange == nil {
 		return depositIndex, false
 	}
 	return *r.eth1DepositIndexChange, true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyJustificationBitsChange(bits cltypes.JustificationBits) (cltypes.JustificationBits, bool) {
+func (r *ChangeSet) ApplyJustificationBitsChange(bits cltypes.JustificationBits) (cltypes.JustificationBits, bool) {
 	if r.justificationBitsChange == nil {
 		return bits, false
 	}
 	return r.justificationBitsChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
+func (r *ChangeSet) ApplyCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
 	if r.currentJustifiedCheckpointChange == nil {
 		return c, false
 	}
 	return r.currentJustifiedCheckpointChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
+func (r *ChangeSet) ApplyPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
 	if r.previousJustifiedCheckpointChange == nil {
 		return c, false
 	}
 	return r.previousJustifiedCheckpointChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyFinalizedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
+func (r *ChangeSet) ApplyFinalizedCheckpointChange(c *cltypes.Checkpoint) (*cltypes.Checkpoint, bool) {
 	if r.finalizedCheckpointChange == nil {
 		return c, false
 	}
 	return r.finalizedCheckpointChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyCurrentSyncCommitteeChange(committee *cltypes.SyncCommittee) (*cltypes.SyncCommittee, bool) {
+func (r *ChangeSet) ApplyCurrentSyncCommitteeChange(committee *cltypes.SyncCommittee) (*cltypes.SyncCommittee, bool) {
 	if r.currentSyncCommitteeChange == nil {
 		return committee, false
 	}
 	return r.currentSyncCommitteeChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyNextSyncCommitteeChange(committee *cltypes.SyncCommittee) (*cltypes.SyncCommittee, bool) {
+func (r *ChangeSet) ApplyNextSyncCommitteeChange(committee *cltypes.SyncCommittee) (*cltypes.SyncCommittee, bool) {
 	if r.nextSyncCommitteeChange == nil {
 		return committee, false
 	}
 	return r.nextSyncCommitteeChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyLatestExecutionPayloadHeaderChange(eth1Header *cltypes.Eth1Header) (*cltypes.Eth1Header, bool) {
+func (r *ChangeSet) ApplyLatestExecutionPayloadHeaderChange(eth1Header *cltypes.Eth1Header) (*cltypes.Eth1Header, bool) {
 	if r.latestExecutionPayloadHeaderChange == nil {
 		return eth1Header, false
 	}
 	return r.latestExecutionPayloadHeaderChange.Copy(), true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyNextWithdrawalIndexChange(index uint64) (uint64, bool) {
+func (r *ChangeSet) ApplyNextWithdrawalIndexChange(index uint64) (uint64, bool) {
 	if r.nextWithdrawalIndexChange == nil {
 		return index, false
 	}
 	return *r.nextWithdrawalIndexChange, true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyNextValidatorWithdrawalIndexChange(index uint64) (uint64, bool) {
+func (r *ChangeSet) ApplyNextValidatorWithdrawalIndexChange(index uint64) (uint64, bool) {
 	if r.nextWithdrawalValidatorIndexChange == nil {
 		return index, false
 	}
 	return *r.nextWithdrawalValidatorIndexChange, true
 }
 
-func (r *ReverseBeaconStateChangeSet) ApplyVersionChange(version clparams.StateVersion) (clparams.StateVersion, bool) {
+func (r *ChangeSet) ApplyVersionChange(version clparams.StateVersion) (clparams.StateVersion, bool) {
 	if r.versionChange == nil {
 		return version, false
 	}

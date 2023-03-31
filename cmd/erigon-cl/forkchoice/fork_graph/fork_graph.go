@@ -38,7 +38,7 @@ const maxGraphExtension = 256
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type ForkGraph struct {
-	inverseEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ReverseBeaconStateChangeSet]
+	inverseEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ChangeSet]
 	forwardEdges          *lru.Cache[libcommon.Hash, *cltypes.SignedBeaconBlock]
 	farthestExtendingPath *lru.Cache[libcommon.Hash, bool] // The longest path is used as the "canonical"
 	badBlocks             *lru.Cache[libcommon.Hash, bool] // blocks that are invalid and that leads to automatic fail of extension.
@@ -49,7 +49,7 @@ type ForkGraph struct {
 
 // Initialize fork graph with a new state
 func New(anchorState *state.BeaconState) *ForkGraph {
-	inverseEdges, err := lru.New[libcommon.Hash, *beacon_changeset.ReverseBeaconStateChangeSet](maxGraphExtension)
+	inverseEdges, err := lru.New[libcommon.Hash, *beacon_changeset.ChangeSet](maxGraphExtension)
 	if err != nil {
 		panic(err)
 	}

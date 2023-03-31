@@ -9,37 +9,17 @@ import (
 
 // StartCollectingReverseChangeSet starts collection change sets.
 func (b *BeaconState) StartCollectingReverseChangeSet() {
-	b.reverseChangeset = &beacon_changeset.ReverseBeaconStateChangeSet{
-		BlockRootsChanges:                 beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.blockRoots)),
-		StateRootsChanges:                 beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.stateRoots)),
-		HistoricalRootsChanges:            beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.historicalRoots)),
-		Eth1DataVotesChanges:              beacon_changeset.NewListChangeSet[cltypes.Eth1Data](len(b.eth1DataVotes)),
-		BalancesChanges:                   beacon_changeset.NewListChangeSet[uint64](len(b.balances)),
-		RandaoMixesChanges:                beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.randaoMixes)),
-		SlashingsChanges:                  beacon_changeset.NewListChangeSet[uint64](len(b.slashings)),
-		PreviousEpochParticipationChanges: beacon_changeset.NewListChangeSet[cltypes.ParticipationFlags](len(b.previousEpochParticipation)),
-		CurrentEpochParticipationChanges:  beacon_changeset.NewListChangeSet[cltypes.ParticipationFlags](len(b.currentEpochParticipation)),
-		InactivityScoresChanges:           beacon_changeset.NewListChangeSet[uint64](len(b.inactivityScores)),
-		HistoricalSummaryChange:           beacon_changeset.NewListChangeSet[cltypes.HistoricalSummary](len(b.historicalSummaries)),
-		// Validators section
-		WithdrawalCredentialsChange:      beacon_changeset.NewListChangeSet[libcommon.Hash](len(b.validators)),
-		EffectiveBalanceChange:           beacon_changeset.NewListChangeSet[uint64](len(b.validators)),
-		ActivationEligibilityEpochChange: beacon_changeset.NewListChangeSet[uint64](len(b.validators)),
-		ActivationEpochChange:            beacon_changeset.NewListChangeSet[uint64](len(b.validators)),
-		ExitEpochChange:                  beacon_changeset.NewListChangeSet[uint64](len(b.validators)),
-		WithdrawalEpochChange:            beacon_changeset.NewListChangeSet[uint64](len(b.validators)),
-		SlashedChange:                    beacon_changeset.NewListChangeSet[bool](len(b.validators)),
-	}
+	b.reverseChangeset = beacon_changeset.New(len(b.validators), len(b.blockRoots), len(b.stateRoots), len(b.slashings), len(b.historicalSummaries), len(b.historicalRoots), len(b.eth1DataVotes), len(b.randaoMixes))
 }
 
 // StopCollectingReverseChangeSet stops collection change sets.
-func (b *BeaconState) StopCollectingReverseChangeSet() *beacon_changeset.ReverseBeaconStateChangeSet {
+func (b *BeaconState) StopCollectingReverseChangeSet() *beacon_changeset.ChangeSet {
 	ret := b.reverseChangeset
 	b.reverseChangeset = nil
 	return ret
 }
 
-func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ReverseBeaconStateChangeSet) {
+func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet) {
 	changeset.CompactChanges()
 	beforeSlot := b.slot
 	var touched bool

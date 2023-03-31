@@ -75,7 +75,7 @@ type BeaconState struct {
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 	// Changesets
-	reverseChangeset *beacon_changeset.ReverseBeaconStateChangeSet
+	reverseChangeset *beacon_changeset.ChangeSet
 }
 
 func New(cfg *clparams.BeaconChainConfig) *BeaconState {
