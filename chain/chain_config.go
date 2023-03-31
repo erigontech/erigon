@@ -63,10 +63,9 @@ type Config struct {
 	MergeNetsplitBlock            *big.Int `json:"mergeNetsplitBlock,omitempty"`            // Virtual fork after The Merge to use as a network splitter; see FORK_NEXT_VALUE in EIP-3675
 
 	// Mainnet fork scheduling switched from block numbers to timestamps after The Merge
-	ShanghaiTime     *big.Int `json:"shanghaiTime,omitempty"`
-	CancunTime       *big.Int `json:"cancunTime,omitempty"`
-	ShardingForkTime *big.Int `json:"shardingForkTime,omitempty"`
-	PragueTime       *big.Int `json:"pragueTime,omitempty"`
+	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
+	CancunTime   *big.Int `json:"cancunTime,omitempty"`
+	PragueTime   *big.Int `json:"pragueTime,omitempty"`
 
 	// Parlia fork blocks
 	RamanujanBlock  *big.Int `json:"ramanujanBlock,omitempty" toml:",omitempty"`
@@ -111,7 +110,7 @@ func (c *Config) String() string {
 		)
 	}
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Sharding: %v, Prague: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -130,7 +129,6 @@ func (c *Config) String() string {
 		c.MergeNetsplitBlock,
 		c.ShanghaiTime,
 		c.CancunTime,
-		c.ShardingForkTime,
 		c.PragueTime,
 		engine,
 	)
@@ -300,11 +298,6 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
-// IsSharding returns whether time is either equal to the Mini-Danksharding fork time or greater.
-func (c *Config) IsSharding(time uint64) bool {
-	return isForked(c.ShardingForkTime, time)
-}
-
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -337,32 +330,30 @@ func (c *Config) CheckCompatible(newcfg *Config, height uint64) *ConfigCompatErr
 	return lasterr
 }
 
-type forkPoint struct {
-	name    string
-	block   *big.Int
-	canSkip bool // if true, the fork may be nil and next fork is still allowed
+type forkBlockNumber struct {
+	name        string
+	blockNumber *big.Int
+	optional    bool // if true, the fork may be nil and next fork is still allowed
 }
 
-func (c *Config) forkPoints() []forkPoint {
-	return []forkPoint{
-		{name: "homesteadBlock", block: c.HomesteadBlock},
-		{name: "daoForkBlock", block: c.DAOForkBlock, canSkip: true},
-		{name: "eip150Block", block: c.TangerineWhistleBlock},
-		{name: "eip155Block", block: c.SpuriousDragonBlock},
-		{name: "byzantiumBlock", block: c.ByzantiumBlock},
-		{name: "constantinopleBlock", block: c.ConstantinopleBlock},
-		{name: "petersburgBlock", block: c.PetersburgBlock},
-		{name: "istanbulBlock", block: c.IstanbulBlock},
-		{name: "muirGlacierBlock", block: c.MuirGlacierBlock, canSkip: true},
-		{name: "eulerBlock", block: c.EulerBlock, canSkip: true},
-		{name: "gibbsBlock", block: c.GibbsBlock, canSkip: true},
-		{name: "berlinBlock", block: c.BerlinBlock},
-		{name: "londonBlock", block: c.LondonBlock},
-		{name: "arrowGlacierBlock", block: c.ArrowGlacierBlock, canSkip: true},
-		{name: "grayGlacierBlock", block: c.GrayGlacierBlock, canSkip: true},
-		{name: "mergeNetsplitBlock", block: c.MergeNetsplitBlock, canSkip: true},
-		// {name: "shanghaiTime", timestamp: c.ShanghaiTime},
-		// {name: "shardingForkTime", timestamp: c.ShardingForkTime},
+func (c *Config) forkBlockNumbers() []forkBlockNumber {
+	return []forkBlockNumber{
+		{name: "homesteadBlock", blockNumber: c.HomesteadBlock},
+		{name: "daoForkBlock", blockNumber: c.DAOForkBlock, optional: true},
+		{name: "eip150Block", blockNumber: c.TangerineWhistleBlock},
+		{name: "eip155Block", blockNumber: c.SpuriousDragonBlock},
+		{name: "byzantiumBlock", blockNumber: c.ByzantiumBlock},
+		{name: "constantinopleBlock", blockNumber: c.ConstantinopleBlock},
+		{name: "petersburgBlock", blockNumber: c.PetersburgBlock},
+		{name: "istanbulBlock", blockNumber: c.IstanbulBlock},
+		{name: "muirGlacierBlock", blockNumber: c.MuirGlacierBlock, optional: true},
+		{name: "eulerBlock", blockNumber: c.EulerBlock, optional: true},
+		{name: "gibbsBlock", blockNumber: c.GibbsBlock, optional: true},
+		{name: "berlinBlock", blockNumber: c.BerlinBlock},
+		{name: "londonBlock", blockNumber: c.LondonBlock},
+		{name: "arrowGlacierBlock", blockNumber: c.ArrowGlacierBlock, optional: true},
+		{name: "grayGlacierBlock", blockNumber: c.GrayGlacierBlock, optional: true},
+		{name: "mergeNetsplitBlock", blockNumber: c.MergeNetsplitBlock, optional: true},
 	}
 }
 
@@ -372,24 +363,24 @@ func (c *Config) CheckConfigForkOrder() error {
 		return nil
 	}
 
-	var lastFork forkPoint
+	var lastFork forkBlockNumber
 
-	for _, fork := range c.forkPoints() {
+	for _, fork := range c.forkBlockNumbers() {
 		if lastFork.name != "" {
 			// Next one must be higher number
-			if lastFork.block == nil && fork.block != nil {
+			if lastFork.blockNumber == nil && fork.blockNumber != nil {
 				return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at %v",
-					lastFork.name, fork.name, fork.block)
+					lastFork.name, fork.name, fork.blockNumber)
 			}
-			if lastFork.block != nil && fork.block != nil {
-				if lastFork.block.Cmp(fork.block) > 0 {
+			if lastFork.blockNumber != nil && fork.blockNumber != nil {
+				if lastFork.blockNumber.Cmp(fork.blockNumber) > 0 {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at %v, but %v enabled at %v",
-						lastFork.name, lastFork.block, fork.name, fork.block)
+						lastFork.name, lastFork.blockNumber, fork.name, fork.blockNumber)
 				}
 			}
 			// If it was optional and not set, then ignore it
 		}
-		if !fork.canSkip || fork.block != nil {
+		if !fork.optional || fork.blockNumber != nil {
 			lastFork = fork
 		}
 	}
@@ -664,8 +655,7 @@ type Rules struct {
 	ChainID                                                 *big.Int
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun                bool
-	IsSharding, IsPrague                                    bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
 	IsNano, IsMoran, IsGibbs                                bool
 	IsEip1559FeeCollector                                   bool
 	IsParlia, IsAura                                        bool
@@ -691,7 +681,6 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsLondon:              c.IsLondon(num),
 		IsShanghai:            c.IsShanghai(time),
 		IsCancun:              c.IsCancun(time),
-		IsSharding:            c.IsSharding(time),
 		IsPrague:              c.IsPrague(time),
 		IsNano:                c.IsNano(num),
 		IsMoran:               c.IsMoran(num),
