@@ -131,7 +131,7 @@ RUN gcsFuseRepo=gcsfuse-`lsb_release -c -s`; \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
     apt-key add -; \
     apt-get update; \
-    apt-get install -y gcsfuse \
+    apt-get install -y gcsfuse locales-all \
     && apt-get clean
 
 
