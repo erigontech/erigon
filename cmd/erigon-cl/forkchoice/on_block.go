@@ -32,7 +32,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 		f.proposerBoostRoot = blockRoot
 	}
 	// Update checkpoints
-	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+	f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// Eagerly compute unrealized justification and finality
 	lastProcessedState.StartCollectingReverseChangeSet()
 	if err := transition.ProcessJustificationBitsAndFinality(lastProcessedState); err != nil {
@@ -43,12 +43,12 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	copiedCheckpoint := *lastProcessedState.CurrentJustifiedCheckpoint()
 	f.unrealizedJustifications.Add(blockRoot, &copiedCheckpoint)
 
-	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	currentEpoch := f.computeEpochAtSlot(f.Slot())
 	if blockEpoch < currentEpoch {
-		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint(), lastProcessedState.FinalizedCheckpoint())
+		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
 	// Lastly revert the changes to the state.
 	lastProcessedState.RevertWithChangeset(lastProcessedState.StopCollectingReverseChangeSet())

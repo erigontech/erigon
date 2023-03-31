@@ -47,10 +47,10 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 	}
 	return &ForkChoiceStore{
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
-		justifiedCheckpoint:           anchorCheckpoint,
-		finalizedCheckpoint:           anchorCheckpoint,
-		unrealizedJustifiedCheckpoint: anchorCheckpoint,
-		unrealizedFinalizedCheckpoint: anchorCheckpoint,
+		justifiedCheckpoint:           anchorCheckpoint.Copy(),
+		finalizedCheckpoint:           anchorCheckpoint.Copy(),
+		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
+		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
 		forkGraph:                     fork_graph.New(anchorState),
 		unrealizedJustifications:      unrealizedJustifications,
 		checkpointStates:              checkpointStates,

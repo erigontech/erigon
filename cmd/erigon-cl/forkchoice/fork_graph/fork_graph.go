@@ -100,82 +100,15 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		f.badBlocks.Add(blockRoot, true)
 		return InvalidBlock, nil
 	}
-	currentBlockRoot, err := f.lastState.BlockRoot()
+
+	f.lastState, err = f.GetState(block.ParentRoot)
 	if err != nil {
-		return LogisticError, err
+		return InvalidBlock, err
 	}
-	// Check if it extend the farthest state.
-	if currentBlockRoot == block.ParentRoot {
-		f.lastState.StartCollectingReverseChangeSet()
-		// Execute the state
-		if err := transition.TransitionState(f.lastState, signedBlock /*fullValidation=*/, true); err != nil {
-			changeset := f.lastState.StopCollectingReverseChangeSet()
-			// Revert bad block changes
-			f.lastState.RevertWithChangeset(changeset)
-			// Add block to list of invalid blocks
-			log.Debug("Invalid beacon block", "reason", err)
-			f.badBlocks.Add(blockRoot, true)
-			return InvalidBlock, nil
-		}
-		// if it is finished then update the graph
-		f.inverseEdges.Add(blockRoot, f.lastState.StopCollectingReverseChangeSet())
-		f.forwardEdges.Add(blockRoot, signedBlock)
-		f.farthestExtendingPath.Add(blockRoot, true)
-		return Success, nil
-	}
-	// collect all blocks beetwen greatest extending node path and block.
-	blockRootsFromFarthestExtendingPath := []libcommon.Hash{}
-	// Use the parent root as a reverse iterator.
-	currentIteratorRoot := block.ParentRoot
-	// try and find the point of recconection
-	for reconnect, ok := f.farthestExtendingPath.Get(currentIteratorRoot); !ok || !reconnect; {
-		currentBlock, isSegmentPresent := f.forwardEdges.Get(currentIteratorRoot)
-		if !isSegmentPresent {
-			return MissingSegment, nil
-		}
-		currentRoot, err := currentBlock.Block.HashSSZ()
-		if err != nil {
-			return LogisticError, err
-		}
-		blockRootsFromFarthestExtendingPath = append(blockRootsFromFarthestExtendingPath, currentRoot)
-	}
-	// Initalize edge.
-	edge := currentBlockRoot
-	inverselyTraversedRoots := []libcommon.Hash{currentBlockRoot}
-
-	// Unwind to the recconection root.
-	for edge != currentIteratorRoot {
-		changeset, isChangesetPreset := f.inverseEdges.Get(edge)
-		if !isChangesetPreset {
-			return MissingSegment, nil
-		}
-		f.lastState.RevertWithChangeset(changeset)
-		// Recompute currentBlockRoot
-		currentBlockRoot, err := f.lastState.BlockRoot()
-		if err != nil {
-			return LogisticError, err
-		}
-		inverselyTraversedRoots = append(inverselyTraversedRoots, currentBlockRoot)
-		// go on.
-		edge = currentBlockRoot
-	}
-	// Traverse the graph forward now (the nodes are in reverse order).
-	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
-		currentBlock, _ := f.forwardEdges.Get(blockRootsFromFarthestExtendingPath[i])
-		if err := transition.TransitionState(f.lastState, currentBlock, false); err != nil {
-			log.Debug("Invalid beacon block", "reason", err)
-			f.badBlocks.Add(blockRoot, true)
-			return InvalidBlock, nil
-		}
+	if f.lastState == nil {
+		return MissingSegment, nil
 	}
 
-	// If we have a new farthest extended path, update it accordingly.
-	for _, root := range inverselyTraversedRoots {
-		f.farthestExtendingPath.Add(root, false)
-	}
-	for _, root := range blockRootsFromFarthestExtendingPath {
-		f.farthestExtendingPath.Add(root, true)
-	}
 	f.lastState.StartCollectingReverseChangeSet()
 	// Execute the state
 	if err := transition.TransitionState(f.lastState, signedBlock /*fullValidation=*/, true); err != nil {
@@ -211,4 +144,68 @@ func (f *ForkGraph) Config() *clparams.BeaconChainConfig {
 
 func (f *ForkGraph) GetBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return f.forwardEdges.Get(blockRoot)
+}
+
+func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, error) {
+	currentStateBlockRoot, err := f.lastState.BlockRoot()
+	if err != nil {
+		return nil, err
+	}
+	if currentStateBlockRoot == blockRoot {
+		return f.lastState, nil
+	}
+	// collect all blocks beetwen greatest extending node path and block.
+	blockRootsFromFarthestExtendingPath := []libcommon.Hash{}
+	// Use the parent root as a reverse iterator.
+	currentIteratorRoot := blockRoot
+	// try and find the point of recconection
+	for reconnect, ok := f.farthestExtendingPath.Get(currentIteratorRoot); !ok || !reconnect; {
+		parent, isSegmentPresent := f.forwardEdges.Get(currentIteratorRoot)
+		if !isSegmentPresent {
+			return nil, nil
+		}
+		blockRootsFromFarthestExtendingPath = append(blockRootsFromFarthestExtendingPath, currentIteratorRoot)
+		currentIteratorRoot = parent.Block.ParentRoot
+	}
+	// Initalize edge.
+	edge := currentStateBlockRoot
+	inverselyTraversedRoots := []libcommon.Hash{currentStateBlockRoot}
+
+	// Unwind to the recconection root.
+	for edge != currentIteratorRoot {
+		changeset, isChangesetPreset := f.inverseEdges.Get(edge)
+		if !isChangesetPreset {
+			return nil, nil
+		}
+		f.lastState.RevertWithChangeset(changeset)
+		// Recompute currentBlockRoot
+		currentBlockRoot, err := f.lastState.BlockRoot()
+		if err != nil {
+			return nil, err
+		}
+		inverselyTraversedRoots = append(inverselyTraversedRoots, currentBlockRoot)
+		// go on.
+		edge = currentBlockRoot
+	}
+	// Traverse the graph forward now (the nodes are in reverse order).
+	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
+		currentBlock, _ := f.forwardEdges.Get(blockRootsFromFarthestExtendingPath[i])
+		f.lastState.StartCollectingReverseChangeSet()
+		if err := transition.TransitionState(f.lastState, currentBlock, false); err != nil {
+			f.lastState.RevertWithChangeset(f.lastState.StopCollectingReverseChangeSet())
+			log.Debug("Invalid beacon block", "reason", err)
+			f.badBlocks.Add(blockRoot, true)
+			return nil, err
+		}
+		f.lastState.StopCollectingReverseChangeSet()
+	}
+
+	// If we have a new farthest extended path, update it accordingly.
+	for _, root := range inverselyTraversedRoots {
+		f.farthestExtendingPath.Add(root, false)
+	}
+	for _, root := range blockRootsFromFarthestExtendingPath {
+		f.farthestExtendingPath.Add(root, true)
+	}
+	return f.lastState, nil
 }

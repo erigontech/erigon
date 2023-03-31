@@ -2,7 +2,6 @@ package fork_graph_test
 
 import (
 	_ "embed"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -45,7 +44,6 @@ func TestForkGraph(t *testing.T) {
 	require.Equal(t, status, fork_graph.PreValidated)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
-	fmt.Println("A")
 	status, err = graph.AddChainSegment(blockC)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
