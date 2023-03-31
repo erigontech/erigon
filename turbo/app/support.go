@@ -44,6 +44,7 @@ var supportCommand = cli.Command{
 	Flags: []cli.Flag{
 		&metricsURLsFlag,
 		&diagnosticsURLFlag,
+		&insecureFlag,
 	},
 	Category: "SUPPORT COMMANDS",
 	Description: `
