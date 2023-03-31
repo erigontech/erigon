@@ -104,7 +104,7 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	insecure := cliCtx.Bool(insecureFlag.Name)
 	tlsConfig := &tls.Config{
 		RootCAs:            certPool,
-		InsecureSkipVerify: insecure,
+		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
 	reader, writer := io.Pipe()
