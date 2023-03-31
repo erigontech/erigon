@@ -96,7 +96,8 @@ type Header struct {
 
 	BaseFee         *big.Int        `json:"baseFeePerGas"`   // EIP-1559
 	WithdrawalsHash *libcommon.Hash `json:"withdrawalsRoot"` // EIP-4895
-	ExcessDataGas   *big.Int        `json:"excessDataGas"`   // EIP-4844
+	// ExcessDataGas was added by EIP-4844 and is ignored in legacy headers.
+	ExcessDataGas *big.Int `json:"excessDataGas"`
 
 	// The verkle proof is ignored in legacy headers
 	Verkle        bool
