@@ -103,19 +103,18 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 		b.touchedLeaves[SlashingsLeafIndex] = true
 	})
 	// Process the lists now.
-	b.historicalRoots, touched = changeset.HistoricalRootsChanges.ApplyChanges(b.historicalRoots)
-	if touched {
+	if b.historicalRoots, touched = changeset.HistoricalRootsChanges.ApplyChanges(b.historicalRoots); touched {
 		b.touchedLeaves[HistoricalRootsLeafIndex] = true
 	}
+
 	// Process votes changes
-	b.eth1DataVotes, touched = changeset.ApplyEth1DataVotesChanges(b.eth1DataVotes)
-	if touched {
+	if b.eth1DataVotes, touched = changeset.ApplyEth1DataVotesChanges(b.eth1DataVotes); touched {
 		b.touchedLeaves[Eth1DataVotesLeafIndex] = true
 	}
-	b.balances, touched = changeset.BalancesChanges.ApplyChanges(b.balances)
-	if touched {
+	if b.balances, touched = changeset.BalancesChanges.ApplyChanges(b.balances); touched {
 		b.touchedLeaves[BalancesLeafIndex] = true
 	}
+
 	// Process epoch participation changes
 	var touchedPreviousEpochParticipation, touchedCurrentEpochParticipation bool
 	b.previousEpochParticipation, b.currentEpochParticipation,
@@ -128,14 +127,14 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 		b.touchedLeaves[CurrentEpochParticipationLeafIndex] = true
 	}
 	// Process inactivity scores changes.
-	b.inactivityScores, touched = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores)
-	if touched {
+	if b.inactivityScores, touched = changeset.InactivityScoresChanges.ApplyChanges(b.inactivityScores); touched {
 		b.touchedLeaves[InactivityScoresLeafIndex] = true
 	}
-	b.historicalSummaries, touched = changeset.ApplyHistoricalSummaryChanges(b.historicalSummaries)
-	if touched {
+
+	if b.historicalSummaries, touched = changeset.ApplyHistoricalSummaryChanges(b.historicalSummaries); touched {
 		b.touchedLeaves[HistoricalSummariesLeafIndex] = true
 	}
+
 	// Now start processing validators if there are any.
 	if changeset.HasValidatorSetNotChanged(len(b.validators)) {
 		b.revertCachesOnBoundary(beforeSlot)
