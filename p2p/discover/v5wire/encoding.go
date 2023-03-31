@@ -22,12 +22,11 @@ import (
 	"crypto/cipher"
 	"crypto/ecdsa"
 	crand "crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash"
-
-	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/p2p/enode"
