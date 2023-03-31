@@ -133,16 +133,17 @@ func StageExecuteBlocksCfg(
 }
 
 func executeBlock(
-	block *types.Block,
-	tx kv.RwTx,
-	batch ethdb.Database,
-	cfg ExecuteBlockCfg,
-	vmConfig vm.Config, // emit copy, because will modify it
-	writeChangesets bool,
-	writeReceipts bool,
-	writeCallTraces bool,
-	initialCycle bool,
-	stateStream bool,
+	 block *types.Block,
+	 tx kv.RwTx,
+	 stateWriter *state.WriterV4,
+	 batch ethdb.Database,
+	 cfg ExecuteBlockCfg,
+	 vmConfig vm.Config, // emit copy, because will modify it
+	 writeChangesets bool,
+	 writeReceipts bool,
+	 writeCallTraces bool,
+	 initialCycle bool,
+	 stateStream bool,
 ) error {
 	blockNum := block.NumberU64()
 	//stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
@@ -153,7 +154,7 @@ func executeBlock(
 	//stateWriter, _ := state.WrapStateIO(cfg.agg.SharedDomains())
 	var err error
 	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
-	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
+	//stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -200,6 +201,14 @@ func executeBlock(
 			}
 		}
 	}
+	rh, err := stateWriter.Commitment(0, true, false)
+	if err != nil {
+		return err
+	}
+
+	if !bytes.Equal(rh, block.Root().Bytes()) {
+		return fmt.Errorf("root hash mismatch: %x != %x blockNum %d", rh, block.Root().Bytes(), blockNum)
+	}
 
 	if cfg.changeSetHook != nil {
 		//if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
@@ -209,6 +218,7 @@ func executeBlock(
 	if writeCallTraces {
 		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
+
 	return nil
 }
 
@@ -439,6 +449,29 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	}()
 	defer cfg.agg.StartWrites().FinishWrites()
 
+	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
+
+	if stageProgress == 0 {
+		genBlock, genesisIbs, err := core.GenesisToBlock(cfg.genesis, "")
+		if err != nil {
+			return err
+		}
+		cfg.agg.SetTxNum(0)
+		if err = genesisIbs.CommitBlock(cfg.chainConfig.Rules(0, 0), stateWriter); err != nil {
+			return fmt.Errorf("cannot write state: %w", err)
+		}
+		rh, err := stateWriter.Commitment(0, true, false)
+		if err != nil {
+			return fmt.Errorf("cannot write commitment: %w", err)
+		}
+		if !bytes.Equal(rh, genBlock.Root().Bytes()) {
+			return fmt.Errorf("wrong genesis root hash: %x != %x", rh, genBlock.Root())
+		}
+		if err := cfg.agg.Flush(ctx, tx); err != nil {
+			return fmt.Errorf("flush genesis: %w", err)
+		}
+	}
+
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -464,7 +497,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
+		if err = executeBlock(block, tx, stateWriter, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -477,14 +510,19 @@ Loop:
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
-		rh, err := cfg.agg.SharedDomains().Commit(0, false, false)
-		if err != nil {
-			return err
+
+		if err := cfg.agg.Flush(ctx, tx); err != nil {
+			log.Error("aggregator flush failed", "err", err)
 		}
-		if bytes.Equal(rh, block.Root().Bytes()) {
-			log.Info("match root hash", "block", blockNum, "root", rh)
-			//return fmt.Errorf("block=%d root hash mismatch: %x != %x", blockNum, rh, block.Root().Bytes())
-		}
+
+		//rh, err := cfg.agg.SharedDomains().Commit(0, false, false)
+		//if err != nil {
+		//	return err
+		//}
+		//if bytes.Equal(rh, block.Root().Bytes()) {
+		//	log.Info("match root hash", "block", blockNum, "root", rh)
+		//	//return fmt.Errorf("block=%d root hash mismatch: %x != %x", blockNum, rh, block.Root().Bytes())
+		//}
 		stageProgress = blockNum
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)

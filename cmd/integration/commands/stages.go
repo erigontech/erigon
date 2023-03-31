@@ -1201,7 +1201,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB) (*snapshotsync.RoSnapshots, *
 		dirs := datadir.New(datadirCli)
 		dir.MustExist(dirs.SnapHistory)
 
-		useSnapshots = true
+		//useSnapshots = true
 		snapCfg := ethconfig.NewSnapCfg(useSnapshots, true, true)
 		_allSnapshotsSingleton = snapshotsync.NewRoSnapshots(snapCfg, dirs.Snap)
 

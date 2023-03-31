@@ -56,7 +56,13 @@ func (w *WriterV4) WriteHistory() error    { return nil }
 func (w *WriterV4) Commitment(txNum uint64, saveStateAfter, trace bool) (rootHash []byte, err error) {
 	agg := w.tx.(*temporal.Tx).Agg()
 	agg.SetTx(w.tx.(kv.RwTx))
-	agg.SetTxNum(txNum)
+	//agg.SetTxNum(txNum)
 
-	return agg.ComputeCommitment(saveStateAfter, trace)
+	rh, err := agg.ComputeCommitment(saveStateAfter, trace)
+	if err != nil {
+		return nil, err
+	}
+	return rh, nil
+
+	//return agg.Flush(agg.)
 }

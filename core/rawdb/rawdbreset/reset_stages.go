@@ -227,8 +227,9 @@ var stateHistoryV3Buckets = []string{
 	kv.TracesToKeys, kv.TracesToIdx,
 }
 var stateHistoryV4Buckets = []string{
-	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys,
-	kv.CommitmentKeys, kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
+	kv.AccountKeys, kv.StorageKeys, kv.CodeKeys, kv.CommitmentKeys,
+	kv.CommitmentDomain, kv.AccountDomain, kv.StorageDomain, kv.CodeDomain,
+	kv.CommitmentVals, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx,
 }
 
 func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
