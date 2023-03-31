@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -134,13 +135,21 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	// Apply the connection context on the request context
 	resp.Request = req.WithContext(ctx1)
 	var metricsBuf bytes.Buffer
+	r := bufio.NewReader(resp.Body)
+	firstLine, err := r.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if string(firstLine) != "SUCCESS\n" {
+		return fmt.Errorf("connecting to diagnostics system: %s", firstLine)
+	}
 
 outerLoop:
 	for {
 		var buf [4096]byte
 		var readLen int
 		for readLen < len(buf) && (readLen == 0 || buf[readLen-1] != '\n') {
-			len, err := resp.Body.Read(buf[readLen:])
+			len, err := r.Read(buf[readLen:])
 			if err != nil {
 				log.Error("Connection read", "err", err)
 				break outerLoop
