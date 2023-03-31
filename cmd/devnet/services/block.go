@@ -44,6 +44,24 @@ func CreateManyEIP1559TransactionsRefWithBaseFee(addr string, startingNonce *uin
 	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
 }
 
+func CreateManyEIP1559TransactionsRefWithBaseFee2(addr string, startingNonce *uint64) ([]*types.Transaction, []*types.Transaction, error) {
+	toAddress := libcommon.HexToAddress(addr)
+
+	baseFeePerGas, err := BaseFeeFromBlock()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
+	}
+
+	fmt.Printf("BaseFeePerGas: %v\n", baseFeePerGas)
+
+	lowerBaseFeeTransactions, higherBaseFeeTransactions, err := signEIP1559TxsLowerAndHigherThanBaseFee2(100, 100, baseFeePerGas, startingNonce, toAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed signEIP1559TxsLowerAndHigherThanBaseFee2: %v", err)
+	}
+
+	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
+}
+
 // CreateTransaction creates a transaction depending on the type of transaction being passed
 func CreateTransaction(txType models.TransactionType, addr string, value, nonce uint64) (*types.Transaction, libcommon.Address, *contracts.Subscription, *bind.TransactOpts, error) {
 	switch txType {
@@ -77,14 +95,14 @@ func createNonContractTx(addr string, value, nonce uint64) (*types.Transaction, 
 }
 
 func signEIP1559TxsLowerAndHigherThanBaseFee2(amountLower, amountHigher int, baseFeePerGas uint64, nonce *uint64, toAddress libcommon.Address) ([]*types.Transaction, []*types.Transaction, error) {
-	lowerBaseFeeTransactions, err := signEIP1559TxsLowerThanBaseFee(amountLower, baseFeePerGas, nonce, toAddress)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed signEIP1559TxsLowerThanBaseFee: %v", err)
-	}
-
 	higherBaseFeeTransactions, err := signEIP1559TxsHigherThanBaseFee(amountHigher, baseFeePerGas, nonce, toAddress)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed signEIP1559TxsHigherThanBaseFee: %v", err)
+	}
+
+	lowerBaseFeeTransactions, err := signEIP1559TxsLowerThanBaseFee(amountLower, baseFeePerGas, nonce, toAddress)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed signEIP1559TxsLowerThanBaseFee: %v", err)
 	}
 
 	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
@@ -122,6 +140,7 @@ func signEIP1559TxsLowerThanBaseFee(n int, baseFeePerGas uint64, nonce *uint64, 
 		}
 
 		signedTransactions = append(signedTransactions, &signedTransaction)
+		*nonce++
 	}
 
 	return signedTransactions, nil
@@ -256,7 +275,6 @@ func EmitFallbackEvent(subContract *contracts.Subscription, opts *bind.TransactO
 	if err != nil {
 		return nil, fmt.Errorf("failed to send fallback transaction: %v", err)
 	}
-	fmt.Printf("Tx submitted, adding tx with hash %q to txpool\n", hash)
 
 	return hash, nil
 }
@@ -287,7 +305,6 @@ func SendManyTransactions(signedTransactions []*types.Transaction) ([]*libcommon
 			fmt.Printf("failed SendTransaction: %s\n", err)
 			return nil, err
 		}
-		fmt.Printf("SUCCESS => Tx submitted, adding tx with hash %q to txpool\n", hash)
 		hashes[idx] = hash
 	}
 

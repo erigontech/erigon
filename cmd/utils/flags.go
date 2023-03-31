@@ -613,10 +613,6 @@ var (
 		Usage: "Metrics HTTP server listening port",
 		Value: metrics.DefaultConfig.Port,
 	}
-	MetricsURLsFlag = cli.StringSliceFlag{
-		Name:  "metrics.urls",
-		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
-	}
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
 		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
@@ -773,10 +769,6 @@ var (
 		Name:  "sentinel.port",
 		Usage: "Port for sentinel",
 		Value: 7777,
-	}
-	DiagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team",
 	}
 )
 

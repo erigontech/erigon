@@ -64,7 +64,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, nil /*excessDataGas*/)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
@@ -77,7 +77,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil)
 
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, nil, header, block.Transactions(), block.Uncles(), cfg, statedb, nil /*excessDataGas*/)
 
 	for idx, txn := range block.Transactions() {
 		select {
@@ -91,7 +91,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */)
+				return core.SysCallContract(contract, data, *cfg, statedb, header, engine, true /* constCall */, nil /*excessDataGas*/)
 			}
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}

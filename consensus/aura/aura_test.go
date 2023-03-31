@@ -101,7 +101,7 @@ func TestRewardContract(t *testing.T) {
 	auraDB, require := memdb.NewTestDB(t), require.New(t)
 	engine, err := aura.NewAuRa(nil, auraDB, libcommon.Address{}, test.AuthorityRoundBlockRewardContract)
 	require.NoError(err)
-	m := stages.MockWithGenesisEngine(t, core.SokolGenesisBlock(), engine, false)
+	m := stages.MockWithGenesisEngine(t, core.ChiadoGenesisBlock(), engine, false)
 	m.EnableLogs()
 
 	var accBefore *accounts.Account
