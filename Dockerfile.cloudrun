@@ -131,9 +131,9 @@ RUN gcsFuseRepo=gcsfuse-`lsb_release -c -s`; \
     curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
     apt-key add -; \
     apt-get update; \
-    apt-get install -y gcsfuse locales-all \
+    apt-get install -y gcsfuse locales-all locales \
     && apt-get clean
-
+RUN dpkg-reconfigure locales
 
 ENV STORAGE_DIR=/chain-db
 
@@ -143,10 +143,11 @@ RUN echo '#!/usr/bin/env sh\n\
 set -e\n\
 echo "Mounting GCS Fuse."\n\
 gcsfuse -o rw,allow_other --uid 1000 --gid 1000 ${BUCKET} ${STORAGE_DIR}\n\
-echo "Mounting completed."\n\
-#su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}" &\n\
+echo "BLOCKIMPORTER start"\n\
+su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}" &\n\
 echo "Waiting for blockimporter to initialize."\n\
-sleep 10\n\
+sleep 60\n\
+echo "RPCDAEMON start"\n\
 su erigon -c "rpcdaemon --http.port 8555 --http.addr 0.0.0.0 --datadir ${STORAGE_DIR} --http.corsdomain * --http.api=eth,erigon,ots" &\n\
 wait $(jobs -p)\n\
 ' > /entrypoint.sh
