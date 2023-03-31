@@ -23,7 +23,7 @@ type ForkChoiceStore struct {
 	forkGraph                     *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
 	unrealizedJustifications *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
-	checkpointStates         *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
+	checkpointStates         *lru.Cache[cltypes.Checkpoint, libcommon.Hash]
 	mu                       sync.Mutex
 }
 
@@ -41,7 +41,7 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 	if err != nil {
 		return nil, err
 	}
-	checkpointStates, err := lru.New[libcommon.Hash, *cltypes.Checkpoint](checkpointsPerCache)
+	checkpointStates, err := lru.New[cltypes.Checkpoint, libcommon.Hash](checkpointsPerCache)
 	if err != nil {
 		return nil, err
 	}

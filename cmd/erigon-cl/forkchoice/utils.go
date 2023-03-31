@@ -1,6 +1,9 @@
 package forkchoice
 
-import "github.com/ledgerwatch/erigon/cl/cltypes"
+import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+)
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
@@ -40,4 +43,19 @@ func (f *ForkChoiceStore) computeStartSlotAtEpoch(epoch uint64) uint64 {
 // computeSlotsSinceEpochStart calculates the number of slots since the start of the epoch of a given slot.
 func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 	return slot - f.computeStartSlotAtEpoch(f.computeEpochAtSlot(slot))
+}
+
+// Ancestor returns the ancestor to the given root.
+func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.Hash {
+	block, has := f.forkGraph.GetBlock(root)
+	if !has {
+		return libcommon.Hash{}
+	}
+	for block.Block.Slot > slot {
+		block, has = f.forkGraph.GetBlock(block.Block.ParentRoot)
+		if !has {
+			return libcommon.Hash{}
+		}
+	}
+	return root
 }
