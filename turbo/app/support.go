@@ -30,6 +30,10 @@ var (
 		Name:  "metrics.urls",
 		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
 	}
+	insecureFlag = cli.BoolFlag{
+		Name:  "insecure",
+		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
 )
 
 var supportCommand = cli.Command{
@@ -95,9 +99,10 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	certPool.AppendCertsFromPEM(caCert)
 
 	// Create TLS configuration with the certificate of the server
+	insecure := cliCtx.Bool(insecureFlag.Name)
 	tlsConfig := &tls.Config{
 		RootCAs:            certPool,
-		InsecureSkipVerify: true, //nolint:gosec
+		InsecureSkipVerify: insecure,
 	}
 
 	reader, writer := io.Pipe()
