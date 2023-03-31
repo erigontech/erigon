@@ -494,7 +494,7 @@ type historyFlusher struct {
 
 func (f historyFlusher) Flush(ctx context.Context, tx kv.RwTx) error {
 	if f.d != nil {
-		if err := f.h.flush(ctx, tx); err != nil {
+		if err := f.d.flush(ctx, tx); err != nil {
 			return err
 		}
 	}

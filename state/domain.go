@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -123,8 +124,12 @@ type DomainStats struct {
 }
 
 func (ds *DomainStats) Accumulate(other DomainStats) {
-	ds.HistoryQueries.Add(other.HistoryQueries.Load())
-	ds.TotalQueries.Add(other.TotalQueries.Load())
+	if other.HistoryQueries != nil {
+		ds.HistoryQueries.Add(other.HistoryQueries.Load())
+	}
+	if other.TotalQueries != nil {
+		ds.TotalQueries.Add(other.TotalQueries.Load())
+	}
 	ds.EfSearchTime += other.EfSearchTime
 	ds.IndexSize += other.IndexSize
 	ds.DataSize += other.DataSize
@@ -139,6 +144,8 @@ type Domain struct {
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
+	topLock   sync.RWMutex
+	topTx     map[string]uint64
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
@@ -152,6 +159,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
+		topTx:     make(map[string]uint64),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:     DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
@@ -219,7 +227,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	r := d.stats
 	r.DataSize, r.IndexSize, r.FilesCount = d.collectFilesStats()
 
-	d.stats = DomainStats{}
+	d.stats = DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	return r
 }
 
@@ -507,6 +515,7 @@ type domainWAL struct {
 	key         []byte
 	buffered    bool
 	discard     bool
+	topTx       map[string]uint64
 	largeValues bool
 }
 
@@ -516,7 +525,8 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 		buffered:    buffered,
 		discard:     discard,
 		key:         make([]byte, 0, 128),
-		largeValues: true,
+		topTx:       make(map[string]uint64, 100),
+		largeValues: d.largeValues,
 	}
 	if buffered {
 		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
@@ -553,6 +563,14 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	h.d.topLock.Lock()
+	for k, v := range h.topTx {
+		pv, ok := h.d.topTx[k]
+		if !ok || v > pv {
+			h.d.topTx[k] = v
+		}
+	}
+	h.d.topLock.Unlock()
 	h.close()
 	return nil
 }
@@ -579,6 +597,11 @@ func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
 		}
 		if err := h.values.Collect(fullkey, original); err != nil {
 			return err
+		}
+		h.topTx[string(fullkey[:lk])] = txnum
+
+		if bytes.HasPrefix(fullkey, []byte{58, 16, 136}) {
+			log.Info("addValue", "key", fullkey, "value", original)
 		}
 		return nil
 	}
@@ -1692,35 +1715,28 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 	}
 	return v, true, nil
 }
+
 func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
 	hf.d = d.wal
 	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
 	return hf
 }
+
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
-	//var invertedStep [8]byte
 	dc.d.stats.TotalQueries.Add(1)
 
-	keyCursor, err := roTx.CursorDupSort(dc.d.keysTable)
-	if err != nil {
-		return nil, false, err
-	}
-	defer keyCursor.Close()
-	foundInvStep, err := keyCursor.SeekBothRange(key, nil)
-	if err != nil {
-		return nil, false, err
-	}
-	if len(foundInvStep) == 0 {
-		//panic("how to implement getLatest for files?")
-		//return nil, false, nil
+	dc.d.topLock.RLock()
+	ttx, ok := dc.d.topTx[string(key)]
+	dc.d.topLock.RUnlock()
+	if !ok {
 		dc.d.stats.HistoryQueries.Add(1)
 		v, found := dc.readFromFiles(key, 0)
 		return v, found, nil
 	}
-	//keySuffix := make([]byte, len(key)+8)
+
 	copy(dc.keyBuf[:], key)
-	copy(dc.keyBuf[len(key):], foundInvStep)
+	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
 	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
