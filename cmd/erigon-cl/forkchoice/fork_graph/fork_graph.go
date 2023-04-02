@@ -39,9 +39,10 @@ const maxGraphExtension = 256
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type ForkGraph struct {
 	inverseEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ChangeSet]
-	forwardEdges          *lru.Cache[libcommon.Hash, *cltypes.SignedBeaconBlock]
-	farthestExtendingPath *lru.Cache[libcommon.Hash, bool] // The longest path is used as the "canonical"
-	badBlocks             *lru.Cache[libcommon.Hash, bool] // blocks that are invalid and that leads to automatic fail of extension.
+	forwardEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ChangeSet]
+	headersAndStates      *lru.Cache[libcommon.Hash, interface{}] // Could be either a checkpoint or state
+	farthestExtendingPath *lru.Cache[libcommon.Hash, bool]        // The longest path is used as the "canonical"
+	badBlocks             *lru.Cache[libcommon.Hash, bool]        // blocks that are invalid and that leads to automatic fail of extension.
 	lastState             *state.BeaconState
 	// Cap for how farther we can reorg (initial state slot)
 	anchorSlot uint64
@@ -53,7 +54,7 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 	if err != nil {
 		panic(err)
 	}
-	forwardEdges, err := lru.New[libcommon.Hash, *cltypes.SignedBeaconBlock](maxGraphExtension)
+	forwardEdges, err := lru.New[libcommon.Hash, *beacon_changeset.ChangeSet](maxGraphExtension)
 	if err != nil {
 		panic(err)
 	}
@@ -65,10 +66,16 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 	if err != nil {
 		panic(err)
 	}
+	headersAndStates, err := lru.New[libcommon.Hash, interface{}](maxGraphExtension)
+	if err != nil {
+		panic(err)
+	}
 	return &ForkGraph{
 		// Bidirectional edges
-		inverseEdges:          inverseEdges,
-		forwardEdges:          forwardEdges,
+		inverseEdges:     inverseEdges,
+		headersAndStates: headersAndStates,
+		forwardEdges:     forwardEdges,
+
 		farthestExtendingPath: farthestExtendingPath,
 		badBlocks:             badBlocks,
 		lastState:             anchorState,
@@ -110,10 +117,12 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	}
 
 	f.lastState.StartCollectingReverseChangeSet()
+	f.lastState.StartCollectingForwardChangeSet()
 	// Execute the state
 	if err := transition.TransitionState(f.lastState, signedBlock /*fullValidation=*/, true); err != nil {
 		// Revert bad block changes
 		f.lastState.RevertWithChangeset(f.lastState.StopCollectingReverseChangeSet())
+		f.lastState.StopCollectingForwardChangeSet()
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", err)
 		f.badBlocks.Add(blockRoot, true)
@@ -122,9 +131,60 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 
 	// if it is finished then update the graph
 	f.inverseEdges.Add(blockRoot, f.lastState.StopCollectingReverseChangeSet())
-
-	f.forwardEdges.Add(blockRoot, signedBlock)
+	f.forwardEdges.Add(blockRoot, f.lastState.StopCollectingForwardChangeSet())
+	f.headersAndStates.Add(blockRoot, &cltypes.BeaconBlockHeader{
+		Slot:          block.Slot,
+		ProposerIndex: block.ProposerIndex,
+		ParentRoot:    block.ParentRoot,
+		Root:          blockRoot,
+	})
 	f.farthestExtendingPath.Add(blockRoot, true)
+
+	return Success, nil
+}
+
+// Add a new node and edge to the graph but by using a checkpoint
+func (f *ForkGraph) AddChainSegmentWithCheckpoint(checkpoint *cltypes.Checkpoint) (ChainSegmentInsertionResult, error) {
+	checkpointRoot, err := checkpoint.HashSSZ()
+	if err != nil {
+		return LogisticError, err
+	}
+
+	if _, ok := f.forwardEdges.Get(checkpointRoot); ok {
+		return PreValidated, nil
+	}
+
+	// Check if block being process right now was marked as invalid.
+	if invalid, ok := f.badBlocks.Get(checkpointRoot); ok && invalid {
+		f.badBlocks.Add(checkpointRoot, true)
+		return InvalidBlock, nil
+	}
+	baseState, err := f.GetState(checkpoint.Root)
+	if err != nil {
+		return LogisticError, err
+	}
+	if baseState == nil {
+		return MissingSegment, nil
+	}
+	f.lastState.StartCollectingForwardChangeSet()
+	f.lastState.StartCollectingReverseChangeSet()
+	checkpointSlot := f.lastState.BeaconConfig().SlotsPerEpoch
+	if f.lastState.Slot() < checkpoint.Epoch*checkpointSlot {
+		if err := transition.ProcessSlots(f.lastState, checkpointSlot); err != nil {
+			// Revert bad block changes
+			f.lastState.StopCollectingForwardChangeSet()
+			f.lastState.RevertWithChangeset(f.lastState.StopCollectingReverseChangeSet())
+			// Add block to list of invalid blocks
+			log.Debug("Invalid beacon block", "reason", err)
+			f.badBlocks.Add(checkpointRoot, true)
+			return LogisticError, err
+		}
+	}
+	// if it is finished then update the graph
+	f.inverseEdges.Add(checkpointRoot, f.lastState.StopCollectingReverseChangeSet())
+	f.forwardEdges.Add(checkpointRoot, f.lastState.StopCollectingForwardChangeSet())
+	f.headersAndStates.Add(checkpointRoot, checkpoint)
+	f.farthestExtendingPath.Add(checkpointRoot, true)
 
 	return Success, nil
 }
@@ -142,8 +202,23 @@ func (f *ForkGraph) Config() *clparams.BeaconChainConfig {
 	return f.lastState.BeaconConfig()
 }
 
-func (f *ForkGraph) GetBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	return f.forwardEdges.Get(blockRoot)
+func (f *ForkGraph) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	headerInterface, ok := f.headersAndStates.Get(blockRoot)
+	if !ok {
+		return nil, false
+	}
+	if header, ok := headerInterface.(*cltypes.BeaconBlockHeader); ok {
+		return header, true
+	}
+	return nil, false
+}
+
+func (f *ForkGraph) GetStateFromCheckpoint(checkpoint *cltypes.Checkpoint) (*state.BeaconState, error) {
+	root, err := checkpoint.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	return f.GetState(root)
 }
 
 func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, error) {
@@ -160,12 +235,12 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 	currentIteratorRoot := blockRoot
 	// try and find the point of recconection
 	for reconnect, ok := f.farthestExtendingPath.Get(currentIteratorRoot); !ok || !reconnect; {
-		parent, isSegmentPresent := f.forwardEdges.Get(currentIteratorRoot)
+		parent, isSegmentPresent := f.GetHeader(currentIteratorRoot)
 		if !isSegmentPresent {
 			return nil, nil
 		}
 		blockRootsFromFarthestExtendingPath = append(blockRootsFromFarthestExtendingPath, currentIteratorRoot)
-		currentIteratorRoot = parent.Block.ParentRoot
+		currentIteratorRoot = parent.ParentRoot
 	}
 	// Initalize edge.
 	edge := currentStateBlockRoot
@@ -189,15 +264,8 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 	}
 	// Traverse the graph forward now (the nodes are in reverse order).
 	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
-		currentBlock, _ := f.forwardEdges.Get(blockRootsFromFarthestExtendingPath[i])
-		f.lastState.StartCollectingReverseChangeSet()
-		if err := transition.TransitionState(f.lastState, currentBlock, false); err != nil {
-			f.lastState.RevertWithChangeset(f.lastState.StopCollectingReverseChangeSet())
-			log.Debug("Invalid beacon block", "reason", err)
-			f.badBlocks.Add(blockRoot, true)
-			return nil, err
-		}
-		f.lastState.StopCollectingReverseChangeSet()
+		changeset, _ := f.forwardEdges.Get(blockRootsFromFarthestExtendingPath[i])
+		f.lastState.RevertWithChangeset(changeset)
 	}
 
 	// If we have a new farthest extended path, update it accordingly.

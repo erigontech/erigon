@@ -19,12 +19,18 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint *cltypes.Checkpoint
 	unrealizedFinalizedCheckpoint *cltypes.Checkpoint
 	proposerBoostRoot             libcommon.Hash
-	equivocatingIndicies          []uint64
-	forkGraph                     *fork_graph.ForkGraph
+	// Use go map because this is actually an unordered set
+	equivocatingIndicies map[uint64]struct{}
+	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
 	unrealizedJustifications *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
-	checkpointStates         *lru.Cache[cltypes.Checkpoint, libcommon.Hash]
+	latestMessages           map[uint64]*LatestMessage
 	mu                       sync.Mutex
+}
+
+type LatestMessage struct {
+	Epoch uint64
+	Root  libcommon.Hash
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
@@ -41,10 +47,6 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 	if err != nil {
 		return nil, err
 	}
-	checkpointStates, err := lru.New[cltypes.Checkpoint, libcommon.Hash](checkpointsPerCache)
-	if err != nil {
-		return nil, err
-	}
 	return &ForkChoiceStore{
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
 		justifiedCheckpoint:           anchorCheckpoint.Copy(),
@@ -53,6 +55,7 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
 		forkGraph:                     fork_graph.New(anchorState),
 		unrealizedJustifications:      unrealizedJustifications,
-		checkpointStates:              checkpointStates,
+		equivocatingIndicies:          map[uint64]struct{}{},
+		latestMessages:                map[uint64]*LatestMessage{},
 	}, nil
 }

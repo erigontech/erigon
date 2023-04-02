@@ -47,12 +47,12 @@ func (f *ForkChoiceStore) computeSlotsSinceEpochStart(slot uint64) uint64 {
 
 // Ancestor returns the ancestor to the given root.
 func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.Hash {
-	block, has := f.forkGraph.GetBlock(root)
+	header, has := f.forkGraph.GetHeader(root)
 	if !has {
 		return libcommon.Hash{}
 	}
-	for block.Block.Slot > slot {
-		block, has = f.forkGraph.GetBlock(block.Block.ParentRoot)
+	for header.Slot > slot {
+		header, has = f.forkGraph.GetHeader(header.ParentRoot)
 		if !has {
 			return libcommon.Hash{}
 		}

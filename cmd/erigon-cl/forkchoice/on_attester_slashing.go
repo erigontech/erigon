@@ -40,10 +40,9 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if !valid {
 		return fmt.Errorf("invalid indexed attestation 2")
 	}
-
+	for _, index := range utils.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
+		f.equivocatingIndicies[index] = struct{}{}
+	}
 	// add attestation indicies to equivocating indicies.
-	f.equivocatingIndicies = append(f.equivocatingIndicies, utils.IntersectionOfSortedSets(
-		attestation1.AttestingIndices,
-		attestation2.AttestingIndices)...)
 	return nil
 }

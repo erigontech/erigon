@@ -5,6 +5,8 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice/fork_graph"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // OnAttestation processes incoming attestations. TODO(Giulio2002): finish it with forward changesets.
@@ -14,15 +16,18 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err
 	}
-	// get target state first
-	stateBlockRoot, has := f.checkpointStates.Get(*attestation.Data.Target)
-	if !has {
-		return fmt.Errorf("absent checkpoint state for target")
+	target := attestation.Data.Target
+	// Insert target state
+	if status, err := f.forkGraph.AddChainSegmentWithCheckpoint(target); err != nil || (status != fork_graph.PreValidated && status != fork_graph.Success) {
+		log.Debug("Could not create checkpoint state", "status", status, "err", err)
+		return fmt.Errorf("could not create checkpoint state, %s", err)
 	}
-	targetState, err := f.forkGraph.GetState(stateBlockRoot)
+
+	targetState, err := f.forkGraph.GetStateFromCheckpoint(target)
 	if err != nil {
 		return nil
 	}
+	// Verify attestation signature.
 	if targetState == nil {
 		return fmt.Errorf("target state does not exist")
 	}
@@ -30,23 +35,32 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 	if err != nil {
 		return err
 	}
-	// Verifiy attestation signature.
-	if !fromBlock {
-		indexedAttestation, err := targetState.GetIndexedAttestation(attestation, attestationIndicies)
-		if err != nil {
-			return err
-		}
+	indexedAttestation, err := targetState.GetIndexedAttestation(attestation, attestationIndicies)
+	if err != nil {
+		return err
+	}
 
-		valid, err := targetState.IsValidIndexedAttestation(indexedAttestation)
-		if err != nil {
-			return err
+	valid, err := targetState.IsValidIndexedAttestation(indexedAttestation)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid attestation")
+	}
+	// Lastly update latest messages.
+	beaconBlockRoot := attestation.Data.BeaconBlockHash
+	for _, index := range attestationIndicies {
+		if _, ok := f.equivocatingIndicies[index]; ok {
+			continue
 		}
-		if !valid {
-			return fmt.Errorf("invalid attestation")
+		validatorMessage, has := f.latestMessages[index]
+		if !has || target.Epoch > validatorMessage.Epoch {
+			f.latestMessages[index] = &LatestMessage{
+				Epoch: target.Epoch,
+				Root:  beaconBlockRoot,
+			}
 		}
 	}
-	// Lastly update store.
-	// This needs to be sorted out
 	return nil
 }
 
@@ -61,10 +75,10 @@ func (f *ForkChoiceStore) validateOnAttestation(attestation *cltypes.Attestation
 	if target.Epoch != f.computeEpochAtSlot(attestation.Data.Slot) {
 		return fmt.Errorf("mismatching target epoch with slot data")
 	}
-	if _, has := f.forkGraph.GetBlock(target.Root); !has {
+	if _, has := f.forkGraph.GetHeader(target.Root); !has {
 		return fmt.Errorf("target root is missing")
 	}
-	if signedBlock, has := f.forkGraph.GetBlock(attestation.Data.BeaconBlockHash); !has || signedBlock.Block.Slot > attestation.Data.Slot {
+	if blockHeader, has := f.forkGraph.GetHeader(attestation.Data.BeaconBlockHash); !has || blockHeader.Slot > attestation.Data.Slot {
 		return fmt.Errorf("bad attestation data")
 	}
 	// LMD vote must be consistent with FFG vote target
