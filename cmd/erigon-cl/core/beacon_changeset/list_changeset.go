@@ -35,14 +35,8 @@ func (l *ListChangeSet[T]) AddChange(index int, elem T) {
 
 // OnAddNewElement handles addition of new element to list set of changes.
 func (l *ListChangeSet[T]) OnAddNewElement(elem T) {
-	l.compact = false
+	l.AddChange(l.listLength, elem)
 	l.listLength++
-	l.list = append(l.list, &listElementChangeset[T]{
-		value:     elem,
-		listIndex: l.listLength - 1,
-		id:        l.nextId,
-	})
-	l.nextId++
 }
 
 // CompactChanges removes duplicates from a list using QuickSort and linear scan.

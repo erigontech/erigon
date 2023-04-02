@@ -97,6 +97,12 @@ func (b *BeaconState) SlashValidator(slashedInd uint64, whistleblowerInd *uint64
 	// Update slashings vector
 	b.slashings[slashingsIndex] += b.validators[slashedInd].EffectiveBalance
 	b.touchedLeaves[SlashingsLeafIndex] = true
+	// Lets update the forward changesets
+	if b.forwardChangeset != nil {
+		b.forwardChangeset.SlashedChange.AddChange(int(slashedInd), b.validators[slashedInd].Slashed)
+		b.forwardChangeset.WithdrawalEpochChange.AddChange(int(slashedInd), b.validators[slashedInd].WithdrawableEpoch)
+		b.forwardChangeset.SlashingsChanges.AddChange(slashingsIndex, b.slashings[slashingsIndex])
+	}
 	if err := b.DecreaseBalance(slashedInd, b.validators[slashedInd].EffectiveBalance/b.beaconConfig.GetMinSlashingPenaltyQuotient(b.version)); err != nil {
 		return err
 	}

@@ -156,20 +156,33 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 	b.touchedLeaves[ValidatorsLeafIndex] = true
 	newValidatorsSet := b.validators
 	// All changes habe same length
-	previousValidatorSetLength := changeset.WithdrawalCredentialsChange.ListLength()
-
-	if previousValidatorSetLength != len(b.validators) {
-		for _, removedValidator := range b.validators[previousValidatorSetLength:] {
+	newValidatorSetLength := changeset.WithdrawalCredentialsChange.ListLength()
+	if newValidatorSetLength < len(b.validators) {
+		for _, removedValidator := range b.validators[newValidatorSetLength:] {
 			delete(b.publicKeyIndicies, removedValidator.PublicKey)
 		}
-		newValidatorsSet = make([]*cltypes.Validator, previousValidatorSetLength)
+	}
+	if newValidatorSetLength != len(b.validators) {
+		newValidatorsSet = make([]*cltypes.Validator, newValidatorSetLength)
 		copy(newValidatorsSet, b.validators)
 	}
 	b.validators = newValidatorsSet
 	// Now start processing all of the validator fields
+	changeset.PublicKeyChanges.ChangesWithHandler(func(key [48]byte, index int) {
+		if index >= len(b.validators) {
+			return
+		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
+		}
+		b.validators[index].PublicKey = key
+	})
 	changeset.WithdrawalCredentialsChange.ChangesWithHandler(func(value libcommon.Hash, index int) {
 		if index >= len(b.validators) {
 			return
+		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
 		}
 		b.validators[index].WithdrawalCredentials = value
 	})
@@ -177,11 +190,17 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 		if index >= len(b.validators) {
 			return
 		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
+		}
 		b.validators[index].ExitEpoch = value
 	})
 	changeset.ActivationEligibilityEpochChange.ChangesWithHandler(func(value uint64, index int) {
 		if index >= len(b.validators) {
 			return
+		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
 		}
 		b.validators[index].ActivationEligibilityEpoch = value
 	})
@@ -189,11 +208,17 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 		if index >= len(b.validators) {
 			return
 		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
+		}
 		b.validators[index].ActivationEpoch = value
 	})
 	changeset.SlashedChange.ChangesWithHandler(func(value bool, index int) {
 		if index >= len(b.validators) {
 			return
+		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
 		}
 		b.validators[index].Slashed = value
 	})
@@ -201,11 +226,17 @@ func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet)
 		if index >= len(b.validators) {
 			return
 		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
+		}
 		b.validators[index].WithdrawableEpoch = value
 	})
 	changeset.EffectiveBalanceChange.ChangesWithHandler(func(value uint64, index int) {
 		if index >= len(b.validators) {
 			return
+		}
+		if b.validators[index] == nil {
+			b.validators[index] = new(cltypes.Validator)
 		}
 		b.validators[index].EffectiveBalance = value
 	})
@@ -218,12 +249,11 @@ func (b *BeaconState) revertCachesOnBoundary(beforeSlot uint64) {
 	b.previousStateRoot = libcommon.Hash{}
 	b.proposerIndex = nil
 	b.totalActiveBalanceCache = nil
-	if epoch <= beforeEpoch {
+	if epoch < beforeEpoch {
 		return
 	}
-	b.totalActiveBalanceCache = nil
 	b.committeeCache.Purge()
-	for epochToBeRemoved := beforeEpoch; epochToBeRemoved < epoch+1; beforeEpoch++ {
+	for epochToBeRemoved := beforeEpoch; epochToBeRemoved < epoch+1; epochToBeRemoved++ {
 		b.activeValidatorsCache.Remove(epochToBeRemoved)
 		b.shuffledSetsCache.Remove(b.GetSeed(epochToBeRemoved, b.beaconConfig.DomainBeaconAttester))
 		b.activeValidatorsCache.Remove(epochToBeRemoved)

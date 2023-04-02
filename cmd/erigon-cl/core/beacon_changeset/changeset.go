@@ -37,6 +37,7 @@ type ChangeSet struct {
 	InactivityScoresChanges           *ListChangeSet[uint64]
 	historicalSummaryChange           *ListChangeSet[cltypes.HistoricalSummary]
 	// Validator fields.
+	PublicKeyChanges                 *ListChangeSet[[48]byte]
 	WithdrawalCredentialsChange      *ListChangeSet[libcommon.Hash]
 	EffectiveBalanceChange           *ListChangeSet[uint64]
 	SlashedChange                    *ListChangeSet[bool]
@@ -68,6 +69,7 @@ func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, 
 		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize),
 		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength),
 		// Validators section
+		PublicKeyChanges:                 NewListChangeSet[[48]byte](validatorSetSize),
 		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize),
 		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize),
 		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize),
@@ -424,4 +426,23 @@ func (r *ChangeSet) ApplyVersionChange(version clparams.StateVersion) (clparams.
 		return version, false
 	}
 	return *r.versionChange, true
+}
+
+func (r *ChangeSet) AddVote(vote cltypes.Eth1Data) {
+	r.eth1DataVotesChanges.OnAddNewElement(vote)
+}
+
+func (r *ChangeSet) AddHistoricalSummary(summary cltypes.HistoricalSummary) {
+	r.historicalSummaryChange.OnAddNewElement(summary)
+}
+
+func (r *ChangeSet) OnNewValidator(validator *cltypes.Validator) {
+	r.PublicKeyChanges.OnAddNewElement(validator.PublicKey)
+	r.WithdrawalCredentialsChange.OnAddNewElement(validator.WithdrawalCredentials)
+	r.EffectiveBalanceChange.OnAddNewElement(validator.EffectiveBalance)
+	r.SlashedChange.OnAddNewElement(validator.Slashed)
+	r.ActivationEligibilityEpochChange.OnAddNewElement(validator.ActivationEligibilityEpoch)
+	r.ActivationEpochChange.OnAddNewElement(validator.ActivationEpoch)
+	r.ExitEpochChange.OnAddNewElement(validator.ExitEpoch)
+	r.WithdrawalEpochChange.OnAddNewElement(validator.WithdrawableEpoch)
 }
