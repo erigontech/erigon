@@ -110,3 +110,9 @@ func (l *ListChangeSet[T]) ListLength() int {
 func (l *ListChangeSet[T]) Empty() bool {
 	return len(l.list) == 0
 }
+
+// Clear clears the changesets and re-adjust length.
+func (l *ListChangeSet[T]) Clear(newLength int) {
+	l.list = nil
+	l.listLength = newLength
+}

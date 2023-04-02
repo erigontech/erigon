@@ -234,18 +234,9 @@ func (r *ChangeSet) CompactChanges() {
 	r.SlashingsChanges.CompactChanges(r.inverseChangeset)
 	r.RandaoMixesChanges.CompactChanges(r.inverseChangeset)
 	r.BalancesChanges.CompactChanges(r.inverseChangeset)
-	if len(r.eth1DataVotesAtReset) > 0 {
-		r.eth1DataVotesChanges = nil
-	} else {
-		r.eth1DataVotesChanges.CompactChanges(r.inverseChangeset)
-	}
-	if len(r.previousEpochParticipationAtReset) > 0 {
-		r.PreviousEpochParticipationChanges = nil
-		r.CurrentEpochParticipationChanges = nil
-	} else {
-		r.PreviousEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-		r.CurrentEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-	}
+	r.eth1DataVotesChanges.CompactChanges(r.inverseChangeset)
+	r.PreviousEpochParticipationChanges.CompactChanges(r.inverseChangeset)
+	r.CurrentEpochParticipationChanges.CompactChanges(r.inverseChangeset)
 	r.InactivityScoresChanges.CompactChanges(r.inverseChangeset)
 	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
 	r.WithdrawalCredentialsChange.CompactChanges(r.inverseChangeset)
@@ -257,30 +248,38 @@ func (r *ChangeSet) CompactChanges() {
 	r.WithdrawalEpochChange.CompactChanges(r.inverseChangeset)
 }
 
-func (r *ChangeSet) ReportVotesReset(previousVotes []*cltypes.Eth1Data) {
-	if r.wasEth1DataVotesReset {
+func (r *ChangeSet) ReportVotesReset(votes []*cltypes.Eth1Data) {
+	if r.inverseChangeset && r.wasEth1DataVotesReset {
 		return
 	}
+	r.eth1DataVotesAtReset = nil
 	// Copy the slice over
-	for _, vote := range previousVotes {
+	for _, vote := range votes {
 		copyVote := *vote
 		r.eth1DataVotesAtReset = append(r.eth1DataVotesAtReset, &copyVote)
 	}
+	r.eth1DataVotesChanges.Clear(len(votes))
 	r.wasEth1DataVotesReset = true
 }
 
 func (r *ChangeSet) ReportEpochParticipationReset(prevParticipation, currParticpation cltypes.ParticipationFlagsList) {
-	if r.wasEpochParticipationReset {
+	if r.inverseChangeset && r.wasEpochParticipationReset {
 		return
 	}
 	r.previousEpochParticipationAtReset = prevParticipation.Copy()
 	r.currentEpochParticipationAtReset = currParticpation.Copy()
+	r.PreviousEpochParticipationChanges.Clear(len(prevParticipation))
+	r.CurrentEpochParticipationChanges.Clear(len(currParticpation))
 	r.wasEpochParticipationReset = true
 }
 
 func (r *ChangeSet) ApplyEth1DataVotesChanges(initialVotes []*cltypes.Eth1Data) (output []*cltypes.Eth1Data, changed bool) {
 	if r.wasEth1DataVotesReset {
-		return r.eth1DataVotesAtReset, true
+		initialVotes = r.eth1DataVotesAtReset
+		changed = true
+		if r.inverseChangeset {
+			return initialVotes, changed
+		}
 	}
 	output = initialVotes
 	if r.eth1DataVotesChanges.Empty() && r.eth1DataVotesChanges.ListLength() == len(output) {
@@ -301,11 +300,24 @@ func (r *ChangeSet) ApplyEpochParticipationChanges(
 	previousEpochParticipation cltypes.ParticipationFlagsList,
 	currentEpochParticipation cltypes.ParticipationFlagsList) (newPreviousEpochParticipation cltypes.ParticipationFlagsList, newCurrentEpochParticipation cltypes.ParticipationFlagsList,
 	previousParticipationChanged bool, currentParticipationChanged bool) {
+	// If there was a reset on epoch boundary level to reset
 	if r.wasEpochParticipationReset {
-		return r.previousEpochParticipationAtReset, r.currentEpochParticipationAtReset, true, true
+		previousEpochParticipation = r.previousEpochParticipationAtReset.Copy()
+		currentEpochParticipation = r.currentEpochParticipationAtReset.Copy()
+		currentParticipationChanged = true
+		previousParticipationChanged = true
+		if r.inverseChangeset {
+			return previousEpochParticipation, currentEpochParticipation, currentParticipationChanged, previousParticipationChanged
+		}
 	}
-	newPreviousEpochParticipation, previousParticipationChanged = r.PreviousEpochParticipationChanges.ApplyChanges(previousEpochParticipation)
-	newCurrentEpochParticipation, currentParticipationChanged = r.CurrentEpochParticipationChanges.ApplyChanges(currentEpochParticipation)
+	var touched bool
+	if newPreviousEpochParticipation, touched = r.PreviousEpochParticipationChanges.ApplyChanges(previousEpochParticipation); touched {
+		previousParticipationChanged = true
+	}
+	if newCurrentEpochParticipation, touched = r.CurrentEpochParticipationChanges.ApplyChanges(currentEpochParticipation); touched {
+		currentParticipationChanged = true
+	}
+
 	return
 }
 
