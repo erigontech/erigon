@@ -28,7 +28,7 @@ type ChangeSet struct {
 	BlockRootsChanges                 *ListChangeSet[libcommon.Hash]
 	StateRootsChanges                 *ListChangeSet[libcommon.Hash]
 	HistoricalRootsChanges            *ListChangeSet[libcommon.Hash]
-	Eth1DataVotesChanges              *ListChangeSet[cltypes.Eth1Data]
+	eth1DataVotesChanges              *ListChangeSet[cltypes.Eth1Data]
 	BalancesChanges                   *ListChangeSet[uint64]
 	RandaoMixesChanges                *ListChangeSet[libcommon.Hash]
 	SlashingsChanges                  *ListChangeSet[uint64]
@@ -57,7 +57,7 @@ func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, 
 		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength),
 		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength),
 		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength),
-		Eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength),
+		eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength),
 		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize),
 		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength),
 		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength),
@@ -215,7 +215,10 @@ func (r *ChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSum
 		copy(output, input)
 	}
 	r.historicalSummaryChange.ChangesWithHandler(func(value cltypes.HistoricalSummary, index int) {
-		*output[index] = value
+		output[index] = &cltypes.HistoricalSummary{
+			BlockSummaryRoot: value.BlockSummaryRoot,
+			StateSummaryRoot: value.StateSummaryRoot,
+		}
 	})
 	return
 }
@@ -229,9 +232,9 @@ func (r *ChangeSet) CompactChanges() {
 	r.RandaoMixesChanges.CompactChangesReverse()
 	r.BalancesChanges.CompactChangesReverse()
 	if len(r.eth1DataVotesAtReset) > 0 {
-		r.Eth1DataVotesChanges = nil
+		r.eth1DataVotesChanges = nil
 	} else {
-		r.Eth1DataVotesChanges.CompactChangesReverse()
+		r.eth1DataVotesChanges.CompactChangesReverse()
 	}
 	if len(r.previousEpochParticipationAtReset) > 0 {
 		r.PreviousEpochParticipationChanges = nil
@@ -277,16 +280,16 @@ func (r *ChangeSet) ApplyEth1DataVotesChanges(initialVotes []*cltypes.Eth1Data) 
 		return r.eth1DataVotesAtReset, true
 	}
 	output = initialVotes
-	if r.Eth1DataVotesChanges.Empty() && r.Eth1DataVotesChanges.ListLength() == len(output) {
+	if r.eth1DataVotesChanges.Empty() && r.eth1DataVotesChanges.ListLength() == len(output) {
 		return
 	}
 	changed = true
-	if r.Eth1DataVotesChanges.ListLength() != len(output) {
-		output = make([]*cltypes.Eth1Data, r.Eth1DataVotesChanges.ListLength())
+	if r.eth1DataVotesChanges.ListLength() != len(output) {
+		output = make([]*cltypes.Eth1Data, r.eth1DataVotesChanges.ListLength())
 		copy(output, initialVotes)
 	}
-	r.Eth1DataVotesChanges.ChangesWithHandler(func(value cltypes.Eth1Data, index int) {
-		*output[index] = value
+	r.eth1DataVotesChanges.ChangesWithHandler(func(value cltypes.Eth1Data, index int) {
+		output[index] = value.Copy()
 	})
 	return
 }
