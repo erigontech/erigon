@@ -19,6 +19,18 @@ func (b *BeaconState) StopCollectingReverseChangeSet() *beacon_changeset.ChangeS
 	return ret
 }
 
+// StartCollectingForwardChangeSet starts collection change sets.
+func (b *BeaconState) StartCollectingForwardChangeSet() {
+	b.forwardChangeset = beacon_changeset.New(len(b.validators), len(b.blockRoots), len(b.stateRoots), len(b.slashings), len(b.historicalSummaries), len(b.historicalRoots), len(b.eth1DataVotes), len(b.randaoMixes), false)
+}
+
+// StopCollectingForwardChangeSet stops collection change sets.
+func (b *BeaconState) StopCollectingForwardChangeSet() *beacon_changeset.ChangeSet {
+	ret := b.forwardChangeset
+	b.forwardChangeset = nil
+	return ret
+}
+
 func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet) {
 	changeset.CompactChanges()
 	beforeSlot := b.slot

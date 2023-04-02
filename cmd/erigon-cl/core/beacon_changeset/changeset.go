@@ -80,77 +80,77 @@ func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, 
 	}
 }
 
-func (r *ChangeSet) OnSlotChange(prevSlot uint64, replaceExisting bool) {
-	if !replaceExisting && r.slotChange != nil {
+func (r *ChangeSet) OnSlotChange(prevSlot uint64) {
+	if r.inverseChangeset && r.slotChange != nil {
 		return
 	}
 	r.slotChange = new(uint64)
 	*r.slotChange = prevSlot
 }
 
-func (r *ChangeSet) OnForkChange(fork *cltypes.Fork, replaceExisting bool) {
-	if !replaceExisting && r.forkChange != nil {
+func (r *ChangeSet) OnForkChange(fork *cltypes.Fork) {
+	if r.inverseChangeset && r.forkChange != nil {
 		return
 	}
 	r.forkChange = new(cltypes.Fork)
 	*r.forkChange = *fork
 }
 
-func (r *ChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader, replaceExisting bool) {
-	if !replaceExisting && r.latestBlockHeaderChange != nil {
+func (r *ChangeSet) OnLatestHeaderChange(h *cltypes.BeaconBlockHeader) {
+	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.latestBlockHeaderChange = new(cltypes.BeaconBlockHeader)
 	*r.latestBlockHeaderChange = *h
 }
 
-func (r *ChangeSet) OnEth1DataChange(e *cltypes.Eth1Data, replaceExisting bool) {
-	if !replaceExisting && r.latestBlockHeaderChange != nil {
+func (r *ChangeSet) OnEth1DataChange(e *cltypes.Eth1Data) {
+	if r.inverseChangeset && r.latestBlockHeaderChange != nil {
 		return
 	}
 	r.eth1DataChange = new(cltypes.Eth1Data)
 	*r.eth1DataChange = *e
 }
 
-func (r *ChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits, replaceExisting bool) {
-	if !replaceExisting && r.justificationBitsChange != nil {
+func (r *ChangeSet) OnJustificationBitsChange(j cltypes.JustificationBits) {
+	if r.inverseChangeset && r.justificationBitsChange != nil {
 		return
 	}
 	r.justificationBitsChange = new(cltypes.JustificationBits)
 	*r.justificationBitsChange = j.Copy()
 }
 
-func (r *ChangeSet) OnEth1DepositIndexChange(e uint64, replaceExisting bool) {
-	if !replaceExisting && r.eth1DepositIndexChange != nil {
+func (r *ChangeSet) OnEth1DepositIndexChange(e uint64) {
+	if r.inverseChangeset && r.eth1DepositIndexChange != nil {
 		return
 	}
 	r.eth1DepositIndexChange = new(uint64)
 	*r.eth1DepositIndexChange = e
 }
 
-func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
-	if !replaceExisting && r.previousJustifiedCheckpointChange != nil {
+func (r *ChangeSet) OnPreviousJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+	if r.inverseChangeset && r.previousJustifiedCheckpointChange != nil {
 		return
 	}
 	r.previousJustifiedCheckpointChange = c.Copy()
 }
 
-func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
-	if !replaceExisting && r.currentJustifiedCheckpointChange != nil {
+func (r *ChangeSet) OnCurrentJustifiedCheckpointChange(c *cltypes.Checkpoint) {
+	if r.inverseChangeset && r.currentJustifiedCheckpointChange != nil {
 		return
 	}
 	r.currentJustifiedCheckpointChange = c.Copy()
 }
 
-func (r *ChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint, replaceExisting bool) {
-	if !replaceExisting && r.finalizedCheckpointChange != nil {
+func (r *ChangeSet) OnFinalizedCheckpointChange(c *cltypes.Checkpoint) {
+	if r.inverseChangeset && r.finalizedCheckpointChange != nil {
 		return
 	}
 	r.finalizedCheckpointChange = c.Copy()
 }
 
-func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
-	if !replaceExisting && r.currentSyncCommitteeChange != nil {
+func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee) {
+	if r.inverseChangeset && r.currentSyncCommitteeChange != nil {
 		return
 	}
 	r.currentSyncCommitteeChange = new(cltypes.SyncCommittee)
@@ -159,8 +159,8 @@ func (r *ChangeSet) OnCurrentSyncCommitteeChange(c *cltypes.SyncCommittee, repla
 	copy(r.currentSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee, replaceExisting bool) {
-	if !replaceExisting && r.nextSyncCommitteeChange != nil {
+func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee) {
+	if r.inverseChangeset && r.nextSyncCommitteeChange != nil {
 		return
 	}
 	r.nextSyncCommitteeChange = new(cltypes.SyncCommittee)
@@ -169,8 +169,8 @@ func (r *ChangeSet) OnNextSyncCommitteeChange(c *cltypes.SyncCommittee, replaceE
 	copy(r.nextSyncCommitteeChange.PubKeys, c.PubKeys)
 }
 
-func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header, replaceExisting bool) {
-	if !replaceExisting && r.latestExecutionPayloadHeaderChange != nil {
+func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header) {
+	if r.inverseChangeset && r.latestExecutionPayloadHeaderChange != nil {
 		return
 	}
 	r.latestExecutionPayloadHeaderChange = new(cltypes.Eth1Header)
@@ -178,24 +178,24 @@ func (r *ChangeSet) OnEth1Header(e *cltypes.Eth1Header, replaceExisting bool) {
 	r.latestExecutionPayloadHeaderChange.Extra = libcommon.Copy(e.Extra)
 }
 
-func (r *ChangeSet) OnNextWithdrawalIndexChange(index uint64, replaceExisting bool) {
-	if !replaceExisting && r.nextWithdrawalIndexChange != nil {
+func (r *ChangeSet) OnNextWithdrawalIndexChange(index uint64) {
+	if r.inverseChangeset && r.nextWithdrawalIndexChange != nil {
 		return
 	}
 	r.nextWithdrawalIndexChange = new(uint64)
 	*r.nextWithdrawalIndexChange = index
 }
 
-func (r *ChangeSet) OnNextWithdrawalValidatorIndexChange(index uint64, replaceExisting bool) {
-	if !replaceExisting && r.nextWithdrawalValidatorIndexChange != nil {
+func (r *ChangeSet) OnNextWithdrawalValidatorIndexChange(index uint64) {
+	if r.inverseChangeset && r.nextWithdrawalValidatorIndexChange != nil {
 		return
 	}
 	r.nextWithdrawalValidatorIndexChange = new(uint64)
 	*r.nextWithdrawalValidatorIndexChange = index
 }
 
-func (r *ChangeSet) OnVersionChange(v clparams.StateVersion, replaceExisting bool) {
-	if !replaceExisting && r.versionChange != nil {
+func (r *ChangeSet) OnVersionChange(v clparams.StateVersion) {
+	if r.inverseChangeset && r.versionChange != nil {
 		return
 	}
 	r.versionChange = new(clparams.StateVersion)
