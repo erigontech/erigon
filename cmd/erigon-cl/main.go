@@ -24,7 +24,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	sentinelapp "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/log/v3"
@@ -139,7 +138,7 @@ func startSentinel(cliCtx *cli.Context, cfg lcCli.ConsensusClientCliCfg, beaconS
 		FinalizedEpoch: beaconState.FinalizedCheckpoint().Epoch,
 		HeadSlot:       beaconState.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       beaconState.FinalizedCheckpoint().Root,
-	}, handshake.FullClientRule)
+	})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 		return nil, err

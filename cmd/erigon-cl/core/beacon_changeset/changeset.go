@@ -50,9 +50,11 @@ type ChangeSet struct {
 	eth1DataVotesAtReset              []*cltypes.Eth1Data
 	wasEth1DataVotesReset             bool
 	wasEpochParticipationReset        bool
+	// Whether this changeset points backward or not
+	inverseChangeset bool
 }
 
-func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, historicalSummariesLength, historicalRootsLength, votesLength, randaoMixesLength int) *ChangeSet {
+func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, historicalSummariesLength, historicalRootsLength, votesLength, randaoMixesLength int, inverseChangeset bool) *ChangeSet {
 	return &ChangeSet{
 		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength),
 		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength),
@@ -73,6 +75,8 @@ func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, 
 		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize),
 		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize),
 		SlashedChange:                    NewListChangeSet[bool](validatorSetSize),
+		// Additional internal
+		inverseChangeset: inverseChangeset,
 	}
 }
 
@@ -224,34 +228,33 @@ func (r *ChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSum
 }
 
 func (r *ChangeSet) CompactChanges() {
-
-	r.BlockRootsChanges.CompactChangesReverse()
-	r.StateRootsChanges.CompactChangesReverse()
-	r.HistoricalRootsChanges.CompactChangesReverse()
-	r.SlashingsChanges.CompactChangesReverse()
-	r.RandaoMixesChanges.CompactChangesReverse()
-	r.BalancesChanges.CompactChangesReverse()
+	r.BlockRootsChanges.CompactChanges(r.inverseChangeset)
+	r.StateRootsChanges.CompactChanges(r.inverseChangeset)
+	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
+	r.SlashingsChanges.CompactChanges(r.inverseChangeset)
+	r.RandaoMixesChanges.CompactChanges(r.inverseChangeset)
+	r.BalancesChanges.CompactChanges(r.inverseChangeset)
 	if len(r.eth1DataVotesAtReset) > 0 {
 		r.eth1DataVotesChanges = nil
 	} else {
-		r.eth1DataVotesChanges.CompactChangesReverse()
+		r.eth1DataVotesChanges.CompactChanges(r.inverseChangeset)
 	}
 	if len(r.previousEpochParticipationAtReset) > 0 {
 		r.PreviousEpochParticipationChanges = nil
 		r.CurrentEpochParticipationChanges = nil
 	} else {
-		r.PreviousEpochParticipationChanges.CompactChangesReverse()
-		r.CurrentEpochParticipationChanges.CompactChangesReverse()
+		r.PreviousEpochParticipationChanges.CompactChanges(r.inverseChangeset)
+		r.CurrentEpochParticipationChanges.CompactChanges(r.inverseChangeset)
 	}
-	r.InactivityScoresChanges.CompactChangesReverse()
-	r.HistoricalRootsChanges.CompactChangesReverse()
-	r.WithdrawalCredentialsChange.CompactChangesReverse()
-	r.EffectiveBalanceChange.CompactChangesReverse()
-	r.ExitEpochChange.CompactChangesReverse()
-	r.ActivationEligibilityEpochChange.CompactChangesReverse()
-	r.ActivationEpochChange.CompactChangesReverse()
-	r.SlashedChange.CompactChangesReverse()
-	r.WithdrawalEpochChange.CompactChangesReverse()
+	r.InactivityScoresChanges.CompactChanges(r.inverseChangeset)
+	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
+	r.WithdrawalCredentialsChange.CompactChanges(r.inverseChangeset)
+	r.EffectiveBalanceChange.CompactChanges(r.inverseChangeset)
+	r.ExitEpochChange.CompactChanges(r.inverseChangeset)
+	r.ActivationEligibilityEpochChange.CompactChanges(r.inverseChangeset)
+	r.ActivationEpochChange.CompactChanges(r.inverseChangeset)
+	r.SlashedChange.CompactChanges(r.inverseChangeset)
+	r.WithdrawalEpochChange.CompactChanges(r.inverseChangeset)
 }
 
 func (r *ChangeSet) ReportVotesReset(previousVotes []*cltypes.Eth1Data) {

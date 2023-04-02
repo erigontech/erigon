@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -173,7 +174,6 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db kv.RoDB,
-	rule handshake.RuleFunc,
 ) (*Sentinel, error) {
 	s := &Sentinel{
 		ctx: ctx,
@@ -207,7 +207,11 @@ func New(
 	if s.metrics {
 		http.Handle("/metrics", promhttp.Handler())
 		go func() {
-			if err := http.ListenAndServe(":2112", nil); err != nil {
+			server := &http.Server{
+				Addr:              ":2112",
+				ReadHeaderTimeout: time.Hour,
+			}
+			if err := server.ListenAndServe(); err != nil {
 				panic(err)
 			}
 		}()
@@ -230,7 +234,7 @@ func New(
 		return nil, err
 	}
 
-	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host, rule)
+	s.handshaker = handshake.New(ctx, cfg.GenesisConfig, cfg.BeaconConfig, host)
 
 	// removed IdDelta in recent version of libp2p
 	host.RemoveStreamHandler("/p2p/id/delta/1.0.0")

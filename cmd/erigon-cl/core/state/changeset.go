@@ -9,7 +9,7 @@ import (
 
 // StartCollectingReverseChangeSet starts collection change sets.
 func (b *BeaconState) StartCollectingReverseChangeSet() {
-	b.reverseChangeset = beacon_changeset.New(len(b.validators), len(b.blockRoots), len(b.stateRoots), len(b.slashings), len(b.historicalSummaries), len(b.historicalRoots), len(b.eth1DataVotes), len(b.randaoMixes))
+	b.reverseChangeset = beacon_changeset.New(len(b.validators), len(b.blockRoots), len(b.stateRoots), len(b.slashings), len(b.historicalSummaries), len(b.historicalRoots), len(b.eth1DataVotes), len(b.randaoMixes), true)
 }
 
 // StopCollectingReverseChangeSet stops collection change sets.
