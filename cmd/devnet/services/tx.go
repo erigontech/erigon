@@ -7,8 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 )
 
-func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
-	pendingSize, queuedSize, err := requests.TxpoolContent(models.ReqId)
+func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize, expectedBaseFeeSize int) {
+	pendingSize, queuedSize, baseFeeSize, err := requests.TxpoolContent(models.ReqId)
 	if err != nil {
 		fmt.Printf("FAILURE => error getting txpool content: %v\n", err)
 		return
@@ -24,5 +24,9 @@ func CheckTxPoolContent(expectedPendingSize, expectedQueuedSize int) {
 		return
 	}
 
-	fmt.Printf("SUCCESS => %d transaction(s) in the pending pool and %d transaction(s) in the queued pool\n", pendingSize, queuedSize)
+	if baseFeeSize != expectedBaseFeeSize {
+		fmt.Printf("FAILURE => %v\n", fmt.Errorf("expected %d transaction(s) in baseFee pool, got %d", expectedBaseFeeSize, baseFeeSize))
+	}
+
+	fmt.Printf("SUCCESS => %d transaction(s) in the pending pool, %d transaction(s) in the queued pool and %d transaction(s) in the baseFee pool\n", pendingSize, queuedSize, baseFeeSize)
 }

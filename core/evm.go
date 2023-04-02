@@ -31,6 +31,8 @@ import (
 )
 
 // NewEVMBlockContext creates a new context for use in the EVM.
+// excessDataGas must be set to the excessDataGas value from the *parent* block header, and can be
+// nil if the parent block is not of EIP-4844 type. It is read only.
 func NewEVMBlockContext(header *types.Header, blockHashFunc func(n uint64) libcommon.Hash, engine consensus.EngineReader, author *libcommon.Address, excessDataGas *big.Int) evmtypes.BlockContext {
 	// If we don't have an explicit author (i.e. not mining), extract from the header
 	var beneficiary libcommon.Address

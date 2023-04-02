@@ -22,7 +22,7 @@ func ExecuteAllMethods() {
 
 	// confirm that the txpool is empty
 	fmt.Println("CONFIRMING TXPOOL IS EMPTY BEFORE SENDING TRANSACTION...")
-	services.CheckTxPoolContent(0, 0)
+	services.CheckTxPoolContent(0, 0, 0)
 	fmt.Println()
 
 	/*
@@ -39,8 +39,6 @@ func ExecuteAllMethods() {
 	//}
 	//fmt.Println()
 
-	// USING DYNAMIC FEE
-	// send a token from the dev address to the recipient address
 	_, err := callSendTxWithDynamicFee(recipientAddress, models.DevAddress)
 	if err != nil {
 		fmt.Printf("callSendTxWithDynamicFee error: %v\n", err)

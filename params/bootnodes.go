@@ -182,13 +182,6 @@ var ChapelStaticPeers = []string{
 var RialtoBootnodes = []string{}
 var RialtoStaticPeers = ChapelStaticPeers
 
-var SokolBootnodes = []string{
-	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
-	"enode://e08adce358fc26dfbe1f24ee578dceaa29575ca44a39d9041203131db5135aceba6241840a9b57b1540eeaf7b4eff1aead28a74641be43342c35af454abb31b3@199.247.18.10:30313",
-	"enode://f1a5100a81cb73163ae450c584d06b1f644aa4fad4486c6aeb4c384b343c54bb66c744aa5f133af66ea1b25f0f4a454f04878f3e96ee4cd2390c047396d6357b@209.97.158.4:30303",
-	"enode://f11a0f80939b49a28bf99581da9b351a592ec1504b9d32a7dfda79b36510a891e96631239c4166e5c73368c21e9bb3241e7fd6929b899772e5a8fe9a7b7c3af6@45.77.52.149:30303",
-}
-
 var V5Bootnodes = []string{
 	// Teku team's bootnode
 	"enr:-KG4QOtcP9X1FbIMOe17QNMKqDxCpm14jcX5tiOE4_TyMrFqbmhPZHK_ZPG2Gxb1GE2xdtodOfx9-cgvNtxnRyHEmC0ghGV0aDKQ9aX9QgAAAAD__________4JpZIJ2NIJpcIQDE8KdiXNlY3AyNTZrMaEDhpehBDbZjM_L9ek699Y7vhUJ-eAdMyQW_Fil522Y0fODdGNwgiMog3VkcIIjKA",
@@ -274,8 +267,6 @@ func BootnodeURLsOfChain(chain string) []string {
 		return ChapelBootnodes
 	case networkname.RialtoChainName:
 		return RialtoBootnodes
-	case networkname.SokolChainName:
-		return SokolBootnodes
 	case networkname.MumbaiChainName:
 		return MumbaiBootnodes
 	case networkname.BorMainnetChainName:

@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -175,31 +176,40 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	if err != nil {
 		return nil, nil, err
 	}
-	for addr, account := range g.Alloc {
-		if len(account.Code) > 0 || len(account.Storage) > 0 {
-			// Special case for weird tests - inaccessible storage
-			var b [8]byte
-			binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
-			if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
-				return nil, nil, err
+	var stateWriter state.StateWriter
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+		//tx.(*temporal.Tx).Agg().SetTxNum(0)
+		//stateWriter = state.NewWriterV4(tx.(kv.TemporalTx))
+		//defer tx.(*temporal.Tx).Agg().StartUnbufferedWrites().FinishWrites()
+	} else {
+		for addr, account := range g.Alloc {
+			if len(account.Code) > 0 || len(account.Storage) > 0 {
+				// Special case for weird tests - inaccessible storage
+				var b [8]byte
+				binary.BigEndian.PutUint64(b[:], state.FirstContractIncarnation)
+				if err := tx.Put(kv.IncarnationMap, addr[:], b[:]); err != nil {
+					return nil, nil, err
+				}
 			}
 		}
+		stateWriter = state.NewPlainStateWriter(tx, tx, 0)
 	}
 
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 
-	blockWriter := state.NewPlainStateWriter(tx, tx, 0)
-
-	if err := statedb.CommitBlock(&chain.Rules{}, blockWriter); err != nil {
+	if err := statedb.CommitBlock(&chain.Rules{}, stateWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %w", err)
 	}
-	if err := blockWriter.WriteChangeSets(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
-	}
-	if err := blockWriter.WriteHistory(); err != nil {
-		return nil, statedb, fmt.Errorf("cannot write history: %w", err)
+	if csw, ok := stateWriter.(state.WriterWithChangeSets); ok {
+		if err := csw.WriteChangeSets(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write change sets: %w", err)
+		}
+		if err := csw.WriteHistory(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write history: %w", err)
+		}
 	}
 	return block, statedb, nil
 }
@@ -352,20 +362,6 @@ func GoerliGenesisBlock() *types.Genesis {
 		GasLimit:   10485760,
 		Difficulty: big.NewInt(1),
 		Alloc:      readPrealloc("allocs/goerli.json"),
-	}
-}
-
-func SokolGenesisBlock() *types.Genesis {
-	/*
-		header rlp: f9020da00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a0fad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000830200008083663be080808080b8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-	*/
-	return &types.Genesis{
-		Config:     params.SokolChainConfig,
-		Timestamp:  0x0,
-		AuRaSeal:   common.FromHex("0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   0x663BE0,
-		Difficulty: big.NewInt(0x20000),
-		Alloc:      readPrealloc("allocs/sokol.json"),
 	}
 }
 
@@ -597,7 +593,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			}
 
 			if len(account.Constructor) > 0 {
-				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head); err != nil {
+				if _, err = SysCreate(addr, account.Constructor, *g.Config, statedb, head, nil /*excessDataGas*/); err != nil {
 					return
 				}
 			}
@@ -662,8 +658,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return RinkebyGenesisBlock()
 	case networkname.GoerliChainName:
 		return GoerliGenesisBlock()
-	case networkname.SokolChainName:
-		return SokolGenesisBlock()
 	case networkname.BSCChainName:
 		return BSCGenesisBlock()
 	case networkname.ChapelChainName:
