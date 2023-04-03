@@ -519,7 +519,6 @@ func ExecV3(ctx context.Context,
 	var b *types.Block
 	var blockNum uint64
 	var err error
-	var lastBlockRoot []byte
 Loop:
 	for blockNum = block; blockNum <= maxBlockNum; blockNum++ {
 		inputBlockNum.Store(blockNum)
@@ -532,7 +531,6 @@ Loop:
 			// TODO: panic here and see that overall prodcess deadlock
 			return fmt.Errorf("nil block %d", blockNum)
 		}
-		lastBlockRoot = b.Root().Bytes()
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
 		skipAnalysis := core.SkipAnalysis(chainConfig, blockNum)
@@ -729,15 +727,6 @@ Loop:
 			return err
 		}
 
-		rh, err := rs.CalcCommitment(true, false)
-		if err != nil {
-			return fmt.Errorf("StateV3.Apply: %w", err)
-		}
-
-		if !bytes.Equal(lastBlockRoot, rh) {
-			return fmt.Errorf("root hash mismatch: %x != %x bn =%d", lastBlockRoot, rh, blockNum)
-		}
-
 		if err = agg.Flush(ctx, applyTx); err != nil {
 			return err
 		}
@@ -799,17 +788,13 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			i++
 		}
 
-		_, err := rs.ApplyState4(applyTx, txTask, agg)
+		rh, err := rs.ApplyState4(applyTx, txTask, agg)
 		if err != nil {
 			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		rh, err := rs.CalcCommitment(false, false)
-		if err != nil {
-			panic(err)
-		}
 		if !bytes.Equal(rh, txTask.BlockRoot[:]) {
 			log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
-			panic(fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum))
+			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
 		}
 
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))

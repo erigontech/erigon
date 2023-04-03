@@ -244,6 +244,13 @@ func ExecuteBlockEphemerally(
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit())
 
+	incTxNum := func() {}
+	switch sw := stateWriter.(type) {
+	case *state.WriterV4:
+		incTxNum = func() { sw.IncTxNum() }
+	default:
+	}
+
 	var (
 		rejectedTxs []*RejectedTx
 		includedTxs types.Transactions
@@ -259,9 +266,10 @@ func ExecuteBlockEphemerally(
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-	//noop := state.NewNoopWriter()
+	incTxNum() // preblock tx
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
+		incTxNum()
 		ibs.Prepare(tx.Hash(), block.Hash(), i)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
@@ -316,6 +324,7 @@ func ExecuteBlockEphemerally(
 			return nil, err
 		}
 	}
+	incTxNum() // postblock tx
 	blockLogs := ibs.Logs()
 	execRs := &EphemeralExecResult{
 		TxRoot:      types.DeriveSha(includedTxs),

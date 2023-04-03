@@ -237,11 +237,10 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	rs.chIncs = map[string][]byte{}
 	rs.sizeEstimate = 0
 
-	//log.Warn("shared flush")
+	//rs.sharedWriter.Commitment(true, false)
 	//if err := rs.shared.Flush(); err != nil {
 	//	return err
 	//}
-	//log.Warn("shared flush done")
 	return nil
 }
 
@@ -562,7 +561,7 @@ func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
-	rh, err := rs.sharedWriter.Commitment(txTask.TxNum, false, false)
+	rh, err := rs.sharedWriter.Commitment(false, false)
 	if err != nil {
 		return nil, err
 	}
@@ -785,7 +784,7 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 }
 
 func (rs *StateV3) CalcCommitment(saveAfter, trace bool) ([]byte, error) {
-	return rs.sharedWriter.Commitment(rs.txsDone.Load(), saveAfter, trace)
+	return rs.sharedWriter.Commitment(saveAfter, trace)
 }
 
 type StateWriterV3 struct {

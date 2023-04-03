@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -136,25 +135,21 @@ func executeBlock(
 	 block *types.Block,
 	 tx kv.RwTx,
 	 stateWriter *state.WriterV4,
-	 batch ethdb.Database,
 	 cfg ExecuteBlockCfg,
 	 vmConfig vm.Config, // emit copy, because will modify it
 	 writeChangesets bool,
 	 writeReceipts bool,
 	 writeCallTraces bool,
-	 initialCycle bool,
-	 stateStream bool,
 ) error {
 	blockNum := block.NumberU64()
 	//stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
 	//if err != nil {
 	//	return err
 	//}
+	//stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
 
-	//stateWriter, _ := state.WrapStateIO(cfg.agg.SharedDomains())
 	var err error
 	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
-	//stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
 
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
@@ -201,7 +196,7 @@ func executeBlock(
 			}
 		}
 	}
-	rh, err := stateWriter.Commitment(0, true, false)
+	rh, err := stateWriter.Commitment(true, false)
 	if err != nil {
 		return err
 	}
@@ -424,7 +419,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	if !quiet && to > s.BlockNumber+16 {
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
+	//stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -435,18 +430,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	logTime := time.Now()
 	var gas uint64             // used for logs
 	var currentStateGas uint64 // used for batch commits of state
+	var stoppedErr error
 	// Transform batch_size limit into Ggas
 	gasState := uint64(cfg.batchSize) * uint64(datasize.KB) * 2
 
-	var stoppedErr error
-
-	var batch ethdb.DbWithPendingMutations
-	// state is stored through ethdb batches
-	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-	// avoids stacking defers within the loop
-	defer func() {
-		batch.Rollback()
-	}()
 	defer cfg.agg.StartWrites().FinishWrites()
 
 	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
@@ -460,7 +447,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		if err = genesisIbs.CommitBlock(cfg.chainConfig.Rules(0, 0), stateWriter); err != nil {
 			return fmt.Errorf("cannot write state: %w", err)
 		}
-		rh, err := stateWriter.Commitment(0, true, false)
+		rh, err := stateWriter.Commitment(true, false)
 		if err != nil {
 			return fmt.Errorf("cannot write commitment: %w", err)
 		}
@@ -497,7 +484,8 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, stateWriter, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
+
+		if err = executeBlock(block, tx, stateWriter, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -510,74 +498,67 @@ Loop:
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
-
-		if err := cfg.agg.Flush(ctx, tx); err != nil {
-			log.Error("aggregator flush failed", "err", err)
-		}
-
-		//rh, err := cfg.agg.SharedDomains().Commit(0, false, false)
-		//if err != nil {
-		//	return err
-		//}
-		//if bytes.Equal(rh, block.Root().Bytes()) {
-		//	log.Info("match root hash", "block", blockNum, "root", rh)
-		//	//return fmt.Errorf("block=%d root hash mismatch: %x != %x", blockNum, rh, block.Root().Bytes())
-		//}
 		stageProgress = blockNum
 
-		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
-		if shouldUpdateProgress {
-			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
-			currentStateGas = 0
-			if err = batch.Commit(); err != nil {
-				return err
-			}
-			if err = s.Update(tx, stageProgress); err != nil {
-				return err
-			}
-			if !useExternalTx {
-				if err = tx.Commit(); err != nil {
-					return err
-				}
-				tx, err = cfg.db.BeginRw(context.Background())
-				if err != nil {
-					return err
-				}
-				// TODO: This creates stacked up deferrals
-				defer tx.Rollback()
-			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-		}
+		// todo finishTx is required in place because currently we could aggregate only one block and e4 could do thas in the middle
+		//shouldUpdateProgress := batch.BatchSize() >= ethconfig.HistoryV3AggregationStep
+		//if shouldUpdateProgress {
+		//	log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+		//	currentStateGas = 0
+		//	if err = batch.Commit(); err != nil {
+		//		return err
+		//	}
+		//	if err = s.Update(tx, stageProgress); err != nil {
+		//		return err
+		//	}
+		//	if !useExternalTx {
+		//		if err = tx.Commit(); err != nil {
+		//			return err
+		//		}
+		//		tx, err = cfg.db.BeginRw(context.Background())
+		//		if err != nil {
+		//			return err
+		//		}
+		//		// TODO: This creates stacked up deferrals
+		//		defer tx.Rollback()
+		//	}
+		//	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
+		//}
 
 		gas = gas + block.GasUsed()
 		currentStateGas = currentStateGas + block.GasUsed()
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), nil)
 			gas = 0
 			tx.CollectMetrics()
 			syncMetrics[stages.Execution].Set(blockNum)
 		}
 	}
 
-	if err = s.Update(batch, stageProgress); err != nil {
+	if err := cfg.agg.Flush(ctx, tx); err != nil {
+		log.Error("aggregator flush failed", "err", err)
+	}
+	log.Info("flushed aggregator last time", "block", stageProgress)
+
+	if err = s.Update(tx, stageProgress); err != nil {
 		return err
 	}
-	if err = batch.Commit(); err != nil {
-		return fmt.Errorf("batch commit: %w", err)
-	}
+	//if err = batch.Commit(); err != nil {
+	//	return fmt.Errorf("batch commit: %w", err)
+	//}
 
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
-	if !useExternalTx {
-		if err = tx.Commit(); err != nil {
-			return err
-		}
+	//if !useExternalTx {
+	if err = tx.Commit(); err != nil {
+		return err
 	}
+	//}
 
 	if !quiet {
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
