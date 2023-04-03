@@ -1057,11 +1057,7 @@ func setEtherbase(ctx *cli.Context, cfg *ethconfig.Config) {
 		setSigKey(ctx, cfg)
 	}
 
-	chainsWithValidatorMode := map[string]bool{
-		networkname.BSCChainName:    true,
-		networkname.RialtoChainName: true,
-		networkname.ChapelChainName: true,
-	}
+	chainsWithValidatorMode := map[string]bool{}
 	if _, ok := chainsWithValidatorMode[ctx.String(ChainFlag.Name)]; ok || ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 		if ctx.IsSet(MiningEnabledFlag.Name) && !ctx.IsSet(MinerSigningKeyFileFlag.Name) {
 			panic(fmt.Sprintf("Flag --%s is required in %s chain with --%s flag", MinerSigningKeyFileFlag.Name, ChainFlag.Name, MiningEnabledFlag.Name))
