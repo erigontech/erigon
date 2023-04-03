@@ -237,24 +237,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
-		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
-		for _, list := range txTask.ReadLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		for _, list := range txTask.WriteLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		txTask.ResultsSize = int64(size)
 	}
 }
 
@@ -330,7 +312,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
-	resultChSize := workerCount * 256
+	resultChSize := workerCount * 8
 	resultCh = make(chan *exec22.TxTask, resultChSize)
 	{
 		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.

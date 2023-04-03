@@ -264,7 +264,6 @@ func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
 	txTask.ReadLists = nil
 	returnWriteList(txTask.WriteLists)
 	txTask.WriteLists = nil
-	txTask.ResultsSize = 0
 	txTask.Logs = nil
 	txTask.TraceFroms = nil
 	txTask.TraceTos = nil
