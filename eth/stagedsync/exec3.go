@@ -198,8 +198,12 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
+	rwsConsumed := make(chan struct{}, 2)
+	defer close(rwsConsumed)
+	//backPressureCheck := time.NewTicker(100 * time.Millisecond)
+	//defer backPressureCheck.Stop()
+
 	var rwsLock sync.Mutex
-	rwsReceiveCond := sync.NewCond(&rwsLock)
 
 	commitThreshold := batchSize.Bytes()
 	resultsThreshold := int64(batchSize.Bytes())
@@ -258,7 +262,7 @@ func ExecV3(ctx context.Context,
 			processedResultSize, processedTxNum, conflicts, processedBlockNum, err := func() (processedResultSize int64, processedTxNum, conflicts, processedBlockNum uint64, err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, triggerCount, rwsReceiveCond, applyWorker)
+				return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, triggerCount, rwsConsumed, applyWorker)
 			}()
 			if err != nil {
 				return err
@@ -319,12 +323,8 @@ func ExecV3(ctx context.Context,
 					return ctx.Err()
 
 				case <-logEvery.C:
-					rwsLock.Lock()
-					rwsLen := rws.Len()
-					rwsLock.Unlock()
-
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, rwsLen, uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+					progress.Log(rs, rws.LenLocked(&rwsLock), uint64(queueSize), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
@@ -381,9 +381,13 @@ func ExecV3(ctx context.Context,
 								break
 							}
 						}
-						rwsReceiveCond.Signal()
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
+
+						select {
+						case rwsConsumed <- struct{}{}:
+						default:
+						}
 
 					DrainLoop: // Drain results channel because read sets do not carry over
 						for {
@@ -458,9 +462,6 @@ func ExecV3(ctx context.Context,
 			if err = execStage.Update(tx, outputBlockNum.Get()); err != nil {
 				return err
 			}
-			//if err = execStage.Update(tx, stageProgress); err != nil {
-			//	panic(err)
-			//}
 			if err = tx.Commit(); err != nil {
 				return err
 			}
@@ -553,23 +554,24 @@ Loop:
 				if err != nil {
 					return err
 				}
+			case <-ctx.Done():
+				return ctx.Err()
 			default:
 			}
 
 			func() {
-				needWait := rs.QueueLen() > queueSize
-				if !needWait {
-					return
-				}
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rs.QueueLen() > queueSize || rws.Len() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				//needWait := rs.QueueLen() > queueSize
+				//if !needWait {
+				//	return
+				//}
+				for rws.LenLocked(&rwsLock) > queueSize || rs.QueueLen() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
-					default:
+					case <-rwsConsumed:
+						return
+						//case <-backPressureCheck.C:
 					}
-					rwsReceiveCond.Wait()
 				}
 			}()
 		}
@@ -674,7 +676,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, rws.Len(), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
+				progress.Log(rs, rws.LenLocked(&rwsLock), uint64(queueSize), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), repeatCount.Load(), uint64(resultsSize.Load()), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -768,7 +770,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount *atomic.Uint64, rwsCond *sync.Cond, applyWorker *exec3.Worker) (resultSize int64, outputTxNum, conflicts, processedBlockNum uint64, err error) {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, triggerCount *atomic.Uint64, backPressure chan struct{}, applyWorker *exec3.Worker) (resultSize int64, outputTxNum, conflicts, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
@@ -796,8 +798,11 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 		}
 		triggerCount.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 		outputTxNum++
-		if rwsCond != nil {
-			rwsCond.Signal()
+		if backPressure != nil {
+			select {
+			case backPressure <- struct{}{}:
+			default:
+			}
 		}
 		if err := rs.ApplyHistory(txTask, agg); err != nil {
 			return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)

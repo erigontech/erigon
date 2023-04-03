@@ -1,6 +1,8 @@
 package exec22
 
 import (
+	"sync"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -51,6 +53,12 @@ type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
 	return len(h)
+}
+func (h TxTaskQueue) LenLocked(lock *sync.Mutex) (l int) {
+	lock.Lock()
+	l = len(h)
+	lock.Unlock()
+	return l
 }
 
 func (h TxTaskQueue) Less(i, j int) bool {
