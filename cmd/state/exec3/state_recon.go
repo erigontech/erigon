@@ -1,6 +1,7 @@
 package exec3
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -57,6 +58,8 @@ func NewFillWorker(txNum uint64, as *libstate.AggregatorStep) *FillWorker {
 	return fw
 }
 
+var addr1 = libcommon.HexToAddress("0x8d3831cfbd967a0f8b2fc9f611aed4f17dce14db")
+
 func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) error {
 	it := fw.as.IterateAccountsHistory(fw.txNum)
 	value := make([]byte, 1024)
@@ -103,7 +106,9 @@ func (fw *FillWorker) FillAccounts(plainStateCollector *etl.Collector) error {
 			if err := plainStateCollector.Collect(key, value); err != nil {
 				return err
 			}
-			//fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+			if bytes.Equal(key, addr1[:]) {
+				fmt.Printf("Account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", key, &a.Balance, a.Nonce, a.Root, a.CodeHash)
+			}
 		} else {
 			if err := plainStateCollector.Collect(key, nil); err != nil {
 				return err

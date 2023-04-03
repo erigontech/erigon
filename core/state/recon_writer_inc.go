@@ -2,6 +2,7 @@ package state
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -12,6 +13,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
+
+var addr1 = libcommon.HexToAddress("0x8d3831cfbd967a0f8b2fc9f611aed4f17dce14db")
 
 type StateReconWriterInc struct {
 	as      *libstate.AggregatorStep
@@ -41,8 +44,12 @@ func (w *StateReconWriterInc) SetChainTx(chainTx kv.Tx) {
 }
 
 func (w *StateReconWriterInc) UpdateAccountData(address libcommon.Address, original, account *accounts.Account) error {
+	trace := address == addr1
 	addr := address.Bytes()
 	if ok, stateTxNum := w.as.MaxTxNumAccounts(addr); !ok || stateTxNum != w.txNum {
+		if trace {
+			fmt.Printf("UpdateAccountData %x, txNum=%d, ok=%t, stateTxNum=%d\n", address, w.txNum, ok, stateTxNum)
+		}
 		return nil
 	}
 	value := make([]byte, account.EncodingLengthForStorage())
@@ -51,6 +58,9 @@ func (w *StateReconWriterInc) UpdateAccountData(address libcommon.Address, origi
 	}
 	account.EncodeForStorage(value)
 	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
+	if trace {
+		fmt.Printf("UpdateAccountData %x, txNum=%d, balance=%d, stateTxNum=%d\n", address, w.txNum, &account.Balance)
+	}
 	return nil
 }
 

@@ -171,7 +171,7 @@ func readAccount(chaindata string, account libcommon.Address) error {
 	} else if a == nil {
 		return fmt.Errorf("acc not found")
 	}
-	fmt.Printf("CodeHash:%x\nIncarnation:%d\n", a.CodeHash, a.Incarnation)
+	fmt.Printf("Balance:%x,Nonce:%x,CodeHash:%x\nIncarnation:%d\n", &a.Balance, a.Nonce, a.CodeHash, a.Incarnation)
 
 	c, err := tx.Cursor(kv.PlainState)
 	if err != nil {
@@ -202,6 +202,14 @@ func readAccount(chaindata string, account libcommon.Address) error {
 		}
 		fmt.Printf("%x => %x\n", k, v)
 	}
+	/*
+		if err = tx.Put(kv.PlainState, account[:], libcommon.FromHex("010103")); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+	*/
 	return nil
 }
 
@@ -1151,8 +1159,50 @@ func findPrefix(chaindata string) error {
 	defer c.Close()
 	var k []byte
 	var e error
-	prefix := common.FromHex("0x0901050b0c03")
+	prefix := common.FromHex("0x0e0a07030404")
+	ct, err := tx.Cursor(kv.TrieOfAccounts)
+	if err != nil {
+		return err
+	}
+	defer ct.Close()
+	var v []byte
+	if k, v, e = ct.Seek(prefix); e != nil {
+		return e
+	}
+	if k == nil {
+		fmt.Printf("Prefix not found in TrieOfAccounts\n")
+	} else {
+		hasState := binary.BigEndian.Uint16(v[:2])
+		hasTree := binary.BigEndian.Uint16(v[2:4])
+		hasHash := binary.BigEndian.Uint16(v[4:6])
+		hashesLen := (len(v) - 6) / 32
+		fmt.Printf("k=%x, hasState=%016b, hasTree=%016b, hasHash=%016b, hashesLen=%d\n", k, hasState, hasTree, hasHash, hashesLen)
+		bit := 0
+		for i := 6; i < len(v); i += 32 {
+			for (uint16(1)<<bit)&hasHash == 0 {
+				bit++
+			}
+			fmt.Printf("%x: %064x\n", bit, v[i:32+i])
+			bit++
+		}
+		if hashesLen == 16 {
+			branch := make([]byte, 3+33*16+1)
+			branch[0] = 0xf9
+			branch[1] = 0x02
+			branch[2] = 0x11
+			branchI := 3
+			for i := 6; i < len(v); i += 32 {
+				branch[branchI] = 0xa0
+				copy(branch[branchI+1:], v[i:32+i])
+				branchI += 33
+			}
+			branch[3+33*16] = 0x80
+			branchHash := crypto.Keccak256(branch)
+			fmt.Printf("branch hash: %064x\n", branchHash)
+		}
+	}
 	count := 0
+	collected := 0
 	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
 		if len(k) != 20 {
 			continue
@@ -1161,7 +1211,10 @@ func findPrefix(chaindata string) error {
 		nibbles := keybytesToHex(hash)
 		if bytes.HasPrefix(nibbles, prefix) {
 			fmt.Printf("addr = [%x], hash = [%x]\n", k, hash)
-			break
+			collected++
+			if collected > 20 {
+				break
+			}
 		}
 		count++
 		if count%1_000_000 == 0 {
