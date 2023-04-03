@@ -722,13 +722,13 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 		return nil
 	}
 
-	_, err = a.shared.Commit(txn, true, false)
-	if err != nil {
-		return err
-	}
-	if err := a.shared.Flush(); err != nil {
-		return err
-	}
+	//_, err = a.shared.Commit(txn, true, false)
+	//if err != nil {
+	//	return err
+	//}
+	//if err := a.Flush(context.Background(), ); err != nil {
+	//	return err
+	//}
 
 	// trying to create as much small-step-files as possible:
 	// - to reduce amount of small merges
@@ -763,6 +763,36 @@ func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) 
 	//
 	//closeAll = false
 	return a.aggregate(ctx, step)
+}
+
+func (a *AggregatorV3) FinishTx(rwTx kv.RwTx) (rootHash []byte, err error) {
+	txn := a.txNum.Load()
+	if a.keepInDB > txn+1 && (txn+1)%a.aggregationStep == 0 {
+		return nil, nil
+	}
+
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
+
+	rootHash, err = a.ComputeCommitment(true, false)
+	if err != nil {
+		return nil, err
+	}
+
+	step := txn / a.aggregationStep
+	mxStepCurrent.Set(step)
+
+	step -= a.keepInDB / a.aggregationStep
+
+	ctx := context.Background()
+	if err := a.Flush(ctx, rwTx); err != nil {
+		return nil, err
+	}
+
+	if err := a.aggregate(ctx, step); err != nil {
+		return nil, err
+	}
+	return rootHash, nil
 }
 
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context, workers int) (somethingDone bool, err error) {

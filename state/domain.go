@@ -541,9 +541,9 @@ func (d *Domain) etlLoader() etl.LoadFunc {
 			// instead of tx.Delete just skip its insertion
 			return nil
 		}
-		nk := common.Copy(k)
-		binary.BigEndian.PutUint64(nk[:len(nk)-8], ^(binary.BigEndian.Uint64(k[len(k)-8:]) / d.aggregationStep))
-		return next(k, nk, value)
+		//nk := common.Copy(k)
+		//binary.BigEndian.PutUint64(nk[:len(nk)-8], ^(binary.BigEndian.Uint64(k[len(k)-8:]) / d.aggregationStep))
+		return next(k, k, value)
 	}
 }
 
@@ -563,15 +563,15 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	h.d.topLock.Lock()
-	for k, v := range h.topTx {
-		pv, ok := h.d.topTx[k]
-		if !ok || v > pv {
-			h.d.topTx[k] = v
-		}
-	}
-	h.d.topLock.Unlock()
-	h.close()
+	//h.d.topLock.Lock()
+	//for k, v := range h.topTx {
+	//	pv, ok := h.d.topTx[k]
+	//	if !ok || v > pv {
+	//		h.d.topTx[k] = v
+	//	}
+	//}
+	//h.d.topLock.Unlock()
+	//h.close()
 	return nil
 }
 
@@ -580,41 +580,53 @@ func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
 		return nil
 	}
 
-	if h.largeValues {
-		lk := len(key1) + len(key2)
-		fullkey := h.key[:lk+8]
-		copy(fullkey, key1)
-		if len(key2) > 0 {
-			copy(fullkey[len(key1):], key2)
-		}
-		binary.BigEndian.PutUint64(fullkey[lk:], txnum)
+	kl := len(key1) + len(key2)
+	fullkey := h.key[:kl+8]
+	copy(fullkey, key1)
+	copy(fullkey[len(key1):], key2)
+	binary.BigEndian.PutUint64(fullkey[kl:], txnum)
+	//top, _ := h.topTx[string(fullkey[:kl])]
+	//if top <= txnum {
+	//	h.topTx[string(fullkey[:kl])] = txnum
+	//}
 
+	if h.largeValues {
 		if !h.buffered {
+			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
+				return err
+			}
+
+			invstep := ^(txnum / h.d.aggregationStep)
+			binary.BigEndian.PutUint64(fullkey[kl:], invstep)
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
 				return err
 			}
 			return nil
 		}
+
 		if err := h.values.Collect(fullkey, original); err != nil {
 			return err
 		}
-		h.topTx[string(fullkey[:lk])] = txnum
 
-		if bytes.HasPrefix(fullkey, []byte{58, 16, 136}) {
-			log.Info("addValue", "key", fullkey, "value", original)
+		invstep := ^(txnum / h.d.aggregationStep)
+		binary.BigEndian.PutUint64(fullkey[kl:], invstep)
+		if err := h.values.Collect(fullkey, original); err != nil {
+			return err
 		}
+
 		return nil
 	}
 
-	lk := len(key1) + len(key2)
-	fullKey := h.key[:lk+8+len(original)]
-	copy(fullKey, key1)
-	copy(fullKey[len(key1):], key2)
-	binary.BigEndian.PutUint64(fullKey[lk:], txnum)
-	copy(fullKey[lk+8:], original)
-	historyKey1 := fullKey[:lk]
-	historyVal := fullKey[lk:]
-	if err := h.values.Collect(historyKey1, historyVal); err != nil {
+	//coverKey := h.key[:len(fullkey)+len(original)]
+	//copy(coverKey, fullkey)
+	//
+	//k, v := coverKey[:len(fullkey)], coverKey[len(fullkey):]
+	if err := h.values.Collect(fullkey, original); err != nil {
+		return err
+	}
+	invstep := ^(txnum / h.d.aggregationStep)
+	binary.BigEndian.PutUint64(fullkey[kl:], invstep)
+	if err := h.values.Collect(fullkey, original); err != nil {
 		return err
 	}
 	return nil
@@ -885,6 +897,7 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
+	// todo use valcursor dupsort and get rid of key table
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
 		pos++
 
@@ -1726,20 +1739,24 @@ func (d *Domain) Rotate() flusher {
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	dc.d.topLock.RLock()
-	ttx, ok := dc.d.topTx[string(key)]
-	dc.d.topLock.RUnlock()
-	if !ok {
-		dc.d.stats.HistoryQueries.Add(1)
-		v, found := dc.readFromFiles(key, 0)
-		return v, found, nil
-	}
+	//dc.d.topLock.RLock()
+	//ttx, ok := dc.d.topTx[string(key)]
+	//dc.d.topLock.RUnlock()
 
+	//if !ok {
+	ttx := ^(dc.d.txNum / dc.d.aggregationStep)
+	//}
 	copy(dc.keyBuf[:], key)
 	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
+
 	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
 	if err != nil {
 		return nil, false, err
+	}
+	if v == nil {
+		dc.d.stats.HistoryQueries.Add(1)
+		v, found := dc.readFromFiles(key, 0)
+		return v, found, nil
 	}
 	return v, true, nil
 }
