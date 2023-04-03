@@ -222,7 +222,6 @@ func ExecV3(ctx context.Context,
 
 		applyWorker.ResetTx(tx)
 
-		var t time.Time
 		var lastBlockNum uint64
 		drainF := func(txTask *exec22.TxTask) {
 			rwsLock.Lock()
@@ -265,11 +264,7 @@ func ExecV3(ctx context.Context,
 			ExecTriggers.Add(triggers)
 			if processedBlockNum > lastBlockNum {
 				outputBlockNum.Set(processedBlockNum)
-				if lastBlockNum > 0 {
-					core.BlockExecutionTimer.UpdateDuration(t)
-				}
 				lastBlockNum = processedBlockNum
-				t = time.Now()
 			}
 			if processedTxNum > 0 {
 				outputTxNum.Store(processedTxNum)
@@ -1100,7 +1095,6 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			core.BlockExecutionTimer.UpdateDuration(t)
 			syncMetrics[stages.Execution].Set(bn)
 		}
 		return err
