@@ -58,7 +58,7 @@ type StateV3 struct {
 
 func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
-		txsDone:        metrics.NewCounter(`exec_txs_done`),
+		txsDone:        metrics.GetOrCreateCounter(`exec_txs_done`),
 		tmpdir:         tmpdir,
 		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
