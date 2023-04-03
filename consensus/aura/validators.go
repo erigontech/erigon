@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
@@ -412,8 +412,8 @@ func (q *ReportQueue) truncate() {
 // nolint
 type ValidatorSafeContract struct {
 	contractAddress libcommon.Address
-	validators      *lru.Cache  // RwLock<MemoryLruCache<H256, SimpleList>>,
-	reportQueue     ReportQueue //Mutex<ReportQueue>,
+	validators      *lru2.Cache[libcommon.Hash, *SimpleList] // RwLock<MemoryLruCache<H256, SimpleList>>,
+	reportQueue     ReportQueue                              //Mutex<ReportQueue>,
 	// The block number where we resent the queued reports last time.
 	resentReportsInBlock atomic.Uint64
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
@@ -426,7 +426,7 @@ type ValidatorSafeContract struct {
 
 func NewValidatorSafeContract(contractAddress libcommon.Address, posdaoTransition *uint64, client client) *ValidatorSafeContract {
 	const MemoizeCapacity = 500
-	c, err := lru.New(MemoizeCapacity)
+	c, err := lru2.New[libcommon.Hash, *SimpleList](MemoizeCapacity)
 	if err != nil {
 		panic("error creating ValidatorSafeContract cache")
 	}
@@ -592,7 +592,7 @@ func (s *ValidatorSafeContract) defaultCaller(blockHash libcommon.Hash) (Call, e
 func (s *ValidatorSafeContract) getWithCaller(blockHash libcommon.Hash, nonce uint, caller consensus.Call) (libcommon.Address, error) {
 	set, ok := s.validators.Get(blockHash)
 	if ok {
-		return get(set.(ValidatorSet), blockHash, nonce, caller)
+		return get(set, blockHash, nonce, caller)
 	}
 
 	list, ok := s.getList(caller)
@@ -605,7 +605,7 @@ func (s *ValidatorSafeContract) getWithCaller(blockHash libcommon.Hash, nonce ui
 func (s *ValidatorSafeContract) countWithCaller(parentHash libcommon.Hash, caller consensus.Call) (uint64, error) {
 	set, ok := s.validators.Get(parentHash)
 	if ok {
-		return count(set.(ValidatorSet), parentHash, caller)
+		return count(set, parentHash, caller)
 	}
 	list, ok := s.getList(caller)
 	if !ok {
