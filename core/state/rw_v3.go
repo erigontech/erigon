@@ -304,12 +304,11 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
 	rs.txsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
 		rs.queuePush(triggered)
 		rs.receiveWork.Signal()

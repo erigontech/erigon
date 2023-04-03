@@ -199,10 +199,8 @@ func ExecV3(ctx context.Context,
 
 	rws := &exec22.TxTaskQueue{}
 	heap.Init(rws)
-	rwsConsumed := make(chan struct{}, 2)
+	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
-	//backPressureCheck := time.NewTicker(100 * time.Millisecond)
-	//defer backPressureCheck.Stop()
 
 	var rwsLock sync.Mutex
 
@@ -568,12 +566,11 @@ Loop:
 				//if !needWait {
 				//	return
 				//}
-				for rws.LenLocked(&rwsLock) > queueSize || rs.QueueLen() > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
+				for rs.QueueLen() > queueSize || rws.LenLocked(&rwsLock) > queueSize || resultsSize.Load() >= resultsThreshold || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
 					case <-rwsConsumed:
-						//case <-backPressureCheck.C:
 					}
 				}
 			}()
@@ -662,7 +659,7 @@ Loop:
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
-				ExecTriggers.Add(int(rs.CommitTxNum(txTask.Sender, txTask.TxNum)))
+				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
@@ -799,7 +796,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 			return resultSize, outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		triggers += int(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 		outputTxNum++
 		if backPressure != nil {
 			select {
