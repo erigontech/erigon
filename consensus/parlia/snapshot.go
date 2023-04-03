@@ -26,7 +26,7 @@ import (
 	"math/big"
 	"sort"
 
-	lru "github.com/hashicorp/golang-lru"
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -39,8 +39,8 @@ import (
 
 // Snapshot is the state of the validatorSet at a given point.
 type Snapshot struct {
-	config   *chain.ParliaConfig // Consensus engine parameters to fine tune behavior
-	sigCache *lru.ARCCache       // Cache of recent block signatures to speed up ecrecover
+	config   *chain.ParliaConfig                               // Consensus engine parameters to fine tune behavior
+	sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address] // Cache of recent block signatures to speed up ecrecover
 
 	Number           uint64                         `json:"number"`             // Block number where the snapshot was created
 	Hash             libcommon.Hash                 `json:"hash"`               // Block hash where the snapshot was created
@@ -54,7 +54,7 @@ type Snapshot struct {
 // the genesis block.
 func newSnapshot(
 	config *chain.ParliaConfig,
-	sigCache *lru.ARCCache,
+	sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address],
 	number uint64,
 	hash libcommon.Hash,
 	validators []libcommon.Address,
@@ -89,7 +89,7 @@ func SnapshotFullKey(number uint64, hash libcommon.Hash) []byte {
 var ErrNoSnapsnot = fmt.Errorf("no parlia snapshot")
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.ParliaConfig, sigCache *lru.ARCCache, db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.ParliaConfig, sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address], db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
