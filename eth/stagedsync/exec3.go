@@ -313,7 +313,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, rws.LenLocked(rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
+					progress.Log(rs, exec22.LenLocked(rws, rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
 				case <-pruneEvery.C:
 					if rs.SizeEstimate() < commitThreshold {
 						if agg.CanPrune(tx) {
@@ -552,9 +552,7 @@ Loop:
 				//if !needWait {
 				//	return
 				//}
-				rwsLock.Lock()
-				defer rwsLock.Unlock()
-				for rs.QueueLen() > execQueueLimit || rws.Len() > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
+				for rs.QueueLen() > execQueueLimit || exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -664,7 +662,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, rws.LenLocked(rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
+				progress.Log(rs, exec22.LenLocked(rws, rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}

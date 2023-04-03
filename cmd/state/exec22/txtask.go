@@ -53,9 +53,9 @@ type TxTaskQueue []*TxTask
 func (h TxTaskQueue) Len() int {
 	return len(h)
 }
-func (h TxTaskQueue) LenLocked(lock *sync.Mutex) (l int) {
+func LenLocked(h *TxTaskQueue, lock *sync.Mutex) (l int) {
 	lock.Lock()
-	l = len(h)
+	l = h.Len()
 	lock.Unlock()
 	return l
 }
