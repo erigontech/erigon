@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -30,6 +31,10 @@ var (
 		Name:  "metrics.urls",
 		Usage: "Comma separated list of URLs to the metrics endpoints thats are being diagnosed",
 	}
+	insecureFlag = cli.BoolFlag{
+		Name:  "insecure",
+		Usage: "Allows communication with diagnostics system using self-signed TLS certificates",
+	}
 )
 
 var supportCommand = cli.Command{
@@ -40,6 +45,7 @@ var supportCommand = cli.Command{
 	Flags: []cli.Flag{
 		&metricsURLsFlag,
 		&diagnosticsURLFlag,
+		&insecureFlag,
 	},
 	Category: "SUPPORT COMMANDS",
 	Description: `
@@ -95,9 +101,10 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	certPool.AppendCertsFromPEM(caCert)
 
 	// Create TLS configuration with the certificate of the server
+	insecure := cliCtx.Bool(insecureFlag.Name)
 	tlsConfig := &tls.Config{
 		RootCAs:            certPool,
-		InsecureSkipVerify: true, //nolint:gosec
+		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
 	reader, writer := io.Pipe()
@@ -128,13 +135,21 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	// Apply the connection context on the request context
 	resp.Request = req.WithContext(ctx1)
 	var metricsBuf bytes.Buffer
+	r := bufio.NewReader(resp.Body)
+	firstLine, err := r.ReadBytes('\n')
+	if err != nil {
+		return err
+	}
+	if string(firstLine) != "SUCCESS\n" {
+		return fmt.Errorf("connecting to diagnostics system: %s", firstLine)
+	}
 
 outerLoop:
 	for {
 		var buf [4096]byte
 		var readLen int
 		for readLen < len(buf) && (readLen == 0 || buf[readLen-1] != '\n') {
-			len, err := resp.Body.Read(buf[readLen:])
+			len, err := r.Read(buf[readLen:])
 			if err != nil {
 				log.Error("Connection read", "err", err)
 				break outerLoop
