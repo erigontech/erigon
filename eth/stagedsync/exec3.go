@@ -342,7 +342,7 @@ func ExecV3(ctx context.Context,
 					cancelApplyCtx()
 					applyLoopWg.Wait()
 
-					var t1, t2, t3, t4 time.Duration
+					var t0, t1, t2, t3, t4 time.Duration
 					commitStart := time.Now()
 					log.Info("Committing...")
 					if err := func() error {
@@ -381,6 +381,7 @@ func ExecV3(ctx context.Context,
 								break
 							}
 						}
+						t0 = time.Since(commitStart)
 						lock.Lock() // This is to prevent workers from starting work on any new txTask
 						defer lock.Unlock()
 
@@ -450,7 +451,7 @@ func ExecV3(ctx context.Context,
 					applyLoopWg.Add(1)
 					go applyLoop(applyCtx, rwLoopErrCh)
 
-					log.Info("Committed", "time", time.Since(commitStart), "drain", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
+					log.Info("Committed", "time", time.Since(commitStart), "drain", t0, "drain_and_lock", t1, "rs.flush", t2, "agg.flush", t3, "tx.commit", t4)
 				}
 			}
 			if err = rs.Flush(ctx, tx, logPrefix, logEvery); err != nil {
@@ -569,7 +570,6 @@ Loop:
 					case <-ctx.Done():
 						return
 					case <-rwsConsumed:
-						return
 						//case <-backPressureCheck.C:
 					}
 				}
