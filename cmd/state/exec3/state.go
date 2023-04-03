@@ -312,7 +312,7 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
 
-	resultChSize := workerCount * 256
+	resultChSize := workerCount * 8
 	resultCh = make(chan *exec22.TxTask, resultChSize)
 	{
 		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.
