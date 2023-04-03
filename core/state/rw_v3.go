@@ -31,6 +31,8 @@ import (
 const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
+var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
@@ -48,7 +50,6 @@ type StateV3 struct {
 	queue     exec22.TxTaskQueue
 	queueLock sync.Mutex
 
-	txsDone  *metrics.Counter
 	finished atomic.Bool
 
 	tmpdir              string
@@ -58,7 +59,6 @@ type StateV3 struct {
 
 func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
-		txsDone:        metrics.GetOrCreateCounter(`exec_txs_done`),
 		tmpdir:         tmpdir,
 		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
@@ -304,7 +304,7 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 }
 
 func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
-	rs.txsDone.Inc()
+	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
@@ -641,7 +641,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return rs.txsDone.Get() }
+func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 
 func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
