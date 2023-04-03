@@ -227,22 +227,20 @@ func ExecV3(ctx context.Context,
 
 		var t time.Time
 		var lastBlockNum uint64
-		drainF := func(txTask *exec22.TxTask) (added int64) {
+		drainF := func(txTask *exec22.TxTask) {
 			rwsLock.Lock()
 			defer rwsLock.Unlock()
-			added += txTask.ResultsSize
 			heap.Push(rws, txTask)
 
 			for {
 				select {
 				case txTask, ok := <-resultCh:
 					if !ok {
-						return added
+						return
 					}
-					added += txTask.ResultsSize
 					heap.Push(rws, txTask)
 				default: // we are inside mutex section, can't block here
-					return added
+					return
 				}
 			}
 		}
@@ -255,8 +253,7 @@ func ExecV3(ctx context.Context,
 				if !ok {
 					return nil
 				}
-				added := drainF(txTask)
-				resultsSize.Add(added)
+				drainF(txTask)
 			}
 
 			processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
@@ -357,7 +354,6 @@ func ExecV3(ctx context.Context,
 									if !ok {
 										return nil
 									}
-									resultsSize.Add(txTask.ResultsSize)
 									heap.Push(rws, txTask)
 								default:
 									drained = true
@@ -406,7 +402,6 @@ func ExecV3(ctx context.Context,
 						// Drain results queue as well
 						for rws.Len() > 0 {
 							txTask := heap.Pop(rws).(*exec22.TxTask)
-							resultsSize.Add(-txTask.ResultsSize)
 							rs.AddWork(txTask)
 						}
 						t1 = time.Since(commitStart)
