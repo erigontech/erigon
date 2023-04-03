@@ -27,6 +27,9 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -45,8 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 //go:embed allocs

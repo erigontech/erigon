@@ -17,11 +17,10 @@
 package vm
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"math/big"
-
-	"github.com/minio/sha256-simd"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"

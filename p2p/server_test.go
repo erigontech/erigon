@@ -19,6 +19,7 @@ package p2p
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"math/rand"
@@ -27,8 +28,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/minio/sha256-simd"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
