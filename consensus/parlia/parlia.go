@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	lru2 "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -20,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -150,11 +150,11 @@ var (
 type SignFn func(validator libcommon.Address, payload []byte, chainId *big.Int) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigCache *lru.ARCCache, chainId *big.Int) (libcommon.Address, error) {
+func ecrecover(header *types.Header, sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address], chainId *big.Int) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 	if address, known := sigCache.Get(hash); known {
-		return address.(libcommon.Address), nil
+		return address, nil
 	}
 	// Retrieve the signature from the header extra-data
 	if len(header.Extra) < extraSeal {
@@ -228,8 +228,8 @@ type Parlia struct {
 	db          kv.RwDB // Database to store and retrieve snapshot checkpoints
 	chainDb     kv.RwDB
 
-	recentSnaps *lru.ARCCache // Snapshots for recent block to speed up
-	signatures  *lru.ARCCache // Signatures of recent blocks to speed up mining
+	recentSnaps *lru2.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up
+	signatures  *lru2.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
 
 	signer *types.Signer
 
@@ -265,11 +265,11 @@ func New(
 	}
 
 	// Allocate the snapshot caches and create the engine
-	recentSnaps, err := lru.NewARC(inMemorySnapshots)
+	recentSnaps, err := lru2.NewARC[libcommon.Hash, *Snapshot](inMemorySnapshots)
 	if err != nil {
 		panic(err)
 	}
-	signatures, err := lru.NewARC(inMemorySignatures)
+	signatures, err := lru2.NewARC[libcommon.Hash, libcommon.Address](inMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
@@ -509,7 +509,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	)
 
 	if s, ok := p.recentSnaps.Get(hash); ok {
-		snap = s.(*Snapshot)
+		snap = s
 	} else {
 		p.snapLock.Lock()
 		defer p.snapLock.Unlock()
@@ -519,7 +519,7 @@ func (p *Parlia) snapshot(chain consensus.ChainHeaderReader, number uint64, hash
 	for snap == nil {
 		// If an in-memory snapshot was found, use that
 		if s, ok := p.recentSnaps.Get(hash); ok {
-			snap = s.(*Snapshot)
+			snap = s
 			break
 		}
 
