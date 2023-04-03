@@ -199,7 +199,7 @@ func enable3860(jt *JumpTable) {
 	jt[CREATE2].dynamicGas = gasCreate2Eip3860
 }
 
-// enable3198 applies mini-danksharding (DATAHASH Opcode)
+// enableSharding applies mini-danksharding (DATAHASH Opcode)
 // - Adds an opcode that returns the versioned data hash of the tx at a index.
 func enableSharding(jt *JumpTable) {
 	jt[DATAHASH] = &operation{
