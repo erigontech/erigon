@@ -23,8 +23,8 @@ type WriterV4 struct {
 
 func (w *WriterV4) IncTxNum() {
 	w.txnum++
-	if _, err := w.agg.FinishTx(w.tx); err != nil {
-	}
+	//if _, err := w.agg.FinishTx(w.tx); err != nil {
+	//}
 	w.agg.SetTxNum(w.txnum)
 }
 
