@@ -237,24 +237,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
-		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
-		for _, list := range txTask.ReadLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		for _, list := range txTask.WriteLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		txTask.ResultsSize = int64(size)
 	}
 }
 

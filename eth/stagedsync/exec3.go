@@ -259,7 +259,7 @@ func ExecV3(ctx context.Context,
 				resultsSize.Add(added)
 			}
 
-			processedResultSize, processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedResultSize int64, processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
+			processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
 				return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
@@ -267,7 +267,6 @@ func ExecV3(ctx context.Context,
 			if err != nil {
 				return err
 			}
-			resultsSize.Add(-processedResultSize)
 			ExecRepeats.Add(conflicts)
 			ExecTriggers.Add(triggers)
 			if processedBlockNum > lastBlockNum {
@@ -365,11 +364,10 @@ func ExecV3(ctx context.Context,
 								}
 							}
 							applyWorker.ResetTx(tx)
-							processedResultSize, processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
+							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
 							if err != nil {
 								return err
 							}
-							resultsSize.Add(-processedResultSize)
 							ExecRepeats.Add(conflicts)
 							ExecTriggers.Add(triggers)
 							if processedBlockNum > 0 {
@@ -771,12 +769,11 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (resultSize int64, outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
+func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
 		txTask := heap.Pop(rws).(*exec22.TxTask)
-		resultSize += txTask.ResultsSize
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			conflicts++
 
@@ -789,13 +786,13 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			// resolve first conflict right here: it's faster and conflict-free
 			applyWorker.RunTxTask(txTask)
 			if txTask.Error != nil {
-				return resultSize, outputTxNum, conflicts, triggers, processedBlockNum, txTask.Error
+				return outputTxNum, conflicts, triggers, processedBlockNum, txTask.Error
 			}
 			i++
 		}
 
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
-			return resultSize, outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
+			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 		outputTxNum++
@@ -806,12 +803,12 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			}
 		}
 		if err := rs.ApplyHistory(txTask, agg); err != nil {
-			return resultSize, outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
+			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
 		//fmt.Printf("Applied %d block %d txIndex %d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		processedBlockNum = txTask.BlockNum
 	}
-	return resultSize, outputTxNum, conflicts, triggers, processedBlockNum, nil
+	return outputTxNum, conflicts, triggers, processedBlockNum, nil
 }
 
 func reconstituteStep(last bool,
