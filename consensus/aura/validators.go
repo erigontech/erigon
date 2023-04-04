@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
@@ -412,8 +412,8 @@ func (q *ReportQueue) truncate() {
 // nolint
 type ValidatorSafeContract struct {
 	contractAddress libcommon.Address
-	validators      *lru2.Cache[libcommon.Hash, *SimpleList] // RwLock<MemoryLruCache<H256, SimpleList>>,
-	reportQueue     ReportQueue                              //Mutex<ReportQueue>,
+	validators      *lru.Cache[libcommon.Hash, *SimpleList] // RwLock<MemoryLruCache<H256, SimpleList>>,
+	reportQueue     ReportQueue                             //Mutex<ReportQueue>,
 	// The block number where we resent the queued reports last time.
 	resentReportsInBlock atomic.Uint64
 	// If set, this is the block number at which the consensus engine switches from AuRa to AuRa
@@ -426,7 +426,7 @@ type ValidatorSafeContract struct {
 
 func NewValidatorSafeContract(contractAddress libcommon.Address, posdaoTransition *uint64, client client) *ValidatorSafeContract {
 	const MemoizeCapacity = 500
-	c, err := lru2.New[libcommon.Hash, *SimpleList](MemoizeCapacity)
+	c, err := lru.New[libcommon.Hash, *SimpleList](MemoizeCapacity)
 	if err != nil {
 		panic("error creating ValidatorSafeContract cache")
 	}

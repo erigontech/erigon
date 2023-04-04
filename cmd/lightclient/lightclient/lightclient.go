@@ -19,7 +19,7 @@ import (
 	"runtime"
 	"time"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -50,7 +50,7 @@ type LightClient struct {
 	highestProcessedRoot common2.Hash // Highest processed ETH2 block root.
 	lastEth2ParentRoot   common2.Hash // Last ETH2 Parent root.
 	finalizedEth1Hash    common2.Hash
-	recentHashesCache    *lru2.Cache[common2.Hash, struct{}]
+	recentHashesCache    *lru.Cache[common2.Hash, struct{}]
 	rpc                  *rpc.BeaconRpcP2P
 	// Either execution server or client
 	execution       remote.ETHBACKENDServer
@@ -62,7 +62,7 @@ func NewLightClient(ctx context.Context, genesisConfig *clparams.GenesisConfig, 
 	execution remote.ETHBACKENDServer, executionClient remote.ETHBACKENDClient, sentinel sentinel.SentinelClient,
 	highestSeen uint64, verbose bool) (*LightClient, error) {
 
-	recentHashesCache, err := lru2.New[common2.Hash, struct{}](maxRecentHashes)
+	recentHashesCache, err := lru.New[common2.Hash, struct{}](maxRecentHashes)
 	rpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 	return &LightClient{
 		ctx:               ctx,

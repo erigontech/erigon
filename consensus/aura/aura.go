@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -294,14 +294,14 @@ type AuRa struct {
 }
 
 type GasLimitOverride struct {
-	cache *lru2.Cache[libcommon.Hash, *uint256.Int]
+	cache *lru.Cache[libcommon.Hash, *uint256.Int]
 }
 
 func NewGasLimitOverride() *GasLimitOverride {
 	// The number of recent block hashes for which the gas limit override is memoized.
 	const GasLimitOverrideCacheCapacity = 10
 
-	cache, err := lru2.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
+	cache, err := lru.New[libcommon.Hash, *uint256.Int](GasLimitOverrideCacheCapacity)
 	if err != nil {
 		panic("error creating prefetching cache for blocks")
 	}
