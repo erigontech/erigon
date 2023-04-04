@@ -862,8 +862,8 @@ func (s *RoSnapshots) ViewTxs(blockNum uint64, f func(sn *TxnSegment) error) (fo
 }
 
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainID uint256.Int, tmpDir string, p *background.Progress, lvl log.Lvl) error {
-	_, fName := filepath.Split(sn.Path)
-	log.Debug("[snapshots] build idx", "file", fName)
+	//_, fName := filepath.Split(sn.Path)
+	//log.Debug("[snapshots] build idx", "file", fName)
 	switch sn.T {
 	case snaptype.Headers:
 		if err := HeadersIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl); err != nil {
@@ -885,8 +885,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainID uint256.Int, tm
 func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainID uint256.Int, workers int) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+
 	segments, _, err := Segments(dir)
 	if err != nil {
 		return err
@@ -920,6 +919,8 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 		g.Wait()
 	}()
 
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 	for {
 		select {
 		case <-finish:
@@ -1793,8 +1794,6 @@ RETRY:
 		}
 		return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
 	}
-
-	p.Processed.Store(p.Total.Load())
 
 	return nil
 }
