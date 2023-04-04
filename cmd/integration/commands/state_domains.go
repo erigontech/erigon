@@ -580,7 +580,7 @@ func (b *blockProcessor) applyBlock(
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := b.engine.Finalize(b.chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
+		if _, _, err := b.engine.Finalize(b.chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 

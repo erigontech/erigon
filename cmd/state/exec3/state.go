@@ -41,7 +41,6 @@ type Worker struct {
 	logger   log.Logger
 	genesis  *types.Genesis
 	resultCh chan *exec22.TxTask
-	epoch    EpochReader
 	chain    ChainReader
 	isPoSA   bool
 	posa     consensus.PoSA
@@ -98,7 +97,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 	if chainTx != nil {
 		rw.chainTx = chainTx
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.epoch = EpochReader{tx: rw.chainTx}
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 }
@@ -128,7 +126,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			panic(err)
 		}
 		rw.stateReader.SetTx(rw.chainTx)
-		rw.epoch = EpochReader{tx: rw.chainTx}
 		rw.chain = ChainReader{config: rw.chainConfig, tx: rw.chainTx, blockReader: rw.blockReader}
 	}
 	txTask.Error = nil
@@ -165,7 +162,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
 			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
-		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
 		if txTask.BlockNum > 0 {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
@@ -174,7 +171,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 			}
 
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall); err != nil {
 				//fmt.Printf("error=%v\n", err)
 				txTask.Error = err
 			} else {
@@ -285,28 +282,6 @@ func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 		return nil
 	}
 	return td
-}
-
-type EpochReader struct {
-	tx kv.Tx
-}
-
-func NewEpochReader(tx kv.Tx) EpochReader { return EpochReader{tx: tx} }
-
-func (cr EpochReader) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadEpoch(cr.tx, number, hash)
-}
-func (cr EpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	panic("")
-}
-func (cr EpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
-}
-func (cr EpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	panic("")
-}
-func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
-	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
 func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {

@@ -727,7 +727,7 @@ func runBlock(engine consensus.Engine, ibs *state.IntraBlockState, txnWriter sta
 	if !vmConfig.ReadOnly {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 		tx := block.Transactions()
-		if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil, nil); err != nil {
+		if _, _, _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, tx, block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
 			return nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 

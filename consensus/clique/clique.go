@@ -361,7 +361,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	return nil
 }
 
-func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
@@ -369,7 +369,7 @@ func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderRea
 // rewards given.
 func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)
@@ -380,7 +380,7 @@ func (c *Clique) Finalize(config *chain.Config, header *types.Header, state *sta
 // nor block rewards given, and returns the final block.
 func (c *Clique) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	header.UncleHash = types.CalcUncleHash(nil)

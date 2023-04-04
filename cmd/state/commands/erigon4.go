@@ -475,7 +475,7 @@ func processBlock23(startTxNum uint64, trace bool, txNumStart uint64, rw *StateR
 		}
 
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
+		if _, _, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil); err != nil {
 			return 0, nil, fmt.Errorf("finalize of block %d failed: %w", block.NumberU64(), err)
 		}
 
