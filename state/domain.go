@@ -436,6 +436,9 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
+	if val == nil {
+		val = []byte{}
+	}
 	return d.wal.addValue(key1, key2, val, d.txNum)
 }
 

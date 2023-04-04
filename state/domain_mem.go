@@ -1,3 +1,4 @@
+// Deprecated
 package state
 
 import (

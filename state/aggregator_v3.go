@@ -23,7 +23,6 @@ import (
 	"errors"
 	"fmt"
 	math2 "math"
-	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -50,7 +49,6 @@ import (
 type AggregatorV3 struct {
 	rwTx             kv.RwTx
 	db               kv.RoDB
-	shared           *SharedDomains
 	accounts         *Domain
 	storage          *Domain
 	code             *Domain
@@ -117,8 +115,6 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	if a.tracesTo, err = NewInvertedIndex(dir, a.tmpdir, aggregationStep, "tracesto", kv.TracesToKeys, kv.TracesToIdx, false, nil); err != nil {
 		return nil, err
 	}
-
-	a.shared = NewSharedDomains(path.Join(tmpdir, "domains"), a.accounts, a.storage, a.code, a.commitment)
 	a.recalcMaxTxNum()
 	return a, nil
 }
@@ -200,7 +196,6 @@ func (a *AggregatorV3) Close() {
 	a.logTopics.Close()
 	a.tracesFrom.Close()
 	a.tracesTo.Close()
-	a.shared.Close()
 }
 
 /*
@@ -599,9 +594,9 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 		}(&wg, d, collation)
 
 		//mxPruningProgress.Add(2) // domain and history
-		if err := d.prune(ctx, step, txFrom, txTo, (1<<64)-1, logEvery); err != nil {
-			return err
-		}
+		//if err := d.prune(ctx, step, txFrom, txTo, (1<<64)-1, logEvery); err != nil {
+		//	return err
+		//}
 		//mxPruningProgress.Dec()
 		//mxPruningProgress.Dec()
 
@@ -658,9 +653,9 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 
 		//mxPruningProgress.Inc()
 		//startPrune := time.Now()
-		if err := d.prune(ctx, txFrom, txTo, 1<<64-1, logEvery); err != nil {
-			return err
-		}
+		//if err := d.prune(ctx, txFrom, txTo, 1<<64-1, logEvery); err != nil {
+		//	return err
+		//}
 		//mxPruneTook.UpdateDuration(startPrune)
 		//mxPruningProgress.Dec()
 	}
@@ -1011,13 +1006,6 @@ func (a *AggregatorV3) Flush(ctx context.Context, tx kv.RwTx) error {
 		}
 	}
 	return nil
-}
-
-func (a *AggregatorV3) SharedDomains() *SharedDomains {
-	if a.shared == nil {
-		NewSharedDomains(path.Join(a.tmpdir, "shared"), a.accounts, a.code, a.storage, a.commitment)
-	}
-	return a.shared
 }
 
 func (a *AggregatorV3) CanPrune(tx kv.Tx) bool { return a.CanPruneFrom(tx) < a.maxTxNum.Load() }
