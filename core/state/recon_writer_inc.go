@@ -59,7 +59,7 @@ func (w *StateReconWriterInc) UpdateAccountData(address libcommon.Address, origi
 	account.EncodeForStorage(value)
 	w.rs.Put(kv.PlainStateR, addr, nil, value, w.txNum)
 	if trace {
-		fmt.Printf("UpdateAccountData %x, txNum=%d, balance=%d, stateTxNum=%d\n", address, w.txNum, &account.Balance)
+		fmt.Printf("UpdateAccountData %x, txNum=%d, balance=%d\n", address, w.txNum, &account.Balance)
 	}
 	return nil
 }
