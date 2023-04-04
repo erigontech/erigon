@@ -63,14 +63,6 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 }
 
-type EpochReader interface {
-	GetEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	GetPendingEpoch(blockHash libcommon.Hash, blockN uint64) (transitionProof []byte, err error)
-	PutPendingEpoch(blockHash libcommon.Hash, blockN uint64, transitionProof []byte) (err error)
-	FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error)
-}
-
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)
 type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 
@@ -110,7 +102,7 @@ type EngineWriter interface {
 	Prepare(chain ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
-	Initialize(config *chain.Config, chain ChainHeaderReader, e EpochReader, header *types.Header,
+	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
 		state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall SystemCall)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
@@ -120,7 +112,7 @@ type EngineWriter interface {
 	// consensus rules that happen at finalization (e.g. block rewards).
 	Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		e EpochReader, chain ChainHeaderReader, syscall SystemCall,
+		chain ChainHeaderReader, syscall SystemCall,
 	) (types.Transactions, types.Receipts, error)
 
 	// FinalizeAndAssemble runs any post-transaction state modifications (e.g. block
@@ -128,10 +120,7 @@ type EngineWriter interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
-		txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-		e EpochReader, chain ChainHeaderReader, syscall SystemCall, call Call,
-	) (*types.Block, types.Transactions, types.Receipts, error)
+	FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState, txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain ChainHeaderReader, syscall SystemCall, call Call) (*types.Block, types.Transactions, types.Receipts, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.

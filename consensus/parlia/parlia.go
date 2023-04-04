@@ -665,7 +665,7 @@ func (p *Parlia) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 }
 
 // Initialize runs any pre-transaction state modifications (e.g. epoch start)
-func (p *Parlia) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header,
+func (p *Parlia) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
 }
 
@@ -694,7 +694,7 @@ func (p *Parlia) splitTxs(txs types.Transactions, header *types.Header) (userTxs
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) Finalize(_ *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, _ []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	return p.finalize(header, state, txs, receipts, chain, false)
 }
@@ -791,7 +791,7 @@ func (p *Parlia) finalize(header *types.Header, state *state.IntraBlockState, tx
 // consensus rules that happen at finalization (e.g. block rewards).
 func (p *Parlia) FinalizeAndAssemble(_ *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, _ []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	outTxs, outReceipts, err := p.finalize(header, state, txs, receipts, chain, true)
 	if err != nil {
