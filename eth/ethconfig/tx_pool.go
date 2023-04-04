@@ -14,55 +14,20 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package core
+package ethconfig
 
 import (
-	"errors"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 )
 
-var (
-	// ErrAlreadyKnown is returned if the transactions is already contained
-	// within the pool.
-	ErrAlreadyKnown = errors.New("already known")
-
-	// ErrInvalidSender is returned if the transaction contains an invalid signature.
-	ErrInvalidSender = errors.New("invalid sender")
-
-	// ErrUnderpriced is returned if a transaction's gas price is below the minimum
-	// configured for the transaction pool.
-	ErrUnderpriced = errors.New("transaction underpriced")
-
-	// ErrTxPoolOverflow is returned if the transaction pool is full and can't accpet
-	// another remote transaction.
-	ErrTxPoolOverflow = errors.New("txpool is full")
-
-	// ErrReplaceUnderpriced is returned if a transaction is attempted to be replaced
-	// with a different one without the required price bump.
-	ErrReplaceUnderpriced = errors.New("replacement transaction underpriced")
-
-	// ErrGasLimit is returned if a transaction's requested gas limit exceeds the
-	// maximum allowance of the current block.
-	ErrGasLimit = errors.New("exceeds block gas limit")
-
-	// ErrNegativeValue is a sanity error to ensure no one is able to specify a
-	// transaction with a negative value.
-	ErrNegativeValue = errors.New("negative value")
-
-	// ErrOversizedData is returned if the input data of a transaction is greater
-	// than some meaningful limit a user might use. This is not a consensus error
-	// making the transaction invalid, rather a DOS protection.
-	ErrOversizedData = errors.New("oversized data")
-)
-
-// TxPoolConfig are the configuration parameters of the transaction pool.
-type TxPoolConfig struct {
+// DeprecatedTxPoolConfig are the configuration parameters of the transaction pool.
+type DeprecatedTxPoolConfig struct {
 	Disable  bool
-	Locals   []libcommon.Address // Addresses that should be treated by default as local
-	NoLocals bool                // Whether local transaction handling should be disabled
+	Locals   []common.Address // Addresses that should be treated by default as local
+	NoLocals bool             // Whether local transaction handling should be disabled
 
 	PriceLimit uint64 // Minimum gas price to enforce for acceptance into the pool
 	PriceBump  uint64 // Minimum price bump percentage to replace an already existing transaction (nonce)
@@ -82,7 +47,7 @@ type TxPoolConfig struct {
 
 // DeprecatedDefaultTxPoolConfig contains the default configurations for the transaction
 // pool.
-var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
+var DeprecatedDefaultTxPoolConfig = DeprecatedTxPoolConfig{
 	PriceLimit: 1,
 	PriceBump:  10,
 
@@ -95,8 +60,8 @@ var DeprecatedDefaultTxPoolConfig = TxPoolConfig{
 	Lifetime: 3 * time.Hour,
 }
 
-var DefaultTxPool2Config = func(pool1Cfg TxPoolConfig) txpool.Config {
-	cfg := txpool.DefaultConfig
+var DefaultTxPool2Config = func(pool1Cfg DeprecatedTxPoolConfig) txpoolcfg.Config {
+	cfg := txpoolcfg.DefaultConfig
 	cfg.PendingSubPoolLimit = int(pool1Cfg.GlobalSlots)
 	cfg.BaseFeeSubPoolLimit = int(pool1Cfg.GlobalBaseFeeQueue)
 	cfg.QueuedSubPoolLimit = int(pool1Cfg.GlobalQueue)

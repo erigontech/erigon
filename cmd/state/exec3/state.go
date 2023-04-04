@@ -39,7 +39,7 @@ type Worker struct {
 	ctx      context.Context
 	engine   consensus.Engine
 	logger   log.Logger
-	genesis  *core.Genesis
+	genesis  *types.Genesis
 	resultCh chan *exec22.TxTask
 	epoch    EpochReader
 	chain    ChainReader
@@ -53,7 +53,7 @@ type Worker struct {
 	ibs *state.IntraBlockState
 }
 
-func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
+func NewWorker(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, resultCh chan *exec22.TxTask, engine consensus.Engine) *Worker {
 	w := &Worker{
 		lock:        lock,
 		chainDb:     chainDb,
@@ -146,7 +146,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			panic(err)
 		}
@@ -163,7 +163,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, header.Number, ibs)
 		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, header, ibs, txTask.Txs, txTask.Uncles, syscall)
 	} else if txTask.Final {
@@ -171,7 +171,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 			}
 
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
@@ -207,7 +207,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		blockContext := txTask.EvmBlockContext
 		if !rw.background {
 			getHashFn := core.GetHashFn(header, rw.getHeader)
-			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */)
+			blockContext = core.NewEVMBlockContext(header, getHashFn, rw.engine, nil /* author */, nil /*excessDataGas*/)
 		}
 		rw.evm.ResetBetweenBlocks(blockContext, core.NewEVMTxContext(msg), ibs, vmConfig, rules)
 		vmenv := rw.evm
@@ -237,24 +237,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		txTask.ReadLists = rw.stateReader.ReadSet()
 		txTask.WriteLists = rw.stateWriter.WriteSet()
 		txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = rw.stateWriter.PrevAndDels()
-		size := (20 + 32) * len(txTask.BalanceIncreaseSet)
-		for _, list := range txTask.ReadLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		for _, list := range txTask.WriteLists {
-			for _, b := range list.Keys {
-				size += len(b)
-			}
-			for _, b := range list.Vals {
-				size += len(b)
-			}
-		}
-		txTask.ResultsSize = int64(size)
 	}
 }
 
@@ -327,10 +309,11 @@ func (cr EpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, b
 	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
 }
 
-func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
-	queueSize := workerCount * 256
+func NewWorkersPool(lock sync.Locker, ctx context.Context, background bool, chainDb kv.RoDB, rs *state.StateV3, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine, workerCount int) (reconWorkers []*Worker, applyWorker *Worker, resultCh chan *exec22.TxTask, clear func(), wait func()) {
 	reconWorkers = make([]*Worker, workerCount)
-	resultCh = make(chan *exec22.TxTask, queueSize)
+
+	resultChSize := workerCount * 8
+	resultCh = make(chan *exec22.TxTask, resultChSize)
 	{
 		// we all errors in background workers (except ctx.Cancele), because applyLoop will detect this error anyway.
 		// and in applyLoop all errors are critical

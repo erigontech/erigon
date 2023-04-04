@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 
@@ -50,7 +49,7 @@ type account struct {
 
 // testcase defines a single test to check the stateDiff tracer against.
 type testcase struct {
-	Genesis      *core.Genesis   `json:"genesis"`
+	Genesis      *types.Genesis  `json:"genesis"`
 	Context      *callContext    `json:"context"`
 	Input        string          `json:"input"`
 	TracerConfig json.RawMessage `json:"tracerConfig"`

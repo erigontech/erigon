@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -30,6 +31,8 @@ import (
 const CodeSizeTable = "CodeSize"
 const StorageTable = "Storage"
 
+var ExecTxsDone = metrics.NewCounter(`exec_txs_done`)
+
 type StateV3 struct {
 	lock           sync.RWMutex
 	sizeEstimate   int
@@ -47,7 +50,6 @@ type StateV3 struct {
 	queue     exec22.TxTaskQueue
 	queueLock sync.Mutex
 
-	txsDone  atomic.Uint64
 	finished atomic.Bool
 
 	tmpdir              string
@@ -226,10 +228,11 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) QueueLen() int {
+func (rs *StateV3) QueueLen() (l int) {
 	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	return rs.queue.Len()
+	l = rs.queue.Len()
+	rs.queueLock.Unlock()
+	return l
 }
 
 func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
@@ -245,6 +248,37 @@ func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
 		return heap.Pop(&rs.queue).(*exec22.TxTask), true
 	}
 	return nil, false
+}
+
+func (rs *StateV3) queuePush(t *exec22.TxTask) int {
+	rs.queueLock.Lock()
+	heap.Push(&rs.queue, t)
+	l := len(rs.queue)
+	rs.queueLock.Unlock()
+	return l
+}
+
+func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
+	txTask.BalanceIncreaseSet = nil
+	returnReadList(txTask.ReadLists)
+	txTask.ReadLists = nil
+	returnWriteList(txTask.WriteLists)
+	txTask.WriteLists = nil
+	txTask.Logs = nil
+	txTask.TraceFroms = nil
+	txTask.TraceTos = nil
+
+	/*
+		txTask.ReadLists = nil
+		txTask.WriteLists = nil
+		txTask.AccountPrevs = nil
+		txTask.AccountDels = nil
+		txTask.StoragePrevs = nil
+		txTask.CodePrevs = nil
+	*/
+	queueLen = rs.queuePush(txTask)
+	rs.receiveWork.Signal()
+	return queueLen
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
@@ -269,12 +303,11 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
-	rs.txsDone.Add(1)
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
+	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
-	count := uint64(0)
 	if triggered, ok := rs.triggers[txNum]; ok {
 		rs.queuePush(triggered)
 		rs.receiveWork.Signal()
@@ -288,38 +321,6 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) uint64 {
 		}
 	}
 	return count
-}
-
-func (rs *StateV3) queuePush(t *exec22.TxTask) int {
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	l := len(rs.queue)
-	rs.queueLock.Unlock()
-	return l
-}
-
-func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
-	txTask.BalanceIncreaseSet = nil
-	returnReadList(txTask.ReadLists)
-	txTask.ReadLists = nil
-	returnWriteList(txTask.WriteLists)
-	txTask.WriteLists = nil
-	txTask.ResultsSize = 0
-	txTask.Logs = nil
-	txTask.TraceFroms = nil
-	txTask.TraceTos = nil
-
-	/*
-		txTask.ReadLists = nil
-		txTask.WriteLists = nil
-		txTask.AccountPrevs = nil
-		txTask.AccountDels = nil
-		txTask.StoragePrevs = nil
-		txTask.CodePrevs = nil
-	*/
-	queueLen = rs.queuePush(txTask)
-	rs.receiveWork.Signal()
-	return queueLen
 }
 
 func (rs *StateV3) Finish() {
@@ -640,13 +641,13 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ag
 	return nil
 }
 
-func (rs *StateV3) DoneCount() uint64 { return rs.txsDone.Load() }
+func (rs *StateV3) DoneCount() uint64 { return ExecTxsDone.Get() }
 
-func (rs *StateV3) SizeEstimate() uint64 {
+func (rs *StateV3) SizeEstimate() (r uint64) {
 	rs.lock.RLock()
-	r := rs.sizeEstimate
+	r = uint64(rs.sizeEstimate)
 	rs.lock.RUnlock()
-	return uint64(r) * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
+	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
 func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {

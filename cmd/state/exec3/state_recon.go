@@ -229,7 +229,7 @@ type ReconWorker struct {
 	engine      consensus.Engine
 	chainConfig *chain.Config
 	logger      log.Logger
-	genesis     *core.Genesis
+	genesis     *types.Genesis
 	epoch       EpochReader
 	chain       ChainReader
 	isPoSA      bool
@@ -241,7 +241,7 @@ type ReconWorker struct {
 
 func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
-	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	rw := &ReconWorker{
@@ -302,7 +302,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 			}
 			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil /* receipts */, txTask.Withdrawals, rw.epoch, rw.chain, syscall); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
@@ -331,7 +331,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 			systemcontracts.UpgradeBuildInSystemContract(rw.chainConfig, txTask.Header.Number, ibs)
 		}
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+			return core.SysCallContract(contract, data, *rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */, nil /*excessDataGas*/)
 		}
 
 		rw.engine.Initialize(rw.chainConfig, rw.chain, rw.epoch, txTask.Header, ibs, txTask.Txs, txTask.Uncles, syscall)

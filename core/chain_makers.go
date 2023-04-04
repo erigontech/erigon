@@ -24,8 +24,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -117,7 +117,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 		b.SetCoinbase(libcommon.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil /*excessDataGas*/)
 	if err != nil {
 		panic(err)
 	}
@@ -130,7 +130,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 		b.SetCoinbase(libcommon.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil /*excessDataGas*/)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -311,7 +311,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	defer tx.Rollback()
 
 	genblock := func(i int, parent *types.Block, ibs *state.IntraBlockState, stateReader state.StateReader,
-		plainStateWriter *state.PlainStateWriter) (*types.Block, types.Receipts, error) {
+		stateWriter state.StateWriter) (*types.Block, types.Receipts, error) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, ibs: ibs, stateReader: stateReader, config: config, engine: engine, txs: make([]types.Transaction, 0, 1), receipts: make([]*types.Receipt, 0, 1), uncles: make([]*types.Header, 0, 1)}
 		b.header = makeHeader(chainreader, parent, ibs, b.engine)
 		// Mutate the state and block according to any hard-fork specs
@@ -335,8 +335,8 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db
-			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), plainStateWriter); err != nil {
-				return nil, nil, fmt.Errorf("call to CommitBlock to plainStateWriter: %w", err)
+			if err := ibs.CommitBlock(config.Rules(b.header.Number.Uint64(), b.header.Time), stateWriter); err != nil {
+				return nil, nil, fmt.Errorf("call to CommitBlock to stateWriter: %w", err)
 			}
 
 			if err := tx.ClearBucket(kv.HashedAccounts); err != nil {
@@ -431,13 +431,43 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	}
 
 	for i := 0; i < n; i++ {
-		stateReader := state.NewPlainStateReader(tx)
-		plainStateWriter := state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
+		var stateReader state.StateReader
+		var stateWriter state.StateWriter
+
+		if ethconfig.EnableHistoryV4InTest {
+			panic("implent me")
+			/*
+				agg := db.(*temporal.DB).GetAgg()
+				agg.SetTx(tx)
+				rs = state.NewStateV3("", agg.BufferedDomains())
+				stateWriter = state.NewStateWriterV3(rs)
+				r := state.NewStateReaderV3(rs)
+				r.SetTx(tx)
+				stateReader = r
+				defer agg.StartUnbufferedWrites().FinishWrites()
+			*/
+		} else {
+			stateReader = state.NewPlainStateReader(tx)
+			stateWriter = state.NewPlainStateWriter(tx, nil, parent.NumberU64()+uint64(i)+1)
+		}
 		ibs := state.New(stateReader)
-		block, receipt, err := genblock(i, parent, ibs, stateReader, plainStateWriter)
+		block, receipt, err := genblock(i, parent, ibs, stateReader, stateWriter)
 		if err != nil {
 			return nil, fmt.Errorf("generating block %d: %w", i, err)
 		}
+		/*
+			if ethconfig.EnableHistoryV4InTest {
+				logEvery := time.NewTicker(20 * time.Second)
+				defer logEvery.Stop()
+				if err := rs.Flush(context.Background(), tx, "", logEvery); err != nil {
+					return nil, err
+				}
+
+				//if err := rs.ApplyHistory(txTask, agg); err != nil {
+				//	return resultSize, outputTxNum, conflicts, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
+				//}
+			}
+		*/
 		headers[i] = block.Header()
 		blocks[i] = block
 		receipts[i] = receipt

@@ -425,9 +425,9 @@ func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Durat
 	}
 }
 
-func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
+func (b *blockProcessor) ApplyGenesis(genesis *types.Genesis) error {
 	b.logger.Info("apply genesis", "chain_id", genesis.Config.ChainID)
-	genBlock, genesisIbs, err := genesis.ToBlock("")
+	genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 	if err != nil {
 		return err
 	}
@@ -523,7 +523,7 @@ func (b *blockProcessor) applyBlock(
 			ibs.Prepare(tx.Hash(), block.Hash(), i)
 			ct := exec3.NewCallTracer()
 			b.vmConfig.Tracer = ct
-			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig)
+			receipt, _, err := core.ApplyTransaction(b.chainConfig, getHashFn, b.engine, nil, gp, ibs, b.writer, header, tx, usedGas, b.vmConfig, nil /*excessDataGas*/)
 			if err != nil {
 				return nil, fmt.Errorf("could not apply tx %d [%x] failed: %w", i, tx.Hash(), err)
 			}

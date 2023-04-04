@@ -95,7 +95,6 @@ func testSanityFunction(context testContext) error {
 		if err != nil {
 			break
 		}
-		changes = append(changes, testState.StopCollectingReverseChangeSet())
 	}
 	if err != nil {
 		return err

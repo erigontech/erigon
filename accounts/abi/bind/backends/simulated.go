@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
@@ -46,7 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
 	"github.com/ledgerwatch/erigon/event"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -78,6 +78,7 @@ type SimulatedBackend struct {
 	gasPool         *core.GasPool
 	pendingBlock    *types.Block // Currently pending block that will be imported on request
 	pendingReader   *state.PlainStateReader
+	pendingReaderTx kv.Tx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
 	rmLogsFeed event.Feed
@@ -87,8 +88,8 @@ type SimulatedBackend struct {
 
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
-func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
-	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+func NewSimulatedBackendWithConfig(alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	engine := ethash.NewFaker()
 	m := stages.MockWithGenesisEngine(nil, &genesis, engine, false)
 	backend := &SimulatedBackend{
@@ -109,25 +110,21 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *chain.Config
 }
 
 // A simulated backend always uses chainID 1337.
-func NewSimulatedBackend(t *testing.T, alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
+func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, params.TestChainConfig, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 
-func NewTestSimulatedBackendWithConfig(t *testing.T, alloc core.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
+func NewTestSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	b := NewSimulatedBackendWithConfig(alloc, config, gasLimit)
-	t.Cleanup(func() {
-		b.Close()
-	})
-	if b.m.HistoryV3 {
-		t.Skip("TODO: Fixme")
-	}
+	t.Cleanup(b.Close)
+	//if b.m.HistoryV3 {
+	//	t.Skip("TODO: Fixme")
+	//}
 	return b
 }
 func (b *SimulatedBackend) DB() kv.RwDB               { return b.m.DB }
@@ -140,6 +137,9 @@ func (b *SimulatedBackend) Engine() consensus.Engine { return b.m.Engine }
 
 // Close terminates the underlying blockchain's update loop.
 func (b *SimulatedBackend) Close() {
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
 	b.m.Close()
 }
 
@@ -179,18 +179,31 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingReceipts = chain.Receipts[0]
 	b.pendingHeader = chain.Headers[0]
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingReader = state.NewPlainStateReader(olddb.NewObjectDatabase(b.m.DB))
+	if b.pendingReaderTx != nil {
+		b.pendingReaderTx.Rollback()
+	}
+	tx, err := b.m.DB.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	b.pendingReaderTx = tx
+	if ethconfig.EnableHistoryV4InTest {
+		panic("implement me")
+		//b.pendingReader = state.NewReaderV4(b.pendingReaderTx.(kv.TemporalTx))
+	} else {
+		b.pendingReader = state.NewPlainStateReader(b.pendingReaderTx)
+	}
 	b.pendingState = state.New(b.pendingReader)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
 func (b *SimulatedBackend) stateByBlockNumber(db kv.Tx, blockNumber *big.Int) *state.IntraBlockState {
 	if blockNumber == nil || blockNumber.Cmp(b.pendingBlock.Number()) == 0 {
-		return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
-		//return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
+		//return state.New(state.NewPlainState(db, b.pendingBlock.NumberU64()+1, nil))
+		return state.New(b.m.NewHistoryStateReader(b.pendingBlock.NumberU64()+1, db))
 	}
-	return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
-	//return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
+	//return state.New(state.NewPlainState(db, blockNumber.Uint64()+1, nil))
+	return state.New(b.m.NewHistoryStateReader(blockNumber.Uint64()+1, db))
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -683,7 +696,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call ethereum.CallMsg
 
 	txContext := core.NewEVMTxContext(msg)
 	header := block.Header()
-	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil)
+	evmContext := core.NewEVMBlockContext(header, core.GetHashFn(header, b.getHeader), b.m.Engine, nil, nil /*excessDataGas*/)
 	// Create a new environment which holds all relevant information
 	// about the transaction and calling mechanisms.
 	vmEnv := vm.NewEVM(evmContext, txContext, statedb, b.m.ChainConfig, vm.Config{})
@@ -716,7 +729,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx types.Transac
 		&b.pendingHeader.Coinbase, b.gasPool,
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, tx,
-		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		&b.pendingHeader.GasUsed, vm.Config{}, nil /*excessDataGas*/); err != nil {
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
