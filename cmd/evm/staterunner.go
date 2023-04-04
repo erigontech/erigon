@@ -122,7 +122,7 @@ func aggregateResultsFromStateTests(
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
 	db := mdbx.NewMDBX(log.New()).
-		Path(filepath.Join(os.TempDir(), "statetest")).
+		Path(filepath.Join(os.TempDir(), "erigon-statetest")).
 		Flags(func(u uint) uint {
 			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.LifoReclaim | mdbx2.NoMemInit
 		}).
