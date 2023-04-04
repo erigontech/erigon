@@ -35,14 +35,26 @@ func AlmostAllCPUs() int {
 func totalMemory() uint64 {
 	mem := memory.TotalMemory()
 
-	// apply limit from docker if can
-	// see: https://github.com/shirou/gopsutil/issues/1416
-	if hostname, err := os.Hostname(); err == nil {
-		cgmem, err := docker.CgroupMemDocker(hostname)
-		if err == nil && cgmem != nil && cgmem.MemLimitInBytes > 0 {
-			mem = cmp.Min(mem, cgmem.MemLimitInBytes)
-		}
+	if cgroupsMemLimit, ok := cgroupsMemoryLimit(); ok {
+		mem = cmp.Min(mem, cgroupsMemLimit)
 	}
 
 	return mem
+}
+
+func cgroupsMemoryLimit() (mem uint64, ok bool) {
+	// apply limit from docker if can
+	// see: https://github.com/shirou/gopsutil/issues/1416
+	hostname, err := os.Hostname()
+	if err != nil {
+		return 0, false
+	}
+	cgmem, err := docker.CgroupMemDocker(hostname)
+	if err != nil {
+		return 0, false
+	}
+	if cgmem != nil || cgmem.MemLimitInBytes <= 0 {
+		return 0, false
+	}
+	return cgmem.MemLimitInBytes, true
 }
