@@ -37,10 +37,11 @@ func totalMemory() uint64 {
 
 	// apply limit from docker if can
 	// see: https://github.com/shirou/gopsutil/issues/1416
-	hostname, _ := os.Hostname()
-	cgmem, err := docker.CgroupMemDocker(hostname)
-	if err == nil && cgmem != nil && cgmem.MemLimitInBytes > 0 {
-		mem = cmp.Min(mem, cgmem.MemLimitInBytes)
+	if hostname, err := os.Hostname(); err == nil {
+		cgmem, err := docker.CgroupMemDocker(hostname)
+		if err == nil && cgmem != nil && cgmem.MemLimitInBytes > 0 {
+			mem = cmp.Min(mem, cgmem.MemLimitInBytes)
+		}
 	}
 
 	return mem
