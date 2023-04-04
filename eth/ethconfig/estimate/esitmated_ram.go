@@ -42,9 +42,9 @@ func totalMemory() uint64 {
 	return mem
 }
 
+// apply limit from docker if can, treat errors as "not available or maybe non-docker environment
+// supports only cgroups v1, for v2 see: https://github.com/shirou/gopsutil/issues/1416
 func cgroupsMemoryLimit() (mem uint64, ok bool) {
-	// apply limit from docker if can
-	// see: https://github.com/shirou/gopsutil/issues/1416
 	hostname, err := os.Hostname()
 	if err != nil {
 		return 0, false
