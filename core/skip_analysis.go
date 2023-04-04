@@ -38,7 +38,6 @@ import (
 
 var analysisBlocks = map[string][]uint64{
 	networkname.MainnetChainName:    {5_800_596, 6_426_298, 6_426_432, 11_079_912, 13_119_520, 15_081_051},
-	networkname.BSCChainName:        {19_278_044},
 	networkname.BorMainnetChainName: {29_447_463},
 }
 
