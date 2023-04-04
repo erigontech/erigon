@@ -137,13 +137,13 @@ RUN dpkg-reconfigure locales
 
 ENV STORAGE_DIR=/chain-db
 
-RUN mkdir $STORAGE_DIR
+RUN mkdir $STORAGE_DIR && chown erigon:erigon ${STORAGE_DIR}
 
 RUN echo '#!/usr/bin/env sh\n\
 set -e\n\
-echo "Mounting GCS Fuse."\n\
-gcsfuse -o rw,allow_other --uid 1000 --gid 1000 ${BUCKET} ${STORAGE_DIR}\n\
-echo "BLOCKIMPORTER start"\n\
+#echo "Mounting GCS Fuse."\n\
+#gcsfuse -o rw,allow_other --uid 1000 --gid 1000 ${BUCKET} ${STORAGE_DIR}\n\
+#echo "BLOCKIMPORTER start"\n\
 su erigon -c "blockimporter --db ${STORAGE_DIR} --evm ${EVMC_URL}" &\n\
 echo "Waiting for blockimporter to initialize."\n\
 sleep 60\n\
