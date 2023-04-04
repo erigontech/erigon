@@ -1149,26 +1149,6 @@ func (cr ChainReaderImpl) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	return td
 }
 
-type EpochReaderImpl struct {
-	tx kv.RwTx
-}
-
-func (cr EpochReaderImpl) GetEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadEpoch(cr.tx, number, hash)
-}
-func (cr EpochReaderImpl) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return rawdb.WriteEpoch(cr.tx, number, hash, proof)
-}
-func (cr EpochReaderImpl) GetPendingEpoch(hash libcommon.Hash, number uint64) ([]byte, error) {
-	return rawdb.ReadPendingEpoch(cr.tx, number, hash)
-}
-func (cr EpochReaderImpl) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
-	return rawdb.WritePendingEpoch(cr.tx, number, hash, proof)
-}
-func (cr EpochReaderImpl) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash libcommon.Hash, transitionProof []byte, err error) {
-	return rawdb.FindEpochBeforeOrEqualNumber(cr.tx, number)
-}
-
 func HeadersPrune(p *PruneState, tx kv.RwTx, cfg HeadersCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
