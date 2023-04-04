@@ -53,7 +53,7 @@ func cgroupsMemoryLimit() (mem uint64, ok bool) {
 	if err != nil {
 		return 0, false
 	}
-	if cgmem != nil || cgmem.MemLimitInBytes <= 0 {
+	if cgmem == nil || cgmem.MemLimitInBytes <= 0 {
 		return 0, false
 	}
 	return cgmem.MemLimitInBytes, true
