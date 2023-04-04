@@ -179,6 +179,8 @@ func (*AccessListTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 func (*AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
+func (*AccessListTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}
+
 // AccessList returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()

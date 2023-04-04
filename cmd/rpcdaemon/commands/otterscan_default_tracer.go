@@ -3,6 +3,7 @@ package commands
 import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 )
@@ -34,3 +35,5 @@ func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 
 func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
+
+func (t *DefaultTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}

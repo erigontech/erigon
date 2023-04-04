@@ -41,3 +41,5 @@ func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
+func (ct *CallTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {
+}

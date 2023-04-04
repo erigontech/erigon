@@ -132,3 +132,6 @@ func (t *fourByteTracer) Stop(err error) {
 func bytesToHex(s []byte) string {
 	return "0x" + common.Bytes2Hex(s)
 }
+
+func (t *fourByteTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {
+}

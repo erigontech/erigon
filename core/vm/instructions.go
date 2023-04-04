@@ -277,6 +277,9 @@ func opKeccak256(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 	if _, err := interpreter.hasher.Read(interpreter.hasherBuf[:]); err != nil {
 		panic(err)
 	}
+	if interpreter.cfg.Tracer != nil {
+		interpreter.cfg.Tracer.CapturePreimage(*pc, interpreter.hasherBuf, data)
+	}
 
 	size.SetBytes(interpreter.hasherBuf[:])
 	return nil, nil

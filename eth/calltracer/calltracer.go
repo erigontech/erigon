@@ -60,6 +60,8 @@ func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 }
 
+func (ct *CallTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}
+
 func (ct *CallTracer) WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error {
 	ct.tos[block.Coinbase()] = false
 	for _, uncle := range block.Uncles() {

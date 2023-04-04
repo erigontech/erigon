@@ -31,6 +31,8 @@ type JsonStreamLogger struct {
 	output    []byte //nolint
 	err       error  //nolint
 	env       vm.VMInterface
+
+	preimage map[libcommon.Hash][]byte
 }
 
 // NewStructLogger returns a new logger
@@ -40,6 +42,7 @@ func NewJsonStreamLogger(cfg *LogConfig, ctx context.Context, stream *jsoniter.S
 		stream:       stream,
 		storage:      make(map[libcommon.Address]Storage),
 		firstCapture: true,
+		preimage:     make(map[libcommon.Hash][]byte),
 	}
 	if cfg != nil {
 		logger.cfg = *cfg
@@ -57,6 +60,14 @@ func (l *JsonStreamLogger) CaptureStart(env vm.VMInterface, from libcommon.Addre
 }
 
 func (l *JsonStreamLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+}
+
+func (l *JsonStreamLogger) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {
+	if l.cfg.DisablePreimage {
+		return
+	}
+	copyHash := hash
+	l.preimage[copyHash] = libcommon.Copy(preimage)
 }
 
 // CaptureState logs a new structured log message and pushes it out to the environment
@@ -196,4 +207,24 @@ func (l *JsonStreamLogger) CaptureEnd(output []byte, usedGas uint64, err error) 
 }
 
 func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+}
+
+func (l *JsonStreamLogger) End() {
+	if !l.cfg.DisablePreimage {
+		// dump preimage
+		l.stream.WriteMore()
+		l.stream.WriteObjectField("preimage")
+		l.stream.WriteObjectStart()
+		first := true
+		for hash, preimage := range l.preimage {
+			if first {
+				first = false
+			} else {
+				l.stream.WriteMore()
+			}
+			l.stream.WriteObjectField(hash.Hex())
+			l.stream.WriteString("0x" + hex.EncodeToString(preimage))
+		}
+		l.stream.WriteObjectEnd()
+	}
 }

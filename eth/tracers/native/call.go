@@ -272,3 +272,6 @@ func clearFailedLogs(cf *callFrame, parentFailed bool) {
 		clearFailedLogs(&cf.Calls[i], failed)
 	}
 }
+
+func (t *callTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {
+}

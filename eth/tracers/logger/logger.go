@@ -40,6 +40,7 @@ type LogConfig struct {
 	DisableStack      bool // disable stack capture
 	DisableStorage    bool // disable storage capture
 	DisableReturnData bool // disable return data capture
+	DisablePreimage   bool // disable preimage capture
 	Debug             bool // print output during capture end
 	Limit             int  // maximum length of output, but zero means unlimited
 	// Chain overrides, can be used to execute a trace using future fork rules
@@ -226,6 +227,8 @@ func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 // CaptureExit is called after the internal call finishes to finalize the tracing.
 func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
+
+func (l *StructLogger) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}
 
 // StructLogs returns the captured log entries.
 func (l *StructLogger) StructLogs() []StructLog { return l.logs }
@@ -418,3 +421,5 @@ func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 	t.captureEndOrExit(output, usedGas, err)
 }
+
+func (t *mdLogger) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}

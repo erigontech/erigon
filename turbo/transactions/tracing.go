@@ -211,6 +211,7 @@ func TraceTx(
 		}
 		stream.WriteObjectField("returnValue")
 		stream.WriteString(returnVal)
+		tracer.(*logger.JsonStreamLogger).End()
 		stream.WriteObjectEnd()
 	} else {
 		if r, err1 := tracer.(tracers.Tracer).GetResult(); err1 == nil {

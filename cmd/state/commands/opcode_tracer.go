@@ -244,6 +244,8 @@ func (ot *opcodeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
 	ot.depth--
 }
 
+func (ot *opcodeTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}
+
 func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, opDepth int, err error) {
 	//CaptureState sees the system as it is before the opcode is run. It seems to never get an error.
 	contract := scope.Contract

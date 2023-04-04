@@ -41,6 +41,8 @@ type EVMLogger interface {
 	// Opcode level
 	CaptureState(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, rData []byte, depth int, err error)
 	CaptureFault(pc uint64, op OpCode, gas, cost uint64, scope *ScopeContext, depth int, err error)
+	// CapturePreimage records a SHA3 preimage discovered during execution.
+	CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte)
 }
 
 // FlushableTracer is a Tracer extension whose accumulated traces has to be

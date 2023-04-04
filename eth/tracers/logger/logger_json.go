@@ -106,3 +106,5 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 
 func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
 }
+
+func (l *JSONLogger) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}

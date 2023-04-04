@@ -114,6 +114,12 @@ func (t *muxTracer) CaptureTxEnd(restGas uint64) {
 	}
 }
 
+func (t *muxTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {
+	for _, t := range t.tracers {
+		t.CapturePreimage(pc, hash, preimage)
+	}
+}
+
 // GetResult returns an empty json object.
 func (t *muxTracer) GetResult() (json.RawMessage, error) {
 	resObject := make(map[string]json.RawMessage)

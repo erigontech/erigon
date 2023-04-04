@@ -288,3 +288,5 @@ func (t *prestateTracer) lookupStorage(addr libcommon.Address, key libcommon.Has
 	t.env.IntraBlockState().GetState(addr, &key, &val)
 	t.pre[addr].Storage[key] = val.Bytes32()
 }
+
+func (*prestateTracer) CapturePreimage(pc uint64, hash libcommon.Hash, preimage []byte) {}
