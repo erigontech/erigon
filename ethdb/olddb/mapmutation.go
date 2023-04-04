@@ -10,6 +10,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/ethdb"
@@ -24,6 +27,96 @@ type mapmutation struct {
 	size   int
 	count  uint64
 	tmpdir string
+}
+
+func (m *mapmutation) BucketSize(table string) (uint64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) ListBuckets() ([]string, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) ViewID() uint64 {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) Cursor(table string) (kv.Cursor, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) CursorDupSort(table string) (kv.CursorDupSort, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) DBSize() (uint64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) Range(table string, fromPrefix, toPrefix []byte) (iter.KV, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) RangeAscend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) RangeDescend(table string, fromPrefix, toPrefix []byte, limit int) (iter.KV, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) Prefix(table string, prefix []byte) (iter.KV, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) DropBucket(s string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) CreateBucket(s string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) ExistsBucket(s string) (bool, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) ClearBucket(s string) error {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) RwCursor(table string) (kv.RwCursor, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) RwCursorDupSort(table string) (kv.RwCursorDupSort, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (m *mapmutation) CollectMetrics() {
+	//TODO implement me
+	panic("implement me")
 }
 
 // NewBatch - starts in-mem batch

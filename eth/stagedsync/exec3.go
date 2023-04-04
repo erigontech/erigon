@@ -693,6 +693,13 @@ Loop:
 			}
 		}
 
+		//rh, err := rs.Commitment(inputTxNum, agg)
+		//if err != nil {
+		//	return err
+		//}
+		//if !bytes.Equal(rh, header.Root.Bytes()) {
+		//	return fmt.Errorf("root hash mismatch: %x != %x, bn=%d", rh, header.Root.Bytes(), blockNum)
+		//}
 		if blockSnapshots.Cfg().Produce {
 			agg.BuildFilesInBackground()
 		}
@@ -774,13 +781,15 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 			i++
 		}
 
-		rh, err := rs.ApplyState4(applyTx, txTask, agg)
-		if err != nil {
-			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
-		}
-		if !bytes.Equal(rh, txTask.BlockRoot[:]) {
-			log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
-			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
+		if txTask.Final {
+			rh, err := rs.ApplyState4(applyTx, txTask, agg)
+			if err != nil {
+				return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
+			}
+			if !bytes.Equal(rh, txTask.BlockRoot[:]) {
+				log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
+				return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
+			}
 		}
 
 		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)

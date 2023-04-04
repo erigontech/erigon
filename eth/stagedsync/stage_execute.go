@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon/ethdb/olddb"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
@@ -196,6 +197,7 @@ func executeBlock(
 			}
 		}
 	}
+
 	rh, err := stateWriter.Commitment(true, false)
 	if err != nil {
 		return err
@@ -300,8 +302,7 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 
 	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix,
-		log.New(), to); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, rs, logPrefix, log.New(), to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil
@@ -437,6 +438,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	defer cfg.agg.StartWrites().FinishWrites()
 
 	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
+	batch := olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
+	stateWriter.SetTx(batch)
 
 	if stageProgress == 0 {
 		genBlock, genesisIbs, err := core.GenesisToBlock(cfg.genesis, "")
@@ -462,6 +465,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
+			log.Warn("Execution interrupted", "err", stoppedErr)
 			break
 		}
 
@@ -501,29 +505,34 @@ Loop:
 		stageProgress = blockNum
 
 		// todo finishTx is required in place because currently we could aggregate only one block and e4 could do thas in the middle
-		//shouldUpdateProgress := batch.BatchSize() >= ethconfig.HistoryV3AggregationStep
-		//if shouldUpdateProgress {
-		//	log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
-		//	currentStateGas = 0
-		//	if err = batch.Commit(); err != nil {
-		//		return err
-		//	}
-		//	if err = s.Update(tx, stageProgress); err != nil {
-		//		return err
-		//	}
-		//	if !useExternalTx {
-		//		if err = tx.Commit(); err != nil {
-		//			return err
-		//		}
-		//		tx, err = cfg.db.BeginRw(context.Background())
-		//		if err != nil {
-		//			return err
-		//		}
-		//		// TODO: This creates stacked up deferrals
-		//		defer tx.Rollback()
-		//	}
-		//	batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-		//}
+		shouldUpdateProgress := batch.BatchSize() >= ethconfig.HistoryV3AggregationStep
+		if shouldUpdateProgress {
+			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			currentStateGas = 0
+			if err = batch.Commit(); err != nil {
+				return err
+			}
+			if err := cfg.agg.Flush(ctx, tx); err != nil {
+				log.Error("aggregator flush failed", "err", err)
+			}
+			log.Info("flushed aggregator last time", "block", stageProgress)
+
+			if err = s.Update(tx, stageProgress); err != nil {
+				return err
+			}
+			if !useExternalTx {
+				if err = tx.Commit(); err != nil {
+					return err
+				}
+				tx, err = cfg.db.BeginRw(context.Background())
+				if err != nil {
+					return err
+				}
+				// TODO: This creates stacked up deferrals
+				defer tx.Rollback()
+			}
+			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
+		}
 
 		gas = gas + block.GasUsed()
 		currentStateGas = currentStateGas + block.GasUsed()
@@ -545,20 +554,20 @@ Loop:
 	if err = s.Update(tx, stageProgress); err != nil {
 		return err
 	}
-	//if err = batch.Commit(); err != nil {
-	//	return fmt.Errorf("batch commit: %w", err)
-	//}
-
 	_, err = rawdb.IncrementStateVersion(tx)
 	if err != nil {
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
-	//if !useExternalTx {
-	if err = tx.Commit(); err != nil {
-		return err
+	if !useExternalTx {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		tx, err = cfg.db.BeginRw(context.Background())
+		if err != nil {
+			return err
+		}
 	}
-	//}
 
 	if !quiet {
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)

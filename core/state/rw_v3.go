@@ -239,7 +239,10 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	rs.chIncs = map[string][]byte{}
 	rs.sizeEstimate = 0
 
-	//rs.sharedWriter.Commitment(true, false)
+	//_, err := rs.sharedWriter.Commitment(true, false)
+	//if err != nil {
+	//	return err
+	//}
 	//if err := rs.shared.Flush(); err != nil {
 	//	return err
 	//}
@@ -558,11 +561,19 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
+func (rs *StateV3) Commitment(txNum uint64, agg *libstate.AggregatorV3) ([]byte, error) {
+	//defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+
+	rs.sharedWriter.SetTxNum(txNum)
+	return rs.sharedWriter.Commitment(true, false)
+}
+
 func (rs *StateV3) ApplyState4(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) ([]byte, error) {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
-	agg.SetTxNum(txTask.TxNum)
-	rh, err := rs.sharedWriter.Commitment(false, false)
+	//agg.SetTxNum(txTask.TxNum)
+	rs.sharedWriter.SetTxNum(txTask.TxNum)
+	rh, err := rs.sharedWriter.Commitment(true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -939,7 +950,6 @@ func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
 func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	return r.rs.sharedReader.ReadAccountData(address)
 	addr := address.Bytes()
 	enc, ok := r.rs.Get(kv.PlainState, addr)
 	if !ok {
@@ -955,6 +965,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 		r.readLists[kv.PlainState].Vals = append(r.readLists[kv.PlainState].Vals, enc)
 	}
 	if len(enc) == 0 {
+		return r.rs.sharedReader.ReadAccountData(address)
 		return nil, nil
 	}
 	var a accounts.Account
@@ -968,7 +979,6 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	return r.rs.sharedReader.ReadAccountStorage(address, incarnation, key)
 	composite := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
 	enc, ok := r.rs.Get(StorageTable, composite)
 	if !ok || enc == nil {
@@ -990,13 +1000,13 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 	if enc == nil {
+		return r.rs.sharedReader.ReadAccountStorage(address, incarnation, key)
 		return nil, nil
 	}
 	return enc, nil
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	return r.rs.sharedReader.ReadAccountCode(address, incarnation, codeHash)
 	addr, codeHashBytes := address.Bytes(), codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1010,6 +1020,9 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 		r.readLists[kv.Code].Keys = append(r.readLists[kv.Code].Keys, string(addr))
 		r.readLists[kv.Code].Vals = append(r.readLists[kv.Code].Vals, enc)
 	}
+	if len(enc) == 0 {
+		return r.rs.sharedReader.ReadAccountCode(address, incarnation, codeHash)
+	}
 	if r.trace {
 		fmt.Printf("ReadAccountCode [%x] => [%x], txNum: %d\n", address, enc, r.txNum)
 	}
@@ -1017,7 +1030,6 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	return r.ReadAccountCodeSize(address, incarnation, codeHash)
 	codeHashBytes := codeHash.Bytes()
 	enc, ok := r.rs.Get(kv.Code, codeHashBytes)
 	if !ok || enc == nil {
@@ -1036,6 +1048,9 @@ func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation 
 	size := len(enc)
 	if r.trace {
 		fmt.Printf("ReadAccountCodeSize [%x] => [%d], txNum: %d\n", address, size, r.txNum)
+	}
+	if size == 0 {
+		return r.ReadAccountCodeSize(address, incarnation, codeHash)
 	}
 	return size, nil
 }
