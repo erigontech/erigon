@@ -2027,7 +2027,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 	}
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	log.Log(m.lvl, "[snapshots] Merge segments", "ranges", fmt.Sprintf("%v", mergeRanges))
 	for _, r := range mergeRanges {
 		toMerge, err := m.filesByRange(snapshots, r.from, r.to)
 		if err != nil {
@@ -2089,14 +2088,6 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 				word, _ = g.Next(word[:0])
 				if err := f.AddWord(word); err != nil {
 					return err
-				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					_, fName := filepath.Split(targetFile)
-					log.Info("[snapshots] Merge", "progress", fmt.Sprintf("%.2f%%", 100*float64(f.Count())/float64(expectedTotal)), "to", fName)
-				default:
 				}
 			}
 			return nil
