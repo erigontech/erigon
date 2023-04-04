@@ -26,9 +26,9 @@ import (
 	"math/big"
 	"sort"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -39,14 +39,14 @@ import (
 
 // Snapshot is the state of the validatorSet at a given point.
 type Snapshot struct {
-	config   *chain.ParliaConfig                               // Consensus engine parameters to fine tune behavior
-	sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address] // Cache of recent block signatures to speed up ecrecover
+	config   *chain.ParliaConfig                        // Consensus engine parameters to fine tune behavior
+	sigCache *lru.ARCCache[common.Hash, common.Address] // Cache of recent block signatures to speed up ecrecover
 
-	Number           uint64                         `json:"number"`             // Block number where the snapshot was created
-	Hash             libcommon.Hash                 `json:"hash"`               // Block hash where the snapshot was created
-	Validators       map[libcommon.Address]struct{} `json:"validators"`         // Set of authorized validators at this moment
-	Recents          map[uint64]libcommon.Address   `json:"recents"`            // Set of recent validators for spam protections
-	RecentForkHashes map[uint64]string              `json:"recent_fork_hashes"` // Set of recent forkHash
+	Number           uint64                      `json:"number"`             // Block number where the snapshot was created
+	Hash             common.Hash                 `json:"hash"`               // Block hash where the snapshot was created
+	Validators       map[common.Address]struct{} `json:"validators"`         // Set of authorized validators at this moment
+	Recents          map[uint64]common.Address   `json:"recents"`            // Set of recent validators for spam protections
+	RecentForkHashes map[uint64]string           `json:"recent_fork_hashes"` // Set of recent forkHash
 }
 
 // newSnapshot creates a new snapshot with the specified startup parameters. This
@@ -54,19 +54,19 @@ type Snapshot struct {
 // the genesis block.
 func newSnapshot(
 	config *chain.ParliaConfig,
-	sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address],
+	sigCache *lru.ARCCache[common.Hash, common.Address],
 	number uint64,
-	hash libcommon.Hash,
-	validators []libcommon.Address,
+	hash common.Hash,
+	validators []common.Address,
 ) *Snapshot {
 	snap := &Snapshot{
 		config:           config,
 		sigCache:         sigCache,
 		Number:           number,
 		Hash:             hash,
-		Recents:          make(map[uint64]libcommon.Address),
+		Recents:          make(map[uint64]common.Address),
 		RecentForkHashes: make(map[uint64]string),
-		Validators:       make(map[libcommon.Address]struct{}),
+		Validators:       make(map[common.Address]struct{}),
 	}
 	for _, v := range validators {
 		snap.Validators[v] = struct{}{}
@@ -75,21 +75,21 @@ func newSnapshot(
 }
 
 // validatorsAscending implements the sort interface to allow sorting a list of addresses
-type validatorsAscending []libcommon.Address
+type validatorsAscending []common.Address
 
 func (s validatorsAscending) Len() int           { return len(s) }
 func (s validatorsAscending) Less(i, j int) bool { return bytes.Compare(s[i][:], s[j][:]) < 0 }
 func (s validatorsAscending) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
 
 // SnapshotFullKey = SnapshotBucket + num (uint64 big endian) + hash
-func SnapshotFullKey(number uint64, hash libcommon.Hash) []byte {
+func SnapshotFullKey(number uint64, hash common.Hash) []byte {
 	return append(hexutility.EncodeTs(number), hash.Bytes()...)
 }
 
 var ErrNoSnapsnot = fmt.Errorf("no parlia snapshot")
 
 // loadSnapshot loads an existing snapshot from the database.
-func loadSnapshot(config *chain.ParliaConfig, sigCache *lru2.ARCCache[libcommon.Hash, libcommon.Address], db kv.RwDB, num uint64, hash libcommon.Hash) (*Snapshot, error) {
+func loadSnapshot(config *chain.ParliaConfig, sigCache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, num uint64, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -130,8 +130,8 @@ func (s *Snapshot) copy() *Snapshot {
 		sigCache:         s.sigCache,
 		Number:           s.Number,
 		Hash:             s.Hash,
-		Validators:       make(map[libcommon.Address]struct{}),
-		Recents:          make(map[uint64]libcommon.Address),
+		Validators:       make(map[common.Address]struct{}),
+		Recents:          make(map[uint64]common.Address),
 		RecentForkHashes: make(map[uint64]string),
 	}
 
@@ -224,7 +224,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			if err != nil {
 				return nil, err
 			}
-			newVals := make(map[libcommon.Address]struct{}, len(newValArr))
+			newVals := make(map[common.Address]struct{}, len(newValArr))
 			for _, val := range newValArr {
 				newVals[val] = struct{}{}
 			}
@@ -252,8 +252,8 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 }
 
 // validators retrieves the list of validators in ascending order.
-func (s *Snapshot) validators() []libcommon.Address {
-	validators := make([]libcommon.Address, 0, len(s.Validators))
+func (s *Snapshot) validators() []common.Address {
+	validators := make([]common.Address, 0, len(s.Validators))
 	for v := range s.Validators {
 		validators = append(validators, v)
 	}
@@ -262,13 +262,13 @@ func (s *Snapshot) validators() []libcommon.Address {
 }
 
 // inturn returns if a validator at a given block height is in-turn or not.
-func (s *Snapshot) inturn(validator libcommon.Address) bool {
+func (s *Snapshot) inturn(validator common.Address) bool {
 	validators := s.validators()
 	offset := (s.Number + 1) % uint64(len(validators))
 	return validators[offset] == validator
 }
 
-func (s *Snapshot) enoughDistance(validator libcommon.Address, header *types.Header) bool {
+func (s *Snapshot) enoughDistance(validator common.Address, header *types.Header) bool {
 	idx := s.indexOfVal(validator)
 	if idx < 0 {
 		return true
@@ -288,7 +288,7 @@ func (s *Snapshot) enoughDistance(validator libcommon.Address, header *types.Hea
 	}
 }
 
-func (s *Snapshot) indexOfVal(validator libcommon.Address) int {
+func (s *Snapshot) indexOfVal(validator common.Address) int {
 	validators := s.validators()
 	for idx, val := range validators {
 		if val == validator {
@@ -298,22 +298,22 @@ func (s *Snapshot) indexOfVal(validator libcommon.Address) int {
 	return -1
 }
 
-func (s *Snapshot) supposeValidator() libcommon.Address {
+func (s *Snapshot) supposeValidator() common.Address {
 	validators := s.validators()
 	index := (s.Number + 1) % uint64(len(validators))
 	return validators[index]
 }
 
-func ParseValidators(validatorsBytes []byte) ([]libcommon.Address, error) {
+func ParseValidators(validatorsBytes []byte) ([]common.Address, error) {
 	if len(validatorsBytes)%validatorBytesLength != 0 {
 		return nil, errors.New("invalid validators bytes")
 	}
 	n := len(validatorsBytes) / validatorBytesLength
-	result := make([]libcommon.Address, n)
+	result := make([]common.Address, n)
 	for i := 0; i < n; i++ {
 		address := make([]byte, validatorBytesLength)
 		copy(address, validatorsBytes[i*validatorBytesLength:(i+1)*validatorBytesLength])
-		result[i] = libcommon.BytesToAddress(address)
+		result[i] = common.BytesToAddress(address)
 	}
 	return result, nil
 }

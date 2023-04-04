@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -144,7 +144,7 @@ var (
 type SignerFn func(signer libcommon.Address, mimeType string, message []byte) ([]byte, error)
 
 // ecrecover extracts the Ethereum account address from a signed header.
-func ecrecover(header *types.Header, sigcache *lru2.ARCCache[libcommon.Hash, libcommon.Address]) (libcommon.Address, error) {
+func ecrecover(header *types.Header, sigcache *lru.ARCCache[libcommon.Hash, libcommon.Address]) (libcommon.Address, error) {
 	// If the signature's already cached, return that
 	hash := header.Hash()
 
@@ -180,8 +180,8 @@ type Clique struct {
 	snapshotConfig *params.ConsensusSnapshotConfig // Consensus engine configuration parameters
 	db             kv.RwDB                         // Database to store and retrieve snapshot checkpoints
 
-	signatures *lru2.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
-	recents    *lru2.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
+	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address] // Signatures of recent blocks to speed up mining
+	recents    *lru.ARCCache[libcommon.Hash, *Snapshot]         // Snapshots for recent block to speed up reorgs
 
 	proposals map[libcommon.Address]bool // Current list of proposals we are pushing
 
@@ -206,8 +206,8 @@ func New(cfg *chain.Config, snapshotConfig *params.ConsensusSnapshotConfig, cliq
 		conf.Epoch = epochLength
 	}
 	// Allocate the snapshot caches and create the engine
-	recents, _ := lru2.NewARC[libcommon.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
-	signatures, _ := lru2.NewARC[libcommon.Hash, libcommon.Address](snapshotConfig.InmemorySignatures)
+	recents, _ := lru.NewARC[libcommon.Hash, *Snapshot](snapshotConfig.InmemorySnapshots)
+	signatures, _ := lru.NewARC[libcommon.Hash, libcommon.Address](snapshotConfig.InmemorySignatures)
 
 	exitCh := make(chan struct{})
 
