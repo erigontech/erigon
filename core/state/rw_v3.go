@@ -72,7 +72,7 @@ func NewStateV3(tmpdir string) *StateV3 {
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
 	}
-	rs.receiveWork = make(chan *exec22.TxTask, 10_000)
+	rs.receiveWork = make(chan *exec22.TxTask, 1)
 	return rs
 }
 
@@ -239,33 +239,48 @@ func (rs *StateV3) QueueLen() (l int) {
 func (rs *StateV3) drainToQueue(task *exec22.TxTask) (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
-	heap.Push(&rs.queue, task)
+	if task != nil {
+		heap.Push(&rs.queue, task)
+	}
+Loop:
 	for {
 		select {
 		case task, ok := <-rs.receiveWork:
 			if !ok {
-				return nil, false
+				break Loop
 			}
 			heap.Push(&rs.queue, task)
 		default: // we are inside mutex section, can't block here
-			return heap.Pop(&rs.queue).(*exec22.TxTask), true
+			break Loop
 		}
 	}
+	if rs.queue.Len() == 0 {
+		return nil, false
+	}
+	return heap.Pop(&rs.queue).(*exec22.TxTask), true
+}
+
+func (rs *StateV3) popWait(ctx context.Context) (*exec22.TxTask, bool) {
+	select {
+	case task, ok := <-rs.receiveWork:
+		if !ok { // chan closed - means work is done
+			return nil, false
+		}
+		return rs.drainToQueue(task)
+	case <-ctx.Done():
+		return nil, false
+	}
+}
+func (rs *StateV3) popNoWait() (*exec22.TxTask, bool) {
+	return rs.drainToQueue(nil)
 }
 
 func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
-	for rs.QueueLen() == 0 {
-		select {
-		case task, ok := <-rs.receiveWork:
-			if !ok { // chan closed - means work is done
-				return nil, false
-			}
-			return rs.drainToQueue(task)
-		case <-ctx.Done():
-			return nil, false
-		}
+	task, ok := rs.popNoWait()
+	if ok {
+		return task, true
 	}
-	return nil, false
+	return rs.popWait(ctx)
 }
 
 func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
