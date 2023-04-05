@@ -272,6 +272,11 @@ func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
 	rs.queueLock.Lock()
 	if rs.queue.Len() > 0 {
 		task = heap.Pop(&rs.queue).(*exec22.TxTask)
+	} else {
+		select {
+		case task, _ = <-rs.receiveWork:
+		default:
+		}
 	}
 	rs.queueLock.Unlock()
 	return task, task != nil
