@@ -68,8 +68,9 @@ func NewStateV3(tmpdir string) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
+
+		receiveWork: make(chan *exec22.TxTask, 10_000),
 	}
-	rs.receiveWork = make(chan *exec22.TxTask, 10_000)
 	return rs
 }
 
@@ -281,21 +282,16 @@ func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
 	}
 
 	// otherwise get some new task. non-blocking way. without adding to queue.
-	select {
-	case task, _ = <-rs.receiveWork:
-	default:
+	for task == nil {
+		select {
+		case task, ok = <-rs.receiveWork:
+			if !ok {
+				return nil, false
+			}
+		default:
+			return nil, false
+		}
 	}
-	//Loop:
-	//	for task == nil {
-	//		select {
-	//		case task, ok = <-rs.receiveWork:
-	//			if !ok {
-	//				break Loop
-	//			}
-	//		default:
-	//			break Loop
-	//		}
-	//	}
 	return task, task != nil
 }
 
