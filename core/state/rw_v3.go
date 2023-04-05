@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -46,11 +45,10 @@ type StateV3 struct {
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
-	receiveWork chan *exec22.TxTask
-	queue       exec22.TxTaskQueue
-	queueLock   sync.Mutex
-
-	finished atomic.Bool
+	workFinished bool
+	receiveWork  chan *exec22.TxTask
+	queue        exec22.TxTaskQueue
+	queueLock    sync.Mutex
 
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -271,11 +269,25 @@ func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
 	}
 }
 func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
-	select {
-	case task, _ = <-rs.receiveWork:
-	default:
+Loop:
+	for {
+		select {
+		case task, ok = <-rs.receiveWork:
+			if !ok {
+				break Loop
+			}
+			if task == nil {
+				continue Loop
+			}
+			rs.queueLock.Lock()
+			if task != nil {
+				heap.Push(&rs.queue, task)
+			}
+			rs.queueLock.Unlock()
+		default:
+			break Loop
+		}
 	}
-
 	rs.queueLock.Lock()
 	if task != nil {
 		heap.Push(&rs.queue, task)
@@ -379,8 +391,11 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int)
 	return count
 }
 
-func (rs *StateV3) Finish() {
-	rs.finished.Store(true)
+func (rs *StateV3) WorkFinish() {
+	if rs.workFinished {
+		return
+	}
+	rs.workFinished = true
 	close(rs.receiveWork)
 }
 
