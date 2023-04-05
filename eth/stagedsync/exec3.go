@@ -200,7 +200,7 @@ func ExecV3(ctx context.Context,
 	heap.Init(rws)
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
-	defer rs.Finish()
+	defer rs.WorkFinish()
 
 	rwsLock := &sync.Mutex{}
 
@@ -711,7 +711,7 @@ Loop:
 	}
 
 	if parallel {
-		rs.Finish()
+		rs.WorkFinish()
 		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
