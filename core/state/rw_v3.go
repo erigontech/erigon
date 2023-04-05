@@ -46,10 +46,9 @@ type StateV3 struct {
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
-	queueScheduleLock sync.Mutex
-	receiveWork       chan *exec22.TxTask
-	queue             exec22.TxTaskQueue
-	queueLock         sync.Mutex
+	receiveWork chan *exec22.TxTask
+	queue       exec22.TxTaskQueue
+	queueLock   sync.Mutex
 
 	finished atomic.Bool
 
@@ -235,6 +234,12 @@ func (rs *StateV3) QueueLen() (l int) {
 	rs.queueLock.Unlock()
 	return l
 }
+func (rs *StateV3) QueueAndChLen() (l int) {
+	rs.queueLock.Lock()
+	l = rs.queue.Len()
+	rs.queueLock.Unlock()
+	return l + len(rs.receiveWork)
+}
 
 func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok bool) {
 	rs.queueLock.Lock()
@@ -243,7 +248,7 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 		heap.Push(&rs.queue, inTask)
 	}
 Loop:
-	for {
+	for i := 0; i < 10; i++ {
 		select {
 		case task, ok = <-rs.receiveWork:
 			if !ok {
