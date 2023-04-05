@@ -309,7 +309,7 @@ func (rs *StateV3) queueForcePush(t *exec22.TxTask) {
 	}
 }
 
-func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask) {
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, force bool) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -327,7 +327,11 @@ func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask) {
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	rs.queuePush(ctx, txTask)
+	if force {
+		rs.queueForcePush(txTask)
+	} else {
+		rs.queuePush(ctx, txTask)
+	}
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
