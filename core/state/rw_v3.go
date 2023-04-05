@@ -254,6 +254,9 @@ Loop:
 			if !ok {
 				break Loop
 			}
+			if task == nil {
+				continue
+			}
 			heap.Push(&rs.queue, task)
 		default: // we are inside mutex section, can't block here
 			break Loop
@@ -293,6 +296,16 @@ func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
 	case rs.receiveWork <- t:
 	case <-ctx.Done():
 		return
+	}
+}
+func (rs *StateV3) queueForcePush(t *exec22.TxTask) {
+	//add work without caring of channel limit
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
+	heap.Push(&rs.queue, t)
+	select {
+	case rs.receiveWork <- nil:
+	default:
 	}
 }
 
@@ -339,13 +352,13 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(ctx context.Context, sender *common.Address, txNum uint64) (count int) {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
 	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queuePush(ctx, triggered)
+		rs.queueForcePush(triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}

@@ -647,7 +647,7 @@ Loop:
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
-				ExecTriggers.Add(rs.CommitTxNum(ctx, txTask.Sender, txTask.TxNum))
+				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
 				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
@@ -783,7 +783,7 @@ func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNu
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		triggers += rs.CommitTxNum(ctx, txTask.Sender, txTask.TxNum)
+		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
 		outputTxNum++
 		if backPressure != nil {
 			select {
