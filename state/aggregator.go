@@ -29,10 +29,11 @@ import (
 
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -85,6 +86,8 @@ type Aggregator struct {
 	stats           FilesStats
 	tmpdir          string
 	defaultCtx      *AggregatorContext
+
+	ps *background.ProgressSet
 }
 
 //type exposedMetrics struct {
@@ -104,7 +107,7 @@ type Aggregator struct {
 //}
 
 func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode CommitmentMode, commitTrieVariant commitment.TrieVariant) (*Aggregator, error) {
-	a := &Aggregator{aggregationStep: aggregationStep, tmpdir: tmpdir, stepDoneNotice: make(chan [length.Hash]byte, 1)}
+	a := &Aggregator{aggregationStep: aggregationStep, ps: background.NewProgressSet(), tmpdir: tmpdir, stepDoneNotice: make(chan [length.Hash]byte, 1)}
 
 	closeAgg := true
 	defer func() {
@@ -152,8 +155,30 @@ func NewAggregator(dir, tmpdir string, aggregationStep uint64, commitmentMode Co
 
 func (a *Aggregator) SetDB(db kv.RwDB) { a.db = db }
 
-func (a *Aggregator) ReopenFolder() error {
-	var err error
+func (a *Aggregator) buildMissedIdxBlocking(d *Domain) error {
+	eg, ctx := errgroup.WithContext(context.Background())
+	eg.SetLimit(32)
+	if err := d.BuildMissedIndices(ctx, eg, a.ps); err != nil {
+		return err
+	}
+	return eg.Wait()
+}
+func (a *Aggregator) ReopenFolder() (err error) {
+	{
+		if err = a.buildMissedIdxBlocking(a.accounts); err != nil {
+			return err
+		}
+		if err = a.buildMissedIdxBlocking(a.storage); err != nil {
+			return err
+		}
+		if err = a.buildMissedIdxBlocking(a.code); err != nil {
+			return err
+		}
+		if err = a.buildMissedIdxBlocking(a.commitment.Domain); err != nil {
+			return err
+		}
+	}
+
 	if err = a.accounts.OpenFolder(); err != nil {
 		return fmt.Errorf("OpenFolder: %w", err)
 	}
@@ -413,7 +438,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
-		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx, logEvery)
+		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
@@ -430,7 +455,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			mxRunningMerges.Inc()
 
 			start := time.Now()
-			sf, err := d.buildFiles(ctx, step, collation)
+			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
 
 			if err != nil {
@@ -474,7 +499,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
-		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx, logEvery)
+		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
@@ -488,7 +513,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			mxRunningMerges.Inc()
 			start := time.Now()
 
-			sf, err := d.buildFiles(ctx, step, collation)
+			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
 				errCh <- err
 				sf.Close()
@@ -503,7 +528,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			icx := d.MakeContext()
 			mxRunningMerges.Inc()
 
-			if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx); err != nil {
+			if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx, a.ps); err != nil {
 				errCh <- err
 
 				mxRunningMerges.Dec()
@@ -734,7 +759,7 @@ func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, 
 
 		var err error
 		if r.code.any() {
-			if mf.code, mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, workers); err != nil {
+			if mf.code, mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, workers, a.ps); err != nil {
 				errCh <- err
 			}
 		}
@@ -748,7 +773,7 @@ func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, 
 		defer predicates.Done()
 		var err error
 		if r.accounts.any() {
-			if mf.accounts, mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers); err != nil {
+			if mf.accounts, mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, workers, a.ps); err != nil {
 				errCh <- err
 			}
 		}
@@ -761,7 +786,7 @@ func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, 
 		defer predicates.Done()
 		var err error
 		if r.storage.any() {
-			if mf.storage, mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers); err != nil {
+			if mf.storage, mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, a.ps); err != nil {
 				errCh <- err
 			}
 		}
@@ -777,7 +802,7 @@ func (a *Aggregator) mergeFiles(ctx context.Context, files SelectedStaticFiles, 
 		var err error
 		// requires storage|accounts to be merged at this point
 		if r.commitment.any() {
-			if mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = a.commitment.mergeFiles(ctx, files, mf, r.commitment, workers); err != nil {
+			if mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = a.commitment.mergeFiles(ctx, files, mf, r.commitment, workers, a.ps); err != nil {
 				errCh <- err
 			}
 		}

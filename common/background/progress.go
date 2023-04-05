@@ -48,7 +48,13 @@ type ProgressSet struct {
 func NewProgressSet() *ProgressSet {
 	return &ProgressSet{list: btree2.NewMap[int, *Progress](128)}
 }
-
+func (s *ProgressSet) AddNew(fName string, total uint64) *Progress {
+	p := &Progress{}
+	p.Name.Store(&fName)
+	p.Total.Store(total)
+	s.Add(p)
+	return p
+}
 func (s *ProgressSet) Add(p *Progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -61,6 +67,11 @@ func (s *ProgressSet) Delete(p *Progress) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	s.list.Delete(p.i)
+}
+func (s *ProgressSet) Has() bool {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.list.Len() > 0
 }
 
 func (s *ProgressSet) String() string {

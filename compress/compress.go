@@ -129,6 +129,12 @@ func (c *Compressor) SetTrace(trace bool) {
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 
 func (c *Compressor) AddWord(word []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
 	c.wordsCount++
 	l := 2*len(word) + 2
 	if c.superstringLen+l > superstringLimit {
@@ -152,6 +158,12 @@ func (c *Compressor) AddWord(word []byte) error {
 }
 
 func (c *Compressor) AddUncompressedWord(word []byte) error {
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	default:
+	}
+
 	c.wordsCount++
 	return c.uncompressedFile.AppendUncompressed(word)
 }

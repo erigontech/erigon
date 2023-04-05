@@ -30,6 +30,7 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -74,13 +75,15 @@ type AggregatorV3 struct {
 
 	onFreeze OnFreezeFunc
 	walLock  sync.RWMutex
+
+	ps *background.ProgressSet
 }
 
 type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep uint64, db kv.RoDB) (*AggregatorV3, error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
-	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
+	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, ps: background.NewProgressSet(), onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	var err error
 	if a.accounts, err = NewHistory(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountHistoryKeys, kv.AccountIdx, kv.AccountHistoryVals, false, nil, false); err != nil {
 		return nil, err
@@ -205,6 +208,9 @@ func (a *AggregatorV3) SetWorkers(i int) {
 	a.tracesTo.compressWorkers = i
 }
 
+func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
+func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
+
 func (a *AggregatorV3) Files() (res []string) {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
@@ -251,16 +257,34 @@ func (a *AggregatorV3) BuildOptionalMissedIndices(ctx context.Context, workers i
 }
 
 func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) error {
+	startIndexingTime := time.Now()
 	{
+		ps := background.NewProgressSet()
+
 		g, ctx := errgroup.WithContext(ctx)
 		g.SetLimit(workers)
-		a.accounts.BuildMissedIndices(ctx, g)
-		a.storage.BuildMissedIndices(ctx, g)
-		a.code.BuildMissedIndices(ctx, g)
-		a.logAddrs.BuildMissedIndices(ctx, g)
-		a.logTopics.BuildMissedIndices(ctx, g)
-		a.tracesFrom.BuildMissedIndices(ctx, g)
-		a.tracesTo.BuildMissedIndices(ctx, g)
+		go func() {
+			logEvery := time.NewTicker(20 * time.Second)
+			defer logEvery.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-logEvery.C:
+					var m runtime.MemStats
+					dbg.ReadMemStats(&m)
+					log.Info("[snapshots] Indexing", "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+				}
+			}
+		}()
+
+		a.accounts.BuildMissedIndices(ctx, g, ps)
+		a.storage.BuildMissedIndices(ctx, g, ps)
+		a.code.BuildMissedIndices(ctx, g, ps)
+		a.logAddrs.BuildMissedIndices(ctx, g, ps)
+		a.logTopics.BuildMissedIndices(ctx, g, ps)
+		a.tracesFrom.BuildMissedIndices(ctx, g, ps)
+		a.tracesTo.BuildMissedIndices(ctx, g, ps)
 
 		if err := g.Wait(); err != nil {
 			return err
@@ -327,11 +351,11 @@ func (c AggV3Collation) Close() {
 }
 
 func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64) (AggV3StaticFiles, error) {
-	logEvery := time.NewTicker(60 * time.Second)
-	defer logEvery.Stop()
-	defer func(t time.Time) {
-		log.Info(fmt.Sprintf("[snapshot] build %d-%d", step, step+1), "took", time.Since(t))
-	}(time.Now())
+	//logEvery := time.NewTicker(60 * time.Second)
+	//defer logEvery.Stop()
+	//defer func(t time.Time) {
+	//	log.Info(fmt.Sprintf("[snapshot] build %d-%d", step, step+1), "took", time.Since(t))
+	//}(time.Now())
 	var sf AggV3StaticFiles
 	var ac AggV3Collation
 	closeColl := true
@@ -347,14 +371,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx, logEvery)
+		ac.accounts, err = a.accounts.collate(step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts); err != nil {
+	if sf.accounts, err = a.accounts.buildFiles(ctx, step, ac.accounts, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -364,14 +388,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.storage, err = a.storage.collate(step, txFrom, txTo, tx, logEvery)
+		ac.storage, err = a.storage.collate(step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage); err != nil {
+	if sf.storage, err = a.storage.buildFiles(ctx, step, ac.storage, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -380,14 +404,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.code, err = a.code.collate(step, txFrom, txTo, tx, logEvery)
+		ac.code, err = a.code.collate(step, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.code, err = a.code.buildFiles(ctx, step, ac.code); err != nil {
+	if sf.code, err = a.code.buildFiles(ctx, step, ac.code, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -396,14 +420,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx, logEvery)
+		ac.logAddrs, err = a.logAddrs.collate(ctx, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs); err != nil {
+	if sf.logAddrs, err = a.logAddrs.buildFiles(ctx, step, ac.logAddrs, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -412,14 +436,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx, logEvery)
+		ac.logTopics, err = a.logTopics.collate(ctx, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics); err != nil {
+	if sf.logTopics, err = a.logTopics.buildFiles(ctx, step, ac.logTopics, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -428,14 +452,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx, logEvery)
+		ac.tracesFrom, err = a.tracesFrom.collate(ctx, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom); err != nil {
+	if sf.tracesFrom, err = a.tracesFrom.buildFiles(ctx, step, ac.tracesFrom, a.ps); err != nil {
 		return sf, err
 		//errCh <- err
 	}
@@ -444,14 +468,14 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step, txFrom, txTo uint64
 	//	defer wg.Done()
 	//	var err error
 	if err = a.db.View(ctx, func(tx kv.Tx) error {
-		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx, logEvery)
+		ac.tracesTo, err = a.tracesTo.collate(ctx, txFrom, txTo, tx)
 		return err
 	}); err != nil {
 		return sf, err
 		//errCh <- err
 	}
 
-	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo); err != nil {
+	if sf.tracesTo, err = a.tracesTo.buildFiles(ctx, step, ac.tracesTo, a.ps); err != nil {
 		return sf, err
 		//		errCh <- err
 	}
@@ -515,7 +539,7 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 
 func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) (err error) {
 	closeAll := true
-	log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
+	//log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
 	sf, err := a.buildFiles(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep)
 	if err != nil {
 		return err
@@ -1046,10 +1070,9 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 		}
 	}()
 	if r.accounts.any() {
-		log.Info(fmt.Sprintf("[snapshots] merge: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
 		g.Go(func() error {
 			var err error
-			mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, workers)
+			mf.accountsIdx, mf.accountsHist, err = a.accounts.mergeFiles(ctx, files.accountsIdx, files.accountsHist, r.accounts, workers, a.ps)
 			return err
 		})
 	}
@@ -1057,42 +1080,42 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 	if r.storage.any() {
 		g.Go(func() error {
 			var err error
-			mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, workers)
+			mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storageIdx, files.storageHist, r.storage, workers, a.ps)
 			return err
 		})
 	}
 	if r.code.any() {
 		g.Go(func() error {
 			var err error
-			mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, workers)
+			mf.codeIdx, mf.codeHist, err = a.code.mergeFiles(ctx, files.codeIdx, files.codeHist, r.code, workers, a.ps)
 			return err
 		})
 	}
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers)
+			mf.logAddrs, err = a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, workers, a.ps)
 			return err
 		})
 	}
 	if r.logTopics {
 		g.Go(func() error {
 			var err error
-			mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers)
+			mf.logTopics, err = a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, workers, a.ps)
 			return err
 		})
 	}
 	if r.tracesFrom {
 		g.Go(func() error {
 			var err error
-			mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers)
+			mf.tracesFrom, err = a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, workers, a.ps)
 			return err
 		})
 	}
 	if r.tracesTo {
 		g.Go(func() error {
 			var err error
-			mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers)
+			mf.tracesTo, err = a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, workers, a.ps)
 			return err
 		})
 	}

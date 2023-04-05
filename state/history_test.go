@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -103,7 +104,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		err = h.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
-		c, err := h.collate(0, 0, 8, tx, logEvery)
+		c, err := h.collate(0, 0, 8, tx)
 		require.NoError(err)
 		require.True(strings.HasSuffix(c.historyPath, "hist.0-1.v"))
 		require.Equal(6, c.historyCount)
@@ -112,7 +113,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([]uint64{3, 6, 7}, c.indexBitmaps["key2"].ToArray())
 		require.Equal([]uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
 
-		sf, err := h.buildFiles(ctx, 0, c)
+		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 		defer sf.Close()
 		var valWords []string
@@ -209,10 +210,10 @@ func TestHistoryAfterPrune(t *testing.T) {
 		err = h.Rotate().Flush(ctx, tx)
 		require.NoError(err)
 
-		c, err := h.collate(0, 0, 16, tx, logEvery)
+		c, err := h.collate(0, 0, 16, tx)
 		require.NoError(err)
 
-		sf, err := h.buildFiles(ctx, 0, c)
+		sf, err := h.buildFiles(ctx, 0, c, background.NewProgressSet())
 		require.NoError(err)
 
 		h.integrateFiles(sf, 0, 16)
@@ -340,9 +341,9 @@ func TestHistoryHistory(t *testing.T) {
 		// Leave the last 2 aggregation steps un-collated
 		for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
 			func() {
-				c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx, logEvery)
+				c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
 				require.NoError(err)
-				sf, err := h.buildFiles(ctx, step, c)
+				sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 				require.NoError(err)
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 				err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
@@ -376,9 +377,9 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
-		c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx, logEvery)
+		c, err := h.collate(step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
 		require.NoError(err)
-		sf, err := h.buildFiles(ctx, step, c)
+		sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(err)
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 		err = h.prune(ctx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, logEvery)
@@ -397,7 +398,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 
 			indexOuts, historyOuts, _, err := h.staticFilesInRange(r, hc)
 			require.NoError(err)
-			indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, 1)
+			indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 		}()

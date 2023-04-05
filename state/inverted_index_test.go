@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/log/v3"
@@ -92,14 +93,14 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, 7, roTx, logEvery)
+	bs, err := ii.collate(ctx, 0, 7, roTx)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(bs))
 	require.Equal(t, []uint64{3}, bs["key2"].ToArray())
 	require.Equal(t, []uint64{2, 6}, bs["key1"].ToArray())
 	require.Equal(t, []uint64{6}, bs["key3"].ToArray())
 
-	sf, err := ii.buildFiles(ctx, 0, bs)
+	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 	defer sf.Close()
 
@@ -170,10 +171,10 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	bs, err := ii.collate(ctx, 0, 16, roTx, logEvery)
+	bs, err := ii.collate(ctx, 0, 16, roTx)
 	require.NoError(t, err)
 
-	sf, err := ii.buildFiles(ctx, 0, bs)
+	sf, err := ii.buildFiles(ctx, 0, bs, background.NewProgressSet())
 	require.NoError(t, err)
 
 	tx, err = db.BeginRw(ctx)
@@ -344,9 +345,9 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx, logEvery)
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx)
 			require.NoError(tb, err)
-			sf, err := ii.buildFiles(ctx, step, bs)
+			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(tb, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
@@ -358,7 +359,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			for found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan); found; found, startTxNum, endTxNum = ii.findMergeRange(maxEndTxNum, maxSpan) {
 				ic := ii.MakeContext()
 				outs, _ := ii.staticFilesInRange(startTxNum, endTxNum, ic)
-				in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, 1)
+				in, err := ii.mergeFiles(ctx, outs, startTxNum, endTxNum, 1, background.NewProgressSet())
 				require.NoError(tb, err)
 				ii.integrateMergedFiles(outs, in)
 				require.NoError(tb, err)
@@ -383,9 +384,9 @@ func TestInvIndexRanges(t *testing.T) {
 	// Leave the last 2 aggregation steps un-collated
 	for step := uint64(0); step < txs/ii.aggregationStep-1; step++ {
 		func() {
-			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx, logEvery)
+			bs, err := ii.collate(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, tx)
 			require.NoError(t, err)
-			sf, err := ii.buildFiles(ctx, step, bs)
+			sf, err := ii.buildFiles(ctx, step, bs, background.NewProgressSet())
 			require.NoError(t, err)
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			err = ii.prune(ctx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery)
