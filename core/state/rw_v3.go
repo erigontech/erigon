@@ -248,7 +248,7 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 		heap.Push(&rs.queue, inTask)
 	}
 Loop:
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 100; i++ {
 		select {
 		case task, ok = <-rs.receiveWork:
 			if !ok {
