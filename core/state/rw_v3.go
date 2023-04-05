@@ -270,25 +270,29 @@ func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
 }
 func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
 	rs.queueLock.Lock()
-	l := rs.queue.Len()
-	if l > 0 { // means have conflicts to re-exec: it has higher priority than new tasks
+	has := rs.queue.Len() > 0
+	if has { // means have conflicts to re-exec: it has higher priority than new tasks
 		task = heap.Pop(&rs.queue).(*exec22.TxTask)
 	}
 	rs.queueLock.Unlock()
 
 	// otherwise get some new task. non-blocking way. without adding to queue.
-	if l == 0 {
-	Loop:
-		for task == nil {
-			select {
-			case task, ok = <-rs.receiveWork:
-				if !ok {
-					break Loop
-				}
-			default:
-				break Loop
-			}
+	if !has {
+		select {
+		case task, _ = <-rs.receiveWork:
+		default:
 		}
+		//Loop:
+		//	for task == nil {
+		//		select {
+		//		case task, ok = <-rs.receiveWork:
+		//			if !ok {
+		//				break Loop
+		//			}
+		//		default:
+		//			break Loop
+		//		}
+		//	}
 	}
 	return task, task != nil
 }
