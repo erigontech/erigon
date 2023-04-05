@@ -236,16 +236,16 @@ func (rs *StateV3) QueueLen() (l int) {
 	return l
 }
 
-func (rs *StateV3) drainToQueue(task *exec22.TxTask) (*exec22.TxTask, bool) {
+func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
-	if task != nil {
-		heap.Push(&rs.queue, task)
+	if inTask != nil {
+		heap.Push(&rs.queue, inTask)
 	}
 Loop:
 	for {
 		select {
-		case task, ok := <-rs.receiveWork:
+		case task, ok = <-rs.receiveWork:
 			if !ok {
 				break Loop
 			}
