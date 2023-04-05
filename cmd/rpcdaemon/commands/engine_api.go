@@ -169,7 +169,7 @@ func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, fork
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
-	if payloadAttributes != nil {
+	if payloadAttributes == nil {
 		log.Debug("Received ForkchoiceUpdated", "version", version,
 			"head", forkChoiceState.HeadHash, "safe", forkChoiceState.SafeBlockHash, "finalized", forkChoiceState.FinalizedBlockHash)
 	} else {
