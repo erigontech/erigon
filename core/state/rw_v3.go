@@ -248,14 +248,14 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 		heap.Push(&rs.queue, inTask)
 	}
 Loop:
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		select {
 		case task, ok = <-rs.receiveWork:
 			if !ok {
 				break Loop
 			}
 			if task == nil {
-				continue
+				continue Loop
 			}
 			heap.Push(&rs.queue, task)
 		default: // we are inside mutex section, can't block here
@@ -271,8 +271,8 @@ Loop:
 func (rs *StateV3) popWait(ctx context.Context) (*exec22.TxTask, bool) {
 	select {
 	case task, ok := <-rs.receiveWork:
-		if !ok { // chan closed - means work is done
-			return nil, false
+		if !ok { // chan closed - means producer is done, but we still may have some tasks in queue
+			return rs.popNoWait()
 		}
 		return rs.drainToQueue(task)
 	case <-ctx.Done():
