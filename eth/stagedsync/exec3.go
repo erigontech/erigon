@@ -388,7 +388,7 @@ func ExecV3(ctx context.Context,
 								if !ok {
 									return nil
 								}
-								rs.AddWork(ctx, txTask)
+								rs.AddWork(ctx, txTask, true)
 							default:
 								break DrainLoop
 							}
@@ -397,7 +397,7 @@ func ExecV3(ctx context.Context,
 						// Drain results queue as well
 						for rws.Len() > 0 {
 							txTask := heap.Pop(rws).(*exec22.TxTask)
-							rs.AddWork(ctx, txTask)
+							rs.AddWork(ctx, txTask, true)
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
@@ -607,10 +607,10 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(ctx, txTask)
+						rs.AddWork(ctx, txTask, false)
 					}
 				} else {
-					rs.AddWork(ctx, txTask)
+					rs.AddWork(ctx, txTask, false)
 				}
 			} else {
 				count++
@@ -768,7 +768,7 @@ func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNu
 
 			if i > 0 {
 				//send to re-exex
-				rs.AddWork(ctx, txTask)
+				rs.AddWork(ctx, txTask, true)
 				continue
 			}
 
