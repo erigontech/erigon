@@ -71,7 +71,7 @@ func NewStateV3(tmpdir string) *StateV3 {
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
 	}
-	rs.receiveWork = make(chan *exec22.TxTask, 8*1)
+	rs.receiveWork = make(chan *exec22.TxTask, 8*10)
 	return rs
 }
 
