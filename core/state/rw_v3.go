@@ -271,19 +271,20 @@ func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
 	}
 }
 func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	select {
-	case task, ok = <-rs.receiveWork:
-		if ok && task != nil {
-			heap.Push(&rs.queue, task)
-		}
-	default: // we are inside mutex section, can't block here
+	case task, _ = <-rs.receiveWork:
+	default:
 	}
-	if rs.queue.Len() == 0 {
-		return nil, false
+
+	rs.queueLock.Lock()
+	if task != nil {
+		heap.Push(&rs.queue, task)
 	}
-	return heap.Pop(&rs.queue).(*exec22.TxTask), true
+	if rs.queue.Len() > 0 {
+		task = heap.Pop(&rs.queue).(*exec22.TxTask)
+	}
+	rs.queueLock.Unlock()
+	return task, task != nil
 }
 
 func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
