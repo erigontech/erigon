@@ -42,13 +42,14 @@ type StateV3 struct {
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
 
-	receiveWork  *sync.Cond
 	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
-	queue     exec22.TxTaskQueue
-	queueLock sync.Mutex
+	queueScheduleLock sync.Mutex
+	receiveWork       chan *exec22.TxTask
+	queue             exec22.TxTaskQueue
+	queueLock         sync.Mutex
 
 	finished atomic.Bool
 
@@ -71,7 +72,7 @@ func NewStateV3(tmpdir string) *StateV3 {
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
 	}
-	rs.receiveWork = sync.NewCond(&rs.queueLock)
+	rs.receiveWork = make(chan *exec22.TxTask, 10_000)
 	return rs
 }
 
@@ -235,30 +236,47 @@ func (rs *StateV3) QueueLen() (l int) {
 	return l
 }
 
-func (rs *StateV3) Schedule() (*exec22.TxTask, bool) {
+func (rs *StateV3) drainToQueue(task *exec22.TxTask) (*exec22.TxTask, bool) {
 	rs.queueLock.Lock()
 	defer rs.queueLock.Unlock()
-	for !rs.finished.Load() && rs.queue.Len() == 0 {
-		rs.receiveWork.Wait()
+	heap.Push(&rs.queue, task)
+	for {
+		select {
+		case task, ok := <-rs.receiveWork:
+			if !ok {
+				return nil, false
+			}
+			heap.Push(&rs.queue, task)
+		default: // we are inside mutex section, can't block here
+			return heap.Pop(&rs.queue).(*exec22.TxTask), true
+		}
 	}
-	if rs.finished.Load() {
-		return nil, false
-	}
-	if rs.queue.Len() > 0 {
-		return heap.Pop(&rs.queue).(*exec22.TxTask), true
+}
+
+func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
+	for rs.QueueLen() == 0 {
+		select {
+		case task, ok := <-rs.receiveWork:
+			if !ok { // chan closed - means work is done
+				return nil, false
+			}
+			return rs.drainToQueue(task)
+		case <-ctx.Done():
+			return nil, false
+		}
 	}
 	return nil, false
 }
 
-func (rs *StateV3) queuePush(t *exec22.TxTask) int {
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	l := len(rs.queue)
-	rs.queueLock.Unlock()
-	return l
+func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
+	select {
+	case rs.receiveWork <- t:
+	case <-ctx.Done():
+		return
+	}
 }
 
-func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -276,9 +294,7 @@ func (rs *StateV3) AddWork(txTask *exec22.TxTask) (queueLen int) {
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	queueLen = rs.queuePush(txTask)
-	rs.receiveWork.Signal()
-	return queueLen
+	rs.queuePush(ctx, txTask)
 }
 
 func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
@@ -303,14 +319,13 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
+func (rs *StateV3) CommitTxNum(ctx context.Context, sender *common.Address, txNum uint64) (count int) {
 	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queuePush(triggered)
-		rs.receiveWork.Signal()
+		rs.queuePush(ctx, triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -325,7 +340,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int)
 
 func (rs *StateV3) Finish() {
 	rs.finished.Store(true)
-	rs.receiveWork.Broadcast()
+	close(rs.receiveWork)
 }
 
 func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {

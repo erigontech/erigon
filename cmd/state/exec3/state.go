@@ -102,7 +102,7 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() error {
-	for txTask, ok := rw.rs.Schedule(); ok; txTask, ok = rw.rs.Schedule() {
+	for txTask, ok := rw.rs.Schedule(rw.ctx); ok; txTask, ok = rw.rs.Schedule(rw.ctx) {
 		rw.RunTxTask(txTask)
 		select {
 		case rw.resultCh <- txTask: // Needs to have outside of the lock

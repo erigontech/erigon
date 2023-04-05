@@ -255,7 +255,7 @@ func ExecV3(ctx context.Context,
 			processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
+				return processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
 			}()
 			if err != nil {
 				return err
@@ -352,7 +352,7 @@ func ExecV3(ctx context.Context,
 								}
 							}
 							applyWorker.ResetTx(tx)
-							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
+							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
 							if err != nil {
 								return err
 							}
@@ -385,7 +385,7 @@ func ExecV3(ctx context.Context,
 								if !ok {
 									return nil
 								}
-								rs.AddWork(txTask)
+								rs.AddWork(ctx, txTask)
 							default:
 								break DrainLoop
 							}
@@ -394,7 +394,7 @@ func ExecV3(ctx context.Context,
 						// Drain results queue as well
 						for rws.Len() > 0 {
 							txTask := heap.Pop(rws).(*exec22.TxTask)
-							rs.AddWork(txTask)
+							rs.AddWork(ctx, txTask)
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
@@ -552,7 +552,10 @@ Loop:
 					select {
 					case <-ctx.Done():
 						return
-					case <-rwsConsumed:
+					case _, ok := <-rwsConsumed:
+						if !ok {
+							return
+						}
 					}
 				}
 			}()
@@ -601,10 +604,10 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
+						rs.AddWork(ctx, txTask)
 					}
 				} else {
-					rs.AddWork(txTask)
+					rs.AddWork(ctx, txTask)
 				}
 			} else {
 				count++
@@ -641,7 +644,7 @@ Loop:
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
-				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+				ExecTriggers.Add(rs.CommitTxNum(ctx, txTask.Sender, txTask.TxNum))
 				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
@@ -752,7 +755,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
+func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
@@ -762,7 +765,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 
 			if i > 0 {
 				//send to re-exex
-				rs.AddWork(txTask)
+				rs.AddWork(ctx, txTask)
 				continue
 			}
 
@@ -777,7 +780,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+		triggers += rs.CommitTxNum(ctx, txTask.Sender, txTask.TxNum)
 		outputTxNum++
 		if backPressure != nil {
 			select {
