@@ -241,26 +241,7 @@ func (rs *StateV3) QueueAndChLen() (l int) {
 	return l + len(rs.receiveWork)
 }
 
-func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok bool) {
-	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
-	if inTask != nil {
-		heap.Push(&rs.queue, inTask)
-	}
-	select {
-	case task, ok = <-rs.receiveWork:
-		if ok && task != nil {
-			heap.Push(&rs.queue, task)
-		}
-	default: // we are inside mutex section, can't block here
-	}
-	if rs.queue.Len() == 0 {
-		return nil, false
-	}
-	return heap.Pop(&rs.queue).(*exec22.TxTask), true
-}
 func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
-Loop:
 	for {
 		select {
 		case inTask, ok := <-rs.receiveWork:
@@ -273,21 +254,36 @@ Loop:
 				return task, task != nil
 			}
 
-			if inTask == nil {
-				continue Loop
-			}
 			rs.queueLock.Lock()
-			heap.Push(&rs.queue, inTask)
-			task = heap.Pop(&rs.queue).(*exec22.TxTask)
+			if inTask != nil {
+				heap.Push(&rs.queue, inTask)
+			}
+			if rs.queue.Len() > 0 {
+				task = heap.Pop(&rs.queue).(*exec22.TxTask)
+			}
 			rs.queueLock.Unlock()
-			return task, true
+			if task != nil {
+				return task, true
+			}
 		case <-ctx.Done():
 			return nil, false
 		}
 	}
 }
-func (rs *StateV3) popNoWait() (*exec22.TxTask, bool) {
-	return rs.drainToQueue(nil)
+func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
+	rs.queueLock.Lock()
+	defer rs.queueLock.Unlock()
+	select {
+	case task, ok = <-rs.receiveWork:
+		if ok && task != nil {
+			heap.Push(&rs.queue, task)
+		}
+	default: // we are inside mutex section, can't block here
+	}
+	if rs.queue.Len() == 0 {
+		return nil, false
+	}
+	return heap.Pop(&rs.queue).(*exec22.TxTask), true
 }
 
 func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
