@@ -119,7 +119,6 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 		log.Info("Reconnecting in 10 seconds...")
 		time.Sleep(10 * time.Second)
 	}
-	return nil
 }
 
 // tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
@@ -205,5 +204,4 @@ outerLoop:
 		}
 	}
 	return nil
-
 }
