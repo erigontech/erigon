@@ -78,6 +78,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		stream.WriteNil()
 		return err
 	}
+	
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
 
 	if config.BorTraceEnabled == nil {
 		config.BorTraceEnabled = newBoolPtr(false)
