@@ -555,7 +555,10 @@ Loop:
 					select {
 					case <-ctx.Done():
 						return
-					case <-rwsConsumed:
+					case _, ok := <-rwsConsumed:
+						if !ok {
+							return
+						}
 					}
 				}
 			}()
