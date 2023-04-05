@@ -551,7 +551,7 @@ Loop:
 			}
 
 			func() {
-				for rs.QueueAndChLen() > execQueueLimit || exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
+				for exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return

@@ -247,40 +247,43 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 	if inTask != nil {
 		heap.Push(&rs.queue, inTask)
 	}
-Loop:
-	for i := 0; i < 100; i++ {
-		select {
-		case task, ok = <-rs.receiveWork:
-			if !ok {
-				break Loop
-			}
-			if task == nil {
-				continue Loop
-			}
+	select {
+	case task, ok = <-rs.receiveWork:
+		if ok && task != nil {
 			heap.Push(&rs.queue, task)
-		default: // we are inside mutex section, can't block here
-			break Loop
 		}
+	default: // we are inside mutex section, can't block here
 	}
 	if rs.queue.Len() == 0 {
 		return nil, false
 	}
 	return heap.Pop(&rs.queue).(*exec22.TxTask), true
 }
+func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
+Loop:
+	for {
+		select {
+		case inTask, ok := <-rs.receiveWork:
+			if !ok {
+				rs.queueLock.Lock()
+				if rs.queue.Len() > 0 {
+					task = heap.Pop(&rs.queue).(*exec22.TxTask)
+				}
+				rs.queueLock.Unlock()
+				return task, task != nil
+			}
 
-func (rs *StateV3) popWait(ctx context.Context) (*exec22.TxTask, bool) {
-	select {
-	case task, ok := <-rs.receiveWork:
-		if !ok { // chan closed - means producer is done, but we still may have some tasks in queue
-			return rs.popNoWait()
+			if inTask == nil {
+				continue Loop
+			}
+			rs.queueLock.Lock()
+			heap.Push(&rs.queue, inTask)
+			task = heap.Pop(&rs.queue).(*exec22.TxTask)
+			rs.queueLock.Unlock()
+			return task, true
+		case <-ctx.Done():
+			return nil, false
 		}
-		t, ok := rs.drainToQueue(task)
-		if !ok {
-			log.Warn("pop wait return false")
-		}
-		return t, ok
-	case <-ctx.Done():
-		return nil, false
 	}
 }
 func (rs *StateV3) popNoWait() (*exec22.TxTask, bool) {
