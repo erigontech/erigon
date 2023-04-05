@@ -274,7 +274,11 @@ func (rs *StateV3) popWait(ctx context.Context) (*exec22.TxTask, bool) {
 		if !ok { // chan closed - means producer is done, but we still may have some tasks in queue
 			return rs.popNoWait()
 		}
-		return rs.drainToQueue(task)
+		t, ok := rs.drainToQueue(task)
+		if !ok {
+			log.Warn("pop wait return false")
+		}
+		return t, ok
 	case <-ctx.Done():
 		return nil, false
 	}
