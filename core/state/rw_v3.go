@@ -247,20 +247,12 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 	if inTask != nil {
 		heap.Push(&rs.queue, inTask)
 	}
-Loop:
-	for i := 0; i < 100; i++ {
-		select {
-		case task, ok = <-rs.receiveWork:
-			if !ok {
-				break Loop
-			}
-			if task == nil {
-				continue Loop
-			}
+	select {
+	case task, ok = <-rs.receiveWork:
+		if ok && task != nil {
 			heap.Push(&rs.queue, task)
-		default: // we are inside mutex section, can't block here
-			break Loop
 		}
+	default: // we are inside mutex section, can't block here
 	}
 	if rs.queue.Len() == 0 {
 		return nil, false
@@ -301,8 +293,8 @@ func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
 func (rs *StateV3) queueForcePush(t *exec22.TxTask) {
 	//add work without caring of channel limit
 	rs.queueLock.Lock()
-	defer rs.queueLock.Unlock()
 	heap.Push(&rs.queue, t)
+	rs.queueLock.Unlock()
 	select {
 	case rs.receiveWork <- nil:
 	default:
