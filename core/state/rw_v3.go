@@ -247,12 +247,20 @@ func (rs *StateV3) drainToQueue(inTask *exec22.TxTask) (task *exec22.TxTask, ok 
 	if inTask != nil {
 		heap.Push(&rs.queue, inTask)
 	}
-	select {
-	case task, ok = <-rs.receiveWork:
-		if ok && task != nil {
+Loop:
+	for i := 0; i < 100; i++ {
+		select {
+		case task, ok = <-rs.receiveWork:
+			if !ok {
+				break Loop
+			}
+			if task == nil {
+				continue Loop
+			}
 			heap.Push(&rs.queue, task)
+		default: // we are inside mutex section, can't block here
+			break Loop
 		}
-	default: // we are inside mutex section, can't block here
 	}
 	if rs.queue.Len() == 0 {
 		return nil, false
