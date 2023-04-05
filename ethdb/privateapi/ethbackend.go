@@ -695,6 +695,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 
 	// First check if we're already building a block with the requested parameters
 	if reflect.DeepEqual(s.lastParameters, &param) {
+		log.Info("[ForkChoiceUpdated] duplicate build request")
 		return &remote.EngineForkChoiceUpdatedResponse{
 			PayloadStatus: &remote.EnginePayloadStatus{
 				Status:          remote.EngineStatus_VALID,
@@ -712,7 +713,7 @@ func (s *EthBackendServer) EngineForkChoiceUpdated(ctx context.Context, req *rem
 	s.lastParameters = &param
 
 	s.builders[s.payloadId] = builder.NewBlockBuilder(s.builderFunc, &param)
-	log.Debug("BlockBuilder added", "payload", s.payloadId)
+	log.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", s.payloadId)
 
 	return &remote.EngineForkChoiceUpdatedResponse{
 		PayloadStatus: &remote.EnginePayloadStatus{
