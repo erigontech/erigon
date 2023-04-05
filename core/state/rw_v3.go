@@ -271,11 +271,25 @@ func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
 	}
 }
 func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
-	select {
-	case task, _ = <-rs.receiveWork:
-	default:
+Loop:
+	for {
+		select {
+		case task, ok = <-rs.receiveWork:
+			if !ok {
+				break Loop
+			}
+			if task == nil {
+				continue Loop
+			}
+			rs.queueLock.Lock()
+			if task != nil {
+				heap.Push(&rs.queue, task)
+			}
+			rs.queueLock.Unlock()
+		default:
+			break Loop
+		}
 	}
-
 	rs.queueLock.Lock()
 	if task != nil {
 		heap.Push(&rs.queue, task)
