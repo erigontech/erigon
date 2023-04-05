@@ -9,6 +9,7 @@ import (
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
@@ -126,8 +127,8 @@ type RootHashAggregator struct {
 	accData        GenStructStepAccountData
 
 	// Used to construct an Account proof while calculating the tree root.
-	proofMatch RetainDecider
-	cutoff     bool
+	proofRetainer *ProofRetainer
+	cutoff        bool
 }
 
 func NewRootHashAggregator() *RootHashAggregator {
@@ -160,9 +161,8 @@ func NewFlatDBTrieLoader(logPrefix string, rd RetainDeciderWithMarker, hc HashCo
 	}
 }
 
-func (l *FlatDBTrieLoader) SetProofReturn(accProofResult *accounts.AccProofResult) {
-	l.receiver.proofMatch = l.rd
-	l.receiver.hb.SetProofReturn(accProofResult)
+func (l *FlatDBTrieLoader) SetProofRetainer(pr *ProofRetainer) {
+	l.receiver.proofRetainer = pr
 }
 
 // CalcTrieRoot algo:
@@ -339,6 +339,7 @@ func (r *RootHashAggregator) Receive(itemType StreamItem,
 	//	fmt.Printf("1: %d, %x, %x, %x\n", itemType, accountKey, storageKey, hash)
 	//	//}
 	//}
+	//
 
 	switch itemType {
 	case StorageStreamItem:
@@ -534,13 +535,32 @@ func (r *RootHashAggregator) genStructStorage() error {
 		r.leafData.Value = rlphacks.RlpSerializableBytes(r.valueStorage)
 		data = &r.leafData
 	}
-	r.groupsStorage, r.hasTreeStorage, r.hasHashStorage, err = GenStructStep(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
+	var wantProof func(_ []byte) *proofElement
+	if r.proofRetainer != nil {
+		var fullKey [2 * (length.Hash + length.Incarnation + length.Hash)]byte
+		for i, b := range r.currAccK {
+			fullKey[i*2] = b / 16
+			fullKey[i*2+1] = b % 16
+		}
+		for i, b := range binary.BigEndian.AppendUint64(nil, r.a.Incarnation) {
+			fullKey[2*length.Hash+i*2] = b / 16
+			fullKey[2*length.Hash+i*2+1] = b % 16
+		}
+		baseKeyLen := 2 * (length.Hash + length.Incarnation)
+		wantProof = func(prefix []byte) *proofElement {
+			copy(fullKey[baseKeyLen:], prefix)
+			return r.proofRetainer.ProofElement(fullKey[:baseKeyLen+len(prefix)])
+		}
+	}
+	r.groupsStorage, r.hasTreeStorage, r.hasHashStorage, err = GenStructStepEx(r.RetainNothing, r.currStorage.Bytes(), r.succStorage.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.shc == nil {
 			return nil
 		}
 		return r.shc(r.currAccK, keyHex, hasState, hasTree, hasHash, hashes, rootHash)
 	}, data, r.groupsStorage, r.hasTreeStorage, r.hasHashStorage,
 		r.trace,
+		wantProof,
+		r.cutoff,
 	)
 	if err != nil {
 		return err
@@ -603,9 +623,9 @@ func (r *RootHashAggregator) genStructAccount() error {
 	r.succStorage.Reset()
 	var err error
 
-	var wantProof func(_ []byte) bool
-	if r.proofMatch != nil {
-		wantProof = r.proofMatch.Retain
+	var wantProof func(_ []byte) *proofElement
+	if r.proofRetainer != nil {
+		wantProof = r.proofRetainer.ProofElement
 	}
 	if r.groups, r.hasTree, r.hasHash, err = GenStructStepEx(r.RetainNothing, r.curr.Bytes(), r.succ.Bytes(), r.hb, func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error {
 		if r.hc == nil {
