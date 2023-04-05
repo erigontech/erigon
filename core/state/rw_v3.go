@@ -277,23 +277,24 @@ func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
 	rs.queueLock.Unlock()
 
 	// otherwise get some new task. non-blocking way. without adding to queue.
-	if !has {
-		select {
-		case task, _ = <-rs.receiveWork:
-		default:
-		}
-		//Loop:
-		//	for task == nil {
-		//		select {
-		//		case task, ok = <-rs.receiveWork:
-		//			if !ok {
-		//				break Loop
-		//			}
-		//		default:
-		//			break Loop
-		//		}
-		//	}
+	if has {
+		return task, task != nil
 	}
+	select {
+	case task, _ = <-rs.receiveWork:
+	default:
+	}
+	//Loop:
+	//	for task == nil {
+	//		select {
+	//		case task, ok = <-rs.receiveWork:
+	//			if !ok {
+	//				break Loop
+	//			}
+	//		default:
+	//			break Loop
+	//		}
+	//	}
 	return task, task != nil
 }
 
