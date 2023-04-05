@@ -115,17 +115,17 @@ type DomainStats struct {
 	LastCollationSize    uint64
 	LastPruneSize        uint64
 
-	HistoryQueries *atomic.Uint64
-	TotalQueries   *atomic.Uint64
-	EfSearchTime   time.Duration
-	DataSize       uint64
-	IndexSize      uint64
-	FilesCount     uint64
+	FilesQueries *atomic.Uint64
+	TotalQueries *atomic.Uint64
+	EfSearchTime time.Duration
+	DataSize     uint64
+	IndexSize    uint64
+	FilesCount   uint64
 }
 
 func (ds *DomainStats) Accumulate(other DomainStats) {
-	if other.HistoryQueries != nil {
-		ds.HistoryQueries.Add(other.HistoryQueries.Load())
+	if other.FilesQueries != nil {
+		ds.FilesQueries.Add(other.FilesQueries.Load())
 	}
 	if other.TotalQueries != nil {
 		ds.TotalQueries.Add(other.TotalQueries.Load())
@@ -161,7 +161,7 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 		valsTable: valsTable,
 		topTx:     make(map[string]uint64),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:     DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
@@ -227,7 +227,7 @@ func (d *Domain) GetAndResetStats() DomainStats {
 	r := d.stats
 	r.DataSize, r.IndexSize, r.FilesCount = d.collectFilesStats()
 
-	d.stats = DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
+	d.stats = DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	return r
 }
 
@@ -436,9 +436,18 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-	if val == nil {
-		val = []byte{}
+
+	fullkey := common.Append(key1, key2, make([]byte, 8))
+	kl := len(key1) + len(key2)
+	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.txNum / d.aggregationStep))
+
+	if err := d.tx.Put(d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+		return err
 	}
+	if err := d.tx.Put(d.valsTable, fullkey, val); err != nil {
+		return err
+	}
+	return nil
 	return d.wal.addValue(key1, key2, val, d.txNum)
 }
 
@@ -447,6 +456,7 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
+	return d.tx.Delete(d.keysTable, common.Append(key1, key2))
 	return d.wal.addValue(key1, key2, nil, d.txNum)
 }
 
@@ -479,10 +489,8 @@ func (d *Domain) Put(key1, key2, val []byte) error {
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-	if err = d.tx.Put(d.valsTable, keySuffix, val); err != nil {
-		return err
-	}
-	return nil
+
+	return d.tx.Put(d.valsTable, keySuffix, val)
 }
 
 func (d *Domain) Delete(key1, key2 []byte) error {
@@ -876,17 +884,17 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	}
 	defer keysCursor.Close()
 
+	totalKeys, err := keysCursor.Count()
+	if err != nil {
+		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
+	}
+
 	var (
 		k, v     []byte
 		pos      uint64
 		valCount int
 		pairs    = make(chan kvpair, 1024)
 	)
-
-	totalKeys, err := keysCursor.Count()
-	if err != nil {
-		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	}
 
 	eg, _ := errgroup.WithContext(ctx)
 	eg.Go(func() error {
@@ -900,9 +908,44 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
 
-	// todo use valcursor dupsort and get rid of key table
+	//valsCursor, err := roTx.Cursor(d.valsTable)
+	//if err != nil {
+	//	return Collation{}, fmt.Errorf("create %s vals cursor: %w", d.filenameBase, err)
+	//}
+	//
+	//totalKeys, err := valsCursor.Count()
+	//if err != nil {
+	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
+	//}
+	//
+	//for k, v, err = valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
+	//	pos++
+	//	select {
+	//	case <-ctx.Done():
+	//		return Collation{}, ctx.Err()
+	//	case <-logEvery.C:
+	//		log.Info("[snapshots] collate domain", "name", d.filenameBase,
+	//			"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+	//			"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
+	//	default:
+	//	}
+	//
+	//	if bytes.HasSuffix(k, stepBytes) {
+	//		pairs <- kvpair{k: k[:len(k)-len(stepBytes)], v: v}
+	//	}
+	//}
+
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
 		pos++
+		select {
+		case <-ctx.Done():
+			return Collation{}, ctx.Err()
+		case <-logEvery.C:
+			log.Info("[snapshots] collate domain", "name", d.filenameBase,
+				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
+				"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
+		default:
+		}
 
 		if v, err = keysCursor.LastDup(); err != nil {
 			return Collation{}, fmt.Errorf("find last %s key for aggregation step k=[%x]: %w", d.filenameBase, k, err)
@@ -915,16 +958,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 			v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
 			if err != nil {
 				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
-			}
-
-			select {
-			case <-ctx.Done():
-				return Collation{}, ctx.Err()
-			case <-logEvery.C:
-				log.Info("[snapshots] collate domain", "name", d.filenameBase,
-					"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-					"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
-			default:
 			}
 
 			pairs <- kvpair{k: k, v: v}
@@ -1500,7 +1533,7 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 // historyBeforeTxNum searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (dc *DomainContext) historyBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	dc.d.stats.HistoryQueries.Add(1)
+	dc.d.stats.FilesQueries.Add(1)
 
 	v, found, err := dc.hc.GetNoState(key, txNum)
 	if err != nil {
@@ -1566,7 +1599,7 @@ func (dc *DomainContext) GetBeforeTxNum(key []byte, txNum uint64, roTx kv.Tx) ([
 		}
 		return v, nil
 	}
-	if v, _, err = dc.get(key, txNum-1, roTx); err != nil {
+	if v, _, err = dc.get(key, txNum, roTx); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -1591,7 +1624,7 @@ func (dc *DomainContext) Close() {
 // inside the domain. Another version of this for public API use needs to be created, that uses
 // roTx instead and supports ending the iterations before it reaches the end.
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
-	dc.d.stats.HistoryQueries.Add(1)
+	dc.d.stats.FilesQueries.Add(1)
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -1719,7 +1752,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 		return nil, false, err
 	}
 	if len(foundInvStep) == 0 {
-		dc.d.stats.HistoryQueries.Add(1)
+		dc.d.stats.FilesQueries.Add(1)
 		v, found := dc.readFromFiles(key, fromTxNum)
 		return v, found, nil
 	}
@@ -1742,13 +1775,7 @@ func (d *Domain) Rotate() flusher {
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	//dc.d.topLock.RLock()
-	//ttx, ok := dc.d.topTx[string(key)]
-	//dc.d.topLock.RUnlock()
-
-	//if !ok {
 	ttx := ^(dc.d.txNum / dc.d.aggregationStep)
-	//}
 	copy(dc.keyBuf[:], key)
 	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
 
@@ -1757,7 +1784,7 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 		return nil, false, err
 	}
 	if v == nil {
-		dc.d.stats.HistoryQueries.Add(1)
+		dc.d.stats.FilesQueries.Add(1)
 		v, found := dc.readFromFiles(key, 0)
 		return v, found, nil
 	}
@@ -1776,5 +1803,6 @@ func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
+	return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
 	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }

@@ -762,6 +762,10 @@ func (d *DomainCommitted) SeekCommitment(aggStep, sinceTx uint64) (blockNum, txN
 		step               = uint16(sinceTx/aggStep) - 1
 		latestTxNum uint64 = sinceTx - 1
 	)
+	if sinceTx == 0 {
+		step = 0
+		latestTxNum = 0
+	}
 
 	d.SetTxNum(latestTxNum)
 	ctx := d.MakeContext()

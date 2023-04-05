@@ -367,12 +367,13 @@ const (
 	BittorrentInfo       = "BittorrentInfo"
 
 	// Domains and Inverted Indices
+	AccountDomain    = "AccountsDomain"
+	StorageDomain    = "StorageDomain"
+	CodeDomain       = "CodeDomain"
+	CommitmentDomain = "CommitmentDomain"
+
 	AccountKeys        = "AccountKeys"
 	AccountVals        = "AccountVals"
-	AccountDomain      = "AccountDomain"
-	StorageDomain      = "StorageDomain"
-	CodeDomain         = "CodeDomain"
-	CommitmentDomain   = "CommitmentDomain"
 	AccountHistoryKeys = "AccountHistoryKeys"
 	AccountHistoryVals = "AccountHistoryVals"
 	AccountIdx         = "AccountIdx"

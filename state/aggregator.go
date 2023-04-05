@@ -211,7 +211,7 @@ func (a *Aggregator) ReopenList(fNames []string) error {
 }
 
 func (a *Aggregator) GetAndResetStats() DomainStats {
-	stats := DomainStats{HistoryQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
+	stats := DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}}
 	stats.Accumulate(a.accounts.GetAndResetStats())
 	stats.Accumulate(a.storage.GetAndResetStats())
 	stats.Accumulate(a.code.GetAndResetStats())
@@ -1080,7 +1080,7 @@ func (a *Aggregator) Stats() FilesStats {
 	res.IdxSize = stat.IndexSize
 	res.DataSize = stat.DataSize
 	res.FilesCount = stat.FilesCount
-	res.HistoryReads = stat.HistoryQueries.Load()
+	res.HistoryReads = stat.FilesQueries.Load()
 	res.TotalReads = stat.TotalQueries.Load()
 	res.IdxAccess = stat.EfSearchTime
 	return res

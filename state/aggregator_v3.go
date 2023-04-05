@@ -89,10 +89,10 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, true); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, true); err != nil {
 		return nil, err
 	}
 	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
@@ -553,6 +553,11 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	)
 
 	defer logEvery.Stop()
+
+	a.filesMutationLock.Lock()
+	defer a.filesMutationLock.Unlock()
+	defer a.needSaveFilesListInDB.Store(true)
+	defer a.recalcMaxTxNum()
 
 	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment.Domain} {
 		wg.Add(1)
@@ -1466,6 +1471,11 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 
 	toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
+
+	if err := a.aggregate(context.Background(), step); err != nil {
+		log.Error("aggregate", "err", err, "step", step)
+		panic(err)
+	}
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
