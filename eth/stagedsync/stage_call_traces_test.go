@@ -56,26 +56,26 @@ func TestCallTrace(t *testing.T) {
 		tx = CommitTx(t, db, tx)
 
 		// forward 0->20
-		err = promoteCallTraces("test", db, tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "", parallelArgs[i])
+		err = promoteCallTraces("test", db, tx, 0, 20, 0, time.Nanosecond, ctx.Done(), "", parallelArgs[i], nil)
 		assert.NoError(err)
 		assert.Equal([]uint64{6, 16}, froms().ToArray())
 		assert.Equal([]uint64{1, 11}, tos().ToArray())
 
 		// unwind 20->10
-		err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "")
+		err = DoUnwindCallTraces("test", tx, 20, 10, ctx, "", nil)
 		assert.NoError(err)
 		assert.Equal([]uint64{6}, froms().ToArray())
 		assert.Equal([]uint64{1}, tos().ToArray())
 
 		tx = CommitTx(t, db, tx)
 		// forward 10->30
-		err = promoteCallTraces("test", db, tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "", parallelArgs[i])
+		err = promoteCallTraces("test", db, tx, 10, 30, 0, time.Nanosecond, ctx.Done(), "", parallelArgs[i], nil)
 		assert.NoError(err)
 		assert.Equal([]uint64{6, 16, 26}, froms().ToArray())
 		assert.Equal([]uint64{1, 11, 21}, tos().ToArray())
 
 		// prune 0 -> 10
-		err = pruneCallTraces(tx, "test", 10, ctx, "")
+		err = pruneCallTraces(tx, "test", 10, ctx, "", nil)
 		assert.NoError(err)
 	}
 }

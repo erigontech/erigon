@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -42,7 +43,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 	engine := api.engine()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx), api._bitmapDB2)
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +74,37 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 
 	return receipts, nil
+}
+
+func (api *APIImpl) DumpBitmap(ctx context.Context, bucket string, key hexutil.Bytes, from uint64, to uint64) ([]uint64, error) {
+	tx, beginErr := api.db.BeginRo(ctx)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer tx.Rollback()
+
+	var bitmaps []*roaring.Bitmap
+	bitmapDB2 := api._bitmapDB2
+	if bitmapDB2 != nil {
+		m, err := bitmapDB2.GetBitmap(bucket, key[:], from, to)
+		if err != nil {
+			return nil, err
+		}
+		bitmaps = append(bitmaps, m)
+	}
+	m, err := bitmapdb.Get(tx, bucket, key[:], uint32(from), uint32(to))
+	if err != nil {
+		return nil, err
+	}
+	bitmaps = append(bitmaps, m)
+
+	var result []uint64
+	bitmap := roaring.FastOr(bitmaps...)
+	bitmap.Iterate(func(i uint32) bool {
+		result = append(result, uint64(i))
+		return true
+	})
+	return result, nil
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
@@ -140,7 +172,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit, api._bitmapDB2); err != nil {
 		return logs, err
 	}
 	if blockNumbers.IsEmpty() {
@@ -232,64 +264,74 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 // {{}, {B}}          matches any topic in first position AND B in second position
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
-func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64) (*roaring.Bitmap, error) {
+func getTopicsBitmap(c kv.Tx, topics [][]common.Hash, from, to uint64, bitmapDB2 *bitmapdb2.DB) (*roaring.Bitmap, error) {
 	var result *roaring.Bitmap
 	for _, sub := range topics {
-		var bitmapForORing *roaring.Bitmap
+		var bitmapForORing []*roaring.Bitmap
 		for _, topic := range sub {
+			if bitmapDB2 != nil {
+				m, err := bitmapDB2.GetBitmap(kv.LogTopicIndex, topic[:], from, to)
+				if err != nil {
+					return nil, err
+				}
+				bitmapForORing = append(bitmapForORing, m)
+			}
 			m, err := bitmapdb.Get(c, kv.LogTopicIndex, topic[:], uint32(from), uint32(to))
 			if err != nil {
 				return nil, err
 			}
-			if bitmapForORing == nil {
-				bitmapForORing = m
-				continue
-			}
-			bitmapForORing.Or(m)
+			bitmapForORing = append(bitmapForORing, m)
 		}
 
 		if bitmapForORing == nil {
 			continue
 		}
 		if result == nil {
-			result = bitmapForORing
+			result = roaring.FastOr(bitmapForORing...)
 			continue
 		}
 
-		result = roaring.And(bitmapForORing, result)
+		result = roaring.And(roaring.FastOr(bitmapForORing...), result)
 	}
 	return result, nil
 }
-func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64) (*roaring.Bitmap, error) {
+func getAddrsBitmap(tx kv.Tx, addrs []common.Address, from, to uint64, bitmapDB2 *bitmapdb2.DB) (*roaring.Bitmap, error) {
 	if len(addrs) == 0 {
 		return nil, nil
 	}
-	rx := make([]*roaring.Bitmap, len(addrs))
+	rx := make([]*roaring.Bitmap, 0, len(addrs)*2)
 	defer func() {
 		for _, bm := range rx {
 			bitmapdb.ReturnToPool(bm)
 		}
 	}()
-	for idx, addr := range addrs {
+	for _, addr := range addrs {
+		if bitmapDB2 != nil {
+			m, err := bitmapDB2.GetBitmap(kv.LogAddressIndex, addr[:], from, to)
+			if err != nil {
+				return nil, err
+			}
+			rx = append(rx, m)
+		}
 		m, err := bitmapdb.Get(tx, kv.LogAddressIndex, addr[:], uint32(from), uint32(to))
 		if err != nil {
 			return nil, err
 		}
-		rx[idx] = m
+		rx = append(rx, m)
 	}
 	return roaring.FastOr(rx...), nil
 }
 
-func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria) error {
+func applyFilters(out *roaring.Bitmap, tx kv.Tx, begin, end uint64, crit filters.FilterCriteria, bitmapDB2 *bitmapdb2.DB) error {
 	out.AddRange(begin, end+1) // [from,to)
-	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end)
+	topicsBitmap, err := getTopicsBitmap(tx, crit.Topics, begin, end, bitmapDB2)
 	if err != nil {
 		return err
 	}
 	if topicsBitmap != nil {
 		out.And(topicsBitmap)
 	}
-	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end)
+	addrBitmap, err := getAddrsBitmap(tx, crit.Addresses, begin, end, bitmapDB2)
 	if err != nil {
 		return err
 	}

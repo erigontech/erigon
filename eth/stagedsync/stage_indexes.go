@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/worker"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -36,15 +37,17 @@ type HistoryCfg struct {
 	prune      prune.Mode
 	flushEvery time.Duration
 	tmpdir     string
+	bitmapDB2  *bitmapdb2.DB
 }
 
-func StageHistoryCfg(db kv.RwDB, prune prune.Mode, tmpDir string) HistoryCfg {
+func StageHistoryCfg(db kv.RwDB, prune prune.Mode, tmpDir string, bitmapDB2 *bitmapdb2.DB) HistoryCfg {
 	return HistoryCfg{
 		db:         db,
 		prune:      prune,
 		bufLimit:   bitmapsBufLimit,
 		flushEvery: bitmapsFlushEvery,
 		tmpdir:     tmpDir,
+		bitmapDB2:  bitmapDB2,
 	}
 }
 
@@ -80,7 +83,7 @@ func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 		startBlock = pruneTo
 	}
 
-	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.AccountChangeSet, startBlock, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx, cfg.bitmapDB2); err != nil {
 		return err
 	}
 
@@ -123,7 +126,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	}
 	stopChangeSetsLookupAt := executionAt + 1
 
-	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx); err != nil {
+	if err := promoteHistory(logPrefix, tx, kv.StorageChangeSet, startChangeSetsLookupAt, stopChangeSetsLookupAt, cfg, quitCh, !useExternalTx, cfg.bitmapDB2); err != nil {
 		return err
 	}
 
@@ -141,7 +144,7 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 const IndexParallelWorkers = 32
 
 func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start, stop uint64, cfg HistoryCfg, quit <-chan struct{},
-	parallel bool) error {
+	parallel bool, bitmapDB2 *bitmapdb2.DB) error {
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 
@@ -250,6 +253,20 @@ func promoteHistory(logPrefix string, tx kv.RwTx, changesetBucket string, start,
 		return err
 	}
 
+	if bitmapDB2 != nil {
+		bucket := historyv2.Mapper[changesetBucket].IndexBucket
+		pl := bitmapdb2.NewParallelLoader(bitmapDB2, 16, 64*1024*1024, 64)
+		defer pl.Close()
+		loadToBitmapDB2 := pl.ETLLoadFunc64(bucket)
+		if err := collectorUpdates.Load(tx, historyv2.Mapper[changesetBucket].IndexBucket, loadToBitmapDB2, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+		if err := pl.Commit(); err != nil {
+			return err
+		}
+		log.Info(fmt.Sprintf("[%s] History commit", logPrefix), "bucket", bucket, "bitmapDB2Summary", pl.Summary)
+		return nil
+	}
 	var currentBitmap = roaring64.New()
 	var buf = bytes.NewBuffer(nil)
 
@@ -373,7 +390,7 @@ func unwindHistory(logPrefix string, db kv.RwTx, csBucket string, to uint64, cfg
 		return err
 	}
 
-	if err := truncateBitmaps64(db, historyv2.Mapper[csBucket].IndexBucket, updates, to); err != nil {
+	if err := truncateBitmaps64(db, historyv2.Mapper[csBucket].IndexBucket, updates, to, cfg.bitmapDB2); err != nil {
 		return err
 	}
 	return nil
@@ -405,7 +422,7 @@ func flushBitmaps64(c *etl.Collector, inMem map[string]*roaring64.Bitmap) error 
 	return nil
 }
 
-func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to uint64) error {
+func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to uint64, bitmapDB2 *bitmapdb2.DB) error {
 	keys := make([]string, 0, len(inMem))
 	for k := range inMem {
 		keys = append(keys, k)
@@ -414,6 +431,18 @@ func truncateBitmaps64(tx kv.RwTx, bucket string, inMem map[string]struct{}, to 
 	for _, k := range keys {
 		if err := bitmapdb.TruncateRange64(tx, bucket, []byte(k), to+1); err != nil {
 			return fmt.Errorf("fail TruncateRange: bucket=%s, %w", bucket, err)
+		}
+	}
+	if bitmapDB2 != nil {
+		batch := bitmapDB2.NewBatch()
+		defer batch.Close()
+		for k := range inMem {
+			if err := batch.TruncateBitmap(bucket, []byte(k), to+1); err != nil {
+				return fmt.Errorf("fail TruncateRange (bitmapDB2): bucket=%s, %w", bucket, err)
+			}
+		}
+		if err := batch.Commit(); err != nil {
+			return fmt.Errorf("fail TruncateRange (bitmapDB2): bucket=%s, %w", bucket, err)
 		}
 	}
 
@@ -436,7 +465,7 @@ func PruneAccountHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	}
 
 	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
-	if err = pruneHistoryIndex(tx, kv.AccountChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+	if err = pruneHistoryIndex(tx, kv.AccountChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx, cfg.bitmapDB2); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -466,7 +495,7 @@ func PruneStorageHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx con
 		defer tx.Rollback()
 	}
 	pruneTo := cfg.prune.History.PruneTo(s.ForwardProgress)
-	if err = pruneHistoryIndex(tx, kv.StorageChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx); err != nil {
+	if err = pruneHistoryIndex(tx, kv.StorageChangeSet, logPrefix, cfg.tmpdir, pruneTo, ctx, cfg.bitmapDB2); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -481,7 +510,7 @@ func PruneStorageHistoryIndex(s *PruneState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	return nil
 }
 
-func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context) error {
+func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo uint64, ctx context.Context, bitmapDB2 *bitmapdb2.DB) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -511,6 +540,13 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 	if csTable == kv.StorageChangeSet {
 		prefixLen = length.Hash
 	}
+
+	var batch *bitmapdb2.Batch
+	if bitmapDB2 != nil {
+		batch := bitmapDB2.NewBatch()
+		defer batch.Close()
+	}
+
 	if err := collector.Load(tx, "", func(addr, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		select {
 		case <-logEvery.C:
@@ -518,6 +554,11 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		case <-ctx.Done():
 			return libcommon.ErrStopped
 		default:
+		}
+		if batch != nil {
+			if err := batch.TruncateBitmap(historyv2.Mapper[csTable].IndexBucket, addr, pruneTo+1); err != nil {
+				return err
+			}
 		}
 		for k, _, err := c.Seek(addr); k != nil; k, _, err = c.Next() {
 			if err != nil {
@@ -534,6 +575,11 @@ func pruneHistoryIndex(tx kv.RwTx, csTable, logPrefix, tmpDir string, pruneTo ui
 		return nil
 	}, etl.TransformArgs{}); err != nil {
 		return err
+	}
+	if batch != nil {
+		if err := batch.Commit(); err != nil {
+			return fmt.Errorf("Commit (bitmapdb2): %w", err)
+		}
 	}
 
 	return nil

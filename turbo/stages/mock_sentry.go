@@ -462,9 +462,9 @@ func MockWithEverything(t *testing.T, gspec *core.Genesis, key *ecdsa.PrivateKey
 			),
 			stagedsync.StageHashStateCfg(mock.DB, mock.Dirs, cfg.HistoryV3, mock.agg),
 			stagedsync.StageTrieCfg(mock.DB, true, true, false, dirs.Tmp, blockReader, mock.sentriesClient.Hd, cfg.HistoryV3, mock.agg),
-			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp),
-			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp),
+			stagedsync.StageHistoryCfg(mock.DB, prune, dirs.Tmp, nil),
+			stagedsync.StageLogIndexCfg(mock.DB, prune, dirs.Tmp, nil),
+			stagedsync.StageCallTracesCfg(mock.DB, prune, 0, dirs.Tmp, nil),
 			stagedsync.StageTxLookupCfg(mock.DB, prune, dirs.Tmp, mock.BlockSnapshots, mock.ChainConfig.Bor),
 			stagedsync.StageFinishCfg(mock.DB, dirs.Tmp, forkValidator),
 			!withPosDownloader),
@@ -756,7 +756,7 @@ func (ms *MockSentry) HeaderDownload() *headerdownload.HeaderDownload {
 }
 
 func (ms *MockSentry) NewHistoryStateReader(blockNum uint64, tx kv.Tx) state.StateReader {
-	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.HistoryV3, ms.ChainConfig.ChainName)
+	r, err := rpchelper.CreateHistoryStateReader(tx, blockNum, 0, ms.HistoryV3, ms.ChainConfig.ChainName, nil)
 	if err != nil {
 		panic(err)
 	}

@@ -102,7 +102,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	}
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, begin, end, crit); err != nil {
+	if err := applyFilters(blockNumbers, tx, begin, end, crit, api._bitmapDB2); err != nil {
 		return nil, err
 	}
 	if blockNumbers.IsEmpty() {
@@ -237,7 +237,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 	blockNumbers := bitmapdb.NewBitmap()
 	defer bitmapdb.ReturnToPool(blockNumbers)
-	if err := applyFilters(blockNumbers, tx, 0, latest, crit); err != nil {
+	if err := applyFilters(blockNumbers, tx, 0, latest, crit, api._bitmapDB2); err != nil {
 		return erigonLogs, err
 	}
 	if blockNumbers.IsEmpty() {

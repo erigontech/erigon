@@ -103,7 +103,7 @@ func TestPromoteLogIndex(t *testing.T) {
 
 		expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
 		cfgCopy.flushEvery = time.Nanosecond
@@ -135,7 +135,7 @@ func TestPruneLogIndex(t *testing.T) {
 
 		_, _ = genReceipts(t, tx, 100)
 
-		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
 		cfgCopy.flushEvery = time.Nanosecond
@@ -145,7 +145,7 @@ func TestPruneLogIndex(t *testing.T) {
 		require.NoError(err)
 
 		// Mode test
-		err = pruneLogIndex("", tx, tmpDir, 50, ctx)
+		err = pruneLogIndex("", tx, tmpDir, 50, ctx, nil)
 		require.NoError(err)
 
 		{
@@ -179,7 +179,7 @@ func TestUnwindLogIndex(t *testing.T) {
 
 		expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+		cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 		cfgCopy := cfg
 		cfgCopy.bufLimit = 10
 		cfgCopy.flushEvery = time.Nanosecond
@@ -189,7 +189,7 @@ func TestUnwindLogIndex(t *testing.T) {
 		require.NoError(err)
 
 		// Mode test
-		err = pruneLogIndex("", tx, tmpDir, 50, ctx)
+		err = pruneLogIndex("", tx, tmpDir, 50, ctx, nil)
 		require.NoError(err)
 
 		// Unwind test

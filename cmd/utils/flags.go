@@ -108,6 +108,10 @@ var (
 		Name:  "override.shanghaiTime",
 		Usage: "Manually specify Shanghai fork time, overriding the bundled setting",
 	}
+	BitmapDB2Flag = cli.BoolFlag{
+		Name:  "bitmapdb2",
+		Usage: "Use new bitmapdb2",
+	}
 	// Ethash settings
 	EthashCachesInMemoryFlag = cli.IntFlag{
 		Name:  "ethash.cachesinmem",
@@ -1557,6 +1561,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.P2PEnabled = len(nodeConfig.P2P.SentryAddr) == 0
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
 	cfg.TransactionsV3 = ctx.Bool(TransactionV3Flag.Name)
+	cfg.BitmapDB2 = ctx.Bool(BitmapDB2Flag.Name)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
 	}

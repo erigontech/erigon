@@ -28,7 +28,7 @@ import (
 
 func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 	db := kv2.NewTestDB(t)
-	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir())
+	cfg := StageHistoryCfg(db, prune.DefaultMode, t.TempDir(), nil)
 	test := func(blocksNum int, csBucket string, parallel bool) func(t *testing.T) {
 		return func(t *testing.T) {
 			tx, err := db.BeginRw(context.Background())
@@ -45,9 +45,9 @@ func TestIndexGenerator_GenerateIndex_SimpleCase(t *testing.T) {
 			cfgCopy.flushEvery = time.Microsecond
 			cfgCopy.db = db
 			tx = CommitTx(t, db, tx)
-			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil, parallel)
+			err = promoteHistory("logPrefix", tx, csBucket, 0, uint64(blocksNum/2), cfgCopy, nil, parallel, nil)
 			require.NoError(t, err)
-			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil, parallel)
+			err = promoteHistory("logPrefix", tx, csBucket, uint64(blocksNum/2), uint64(blocksNum), cfgCopy, nil, parallel, nil)
 			require.NoError(t, err)
 
 			checkIndex(t, tx, csInfo.IndexBucket, addrs[0], expecedIndexes[string(addrs[0])])
@@ -70,7 +70,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 		buckets := []string{kv.AccountChangeSet, kv.StorageChangeSet}
 		tmpDir, ctx := t.TempDir(), context.Background()
 		kv := kv2.NewTestDB(t)
-		cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir())
+		cfg := StageHistoryCfg(kv, prune.DefaultMode, t.TempDir(), nil)
 		for i := range buckets {
 			csbucket := buckets[i]
 
@@ -86,7 +86,7 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			cfgCopy.flushEvery = time.Microsecond
 			cfgCopy.db = kv
 			tx = CommitTx(t, kv, tx)
-			err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil, parallelArgs[j])
+			err = promoteHistory("logPrefix", tx, csbucket, 0, uint64(2100), cfgCopy, nil, parallelArgs[j], nil)
 			require.NoError(t, err)
 
 			reduceSlice := func(arr []uint64, timestamtTo uint64) []uint64 {
@@ -169,12 +169,12 @@ func TestIndexGenerator_Truncate(t *testing.T) {
 			checkIndex(t, tx, indexBucket, hashes[2], expected[string(hashes[2])])
 
 			//})
-			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx, nil)
 			assert.NoError(t, err)
 			expectNoHistoryBefore(t, tx, csbucket, 128)
 
 			// double prune is safe
-			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx)
+			err = pruneHistoryIndex(tx, csbucket, "", tmpDir, 128, ctx, nil)
 			assert.NoError(t, err)
 			expectNoHistoryBefore(t, tx, csbucket, 128)
 			tx.Rollback()

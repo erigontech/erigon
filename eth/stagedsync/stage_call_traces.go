@@ -21,16 +21,18 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/worker"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 )
 
 type CallTracesCfg struct {
-	db      kv.RwDB
-	prune   prune.Mode
-	ToBlock uint64 // not setting this params means no limit
-	tmpdir  string
+	db        kv.RwDB
+	prune     prune.Mode
+	ToBlock   uint64 // not setting this params means no limit
+	tmpdir    string
+	bitmapDB2 *bitmapdb2.DB
 }
 
 func StageCallTracesCfg(
@@ -38,12 +40,14 @@ func StageCallTracesCfg(
 	prune prune.Mode,
 	toBlock uint64,
 	tmpdir string,
+	bitmapDB2 *bitmapdb2.DB,
 ) CallTracesCfg {
 	return CallTracesCfg{
-		db:      db,
-		prune:   prune,
-		ToBlock: toBlock,
-		tmpdir:  tmpdir,
+		db:        db,
+		prune:     prune,
+		ToBlock:   toBlock,
+		tmpdir:    tmpdir,
+		bitmapDB2: bitmapDB2,
 	}
 }
 
@@ -71,7 +75,7 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 		return nil
 	}
 
-	if err := promoteCallTraces(logPrefix, cfg.db, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir, !useExternalTx); err != nil {
+	if err := promoteCallTraces(logPrefix, cfg.db, tx, s.BlockNumber+1, endBlock, bitmapsBufLimit, bitmapsFlushEvery, quit, cfg.tmpdir, !useExternalTx, cfg.bitmapDB2); err != nil {
 		return err
 	}
 
@@ -90,7 +94,7 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 const CallTraceIndexParallelWorkers = 32
 
 func promoteCallTraces(logPrefix string, db kv.RwDB, tx kv.RwTx, startBlock, endBlock uint64, bufLimit datasize.ByteSize, flushEvery time.Duration,
-	quit <-chan struct{}, tmpdir string, parallel bool) error {
+	quit <-chan struct{}, tmpdir string, parallel bool, bitmapDB2 *bitmapdb2.DB) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -285,17 +289,34 @@ func promoteCallTraces(logPrefix string, db kv.RwDB, tx kv.RwTx, startBlock, end
 		log.Info(fmt.Sprintf("[%s] Pruned call trace intermediate table", logPrefix), "from", prunedMin, "to", prunedMax)
 	}
 
-	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit); err != nil {
+	if err := finaliseCallTraces(collectorFrom, collectorTo, logPrefix, tx, quit, bitmapDB2); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx kv.RwTx, quit <-chan struct{}) error {
+func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix string, tx kv.RwTx, quit <-chan struct{}, bitmapDB2 *bitmapdb2.DB) error {
+	reader := bytes.NewReader(nil)
+	if bitmapDB2 != nil {
+		pl := bitmapdb2.NewParallelLoader(bitmapDB2, 16, 64*1024*1024, 64)
+		defer pl.Close()
+		loadCallFrom := pl.ETLLoadFunc64(kv.CallFromIndex)
+		loadCallTo := pl.ETLLoadFunc64(kv.CallToIndex)
+		if err := collectorFrom.Load(tx, kv.CallFromIndex, loadCallFrom, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+		if err := collectorTo.Load(tx, kv.CallToIndex, loadCallTo, etl.TransformArgs{Quit: quit}); err != nil {
+			return err
+		}
+		if err := pl.Commit(); err != nil {
+			return err
+		}
+		log.Info(fmt.Sprintf("[%s] CallTraceIndex commit", logPrefix), "bitmapDB2Summary", pl.Summary)
+		return nil
+	}
 	var buf = bytes.NewBuffer(nil)
 	lastChunkKey := make([]byte, 128)
-	reader := bytes.NewReader(nil)
 	reader2 := bytes.NewReader(nil)
 	var loaderFunc = func(k []byte, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		reader.Reset(v)
@@ -357,7 +378,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 	if s.BlockNumber-u.UnwindPoint > 16 {
 		log.Info(fmt.Sprintf("[%s] Unwind", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
 	}
-	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg.tmpdir); err != nil {
+	if err := DoUnwindCallTraces(logPrefix, tx, s.BlockNumber, u.UnwindPoint, ctx, cfg.tmpdir, cfg.bitmapDB2); err != nil {
 		return err
 	}
 
@@ -374,7 +395,7 @@ func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesC
 	return nil
 }
 
-func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, tmpdir string) error {
+func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx context.Context, tmpdir string, bitmapDB2 *bitmapdb2.DB) error {
 	froms := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
 	defer froms.Close()
 	tos := etl.NewCollector(logPrefix, tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize))
@@ -430,16 +451,38 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 		}
 	}
 
+	var batch *bitmapdb2.Batch
+	if bitmapDB2 != nil {
+		batch := bitmapDB2.NewBatch()
+		defer batch.Close()
+	}
+
 	if err = froms.Load(db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if batch != nil {
+			if err := batch.TruncateBitmap(kv.CallFromIndex, k, to+1); err != nil {
+				return err
+			}
+		}
 		return bitmapdb.TruncateRange64(db, kv.CallFromIndex, k, to+1)
 	}, etl.TransformArgs{}); err != nil {
 		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
 	}
 
 	if err = tos.Load(db, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if batch != nil {
+			if err := batch.TruncateBitmap(kv.CallToIndex, k, to+1); err != nil {
+				return err
+			}
+		}
 		return bitmapdb.TruncateRange64(db, kv.CallToIndex, k, to+1)
 	}, etl.TransformArgs{}); err != nil {
-		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallFromIndex, err)
+		return fmt.Errorf("TruncateRange: bucket=%s, %w", kv.CallToIndex, err)
+	}
+
+	if batch != nil {
+		if err = batch.Commit(); err != nil {
+			return fmt.Errorf("Commit (bitmapdb2): %w", err)
+		}
 	}
 	return nil
 }
@@ -457,7 +500,7 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	}
 
 	if cfg.prune.CallTraces.Enabled() {
-		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir); err != nil {
+		if err = pruneCallTraces(tx, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), ctx, cfg.tmpdir, cfg.bitmapDB2); err != nil {
 			return err
 		}
 	}
@@ -473,7 +516,7 @@ func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	return nil
 }
 
-func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string) error {
+func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.Context, tmpdir string, bitmapDB2 *bitmapdb2.DB) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -524,6 +567,12 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 		}
 	}
 
+	var batch *bitmapdb2.Batch
+	if bitmapDB2 != nil {
+		batch := bitmapDB2.NewBatch()
+		defer batch.Close()
+	}
+
 	{
 		c, err := tx.RwCursor(kv.CallFromIndex)
 		if err != nil {
@@ -532,6 +581,11 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 		defer c.Close()
 
 		if err := froms.Load(tx, "", func(from, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			if batch != nil {
+				if err := batch.TruncateBitmap(kv.CallFromIndex, from, pruneTo+1); err != nil {
+					return err
+				}
+			}
 			for k, _, err := c.Seek(from); k != nil; k, _, err = c.Next() {
 				if err != nil {
 					return err
@@ -564,6 +618,11 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 		defer c.Close()
 
 		if err := tos.Load(tx, "", func(to, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+			if batch != nil {
+				if err := batch.TruncateBitmap(kv.CallToIndex, to, pruneTo+1); err != nil {
+					return err
+				}
+			}
 			for k, _, err := c.Seek(to); k != nil; k, _, err = c.Next() {
 				if err != nil {
 					return err
@@ -586,6 +645,11 @@ func pruneCallTraces(tx kv.RwTx, logPrefix string, pruneTo uint64, ctx context.C
 			return nil
 		}, etl.TransformArgs{}); err != nil {
 			return err
+		}
+	}
+	if batch != nil {
+		if err := batch.Commit(); err != nil {
+			return fmt.Errorf("Commit (bitmapdb2): %w", err)
 		}
 	}
 	return nil

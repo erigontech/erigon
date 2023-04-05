@@ -32,6 +32,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/dbutils"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
@@ -55,9 +56,11 @@ type PlainState struct {
 	storage                      map[libcommon.Address]*btree.BTree
 	trace                        bool
 	systemContractLookup         map[libcommon.Address][]libcommon.CodeRecord
+	bitmapDB2                    *bitmapdb2.DB
 }
 
-func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord) *PlainState {
+func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.Address][]libcommon.CodeRecord,
+	bitmapDB2 *bitmapdb2.DB) *PlainState {
 	histV3, _ := kvcfg.HistoryV3.Enabled(tx)
 	if histV3 {
 		panic("Please use HistoryStateReaderV3 with HistoryV3")
@@ -78,6 +81,7 @@ func NewPlainState(tx kv.Tx, blockNr uint64, systemContractLookup map[libcommon.
 	ps.storageHistoryC = c2
 	ps.accChangesC = c3
 	ps.storageChangesC = c4
+	ps.bitmapDB2 = bitmapDB2
 	return ps
 }
 
@@ -97,7 +101,7 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 	st := btree.New(16)
 	var k [length.Addr + length.Incarnation + length.Hash]byte
 	copy(k[:], addr[:])
-	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr)
+	accData, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, addr[:], s.blockNr, s.bitmapDB2)
 	if err != nil {
 		return err
 	}
@@ -170,7 +174,7 @@ func (s *PlainState) ForEachStorage(addr libcommon.Address, startLocation libcom
 }
 
 func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {
-	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr)
+	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr, s.bitmapDB2)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +211,7 @@ func (s *PlainState) ReadAccountData(address libcommon.Address) (*accounts.Accou
 
 func (s *PlainState) ReadAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash) ([]byte, error) {
 	compositeKey := dbutils.PlainGenerateCompositeStorageKey(address.Bytes(), incarnation, key.Bytes())
-	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr)
+	enc, err := historyv2read.GetAsOf(s.tx, s.storageHistoryC, s.storageChangesC, true /* storage */, compositeKey, s.blockNr, s.bitmapDB2)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +247,7 @@ func (s *PlainState) ReadAccountCodeSize(address libcommon.Address, incarnation 
 }
 
 func (s *PlainState) ReadAccountIncarnation(address libcommon.Address) (uint64, error) {
-	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1)
+	enc, err := historyv2read.GetAsOf(s.tx, s.accHistoryC, s.accChangesC, false /* storage */, address[:], s.blockNr+1, s.bitmapDB2)
 	if err != nil {
 		return 0, err
 	}

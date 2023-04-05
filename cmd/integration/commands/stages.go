@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/sentry/sentry"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	reset2 "github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -932,7 +933,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context) error {
 	log.Info("Stage exec", "progress", execAt)
 	log.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp)
+	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, nil)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.LogIndex, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)
@@ -994,7 +995,7 @@ func stageCallTraces(db kv.RwDB, ctx context.Context) error {
 	}
 	log.Info("ID call traces", "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageCallTracesCfg(db, pm, block, dirs.Tmp)
+	cfg := stagedsync.StageCallTracesCfg(db, pm, block, dirs.Tmp, nil)
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.CallTraces, s.BlockNumber-unwind, s.BlockNumber)
@@ -1055,7 +1056,7 @@ func stageHistory(db kv.RwDB, ctx context.Context) error {
 	log.Info("ID acc history", "progress", stageAcc.BlockNumber)
 	log.Info("ID storage history", "progress", stageStorage.BlockNumber)
 
-	cfg := stagedsync.StageHistoryCfg(db, pm, dirs.Tmp)
+	cfg := stagedsync.StageHistoryCfg(db, pm, dirs.Tmp, nil)
 	if unwind > 0 { //nolint:staticcheck
 		u := sync.NewUnwindState(stages.StorageHistoryIndex, stageStorage.BlockNumber-unwind, stageStorage.BlockNumber)
 		if err := stagedsync.UnwindStorageHistoryIndex(u, stageStorage, tx, cfg, ctx); err != nil {
@@ -1349,6 +1350,10 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 	allSn, agg := allSnapshots(ctx, db)
 	cfg.Snapshot = allSn.Cfg()
 
+	var bitmapDB2 *bitmapdb2.DB
+	if cfg.BitmapDB2 {
+		bitmapDB2 = bitmapdb2.NewBitmapDB2(datadirCli)
+	}
 	engine := initConsensusEngine(chainConfig, cfg.Dirs.DataDir, db)
 
 	br := getBlockReader(db)
@@ -1370,7 +1375,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig)
 		panic(err)
 	}
 
-	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil, engine)
+	stages := stages2.NewDefaultStages(context.Background(), db, p2p.Config{}, &cfg, sentryControlServer, &shards.Notifications{}, nil, allSn, agg, nil, engine, bitmapDB2)
 	sync := stagedsync.New(stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder)
 
 	miner := stagedsync.NewMiningState(&cfg.Miner)

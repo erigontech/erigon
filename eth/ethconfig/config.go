@@ -234,6 +234,9 @@ type Config struct {
 	//  New DB table for storing transactions allows: keeping multiple branches of block bodies in the DB simultaneously
 	TransactionsV3 bool
 
+	// BitmapDB2
+	BitmapDB2 bool
+
 	// URL to connect to Heimdall node
 	HeimdallURL string
 

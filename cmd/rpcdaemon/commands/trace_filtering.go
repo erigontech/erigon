@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/bitmapdb2"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
@@ -236,13 +237,22 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber) (Pa
 	return out, err
 }
 
-func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
+func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64, bitmapDB2 *bitmapdb2.DB,
+) (fromAddresses, toAddresses map[common.Address]struct{}, allBlocks *roaring64.Bitmap, err error) {
 	fromAddresses = make(map[common.Address]struct{}, len(req.FromAddress))
 	toAddresses = make(map[common.Address]struct{}, len(req.ToAddress))
 	allBlocks = roaring64.New()
 	var blocksTo roaring64.Bitmap
 	for _, addr := range req.FromAddress {
 		if addr != nil {
+			if bitmapDB2 != nil {
+				m, err := bitmapDB2.GetBitmap64(kv.CallFromIndex, addr.Bytes(), from, to)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				allBlocks.Or(m)
+			}
+
 			b, err := bitmapdb.Get64(tx, kv.CallFromIndex, addr.Bytes(), from, to)
 			if err != nil {
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -257,6 +267,14 @@ func traceFilterBitmaps(tx kv.Tx, req TraceFilterRequest, from, to uint64) (from
 
 	for _, addr := range req.ToAddress {
 		if addr != nil {
+			if bitmapDB2 != nil {
+				m, err := bitmapDB2.GetBitmap64(kv.CallToIndex, addr.Bytes(), from, to)
+				if err != nil {
+					return nil, nil, nil, err
+				}
+				blocksTo.Or(m)
+			}
+
 			b, err := bitmapdb.Get64(tx, kv.CallToIndex, addr.Bytes(), from, to)
 			if err != nil {
 				if errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -368,7 +386,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, str
 		return api.filterV3(ctx, dbtx.(kv.TemporalTx), fromBlock, toBlock, req, stream)
 	}
 	toBlock++ //+1 because internally Erigon using semantic [from, to), but some RPC have different semantic
-	fromAddresses, toAddresses, allBlocks, err := traceFilterBitmaps(dbtx, req, fromBlock, toBlock)
+	fromAddresses, toAddresses, allBlocks, err := traceFilterBitmaps(dbtx, req, fromBlock, toBlock, api._bitmapDB2)
 	if err != nil {
 		return err
 	}

@@ -53,7 +53,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		return nil
 	}
 
-	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, txIndex, api.historyV3(dbtx), chainConfig.ChainName)
+	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNum, txIndex, api.historyV3(dbtx), chainConfig.ChainName, api._bitmapDB2)
 	if err != nil {
 		return err
 	}
