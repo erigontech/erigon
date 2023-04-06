@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	btree2 "github.com/tidwall/btree"
@@ -103,7 +104,7 @@ func TestCollationBuild(t *testing.T) {
 	require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
 	require.Equal(t, []uint64{2, 6}, c.indexBitmaps["key1"].ToArray())
 
-	sf, err := d.buildFiles(ctx, 0, c)
+	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
 	defer sf.Close()
 	c.Close()
@@ -208,7 +209,7 @@ func TestAfterPrune(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, 16, tx, logEvery)
 	require.NoError(t, err)
 
-	sf, err := d.buildFiles(ctx, 0, c)
+	sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
 	require.NoError(t, err)
 
 	d.integrateFiles(sf, 0, 16)
@@ -330,7 +331,7 @@ func TestHistory(t *testing.T) {
 		func() {
 			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx, logEvery)
 			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c)
+			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
@@ -392,7 +393,7 @@ func TestIterationMultistep(t *testing.T) {
 		func() {
 			c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx, logEvery)
 			require.NoError(t, err)
-			sf, err := d.buildFiles(ctx, step, c)
+			sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 			err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
@@ -431,7 +432,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	for step := uint64(0); step < txs/d.aggregationStep-1; step++ {
 		c, err := d.collate(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, tx, logEvery)
 		require.NoError(t, err)
-		sf, err := d.buildFiles(ctx, step, c)
+		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 		require.NoError(t, err)
 		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 		err = d.prune(ctx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
@@ -445,7 +446,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 			dc := d.MakeContext()
 			defer dc.Close()
 			valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
-			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
+			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 			require.NoError(t, err)
 			d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
 		}()
@@ -466,7 +467,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	c, err := d.collate(ctx, step, txFrom, txTo, d.tx, logEvery)
 	require.NoError(t, err)
 
-	sf, err := d.buildFiles(ctx, step, c)
+	sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
@@ -479,7 +480,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, step uint64) {
 	for r = d.findMergeRange(maxEndTxNum, maxSpan); r.any(); r = d.findMergeRange(maxEndTxNum, maxSpan) {
 		dc := d.MakeContext()
 		valuesOuts, indexOuts, historyOuts, _ := d.staticFilesInRange(r, dc)
-		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1)
+		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, 1, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)

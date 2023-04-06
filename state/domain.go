@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common/background"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -207,15 +208,6 @@ func (d *Domain) openList(fNames []string) error {
 }
 
 func (d *Domain) OpenFolder() error {
-	eg, ctx := errgroup.WithContext(context.Background())
-	eg.SetLimit(32)
-	if err := d.BuildMissedIndices(ctx, eg); err != nil {
-		return err
-	}
-	if err := eg.Wait(); err != nil {
-		return err
-	}
-
 	files, err := d.fileNamesOnDisk()
 	if err != nil {
 		return err
@@ -813,10 +805,10 @@ func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan 
 }
 
 // nolint
-func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64, tx kv.Tx, logEvery *time.Ticker) (err error) {
+func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64, tx kv.Tx, ps *background.ProgressSet) (err error) {
 	mxRunningCollations.Inc()
 	start := time.Now()
-	collation, err := d.collateStream(ctx, step, txFrom, txTo, tx, logEvery)
+	collation, err := d.collateStream(ctx, step, txFrom, txTo, tx)
 	mxRunningCollations.Dec()
 	mxCollateTook.UpdateDuration(start)
 
@@ -832,7 +824,7 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 	mxRunningMerges.Inc()
 
 	start = time.Now()
-	sf, err := d.buildFiles(ctx, step, collation)
+	sf, err := d.buildFiles(ctx, step, collation, ps)
 	collation.Close()
 	defer sf.Close()
 
@@ -852,13 +844,13 @@ func (d *Domain) aggregate(ctx context.Context, step uint64, txFrom, txTo uint64
 // collate gathers domain changes over the specified step, using read-only transaction,
 // and returns compressors, elias fano, and bitmaps
 // [txFrom; txTo)
-func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx, logEvery *time.Ticker) (Collation, error) {
+func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (Collation, error) {
 	started := time.Now()
 	defer func() {
 		d.stats.LastCollationTook = time.Since(started)
 	}()
 
-	hCollation, err := d.History.collate(step, txFrom, txTo, roTx, logEvery)
+	hCollation, err := d.History.collate(step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
@@ -884,10 +876,10 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	}
 	defer keysCursor.Close()
 
-	totalKeys, err := keysCursor.Count()
-	if err != nil {
-		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	}
+	//totalKeys, err := keysCursor.Count()
+	//if err != nil {
+	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
+	//}
 
 	var (
 		k, v     []byte
@@ -940,10 +932,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 		select {
 		case <-ctx.Done():
 			return Collation{}, ctx.Err()
-		case <-logEvery.C:
-			log.Info("[snapshots] collate domain", "name", d.filenameBase,
-				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-				"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
 		default:
 		}
 
@@ -958,6 +946,12 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 			v, err := roTx.GetOne(d.valsTable, keySuffix[:ks])
 			if err != nil {
 				return Collation{}, fmt.Errorf("find last %s value for aggregation step k=[%x]: %w", d.filenameBase, k, err)
+			}
+
+			select {
+			case <-ctx.Done():
+				return Collation{}, ctx.Err()
+			default:
 			}
 
 			pairs <- kvpair{k: k, v: v}
@@ -993,7 +987,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		d.stats.LastCollationTook = time.Since(started)
 	}()
 
-	hCollation, err := d.History.collate(step, txFrom, txTo, roTx, logEvery)
+	hCollation, err := d.History.collate(step, txFrom, txTo, roTx)
 	if err != nil {
 		return Collation{}, err
 	}
@@ -1023,20 +1017,17 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		valuesCount uint
 	)
 
-	totalKeys, err := keysCursor.Count()
-	if err != nil {
-		return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	}
+	//TODO: use prorgesSet
+	//totalKeys, err := keysCursor.Count()
+	//if err != nil {
+	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
+	//}
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
 		if err != nil {
 			return Collation{}, err
 		}
 		pos++
 		select {
-		case <-logEvery.C:
-			log.Info("[snapshots] collate domain", "name", d.filenameBase,
-				"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-				"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
 		case <-ctx.Done():
 			log.Warn("[snapshots] collate domain cancelled", "name", d.filenameBase, "err", ctx.Err())
 			return Collation{}, ctx.Err()
@@ -1115,13 +1106,13 @@ func (sf StaticFiles) Close() {
 
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
-func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation) (StaticFiles, error) {
+func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
 	hStaticFiles, err := d.History.buildFiles(ctx, step, HistoryCollation{
 		historyPath:  collation.historyPath,
 		historyComp:  collation.historyComp,
 		historyCount: collation.historyCount,
 		indexBitmaps: collation.indexBitmaps,
-	})
+	}, ps)
 	if err != nil {
 		return StaticFiles{}, err
 	}
@@ -1143,24 +1134,35 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 			}
 		}
 	}()
-	valuesIdxPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1))
 	if err = valuesComp.Compress(); err != nil {
 		return StaticFiles{}, fmt.Errorf("compress %s values: %w", d.filenameBase, err)
 	}
 	valuesComp.Close()
 	valuesComp = nil
-
 	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
-	if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false); err != nil {
-		return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+
+	valuesIdxFileName := fmt.Sprintf("%s.%d-%d.kvi", d.filenameBase, step, step+1)
+	valuesIdxPath := filepath.Join(d.dir, valuesIdxFileName)
+	{
+		p := ps.AddNew(valuesIdxFileName, uint64(valuesDecomp.Count()*2))
+		defer ps.Delete(p)
+		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, valuesIdxPath, d.tmpdir, collation.valuesCount, false, p); err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+		}
 	}
 
-	btPath := strings.TrimSuffix(valuesIdxPath, "kvi") + "bt"
-	bt, err := CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp)
-	if err != nil {
-		return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
+	var bt *BtIndex
+	{
+		btFileName := strings.TrimSuffix(valuesIdxFileName, "kvi") + "bt"
+		btPath := filepath.Join(d.dir, btFileName)
+		p := ps.AddNew(btFileName, uint64(valuesDecomp.Count()*2))
+		defer ps.Delete(p)
+		bt, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesDecomp, p)
+		if err != nil {
+			return StaticFiles{}, fmt.Errorf("build %s values bt idx: %w", d.filenameBase, err)
+		}
 	}
 
 	closeComp = false
@@ -1189,9 +1191,9 @@ func (d *Domain) missedIdxFiles() (l []*filesItem) {
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group) (err error) {
-	d.History.BuildMissedIndices(ctx, g)
-	d.InvertedIndex.BuildMissedIndices(ctx, g)
+func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) (err error) {
+	d.History.BuildMissedIndices(ctx, g, ps)
+	d.InvertedIndex.BuildMissedIndices(ctx, g, ps)
 	for _, item := range d.missedIdxFiles() {
 		//TODO: build .kvi
 		fitem := item
@@ -1199,7 +1201,9 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group) (err
 			idxPath := filepath.Join(fitem.decompressor.FilePath(), fitem.decompressor.FileName())
 			idxPath = strings.TrimSuffix(idxPath, "kv") + "bt"
 
-			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor); err != nil {
+			p := ps.AddNew("fixme", uint64(fitem.decompressor.Count()))
+			defer ps.Delete(p)
+			if err := BuildBtreeIndexWithDecompressor(idxPath, fitem.decompressor, p); err != nil {
 				return fmt.Errorf("failed to build btree index for %s:  %w", fitem.decompressor.FileName(), err)
 			}
 			return nil
@@ -1208,14 +1212,14 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group) (err
 	return nil
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) (*recsplit.Index, error) {
-	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values); err != nil {
+func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress) (*recsplit.Index, error) {
+	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values, p); err != nil {
 		return nil, err
 	}
 	return recsplit.OpenIndex(idxPath)
 }
 
-func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool) error {
+func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
@@ -1254,6 +1258,8 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir s
 			}
 			// Skip value
 			keyPos = g.Skip()
+
+			p.Processed.Add(1)
 		}
 		if err = rs.Build(); err != nil {
 			if rs.Collision() {
