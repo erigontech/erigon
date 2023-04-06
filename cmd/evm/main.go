@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -190,11 +189,7 @@ func init() {
 	}
 }
 
-var t = time.Now()
-
 func main() {
-	defer func() { fmt.Printf("main.go init: %s\n", time.Since(t)) }()
-	defer func(t time.Time) { fmt.Printf("main.go:193: %s\n", time.Since(t)) }(time.Now())
 	if err := app.Run(os.Args); err != nil {
 		code := 1
 		if ec, ok := err.(*t8ntool.NumberedError); ok {
