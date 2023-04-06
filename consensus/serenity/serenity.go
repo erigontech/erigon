@@ -125,10 +125,10 @@ func (s *Serenity) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 
 func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
 ) (types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, e, chain, syscall)
+		return s.eth1Engine.Finalize(config, header, state, txs, uncles, r, withdrawals, chain, syscall)
 	}
 	if auraEngine, ok := s.eth1Engine.(*aura.AuRa); ok {
 		if err := auraEngine.ApplyRewards(header, state, syscall); err != nil {
@@ -150,12 +150,12 @@ func (s *Serenity) Finalize(config *chain.Config, header *types.Header, state *s
 
 func (s *Serenity) FinalizeAndAssemble(config *chain.Config, header *types.Header, state *state.IntraBlockState,
 	txs types.Transactions, uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
-	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
+	chain consensus.ChainHeaderReader, syscall consensus.SystemCall, call consensus.Call,
 ) (*types.Block, types.Transactions, types.Receipts, error) {
 	if !IsPoSHeader(header) {
-		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall, call)
+		return s.eth1Engine.FinalizeAndAssemble(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall, call)
 	}
-	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, e, chain, syscall)
+	outTxs, outReceipts, err := s.Finalize(config, header, state, txs, uncles, receipts, withdrawals, chain, syscall)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -245,8 +245,8 @@ func (s *Serenity) IsServiceTransaction(sender libcommon.Address, syscall consen
 	return s.eth1Engine.IsServiceTransaction(sender, syscall)
 }
 
-func (s *Serenity) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, e consensus.EpochReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
-	s.eth1Engine.Initialize(config, chain, e, header, state, txs, uncles, syscall)
+func (s *Serenity) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall consensus.SystemCall) {
+	s.eth1Engine.Initialize(config, chain, header, state, txs, uncles, syscall)
 }
 
 func (s *Serenity) APIs(chain consensus.ChainHeaderReader) []rpc.API {

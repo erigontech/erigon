@@ -76,11 +76,6 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 		cancel()
 	}()
 
-	pollInterval := 500 * time.Millisecond
-	pollEvery := time.NewTicker(pollInterval)
-	defer pollEvery.Stop()
-	client := &http.Client{}
-	defer client.CloseIdleConnections()
 	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
 	metricsURL := metricsURLs[0] // TODO: Generalise
 
@@ -107,10 +102,31 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 		InsecureSkipVerify: insecure, //nolint:gosec
 	}
 
-	reader, writer := io.Pipe()
-	httpClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
+	// Perform the requests in a loop (reconnect)
+	for {
+		if err := tunnel(ctx, tlsConfig, diagnosticsUrl, metricsURL); err != nil {
+			return err
+		}
+		log.Info("Reconnecting in 1 second...")
+		timer := time.NewTimer(1 * time.Second)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			// Quit immediately if the context was cancelled (by Ctrl-C or TERM signal)
+			return nil
+		}
+	}
+}
 
+// tunnel operates the tunnel from diagnostics system to the metrics URL for one http/2 request
+// needs to be called repeatedly to implement re-connect logic
+func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, metricsURL string) error {
+	diagnosticsClient := &http.Client{Transport: &http2.Transport{TLSClientConfig: tlsConfig}}
+	defer diagnosticsClient.CloseIdleConnections()
+	metricsClient := &http.Client{}
+	defer metricsClient.CloseIdleConnections()
 	// Create a request object to send to the server
+	reader, writer := io.Pipe()
 	req, err := http.NewRequest(http.MethodPost, diagnosticsUrl, reader)
 	if err != nil {
 		return err
@@ -120,14 +136,12 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 
 	// Apply given context to the sent request
 	req = req.WithContext(ctx)
-
-	// Perform the request
-	resp, err := httpClient.Do(req)
+	resp, err := diagnosticsClient.Do(req)
 	if err != nil {
 		return err
 	}
 	// Create a connection
-	ctx1, cancel1 := context.WithCancel(req.Context())
+	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
 	defer resp.Body.Close()
 	defer writer.Close()
@@ -143,6 +157,7 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 	if string(firstLine) != "SUCCESS\n" {
 		return fmt.Errorf("connecting to diagnostics system: %s", firstLine)
 	}
+	log.Info("Connected")
 
 outerLoop:
 	for {
@@ -161,7 +176,7 @@ outerLoop:
 			break outerLoop
 		}
 		fmt.Printf("Got request: %s\n", buf[:readLen-1])
-		metricsResponse, err := client.Get(metricsURL + string(buf[:readLen-1]))
+		metricsResponse, err := metricsClient.Get(metricsURL + string(buf[:readLen-1]))
 		if err != nil {
 			log.Error("Problem requesting metrics", "url", metricsURL, "query", string(buf[:readLen-1]), "err", err)
 			break outerLoop

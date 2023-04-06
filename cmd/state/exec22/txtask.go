@@ -1,6 +1,8 @@
 package exec22
 
 import (
+	"sync"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -38,7 +40,6 @@ type TxTask struct {
 	AccountDels        map[string]*accounts.Account
 	StoragePrevs       map[string][]byte
 	CodePrevs          map[string]uint64
-	ResultsSize        int64
 	Error              error
 	Logs               []*types.Log
 	TraceFroms         map[libcommon.Address]struct{}
@@ -51,6 +52,12 @@ type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
 	return len(h)
+}
+func LenLocked(h *TxTaskQueue, lock *sync.Mutex) (l int) {
+	lock.Lock()
+	l = h.Len()
+	lock.Unlock()
+	return l
 }
 
 func (h TxTaskQueue) Less(i, j int) bool {

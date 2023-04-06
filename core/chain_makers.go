@@ -117,7 +117,7 @@ func (b *BlockGen) AddTxWithChain(getHeader func(hash libcommon.Hash, number uin
 		b.SetCoinbase(libcommon.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil /*excessDataGas*/)
 	if err != nil {
 		panic(err)
 	}
@@ -130,7 +130,7 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash libcommon.Hash, numb
 		b.SetCoinbase(libcommon.Address{})
 	}
 	b.ibs.Prepare(tx.Hash(), libcommon.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
+	receipt, _, err := ApplyTransaction(b.config, GetHashFn(b.header, getHeader), engine, &b.header.Coinbase, b.gasPool, b.ibs, state.NewNoopWriter(), b.header, tx, &b.header.GasUsed, vm.Config{}, nil /*excessDataGas*/)
 	_ = err // accept failed transactions
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -331,7 +331,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil /* withdrawals */, nil, nil, nil, nil); err != nil {
+			if _, _, _, err := b.engine.FinalizeAndAssemble(config, b.header, ibs, b.txs, b.uncles, b.receipts, nil, nil, nil, nil); err != nil {
 				return nil, nil, fmt.Errorf("call to FinaliseAndAssemble: %w", err)
 			}
 			// Write state changes to db

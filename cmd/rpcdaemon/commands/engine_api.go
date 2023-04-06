@@ -152,13 +152,32 @@ func (e *EngineImpl) ForkchoiceUpdatedV2(ctx context.Context, forkChoiceState *F
 	return e.forkchoiceUpdated(2, ctx, forkChoiceState, payloadAttributes)
 }
 
+// Converts slice of pointers to slice of structs
+func withdrawalValues(ptrs []*types.Withdrawal) []types.Withdrawal {
+	if ptrs == nil {
+		return nil
+	}
+	vals := make([]types.Withdrawal, 0, len(ptrs))
+	for _, w := range ptrs {
+		vals = append(vals, *w)
+	}
+	return vals
+}
+
 func (e *EngineImpl) forkchoiceUpdated(version uint32, ctx context.Context, forkChoiceState *ForkChoiceState, payloadAttributes *PayloadAttributes) (map[string]interface{}, error) {
 	if e.internalCL {
 		log.Error("EXTERNAL CONSENSUS LAYER IS NOT ENABLED, PLEASE RESTART WITH FLAG --externalcl")
 		return nil, fmt.Errorf("engine api should not be used, restart with --externalcl")
 	}
-	log.Debug("Received ForkchoiceUpdated", "version", version, "head", forkChoiceState.HeadHash, "safe", forkChoiceState.HeadHash, "finalized", forkChoiceState.FinalizedBlockHash,
-		"build", payloadAttributes != nil)
+	if payloadAttributes == nil {
+		log.Debug("Received ForkchoiceUpdated", "version", version,
+			"head", forkChoiceState.HeadHash, "safe", forkChoiceState.SafeBlockHash, "finalized", forkChoiceState.FinalizedBlockHash)
+	} else {
+		log.Info("Received ForkchoiceUpdated [build]", "version", version,
+			"head", forkChoiceState.HeadHash, "safe", forkChoiceState.SafeBlockHash, "finalized", forkChoiceState.FinalizedBlockHash,
+			"timestamp", payloadAttributes.Timestamp, "prevRandao", payloadAttributes.PrevRandao, "suggestedFeeRecipient", payloadAttributes.SuggestedFeeRecipient,
+			"withdrawals", withdrawalValues(payloadAttributes.Withdrawals))
+	}
 
 	var attributes *remote.EnginePayloadAttributes
 	if payloadAttributes != nil {
