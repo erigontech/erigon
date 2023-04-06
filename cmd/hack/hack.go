@@ -1151,7 +1151,6 @@ func findPrefix(chaindata string) error {
 	defer c.Close()
 	var k []byte
 	var e error
-	prefix := common.FromHex("0x0901050b0c03")
 	count := 0
 	for k, _, e = c.First(); k != nil && e == nil; k, _, e = c.Next() {
 		if len(k) != 20 {

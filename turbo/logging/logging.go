@@ -115,6 +115,10 @@ func initSeparatedLogging(
 		log.Root().SetHandler(log.LvlFilterHandler(consoleLevel, log.StderrHandler))
 	}
 
+	rbuf := NewAtomicFixedSizeRingBuf(1024 * 1024)
+	consoleMux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(consoleLevel, log.StreamHandler(rbuf, log.TerminalFormatNoColor())))
+	log.Root().SetHandler(consoleMux)
+
 	if len(dirPath) == 0 {
 		logger.Warn("no log dir set, console logging only")
 		return logger
@@ -126,23 +130,18 @@ func initSeparatedLogging(
 		return logger
 	}
 
-	dirFormat := log.LogfmtFormat()
+	dirFormat := log.TerminalFormatNoColor()
 	if dirJson {
 		dirFormat = log.JsonFormat()
 	}
 
-	userLog, err := log.FileHandler(path.Join(dirPath, filePrefix+"-user.log"), dirFormat, 1<<27) // 128Mb
+	userLog, err := log.FileHandler(path.Join(dirPath, filePrefix+".log"), dirFormat, 1<<27) // 128Mb
 	if err != nil {
 		logger.Warn("failed to open user log, console logging only")
 		return logger
 	}
-	errLog, err := log.FileHandler(path.Join(dirPath, filePrefix+"-error.log"), dirFormat, 1<<27) // 128Mb
-	if err != nil {
-		logger.Warn("failed to open error log, console logging only")
-		return logger
-	}
 
-	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(dirLevel, userLog), log.LvlFilterHandler(log.LvlError, errLog))
+	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(dirLevel, userLog))
 	log.Root().SetHandler(mux)
 	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
