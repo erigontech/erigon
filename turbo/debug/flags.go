@@ -191,6 +191,7 @@ func Setup(ctx *cli.Context) error {
 		exp.Setup(address)
 		diagnostics.SetupLogsAccess(ctx)
 		diagnostics.SetupDbAccess(ctx)
+		diagnostics.SetupCmdLineAccess()
 	}
 
 	// pprof server

@@ -76,9 +76,6 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 		cancel()
 	}()
 
-	pollInterval := 500 * time.Millisecond
-	pollEvery := time.NewTicker(pollInterval)
-	defer pollEvery.Stop()
 	metricsURLs := cliCtx.StringSlice(metricsURLsFlag.Name)
 	metricsURL := metricsURLs[0] // TODO: Generalise
 
@@ -110,14 +107,14 @@ func connectDiagnostics(cliCtx *cli.Context) error {
 		if err := tunnel(ctx, tlsConfig, diagnosticsUrl, metricsURL); err != nil {
 			return err
 		}
+		log.Info("Reconnecting in 1 second...")
+		timer := time.NewTimer(1 * time.Second)
 		select {
+		case <-timer.C:
 		case <-ctx.Done():
 			// Quit immediately if the context was cancelled (by Ctrl-C or TERM signal)
 			return nil
-		default:
 		}
-		log.Info("Reconnecting in 10 seconds...")
-		time.Sleep(10 * time.Second)
 	}
 }
 
@@ -144,7 +141,7 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 		return err
 	}
 	// Create a connection
-	ctx1, cancel1 := context.WithCancel(req.Context())
+	ctx1, cancel1 := context.WithCancel(ctx)
 	defer cancel1()
 	defer resp.Body.Close()
 	defer writer.Close()
@@ -160,6 +157,7 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 	if string(firstLine) != "SUCCESS\n" {
 		return fmt.Errorf("connecting to diagnostics system: %s", firstLine)
 	}
+	log.Info("Connected")
 
 outerLoop:
 	for {
