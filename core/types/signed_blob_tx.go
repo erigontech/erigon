@@ -159,7 +159,7 @@ func (tdv *TxDataView) UnmarshalText(text []byte) error {
 	if tdv == nil {
 		return errors.New("cannot decode into nil blob data")
 	}
-	return conv.DynamicBytesUnmarshalText((*[]byte)(tdv), text[:])
+	return conv.DynamicBytesUnmarshalText((*[]byte)(tdv), text)
 }
 
 func ReadHashes(dr *codec.DecodingReader, hashes *[]libcommon.Hash, length uint64) error {
@@ -276,8 +276,8 @@ func (alv AccessListView) Serialize(w *codec.EncodingWriter) error {
 }
 
 func (alv AccessListView) ByteLength() (out uint64) {
-	for _, v := range alv {
-		out += (*AccessTupleView)(&v).ByteLength() + codec.OFFSET_SIZE
+	for idx := range alv {
+		out += (*AccessTupleView)(&alv[idx]).ByteLength() + codec.OFFSET_SIZE
 	}
 	return
 }

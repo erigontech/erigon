@@ -14,9 +14,11 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/protolambda/go-kzg/eth"
+
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/protolambda/ztyp/codec"
 
+	"github.com/ledgerwatch/erigon/crypto/kzg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -57,7 +59,7 @@ func (p *KZGCommitment) UnmarshalText(text []byte) error {
 }
 
 func (c KZGCommitment) ComputeVersionedHash() libcommon.Hash {
-	return libcommon.Hash(eth.KZGToVersionedHash(eth.KZGCommitment(c)))
+	return libcommon.Hash(kzg.KZGToVersionedHash(gokzg4844.KZGCommitment(c)))
 }
 
 // Compressed BLS12-381 G1 element
@@ -111,38 +113,25 @@ func (p *BLSFieldElement) UnmarshalText(text []byte) error {
 }
 
 // Blob data
-type Blob [params.FieldElementsPerBlob]BLSFieldElement
-
-// eth.Blob interface
-func (blob Blob) Len() int {
-	return len(blob)
-}
-
-// eth.Blob interface
-func (blob Blob) At(i int) [32]byte {
-	return [32]byte(blob[i])
-}
+type Blob [params.FieldElementsPerBlob * 32]byte
 
 func (blob *Blob) Deserialize(dr *codec.DecodingReader) error {
 	if blob == nil {
 		return errors.New("cannot decode ssz into nil Blob")
 	}
-	for i := uint64(0); i < params.FieldElementsPerBlob; i++ {
-		// TODO: do we want to check if each field element is within range?
-		if _, err := dr.Read(blob[i][:]); err != nil {
-			return err
-		}
+
+	// We treat the blob as an opaque sequence of bytes
+	// and therefore we do not do any validation related to field
+	// elements
+	if _, err := dr.Read(blob[:]); err != nil {
+		return err
 	}
+
 	return nil
 }
 
 func (blob *Blob) Serialize(w *codec.EncodingWriter) error {
-	for i := range blob {
-		if err := w.Write(blob[i][:]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return w.Write(blob[:])
 }
 
 func (blob *Blob) ByteLength() (out uint64) {
@@ -156,11 +145,8 @@ func (blob *Blob) FixedLength() uint64 {
 func (blob *Blob) MarshalText() ([]byte, error) {
 	out := make([]byte, 2+params.FieldElementsPerBlob*32*2)
 	copy(out[:2], "0x")
-	j := 2
-	for _, elem := range blob {
-		hex.Encode(out[j:j+64], elem[:])
-		j += 64
-	}
+	hex.Encode(out[2:], blob[:])
+
 	return out, nil
 }
 
@@ -183,29 +169,16 @@ func (blob *Blob) UnmarshalText(text []byte) error {
 	if !(text[0] == '0' && text[1] == 'x') {
 		return fmt.Errorf("expected '0x' prefix in Blob string")
 	}
-	j := 0
-	for i := 2; i < l; i += 64 {
-		if _, err := hex.Decode(blob[j][:], text[i:i+64]); err != nil {
-			return fmt.Errorf("blob item %d is not formatted correctly: %v", j, err)
-		}
-		j += 1
+	if _, err := hex.Decode(blob[:], text[2:]); err != nil {
+		return fmt.Errorf("blob is not formatted correctly: %v", err)
 	}
+
 	return nil
 }
 
 type BlobKzgs []KZGCommitment
 
-// eth.KZGCommitmentSequence interface
-func (bk BlobKzgs) Len() int {
-	return len(bk)
-}
-
-func (bk BlobKzgs) At(i int) eth.KZGCommitment {
-	return eth.KZGCommitment(bk[i])
-}
-
 func (li *BlobKzgs) Deserialize(dr *codec.DecodingReader) error {
-	*li = BlobKzgs([]KZGCommitment{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*li)
 		*li = append(*li, KZGCommitment{})
@@ -233,20 +206,39 @@ func (li BlobKzgs) copy() BlobKzgs {
 	return cpy
 }
 
+type KZGProofs []KZGProof
+
+func (li *KZGProofs) Deserialize(dr *codec.DecodingReader) error {
+	return dr.List(func() codec.Deserializable {
+		i := len(*li)
+		*li = append(*li, KZGProof{})
+		return &(*li)[i]
+	}, 48, params.MaxBlobsPerBlock)
+}
+
+func (li KZGProofs) Serialize(w *codec.EncodingWriter) error {
+	return w.List(func(i uint64) codec.Serializable {
+		return &li[i]
+	}, 48, uint64(len(li)))
+}
+
+func (li KZGProofs) ByteLength() uint64 {
+	return uint64(len(li)) * 48
+}
+
+func (li KZGProofs) FixedLength() uint64 {
+	return 0
+}
+
+func (li KZGProofs) copy() KZGProofs {
+	cpy := make(KZGProofs, len(li))
+	copy(cpy, li)
+	return cpy
+}
+
 type Blobs []Blob
 
-// eth.BlobSequence interface
-func (blobs Blobs) Len() int {
-	return len(blobs)
-}
-
-// eth.BlobSequence interface
-func (blobs Blobs) At(i int) eth.Blob {
-	return blobs[i]
-}
-
 func (a *Blobs) Deserialize(dr *codec.DecodingReader) error {
-	*a = Blobs([]Blob{})
 	return dr.List(func() codec.Deserializable {
 		i := len(*a)
 		*a = append(*a, Blob{})
@@ -274,29 +266,51 @@ func (blobs Blobs) copy() Blobs {
 	return cpy
 }
 
-// Return KZG commitments, versioned hashes and the aggregated KZG proof that correspond to these blobs
-func (blobs Blobs) ComputeCommitmentsAndAggregatedProof() (commitments []KZGCommitment, versionedHashes []libcommon.Hash, aggregatedProof KZGProof, err error) {
+// Return KZG commitments, versioned hashes and the proofs that correspond to these blobs
+func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, versionedHashes []libcommon.Hash, proofs []KZGProof, err error) {
 	commitments = make([]KZGCommitment, len(blobs))
+	proofs = make([]KZGProof, len(blobs))
 	versionedHashes = make([]libcommon.Hash, len(blobs))
+
+	cryptoCtx := kzg.CrpytoCtx()
 	for i, blob := range blobs {
-		c, ok := eth.BlobToKZGCommitment(blob)
-		if !ok {
-			return nil, nil, KZGProof{}, errors.New("could not convert blob to commitment")
-		}
-		commitments[i] = KZGCommitment(c)
-		versionedHashes[i] = libcommon.Hash(eth.KZGToVersionedHash(c))
-	}
-
-	var kzgProof KZGProof
-	if len(blobs) != 0 {
-		proof, err := eth.ComputeAggregateKZGProof(blobs)
+		commitment, err := cryptoCtx.BlobToKZGCommitment(gokzg4844.Blob(blob))
 		if err != nil {
-			return nil, nil, KZGProof{}, err
+			return nil, nil, nil, fmt.Errorf("could not convert blob to commitment: %v", err)
 		}
-		kzgProof = KZGProof(proof)
+
+		proof, err := cryptoCtx.ComputeBlobKZGProof(gokzg4844.Blob(blob), commitment)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("could not compute proof for blob: %v", err)
+		}
+		commitments[i] = KZGCommitment(commitment)
+		proofs[i] = KZGProof(proof)
+		versionedHashes[i] = libcommon.Hash(kzg.KZGToVersionedHash(commitment))
 	}
 
-	return commitments, versionedHashes, kzgProof, nil
+	return commitments, versionedHashes, proofs, nil
+}
+
+func toBlobs(_blobs Blobs) []gokzg4844.Blob {
+	blobs := make([]gokzg4844.Blob, len(_blobs))
+	for i, _blob := range _blobs {
+		blobs[i] = gokzg4844.Blob(_blob)
+	}
+	return blobs
+}
+func toComms(_comms BlobKzgs) []gokzg4844.KZGCommitment {
+	comms := make([]gokzg4844.KZGCommitment, len(_comms))
+	for i, _comm := range _comms {
+		comms[i] = gokzg4844.KZGCommitment(_comm)
+	}
+	return comms
+}
+func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
+	proofs := make([]gokzg4844.KZGProof, len(_proofs))
+	for i, _proof := range _proofs {
+		proofs[i] = gokzg4844.KZGProof(_proof)
+	}
+	return proofs
 }
 
 // BlobTxWrapper is the "network representation" of a Blob transaction, that is it includes not
@@ -305,7 +319,7 @@ type BlobTxWrapper struct {
 	Tx                 SignedBlobTx
 	BlobKzgs           BlobKzgs
 	Blobs              Blobs
-	KzgAggregatedProof KZGProof
+	KzgAggregatedProof KZGProofs
 }
 
 func (txw *BlobTxWrapper) Deserialize(dr *codec.DecodingReader) error {
@@ -324,7 +338,8 @@ func (txw *BlobTxWrapper) FixedLength() uint64 {
 	return 0
 }
 
-func (txw *BlobTxWrapper) VerifyBlobs() error {
+// validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
+func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
 	blobTx := txw.Tx.Message
 	l1 := len(txw.BlobKzgs)
 	l2 := len(blobTx.BlobVersionedHashes)
@@ -338,12 +353,10 @@ func (txw *BlobTxWrapper) VerifyBlobs() error {
 	if l1 > params.MaxBlobsPerBlock {
 		return fmt.Errorf("number of blobs exceeds max: %v", l1)
 	}
-	ok, err := eth.VerifyAggregateKZGProof(txw.Blobs, txw.BlobKzgs, eth.KZGProof(txw.KzgAggregatedProof))
+	cryptoCtx := kzg.CrpytoCtx()
+	err := cryptoCtx.VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.BlobKzgs), toProofs(txw.KzgAggregatedProof))
 	if err != nil {
 		return fmt.Errorf("error during proof verification: %v", err)
-	}
-	if !ok {
-		return errors.New("failed to verify kzg")
 	}
 	for i, h := range blobTx.BlobVersionedHashes {
 		if computed := txw.BlobKzgs[i].ComputeVersionedHash(); computed != h {
