@@ -21,6 +21,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -33,9 +34,10 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -141,12 +143,14 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 // Domain should not have any go routines or locks
 type Domain struct {
 	*History
+	//keyTxNums *btree2.BTreeG[uint64]
 	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
 	topLock   sync.RWMutex
-	topTx     map[string]uint64
+	topTx     map[string]string
+	topVals   map[string][]byte
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
@@ -160,9 +164,11 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
-		topTx:     make(map[string]uint64),
+		topTx:     make(map[string]string),
+		topVals:   make(map[string][]byte),
 		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		stats:     DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
+		//keyTxNums: btree2.NewBTreeGOptions[uint64](func(a, b uint64) bool { return a < b }, btree2.Options{Degree: 128, NoLocks: false}),
+		stats: DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
@@ -431,7 +437,13 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 
 	fullkey := common.Append(key1, key2, make([]byte, 8))
 	kl := len(key1) + len(key2)
-	binary.BigEndian.PutUint64(fullkey[kl:], ^(d.txNum / d.aggregationStep))
+	istep := ^(d.txNum / d.aggregationStep)
+	binary.BigEndian.PutUint64(fullkey[kl:], istep)
+
+	//d.topLock.Lock()
+	//d.topTx[hex.EncodeToString(fullkey[:kl])] = string(fullkey[kl:])
+	//d.topVals[hex.EncodeToString(fullkey)] = val
+	//d.topLock.Unlock()
 
 	if err := d.tx.Put(d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
@@ -440,7 +452,7 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 		return err
 	}
 	return nil
-	return d.wal.addValue(key1, key2, val, d.txNum)
+	//return d.wal.addValue(key1, key2, val, d.txNum)
 }
 
 func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
@@ -448,8 +460,20 @@ func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
 	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
-	return d.tx.Delete(d.keysTable, common.Append(key1, key2))
-	return d.wal.addValue(key1, key2, nil, d.txNum)
+
+	k := common.Append(key1, key2)
+	//d.topLock.Lock()
+	//ttx, ok := d.topTx[string(k)]
+	//if ok {
+	//	delete(d.topTx, string(k))
+	//
+	//	delete(d.topVals, string(k)+ttx)
+	//}
+	//d.topLock.Unlock()
+	//return nil
+
+	return d.tx.Delete(d.keysTable, k)
+	//return d.wal.addValue(key1, key2, nil, d.txNum)
 }
 
 func (d *Domain) update(key, original []byte) error {
@@ -513,6 +537,7 @@ func (d *Domain) Delete(key1, key2 []byte) error {
 
 type domainWAL struct {
 	d           *Domain
+	keys        *etl.Collector
 	values      *etl.Collector
 	tmpdir      string
 	key         []byte
@@ -534,6 +559,8 @@ func (d *Domain) newWriter(tmpdir string, buffered, discard bool) *domainWAL {
 	if buffered {
 		w.values = etl.NewCollector(d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
 		w.values.LogLvl(log.LvlTrace)
+		w.keys = etl.NewCollector(d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM))
+		w.keys.LogLvl(log.LvlTrace)
 	}
 	return w
 }
@@ -563,22 +590,16 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	if h.discard {
 		return nil
 	}
+	if err := h.keys.Load(tx, h.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := h.values.Load(tx, h.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	//h.d.topLock.Lock()
-	//for k, v := range h.topTx {
-	//	pv, ok := h.d.topTx[k]
-	//	if !ok || v > pv {
-	//		h.d.topTx[k] = v
-	//	}
-	//}
-	//h.d.topLock.Unlock()
-	//h.close()
 	return nil
 }
 
-func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
+func (h *domainWAL) addValue(key1, key2, original []byte, step []byte) error {
 	if h.discard {
 		return nil
 	}
@@ -587,32 +608,25 @@ func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
 	fullkey := h.key[:kl+8]
 	copy(fullkey, key1)
 	copy(fullkey[len(key1):], key2)
-	binary.BigEndian.PutUint64(fullkey[kl:], txnum)
-	//top, _ := h.topTx[string(fullkey[:kl])]
-	//if top <= txnum {
-	//	h.topTx[string(fullkey[:kl])] = txnum
-	//}
+	//step := ^(txnum / h.d.aggregationStep)
+	//binary.BigEndian.PutUint64(fullkey[kl:], step)
+	copy(fullkey[kl:], step)
 
 	if h.largeValues {
 		if !h.buffered {
-			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
+			if err := h.d.tx.Put(h.d.valsTable, fullkey[:kl], fullkey[kl:]); err != nil {
 				return err
 			}
 
-			invstep := ^(txnum / h.d.aggregationStep)
-			binary.BigEndian.PutUint64(fullkey[kl:], invstep)
 			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
 				return err
 			}
 			return nil
 		}
 
-		if err := h.values.Collect(fullkey, original); err != nil {
+		if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 			return err
 		}
-
-		invstep := ^(txnum / h.d.aggregationStep)
-		binary.BigEndian.PutUint64(fullkey[kl:], invstep)
 		if err := h.values.Collect(fullkey, original); err != nil {
 			return err
 		}
@@ -622,13 +636,10 @@ func (h *domainWAL) addValue(key1, key2, original []byte, txnum uint64) error {
 
 	//coverKey := h.key[:len(fullkey)+len(original)]
 	//copy(coverKey, fullkey)
-	//
 	//k, v := coverKey[:len(fullkey)], coverKey[len(fullkey):]
-	if err := h.values.Collect(fullkey, original); err != nil {
+	if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
-	invstep := ^(txnum / h.d.aggregationStep)
-	binary.BigEndian.PutUint64(fullkey[kl:], invstep)
 	if err := h.values.Collect(fullkey, original); err != nil {
 		return err
 	}
@@ -876,11 +887,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	}
 	defer keysCursor.Close()
 
-	//totalKeys, err := keysCursor.Count()
-	//if err != nil {
-	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	//}
-
 	var (
 		k, v     []byte
 		pos      uint64
@@ -899,33 +905,6 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 		keySuffix = make([]byte, 256+8)
 	)
 	binary.BigEndian.PutUint64(stepBytes, ^step)
-
-	//valsCursor, err := roTx.Cursor(d.valsTable)
-	//if err != nil {
-	//	return Collation{}, fmt.Errorf("create %s vals cursor: %w", d.filenameBase, err)
-	//}
-	//
-	//totalKeys, err := valsCursor.Count()
-	//if err != nil {
-	//	return Collation{}, fmt.Errorf("failed to obtain keys count for domain %q", d.filenameBase)
-	//}
-	//
-	//for k, v, err = valsCursor.First(); err == nil && k != nil; k, _, err = valsCursor.Next() {
-	//	pos++
-	//	select {
-	//	case <-ctx.Done():
-	//		return Collation{}, ctx.Err()
-	//	case <-logEvery.C:
-	//		log.Info("[snapshots] collate domain", "name", d.filenameBase,
-	//			"range", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)),
-	//			"progress", fmt.Sprintf("%.2f%%", float64(pos)/float64(totalKeys)*100))
-	//	default:
-	//	}
-	//
-	//	if bytes.HasSuffix(k, stepBytes) {
-	//		pairs <- kvpair{k: k[:len(k)-len(stepBytes)], v: v}
-	//	}
-	//}
 
 	for k, _, err = keysCursor.First(); err == nil && k != nil; k, _, err = keysCursor.NextNoDup() {
 		pos++
@@ -1773,6 +1752,20 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 
 func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
+
+	//d.topLockLock()
+	//for k, is := range d.topTx {
+	//	v, ok := d.topVals[k+is]
+	//	if !ok {
+	//		panic(fmt.Errorf("no value for key %x", k+is))
+	//	}
+	//	if err := d.wal.addValue([]byte(k), nil, v, []byte(is)); err != nil {
+	//		panic(err)
+	//	}
+	//	delete(d.topTx, k)
+	//	delete(d.topVals, k+is)
+	//}
+	//d.topLock.Unlock()
 	hf.d = d.wal
 	d.wal = d.newWriter(d.wal.tmpdir, d.wal.buffered, d.wal.discard)
 	return hf
@@ -1781,9 +1774,24 @@ func (d *Domain) Rotate() flusher {
 func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error) {
 	dc.d.stats.TotalQueries.Add(1)
 
-	ttx := ^(dc.d.txNum / dc.d.aggregationStep)
+	dc.d.topLock.RLock()
+	ttx, ok := dc.d.topTx[hex.EncodeToString(key)]
+	if ok {
+		copy(dc.keyBuf[:], key)
+		copy(dc.keyBuf[len(key):], []byte(ttx))
+		//binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
+
+		v, ok := dc.d.topVals[hex.EncodeToString(dc.keyBuf[:len(key)+8])]
+		if ok {
+			dc.d.topLock.RUnlock()
+			return v, true, nil
+		}
+	}
+	dc.d.topLock.RUnlock()
+
+	istep := ^(dc.d.txNum / dc.d.aggregationStep)
 	copy(dc.keyBuf[:], key)
-	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
+	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], istep)
 
 	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
 	if err != nil {
@@ -1810,5 +1818,5 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 	copy(dc.keyBuf[:], key1)
 	copy(dc.keyBuf[len(key1):], key2)
 	return dc.get((dc.keyBuf[:len(key1)+len(key2)]), dc.d.txNum, roTx)
-	return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
+	//return dc.getLatest(dc.keyBuf[:len(key1)+len(key2)], roTx)
 }

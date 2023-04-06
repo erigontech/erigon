@@ -31,11 +31,12 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 
@@ -547,7 +548,7 @@ func (h *History) newWriter(tmpdir string, buffered, discard bool) *historyWAL {
 		discard:  discard,
 
 		autoIncrementBuf: make([]byte, 8),
-		historyKey:       make([]byte, 0, 128),
+		historyKey:       make([]byte, 128),
 		largeValues:      h.largeValues,
 	}
 	if buffered {
@@ -599,6 +600,10 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 			return err
 		}
 		return nil
+	}
+	if len(original) > len(h.historyKey)-8-len(key1)-len(key2) {
+		log.Error("History value is too large while largeValues=false", "histo", string(h.historyKey), "len", len(original), "max", len(h.historyKey)-8-len(key1)-len(key2))
+		panic("History value is too large while largeValues=false")
 	}
 
 	lk := len(key1) + len(key2)

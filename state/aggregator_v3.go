@@ -92,16 +92,16 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	ctx, ctxCancel := context.WithCancel(ctx)
 	a := &AggregatorV3{ctx: ctx, ctxCancel: ctxCancel, ps: background.NewProgressSet(), onFreeze: func(frozenFileNames []string) {}, dir: dir, tmpdir: tmpdir, aggregationStep: aggregationStep, backgroundResult: &BackgroundResult{}, db: db, keepInDB: 2 * aggregationStep}
 	var err error
-	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, true); err != nil {
+	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, true); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
 		return nil, err
 	}
 	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
 		return nil, err
 	}
-	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, false, true)
+	commitd, err := NewDomain(dir, tmpdir, aggregationStep, "commitment", kv.CommitmentKeys, kv.CommitmentDomain, kv.CommitmentHistoryKeys, kv.CommitmentHistoryVals, kv.CommitmentIdx, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -564,14 +564,11 @@ func (sf AggV3StaticFiles) Close() {
 
 func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	var (
-		logEvery = time.NewTicker(time.Second * 30)
-		wg       sync.WaitGroup
-		errCh    = make(chan error, 8)
-		//maxSpan  = StepsInBiggestFile * a.aggregationStep
-		txFrom = step * a.aggregationStep
-		txTo   = (step + 1) * a.aggregationStep
-		//workers  = 1
-
+		logEvery      = time.NewTicker(time.Second * 30)
+		wg            sync.WaitGroup
+		errCh         = make(chan error, 8)
+		txFrom        = step * a.aggregationStep
+		txTo          = (step + 1) * a.aggregationStep
 		stepStartedAt = time.Now()
 	)
 
@@ -587,12 +584,19 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 
 		mxRunningCollations.Inc()
 		start := time.Now()
+		//roTx, err := a.db.BeginRo(ctx)
+		//if err != nil {
+		//	return fmt.Errorf("domain collation %q oops: %w", d.filenameBase, err)
+		//}
 		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
+		if err != nil {
+			return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
+		}
 		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
-		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-		//mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+		mxCollationSize.Set(uint64(collation.valuesComp.Count()))
+		mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
 
 		if err != nil {
 			collation.Close()
@@ -611,22 +615,15 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 				errCh <- err
 
 				sf.Close()
-				//mxRunningMerges.Dec()
+				mxRunningMerges.Dec()
 				return
 			}
 
-			//mxRunningMerges.Dec()
+			mxRunningMerges.Dec()
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 			d.stats.LastFileBuildingTook = time.Since(start)
 		}(&wg, d, collation)
-
-		//mxPruningProgress.Add(2) // domain and history
-		//if err := d.prune(ctx, step, txFrom, txTo, (1<<64)-1, logEvery); err != nil {
-		//	return err
-		//}
-		//mxPruningProgress.Dec()
-		//mxPruningProgress.Dec()
 
 		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
 		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
@@ -636,10 +633,10 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
 		wg.Add(1)
 
-		//mxRunningCollations.Inc()
+		mxRunningCollations.Inc()
 		start := time.Now()
 		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
-		//mxRunningCollations.Dec()
+		mxRunningCollations.Dec()
 		mxCollateTook.UpdateDuration(start)
 
 		if err != nil {
@@ -649,8 +646,8 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 		go func(wg *sync.WaitGroup, d *InvertedIndex, tx kv.Tx) {
 			defer wg.Done()
 
-			//mxRunningMerges.Inc()
-			//start := time.Now()
+			mxRunningMerges.Inc()
+			start := time.Now()
 
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			if err != nil {
@@ -659,33 +656,13 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 				return
 			}
 
-			//mxRunningMerges.Dec()
-			//mxBuildTook.UpdateDuration(start)
+			mxRunningMerges.Dec()
+			mxBuildTook.UpdateDuration(start)
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 
-			icx := d.MakeContext()
-			//mxRunningMerges.Inc()
-
-			//if err := d.mergeRangesUpTo(ctx, d.endTxNumMinimax(), maxSpan, workers, icx); err != nil {
-			//	errCh <- err
-			//
-			//	mxRunningMerges.Dec()
-			//	icx.Close()
-			//	return
-			//}
-
-			//mxRunningMerges.Dec()
-			icx.Close()
+			mxRunningMerges.Inc()
 		}(&wg, d, d.tx)
-
-		//mxPruningProgress.Inc()
-		//startPrune := time.Now()
-		//if err := d.prune(ctx, txFrom, txTo, 1<<64-1, logEvery); err != nil {
-		//	return err
-		//}
-		//mxPruneTook.UpdateDuration(startPrune)
-		//mxPruningProgress.Dec()
 	}
 
 	// when domain files are build and db is pruned, we can merge them
@@ -735,7 +712,6 @@ func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
 	if upmerges > 1 {
 		log.Info("[stat] aggregation merged", "merge_took", time.Since(mergeStartedAt), "merges_count", upmerges)
 	}
-
 	return nil
 }
 
@@ -745,13 +721,9 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 		return nil
 	}
 
-	//_, err = a.shared.Commit(txn, true, false)
-	//if err != nil {
-	//	return err
-	//}
-	//if err := a.Flush(context.Background(), ); err != nil {
-	//	return err
-	//}
+	if _, err = a.ComputeCommitment(true, false); err != nil {
+		return err
+	}
 
 	// trying to create as much small-step-files as possible:
 	// - to reduce amount of small merges
@@ -770,21 +742,6 @@ func (a *AggregatorV3) BuildFiles(ctx context.Context, db kv.RoDB) (err error) {
 }
 
 func (a *AggregatorV3) buildFilesInBackground(ctx context.Context, step uint64) (err error) {
-	//closeAll := true
-	//log.Info("[snapshots] history build", "step", fmt.Sprintf("%d-%d", step, step+1))
-	//sf, err := a.buildFiles(ctx, step, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	//if err != nil {
-	//	return err
-	//}
-	//defer func() {
-	//	if closeAll {
-	//		sf.Close()
-	//	}
-	//}()
-	//a.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
-	////a.notifyAboutNewSnapshots()
-	//
-	//closeAll = false
 	return a.aggregate(ctx, step)
 }
 
@@ -1379,7 +1336,7 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 		}
 	}()
 
-	var predicates *sync.WaitGroup
+	var predicates sync.WaitGroup
 	if r.accounts.any() {
 		predicates.Add(1)
 
@@ -1393,6 +1350,7 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 
 	if r.storage.any() {
 		predicates.Add(1)
+		log.Info(fmt.Sprintf("[snapshots] merge storeage: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
 		g.Go(func() (err error) {
 			mf.storage, mf.storageIdx, mf.storageHist, err = a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, workers, a.ps)
 			predicates.Done()
@@ -1407,6 +1365,7 @@ func (a *AggregatorV3) mergeFiles(ctx context.Context, files SelectedStaticFiles
 	}
 	if r.commitment.any() {
 		predicates.Wait()
+		log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/a.aggregationStep, r.accounts.historyEndTxNum/a.aggregationStep))
 		g.Go(func() (err error) {
 			var v4Files SelectedStaticFiles
 			var v4MergedF MergedFiles
@@ -1482,6 +1441,73 @@ func (a *AggregatorV3) cleanFrozenParts(in MergedFilesV3) {
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepInDB(v uint64) { a.keepInDB = v }
 
+func (a *AggregatorV3) AggregateFilesInBackground() {
+	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
+		return
+	}
+
+	step := a.maxTxNum.Load() / a.aggregationStep
+	if ok := a.working.CompareAndSwap(false, true); !ok {
+		return
+	}
+
+	if _, err := a.ComputeCommitment(true, false); err != nil {
+		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
+		return
+	}
+	defer a.working.Store(false)
+
+	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
+		log.Warn("buildFilesInBackground", "err", err)
+	}
+	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+	//a.wg.Add(1)
+	//go func() {
+	//	defer a.wg.Done()
+	//	defer a.working.Store(false)
+	//
+	//	// check if db has enough data (maybe we didn't commit them yet)
+	//	//lastInDB := lastIdInDB(a.db, a.accounts.keysTable)
+	//	//hasData = lastInDB >= toTxNum
+	//	//if !hasData {
+	//	//	return
+	//	//}
+	//
+	//	// trying to create as much small-step-files as possible:
+	//	// - to reduce amount of small merges
+	//	// - to remove old data from db as early as possible
+	//	// - during files build, may happen commit of new data. on each loop step getting latest id in db
+	//	//for step < lastIdInDB(a.db, a.accounts.indexKeysTable)/a.aggregationStep {
+	//	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
+	//		if errors.Is(err, context.Canceled) {
+	//			return
+	//		}
+	//		log.Warn("buildFilesInBackground", "err", err)
+	//		//break
+	//	}
+	//
+	//	if ok := a.workingMerge.CompareAndSwap(false, true); !ok {
+	//		return
+	//	}
+	//	a.wg.Add(1)
+	//	go func() {
+	//		defer a.wg.Done()
+	//		defer a.workingMerge.Store(false)
+	//		if err := a.MergeLoop(a.ctx, 1); err != nil {
+	//			if errors.Is(err, context.Canceled) {
+	//				return
+	//			}
+	//			log.Warn("merge", "err", err)
+	//		}
+	//
+	//		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
+	//	}()
+	//}()
+}
+
 func (a *AggregatorV3) BuildFilesInBackground() {
 	if (a.txNum.Load() + 1) <= a.maxTxNum.Load()+a.aggregationStep+a.keepInDB { // Leave one step worth in the DB
 		return
@@ -1495,19 +1521,20 @@ func (a *AggregatorV3) BuildFilesInBackground() {
 	toTxNum := (step + 1) * a.aggregationStep
 	hasData := false
 
-	if err := a.aggregate(context.Background(), step); err != nil {
-		log.Error("aggregate", "err", err, "step", step)
-		panic(err)
-	}
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		defer a.working.Store(false)
 
 		// check if db has enough data (maybe we didn't commit them yet)
-		lastInDB := lastIdInDB(a.db, a.accounts.indexKeysTable)
+		lastInDB := lastIdInDB(a.db, a.accounts.keysTable)
 		hasData = lastInDB >= toTxNum
 		if !hasData {
+			return
+		}
+
+		if _, err := a.ComputeCommitment(true, false); err != nil {
+			log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 			return
 		}
 
