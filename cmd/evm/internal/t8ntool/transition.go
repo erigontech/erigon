@@ -231,18 +231,28 @@ func Main(ctx *cli.Context) error {
 		if prestate.Env.BaseFee == nil {
 			return NewError(ErrorVMConfig, errors.New("EIP-1559 config but missing 'currentBaseFee' in env section"))
 		}
-	}
-
-	// Sanity check, to not `panic` in state_transition
-	if prestate.Env.Random != nil && !eip1559 {
-		return NewError(ErrorVMConfig, errors.New("can only apply RANDOM on top of London chain rules"))
+	} else {
+		prestate.Env.Random = nil
 	}
 
 	if chainConfig.IsShanghai(prestate.Env.Timestamp) && prestate.Env.Withdrawals == nil {
 		return NewError(ErrorVMConfig, errors.New("Shanghai config but missing 'withdrawals' in env section"))
 	}
 
-	if env := prestate.Env; env.Difficulty == nil {
+	isMerged := chainConfig.TerminalTotalDifficulty != nil && chainConfig.TerminalTotalDifficulty.BitLen() == 0
+	env := prestate.Env
+	if isMerged {
+		// post-merge:
+		// - random must be supplied
+		// - difficulty must be zero
+		switch {
+		case env.Random == nil:
+			return NewError(ErrorVMConfig, errors.New("post-merge requires currentRandom to be defined in env"))
+		case env.Difficulty != nil && env.Difficulty.BitLen() != 0:
+			return NewError(ErrorVMConfig, errors.New("post-merge difficulty must be zero (or omitted) in env"))
+		}
+		prestate.Env.Difficulty = nil
+	} else if env.Difficulty == nil {
 		// If difficulty was not provided by caller, we need to calculate it.
 		switch {
 		case env.ParentDifficulty == nil:
@@ -572,13 +582,16 @@ func dispatchOutput(ctx *cli.Context, baseDir string, result *core.EphemeralExec
 
 func NewHeader(env stEnv) *types.Header {
 	var header types.Header
-	header.UncleHash = env.ParentUncleHash
 	header.Coinbase = env.Coinbase
 	header.Difficulty = env.Difficulty
-	header.Number = big.NewInt(int64(env.Number))
 	header.GasLimit = env.GasLimit
+	header.Number = big.NewInt(int64(env.Number))
 	header.Time = env.Timestamp
 	header.BaseFee = env.BaseFee
+	header.MixDigest = env.MixDigest
+
+	header.UncleHash = env.UncleHash
+	header.WithdrawalsHash = env.WithdrawalsHash
 
 	return &header
 }
