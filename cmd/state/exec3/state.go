@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 
@@ -103,9 +102,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() error {
-	defer func() {
-		fmt.Printf("worker exit\n")
-	}()
 	for txTask, ok := rw.rs.Schedule(rw.ctx); ok; txTask, ok = rw.rs.Schedule(rw.ctx) {
 		rw.RunTxTask(txTask)
 		select {
