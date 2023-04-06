@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -105,23 +104,6 @@ func NewState(db *DB) (*State, error) {
 }
 
 func (state *State) ProcessBlock(block types.Block) error {
-	// Set v equal to 27, otherwise the wrong chain ID will be derived for legacy transaction
-	// TODO: remove it when all the transactions are signed
-	// https: //infinityswap.atlassian.net/browse/EPROD-203
-	log.Info(block.Number().String())
-	for _, tr := range block.Transactions() {
-		if legacyTr, ok := tr.(*types.LegacyTx); ok {
-			if legacyTr.V.IsZero() {
-				legacyTr.V = *uint256.NewInt(27)
-			}
-
-			signer := types.MakeSigner(state.chainConfig, block.NumberU64())
-			from, _ := legacyTr.Sender(*signer)
-
-			log.Info(fmt.Sprintf("from: %s, to: %x , nonce: %d", from.Hex(), legacyTr.To, legacyTr.Nonce))
-		}
-	}
-
 	tx, err := state.db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return err
