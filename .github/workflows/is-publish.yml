@@ -6,7 +6,7 @@ on:
   push:
     branches:
       - "develop"
-      - "ci/cloudrun"
+      - "ci/vmdeploy"
     tags:
       - "v*"
     paths-ignore:
@@ -55,9 +55,9 @@ jobs:
           # push: ${{ (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') ||  github.ref_type == 'tag' }}
           push: true
           context: .
-          file: ./Dockerfile.cloudrun
+          file: ./Dockerfile
           tags: |
-            us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon-dev:latest
+            us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon:latest
   
           # tags: |
           #   ghcr.io/${{ github.repository_owner }}/ic-dev-base:latest
