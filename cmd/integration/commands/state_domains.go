@@ -254,7 +254,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	}
 	mode := libstate.ParseCommitmentMode(commitmentMode)
 
-	engine, _, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
+	engine, cfg, _, agg := newDomains(ctx, chainDb, stepSize, mode, trieVariant)
 	defer agg.Close()
 
 	agg.SetDB(stateDb)
@@ -267,6 +267,7 @@ func loopProcessDomains(chainDb, stateDb kv.RwDB, ctx context.Context) error {
 	must(err)
 	defer stateTx.Rollback()
 
+	_ = cfg
 	agg.SetTx(stateTx)
 	defer agg.StartWrites().FinishWrites()
 

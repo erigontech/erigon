@@ -26,8 +26,6 @@ func (w *WriterV4) SetTx(htx kv.RwTx) {
 
 func (w *WriterV4) IncTxNum() {
 	w.txnum++
-	//if _, err := w.agg.FinishTx(w.tx); err != nil {
-	//}
 	w.agg.SetTxNum(w.txnum)
 }
 
@@ -93,9 +91,6 @@ func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err 
 	} else {
 		w.agg.SetTx(w.tx.(kv.RwTx))
 	}
-	//if err := w.agg.Flush(context.Background(), w.tx.(kv.RwTx)); err != nil {
-	//	return nil, err
-	//}
 
 	rh, err := w.agg.ComputeCommitment(saveStateAfter, trace)
 	if err != nil {
