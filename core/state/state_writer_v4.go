@@ -1,8 +1,6 @@
 package state
 
 import (
-	"context"
-
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -95,9 +93,9 @@ func (w *WriterV4) Commitment(saveStateAfter, trace bool) (rootHash []byte, err 
 	} else {
 		w.agg.SetTx(w.tx.(kv.RwTx))
 	}
-	if err := w.agg.Flush(context.Background(), w.tx.(kv.RwTx)); err != nil {
-		return nil, err
-	}
+	//if err := w.agg.Flush(context.Background(), w.tx.(kv.RwTx)); err != nil {
+	//	return nil, err
+	//}
 
 	rh, err := w.agg.ComputeCommitment(saveStateAfter, trace)
 	if err != nil {

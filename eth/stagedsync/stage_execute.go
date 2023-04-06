@@ -22,11 +22,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/ethdb/olddb"
-
 	"github.com/ledgerwatch/erigon/common/changeset"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -136,22 +135,14 @@ func executeBlock(
 	 block *types.Block,
 	 tx kv.RwTx,
 	 stateWriter *state.WriterV4,
+	 stateReader *state.ReaderV4,
 	 cfg ExecuteBlockCfg,
 	 vmConfig vm.Config, // emit copy, because will modify it
 	 writeChangesets bool,
 	 writeReceipts bool,
 	 writeCallTraces bool,
-) error {
+) (err error) {
 	blockNum := block.NumberU64()
-	//stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
-	//if err != nil {
-	//	return err
-	//}
-	//stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
-
-	var err error
-	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
-
 	// where the magic happens
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
@@ -389,6 +380,12 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		return nil
 	}
 
+	defer func() {
+		s := make([]byte, 1024)
+		n := runtime.Stack(s, true)
+		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", string(s[:n]))
+	}()
+
 	quit := ctx.Done()
 	useExternalTx := tx != nil
 	if !useExternalTx {
@@ -438,8 +435,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	defer cfg.agg.StartWrites().FinishWrites()
 
 	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
-	batch := olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-	stateWriter.SetTx(batch)
+	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
+	batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
+	//stateWriter.SetTx(batch)
+	//stateReader.SetTx(batch)
 
 	if stageProgress == 0 {
 		genBlock, genesisIbs, err := core.GenesisToBlock(cfg.genesis, "")
@@ -457,11 +456,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		if !bytes.Equal(rh, genBlock.Root().Bytes()) {
 			return fmt.Errorf("wrong genesis root hash: %x != %x", rh, genBlock.Root())
 		}
-		if err := cfg.agg.Flush(ctx, tx); err != nil {
-			return fmt.Errorf("flush genesis: %w", err)
-		}
 	}
 
+	var pmerge uint64
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -489,7 +486,7 @@ Loop:
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
-		if err = executeBlock(block, tx, stateWriter, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces); err != nil {
+		if err = executeBlock(block, tx, stateWriter, stateReader, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -505,17 +502,18 @@ Loop:
 		stageProgress = blockNum
 
 		// todo finishTx is required in place because currently we could aggregate only one block and e4 could do thas in the middle
-		shouldUpdateProgress := batch.BatchSize() >= ethconfig.HistoryV3AggregationStep
+		shouldUpdateProgress := (stateWriter.TxNum()/ethconfig.HistoryV3AggregationStep)-pmerge >= 2
 		if shouldUpdateProgress {
 			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			pmerge = stateWriter.TxNum() / ethconfig.HistoryV3AggregationStep
 			currentStateGas = 0
-			if err = batch.Commit(); err != nil {
+			if err = batch.Flush(tx); err != nil {
 				return err
 			}
 			if err := cfg.agg.Flush(ctx, tx); err != nil {
 				log.Error("aggregator flush failed", "err", err)
 			}
-			log.Info("flushed aggregator last time", "block", stageProgress)
+			cfg.agg.BuildFilesInBackground()
 
 			if err = s.Update(tx, stageProgress); err != nil {
 				return err
@@ -531,7 +529,10 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer tx.Rollback()
 			}
-			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
+			batch = memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
+			//stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
+			//stateReader.SetTx(batch)
+			//stateWriter.SetTx(batch)
 		}
 
 		gas = gas + block.GasUsed()
