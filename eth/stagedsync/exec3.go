@@ -200,6 +200,7 @@ func ExecV3(ctx context.Context,
 	heap.Init(rws)
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
+	defer rs.WorkFinish()
 
 	rwsLock := &sync.Mutex{}
 
@@ -255,7 +256,7 @@ func ExecV3(ctx context.Context,
 			processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				return processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
+				return processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
 			}()
 			if err != nil {
 				return err
@@ -355,7 +356,7 @@ func ExecV3(ctx context.Context,
 								}
 							}
 							applyWorker.ResetTx(tx)
-							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
+							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
 							if err != nil {
 								return err
 							}
@@ -388,7 +389,7 @@ func ExecV3(ctx context.Context,
 								if !ok {
 									return nil
 								}
-								rs.AddWork(txTask)
+								rs.AddWork(ctx, txTask, true)
 							default:
 								break DrainLoop
 							}
@@ -397,7 +398,7 @@ func ExecV3(ctx context.Context,
 						// Drain results queue as well
 						for rws.Len() > 0 {
 							txTask := heap.Pop(rws).(*exec22.TxTask)
-							rs.AddWork(txTask)
+							rs.AddWork(ctx, txTask, true)
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
@@ -470,7 +471,6 @@ func ExecV3(ctx context.Context,
 			defer rwLoopWg.Done()
 
 			defer applyLoopWg.Wait()
-			defer rs.Finish()
 
 			if err := rwLoop(rwLoopCtx); err != nil {
 				rwLoopErrCh <- err
@@ -551,7 +551,7 @@ Loop:
 			}
 
 			func() {
-				for rs.QueueLen() > execQueueLimit || exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
+				for exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -607,10 +607,10 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(txTask)
+						rs.AddWork(ctx, txTask, false)
 					}
 				} else {
-					rs.AddWork(txTask)
+					rs.AddWork(ctx, txTask, false)
 				}
 			} else {
 				count++
@@ -711,6 +711,7 @@ Loop:
 	}
 
 	if parallel {
+		rs.WorkFinish()
 		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
@@ -758,7 +759,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
+func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
@@ -768,7 +769,7 @@ func processResultQueue(rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state
 
 			if i > 0 {
 				//send to re-exex
-				rs.AddWork(txTask)
+				rs.AddWork(ctx, txTask, true)
 				continue
 			}
 
