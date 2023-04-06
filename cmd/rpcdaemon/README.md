@@ -255,7 +255,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | eth_signTransaction                        | -       | not yet implemented                  |
 | eth_signTypedData                          | -       | ????                                 |
 |                                            |         |                                      |
-| eth_getProof                               | -       | not yet implemented                  |
+| eth_getProof                               | Yes     | Limited to last 1000 blocks          |
 |                                            |         |                                      |
 | eth_mining                                 | Yes     | returns true if --mine flag provided |
 | eth_coinbase                               | Yes     |                                      |

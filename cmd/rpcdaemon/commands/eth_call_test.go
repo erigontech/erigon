@@ -184,15 +184,18 @@ func decodeNode(t *testing.T, encoded []byte) any {
 }
 
 // proofMap creates a map from hash to proof node
-func proofMap(t *testing.T, proof []hexutil.Bytes) map[libcommon.Hash]any {
+func proofMap(t *testing.T, proof []hexutil.Bytes) (map[libcommon.Hash]any, map[libcommon.Hash][]byte) {
 	res := map[libcommon.Hash]any{}
+	raw := map[libcommon.Hash][]byte{}
 	for _, proofB := range proof {
-		res[crypto.Keccak256Hash(proofB)] = decodeNode(t, proofB)
+		hash := crypto.Keccak256Hash(proofB)
+		res[hash] = decodeNode(t, proofB)
+		raw[hash] = proofB
 	}
-	return res
+	return res, raw
 }
 
-func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any) []byte {
+func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libcommon.Hash]any, used map[libcommon.Hash][]byte) []byte {
 	t.Helper()
 	key = (&trie.Keybytes{Data: key}).ToHex()
 	var node any = hashNode(root)
@@ -210,8 +213,12 @@ func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libco
 			var ok bool
 			node, ok = proofs[libcommon.Hash(nt)]
 			require.True(t, ok, "missing hash %x", nt)
+			delete(used, libcommon.Hash(nt))
 		case valueNode:
 			require.Len(t, key, 0)
+			for hash, raw := range used {
+				require.Failf(t, "not all proof elements were used", "hash=%x value=%x decoded=%#v", hash, raw, proofs[hash])
+			}
 			return nt
 		default:
 			t.Fatalf("unexpected type: %T", node)
@@ -222,8 +229,8 @@ func verifyProof(t *testing.T, root libcommon.Hash, key []byte, proofs map[libco
 func verifyAccountProof(t *testing.T, stateRoot libcommon.Hash, proof *accounts.AccProofResult) {
 	t.Helper()
 	accountKey := crypto.Keccak256(proof.Address[:])
-	pm := proofMap(t, proof.AccountProof)
-	value := verifyProof(t, stateRoot, accountKey, pm)
+	pm, used := proofMap(t, proof.AccountProof)
+	value := verifyProof(t, stateRoot, accountKey, pm, used)
 
 	expected, err := rlp.EncodeToBytes([]any{
 		uint64(proof.Nonce),
@@ -240,8 +247,8 @@ func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts
 	t.Helper()
 
 	storageKey := crypto.Keccak256(proof.Key[:])
-	pm := proofMap(t, proof.Proof)
-	value := verifyProof(t, storageRoot, storageKey, pm)
+	pm, used := proofMap(t, proof.Proof)
+	value := verifyProof(t, storageRoot, storageKey, pm, used)
 
 	expected, err := rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
 	require.NoError(t, err)
@@ -252,7 +259,7 @@ func verifyStorageProof(t *testing.T, storageRoot libcommon.Hash, proof accounts
 func TestGetProof(t *testing.T) {
 	maxGetProofRewindBlockCount = 1 // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 
-	m, bankAddress, _ := chainWithDeployedContract(t)
+	m, bankAddr, contractAddr := chainWithDeployedContract(t)
 	br := snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3)
 
 	if m.HistoryV3 {
@@ -263,28 +270,47 @@ func TestGetProof(t *testing.T) {
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := NewEthAPI(NewBaseApi(nil, stateCache, br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs), m.DB, nil, nil, nil, 5000000, 100_000)
 
+	key := func(b byte) libcommon.Hash {
+		result := libcommon.Hash{}
+		result[31] = b
+		return result
+	}
+
 	tests := []struct {
 		name        string
 		blockNum    uint64
+		addr        libcommon.Address
 		storageKeys []libcommon.Hash
+		stateVal    uint64
 		expectedErr string
 	}{
 		{
-			name:     "currentBlock",
+			name:     "currentBlockNoState",
+			addr:     contractAddr,
 			blockNum: 3,
 		},
 		{
-			name:        "withState",
-			blockNum:    3,
-			storageKeys: []libcommon.Hash{{1}},
-			expectedErr: "the method is currently not implemented: eth_getProof with storageKeys",
+			name:     "currentBlockEOA",
+			addr:     bankAddr,
+			blockNum: 3,
 		},
 		{
-			name:     "olderBlock",
-			blockNum: 2,
+			name:        "currentBlockWithState",
+			addr:        contractAddr,
+			blockNum:    3,
+			storageKeys: []libcommon.Hash{key(0), key(4), key(8), key(10)},
+			stateVal:    2,
+		},
+		{
+			name:        "olderBlockWithState",
+			addr:        contractAddr,
+			blockNum:    2,
+			storageKeys: []libcommon.Hash{key(1), key(5), key(9), key(13)},
+			stateVal:    1,
 		},
 		{
 			name:        "tooOldBlock",
+			addr:        contractAddr,
 			blockNum:    1,
 			expectedErr: "requested block is too old, block must be within 1 blocks of the head block number (currently 3)",
 		},
@@ -294,7 +320,7 @@ func TestGetProof(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			proof, err := api.GetProof(
 				context.Background(),
-				bankAddress,
+				tt.addr,
 				tt.storageKeys,
 				rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(tt.blockNum)),
 			)
@@ -312,17 +338,21 @@ func TestGetProof(t *testing.T) {
 			header, err := api.headerByRPCNumber(rpc.BlockNumber(tt.blockNum), tx)
 			require.NoError(t, err)
 
-			require.Equal(t, bankAddress, proof.Address)
+			require.Equal(t, tt.addr, proof.Address)
 			verifyAccountProof(t, header.Root, proof)
 
 			require.Equal(t, len(tt.storageKeys), len(proof.StorageProof))
 			for _, storageKey := range tt.storageKeys {
+				found := false
 				for _, storageProof := range proof.StorageProof {
 					if storageProof.Key != storageKey {
 						continue
 					}
+					found = true
+					require.Equal(t, uint256.NewInt(tt.stateVal).ToBig(), (*big.Int)(storageProof.Value))
 					verifyStorageProof(t, proof.StorageHash, storageProof)
 				}
+				require.True(t, found, "did not find storage proof for key=%x", storageKey)
 			}
 		})
 	}
@@ -544,13 +574,85 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	}
 }
 
+// contractHexString is the output of compiling the following solidity contract:
+//
+// pragma solidity ^0.8.0;
+//
+//	contract Box {
+//	    uint256 private _value0x0;
+//	    uint256 private _value0x1;
+//	    uint256 private _value0x2;
+//	    uint256 private _value0x3;
+//	    uint256 private _value0x4;
+//	    uint256 private _value0x5;
+//	    uint256 private _value0x6;
+//	    uint256 private _value0x7;
+//	    uint256 private _value0x8;
+//	    uint256 private _value0x9;
+//	    uint256 private _value0xa;
+//	    uint256 private _value0xb;
+//	    uint256 private _value0xc;
+//	    uint256 private _value0xd;
+//	    uint256 private _value0xe;
+//	    uint256 private _value0xf;
+//	    uint256 private _value0x10;
+//
+//	    // Emitted when the stored value changes
+//	    event ValueChanged(uint256 value);
+//
+//	    // Stores a new value in the contract
+//	    function store(uint256 value) public {
+//	        _value0x0 = value;
+//	        _value0x1 = value;
+//	        _value0x2 = value;
+//	        _value0x3 = value;
+//	        _value0x4 = value;
+//	        _value0x5 = value;
+//	        _value0x6 = value;
+//	        _value0x7 = value;
+//	        _value0x8 = value;
+//	        _value0x9 = value;
+//	        _value0xa = value;
+//	        _value0xb = value;
+//	        _value0xc = value;
+//	        _value0xd = value;
+//	        _value0xe = value;
+//	        _value0xf = value;
+//	        _value0x10 = value;
+//	        emit ValueChanged(value);
+//	    }
+//
+//	    // Reads the last stored value
+//	    function retrieve() public view returns (uint256) {
+//	        return _value0x0;
+//	    }
+//	}
+//
+// You may produce this hex string by saving the contract into a file
+// Box.sol and invoking
+//
+//	solc Box.sol --bin --abi --optimize
+//
+// This contract is a slight modification of Box.sol to use more storage nodes
+// and ensure the contract storage will contain at least 1 non-leaf node (by
+// storing 17 values).
+const contractHexString = "0x608060405234801561001057600080fd5b5061013f806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610050575b600080fd5b60005460405190815260200160405180910390f35b61006361005e3660046100f0565b610065565b005b6000819055600181905560028190556003819055600481905560058190556006819055600781905560088190556009819055600a819055600b819055600c819055600d819055600e819055600f81905560108190556040518181527f93fe6d397c74fdf1402a8b72e47b68512f0510d7b98a4bc4cbdf6ac7108b3c599060200160405180910390a150565b60006020828403121561010257600080fd5b503591905056fea2646970667358221220031e17f1bd1d1dcbee088287a905b152410b180064c149763590a0bbc516d95e64736f6c63430008130033"
+
+var contractFuncSelector = crypto.Keccak256([]byte("store(uint256)"))[:4]
+
+// contractInvocationData returns data suitable for invoking the 'store'
+// function of the contract in contractHexString, note
+func contractInvocationData(val byte) []byte {
+	return hexutil.MustDecode(fmt.Sprintf("0x%x00000000000000000000000000000000000000000000000000000000000000%02x", contractFuncSelector, val))
+}
+
 func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Address, libcommon.Address) {
 	var (
 		signer      = types.LatestSignerForChainID(nil)
 		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
 		bankFunds   = big.NewInt(1e9)
-		contract    = hexutil.MustDecode("0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033")
+		contract    = hexutil.MustDecode(contractHexString)
 		gspec       = &types.Genesis{
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
@@ -569,8 +671,12 @@ func chainWithDeployedContract(t *testing.T) (*stages.MockSentry, libcommon.Addr
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			contractAddr = crypto.CreateAddress(bankAddress, nonce)
-		case 1, 2:
-			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 90000, new(uint256.Int), nil), *signer, bankKey)
+		case 1:
+			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(1)), *signer, bankKey)
+			assert.NoError(t, err)
+			block.AddTx(txn)
+		case 2:
+			txn, err := types.SignTx(types.NewTransaction(nonce, contractAddr, new(uint256.Int), 900000, new(uint256.Int), contractInvocationData(2)), *signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(txn)
 		}

@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
-	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -349,18 +348,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
 	}
 
-	if len(storageKeys) != 0 {
-		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
-	}
-
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
-
 	rl := trie.NewRetainList(0)
-	rl.AddKey(addrHash[:])
-
 	var loader *trie.FlatDBTrieLoader
 	if blockNr < latestBlock {
 		if latestBlock-blockNr > maxGetProofRewindBlockCount {
@@ -387,11 +375,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		loader = trie.NewFlatDBTrieLoader("eth_getProof", rl, nil, nil, false)
 	}
 
-	var accProof accounts.AccProofResult
-	accProof.Address = address
-
-	// Fill in the Account fields here to reduce the code changes
-	// needed in turbo/trie/hashbuilder.go
 	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
 	if err != nil {
 		return nil, err
@@ -400,14 +383,12 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	if err != nil {
 		return nil, err
 	}
-	if a != nil {
-		accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
-		accProof.CodeHash = a.CodeHash
-		accProof.Nonce = hexutil.Uint64(a.Nonce)
-		accProof.StorageHash = a.Root
+	pr, err := trie.NewProofRetainer(address, a, storageKeys, rl)
+	if err != nil {
+		return nil, err
 	}
 
-	loader.SetProofReturn(&accProof)
+	loader.SetProofRetainer(pr)
 	root, err := loader.CalcTrieRoot(tx, nil)
 	if err != nil {
 		return nil, err
@@ -416,7 +397,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	if root != header.Root {
 		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
 	}
-	return &accProof, nil
+	return pr.ProofResult()
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {

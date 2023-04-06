@@ -22,10 +22,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
+	mdbx2 "github.com/torquem-ch/mdbx-go/mdbx"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/core/state"
@@ -114,7 +117,17 @@ func aggregateResultsFromStateTests(
 		Tracer: tracer,
 		Debug:  ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 	}
-	db := memdb.New("")
+
+	//this DB is shared. means:
+	// - faster sequential tests: don't need create/delete db
+	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
+	db := mdbx.NewMDBX(log.New()).
+		Path(filepath.Join(os.TempDir(), "erigon-statetest")).
+		Flags(func(u uint) uint {
+			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.LifoReclaim | mdbx2.NoMemInit
+		}).
+		GrowthStep(1 * datasize.MB).
+		MustOpen()
 	defer db.Close()
 
 	tx, txErr := db.BeginRw(context.Background())

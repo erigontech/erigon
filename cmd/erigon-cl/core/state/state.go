@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -25,19 +25,19 @@ const (
 type BeaconState struct {
 	// State fields
 	genesisTime                uint64
-	genesisValidatorsRoot      libcommon.Hash
+	genesisValidatorsRoot      common.Hash
 	slot                       uint64
 	fork                       *cltypes.Fork
 	latestBlockHeader          *cltypes.BeaconBlockHeader
-	blockRoots                 [blockRootsLength]libcommon.Hash
-	stateRoots                 [stateRootsLength]libcommon.Hash
-	historicalRoots            []libcommon.Hash
+	blockRoots                 [blockRootsLength]common.Hash
+	stateRoots                 [stateRootsLength]common.Hash
+	historicalRoots            []common.Hash
 	eth1Data                   *cltypes.Eth1Data
 	eth1DataVotes              []*cltypes.Eth1Data
 	eth1DepositIndex           uint64
 	validators                 []*cltypes.Validator
 	balances                   []uint64
-	randaoMixes                [randoMixesLength]libcommon.Hash
+	randaoMixes                [randoMixesLength]common.Hash
 	slashings                  [slashingsLength]uint64
 	previousEpochParticipation cltypes.ParticipationFlagsList
 	currentEpochParticipation  cltypes.ParticipationFlagsList
@@ -64,13 +64,13 @@ type BeaconState struct {
 	touchedLeaves     map[StateLeafIndex]bool // Maps each leaf to whether they were touched or not.
 	publicKeyIndicies map[[48]byte]uint64
 	// Caches
-	activeValidatorsCache       *lru2.Cache[uint64, []uint64]
-	committeeCache              *lru2.Cache[[16]byte, []uint64]
-	shuffledSetsCache           *lru2.Cache[libcommon.Hash, []uint64]
+	activeValidatorsCache       *lru.Cache[uint64, []uint64]
+	committeeCache              *lru.Cache[[16]byte, []uint64]
+	shuffledSetsCache           *lru.Cache[common.Hash, []uint64]
 	totalActiveBalanceCache     *uint64
 	totalActiveBalanceRootCache uint64
 	proposerIndex               *uint64
-	previousStateRoot           libcommon.Hash
+	previousStateRoot           common.Hash
 	// Configs
 	beaconConfig *clparams.BeaconChainConfig
 	// Changesets
@@ -85,7 +85,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 	return state
 }
 
-func preparateRootsForHashing(roots []libcommon.Hash) [][32]byte {
+func preparateRootsForHashing(roots []common.Hash) [][32]byte {
 	ret := make([][32]byte, len(roots))
 	for i := range roots {
 		copy(ret[i][:], roots[i][:])
@@ -235,13 +235,13 @@ func (b *BeaconState) initBeaconState() error {
 		b.publicKeyIndicies[validator.PublicKey] = uint64(i)
 	}
 	var err error
-	if b.activeValidatorsCache, err = lru2.New[uint64, []uint64](5); err != nil {
+	if b.activeValidatorsCache, err = lru.New[uint64, []uint64](5); err != nil {
 		return err
 	}
-	if b.shuffledSetsCache, err = lru2.New[libcommon.Hash, []uint64](25); err != nil {
+	if b.shuffledSetsCache, err = lru.New[common.Hash, []uint64](25); err != nil {
 		return err
 	}
-	if b.committeeCache, err = lru2.New[[16]byte, []uint64](256); err != nil {
+	if b.committeeCache, err = lru.New[[16]byte, []uint64](256); err != nil {
 		return err
 	}
 	if err := b._updateProposerIndex(); err != nil {

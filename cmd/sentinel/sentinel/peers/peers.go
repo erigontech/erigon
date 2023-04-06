@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -40,26 +40,26 @@ type Peer struct {
 }
 
 type Peers struct {
-	badPeers   *lru2.Cache[peer.ID, int]  // Keep track of bad peers
-	penalties  *lru2.Cache[peer.ID, int]  // Keep track on how many penalties a peer accumulated, PeerId => penalties
-	peerRecord *lru2.Cache[peer.ID, Peer] // Keep track of our peer statuses
+	badPeers   *lru.Cache[peer.ID, int]  // Keep track of bad peers
+	penalties  *lru.Cache[peer.ID, int]  // Keep track on how many penalties a peer accumulated, PeerId => penalties
+	peerRecord *lru.Cache[peer.ID, Peer] // Keep track of our peer statuses
 	host       host.Host
 
 	mu sync.Mutex
 }
 
 func New(host host.Host) *Peers {
-	badPeers, err := lru2.New[peer.ID, int](maxBadPeers)
+	badPeers, err := lru.New[peer.ID, int](maxBadPeers)
 	if err != nil {
 		panic(err)
 	}
 
-	penalties, err := lru2.New[peer.ID, int](maxBadPeers)
+	penalties, err := lru.New[peer.ID, int](maxBadPeers)
 	if err != nil {
 		panic(err)
 	}
 
-	peerRecord, err := lru2.New[peer.ID, Peer](maxPeerRecordSize)
+	peerRecord, err := lru.New[peer.ID, Peer](maxPeerRecordSize)
 	if err != nil {
 		panic(err)
 	}
