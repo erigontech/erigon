@@ -31,7 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	logging2 "github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 var (
@@ -57,7 +57,7 @@ var (
 )
 
 func init() {
-	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging2.Flags)
+	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 	rootCmd.Flags().StringSliceVar(&sentryAddr, "sentry.api.addr", []string{"localhost:9091"}, "comma separated sentry addresses '<host>:<port>,<host>:<port>'")
 	rootCmd.Flags().StringVar(&privateApiAddr, "private.api.addr", "localhost:9090", "execution service <host>:<port>")
 	rootCmd.Flags().StringVar(&txpoolApiAddr, "txpool.api.addr", "localhost:9094", "txpool service <host>:<port>")
@@ -89,7 +89,7 @@ var rootCmd = &cobra.Command{
 		debug.Exit()
 	},
 	Run: func(cmd *cobra.Command, args []string) {
-		_ = logging2.GetLoggerCmd("txpool", cmd)
+		logging.SetupLoggerCmd("txpool", cmd)
 
 		if err := doTxpool(cmd.Context()); err != nil {
 			if !errors.Is(err, context.Canceled) {
