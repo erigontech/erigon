@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"container/heap"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -19,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/e3types"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -41,14 +40,9 @@ type StateV3 struct {
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
 
-	triggers     map[uint64]*exec22.TxTask
+	triggers     map[uint64]*e3types.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
-
-	workFinished bool
-	receiveWork  chan *exec22.TxTask
-	queue        exec22.TxTaskQueue
-	queueLock    sync.Mutex
 
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -58,7 +52,7 @@ type StateV3 struct {
 func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
-		triggers:       map[uint64]*exec22.TxTask{},
+		triggers:       map[uint64]*e3types.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
 		chAccs:         map[string][]byte{},
@@ -68,8 +62,6 @@ func NewStateV3(tmpdir string) *StateV3 {
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),
-
-		receiveWork: make(chan *exec22.TxTask, 10_000),
 	}
 	return rs
 }
@@ -227,101 +219,15 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) QueueLen() (l int) {
-	rs.queueLock.Lock()
-	l = rs.queue.Len()
-	rs.queueLock.Unlock()
-	return l
+func (rs *StateV3) ReTry(txTask *e3types.TxTask, in *e3types.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.ReTry(txTask)
 }
-func (rs *StateV3) QueueAndChLen() (l int) {
-	rs.queueLock.Lock()
-	l = rs.queue.Len()
-	rs.queueLock.Unlock()
-	return l + len(rs.receiveWork)
+func (rs *StateV3) AddWork(ctx context.Context, txTask *e3types.TxTask, in *e3types.QueueWithRetry) {
+	rs.resetTxTask(txTask)
+	in.Add(ctx, txTask)
 }
-
-func (rs *StateV3) popWait(ctx context.Context) (task *exec22.TxTask, ok bool) {
-	for {
-		select {
-		case inTask, ok := <-rs.receiveWork:
-			if !ok {
-				rs.queueLock.Lock()
-				if rs.queue.Len() > 0 {
-					task = heap.Pop(&rs.queue).(*exec22.TxTask)
-				}
-				rs.queueLock.Unlock()
-				return task, task != nil
-			}
-
-			rs.queueLock.Lock()
-			if inTask != nil {
-				heap.Push(&rs.queue, inTask)
-			}
-			if rs.queue.Len() > 0 {
-				task = heap.Pop(&rs.queue).(*exec22.TxTask)
-			}
-			rs.queueLock.Unlock()
-			if task != nil {
-				return task, true
-			}
-		case <-ctx.Done():
-			return nil, false
-		}
-	}
-}
-func (rs *StateV3) popNoWait() (task *exec22.TxTask, ok bool) {
-	rs.queueLock.Lock()
-	has := rs.queue.Len() > 0
-	if has { // means have conflicts to re-exec: it has higher priority than new tasks
-		task = heap.Pop(&rs.queue).(*exec22.TxTask)
-	}
-	rs.queueLock.Unlock()
-
-	if has {
-		return task, task != nil
-	}
-
-	// otherwise get some new task. non-blocking way. without adding to queue.
-	for task == nil {
-		select {
-		case task, ok = <-rs.receiveWork:
-			if !ok {
-				return nil, false
-			}
-		default:
-			return nil, false
-		}
-	}
-	return task, task != nil
-}
-
-func (rs *StateV3) Schedule(ctx context.Context) (*exec22.TxTask, bool) {
-	task, ok := rs.popNoWait()
-	if ok {
-		return task, true
-	}
-	return rs.popWait(ctx)
-}
-
-func (rs *StateV3) queuePush(ctx context.Context, t *exec22.TxTask) {
-	select {
-	case rs.receiveWork <- t:
-	case <-ctx.Done():
-		return
-	}
-}
-func (rs *StateV3) queueForcePush(t *exec22.TxTask) {
-	//add work without caring of channel limit
-	rs.queueLock.Lock()
-	heap.Push(&rs.queue, t)
-	rs.queueLock.Unlock()
-	select {
-	case rs.receiveWork <- nil:
-	default:
-	}
-}
-
-func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, force bool) {
+func (rs *StateV3) resetTxTask(txTask *e3types.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -339,14 +245,9 @@ func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, force boo
 		txTask.StoragePrevs = nil
 		txTask.CodePrevs = nil
 	*/
-	if force {
-		rs.queueForcePush(txTask)
-	} else {
-		rs.queuePush(ctx, txTask)
-	}
 }
 
-func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
+func (rs *StateV3) RegisterSender(txTask *e3types.TxTask) bool {
 	//TODO: it deadlocks on panic, fix it
 	defer func() {
 		rec := recover()
@@ -368,13 +269,13 @@ func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int) {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *e3types.QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
 	defer rs.triggerLock.Unlock()
 	if triggered, ok := rs.triggers[txNum]; ok {
-		rs.queueForcePush(triggered)
+		in.ReTry(triggered)
 		count++
 		delete(rs.triggers, txNum)
 	}
@@ -387,15 +288,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64) (count int)
 	return count
 }
 
-func (rs *StateV3) WorkFinish() {
-	if rs.workFinished {
-		return
-	}
-	rs.workFinished = true
-	close(rs.receiveWork)
-}
-
-func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -503,7 +396,7 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *lib
 	return nil
 }
 
-func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) applyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -551,7 +444,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
-func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
@@ -569,7 +462,7 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.A
 	return nil
 }
 
-func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyHistory(txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
 	if dbg.DiscardHistory() {
 		return nil
 	}
@@ -717,7 +610,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*e3types.KvList) bool {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	for table, list := range readLists {
@@ -747,7 +640,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	return true
 }
 
-func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
+func (rs *StateV3) readsValidMap(table string, list *e3types.KvList, m map[string][]byte) bool {
 	switch table {
 	case CodeSizeTable:
 		for i, key := range list.Keys {
@@ -769,7 +662,7 @@ func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string
 	return true
 }
 
-func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
+func (rs *StateV3) readsValidBtree(table string, list *e3types.KvList, m *btree2.Map[string, []byte]) bool {
 	for i, key := range list.Keys {
 		if val, ok := m.Get(key); ok {
 			if !bytes.Equal(list.Vals[i], val) {
@@ -783,7 +676,7 @@ func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.
 type StateWriterV3 struct {
 	rs           *StateV3
 	txNum        uint64
-	writeLists   map[string]*exec22.KvList
+	writeLists   map[string]*e3types.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -809,7 +702,7 @@ func (w *StateWriterV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
+func (w *StateWriterV3) WriteSet() map[string]*e3types.KvList {
 	return w.writeLists
 }
 
@@ -899,7 +792,7 @@ type StateReaderV3 struct {
 	composite []byte
 
 	discardReadList bool
-	readLists       map[string]*exec22.KvList
+	readLists       map[string]*e3types.KvList
 }
 
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
@@ -909,12 +802,12 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                   { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
-func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
+func (r *StateReaderV3) DiscardReadList()                    { r.discardReadList = true }
+func (r *StateReaderV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                      { r.tx = tx }
+func (r *StateReaderV3) ReadSet() map[string]*e3types.KvList { return r.readLists }
+func (r *StateReaderV3) SetTrace(trace bool)                 { r.trace = trace }
+func (r *StateReaderV3) ResetReadSet()                       { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
@@ -1036,7 +929,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 
 var writeListPool = sync.Pool{
 	New: func() any {
-		return map[string]*exec22.KvList{
+		return map[string]*e3types.KvList{
 			kv.PlainState:        {},
 			StorageTable:         {},
 			kv.Code:              {},
@@ -1046,14 +939,14 @@ var writeListPool = sync.Pool{
 	},
 }
 
-func newWriteList() map[string]*exec22.KvList {
-	v := writeListPool.Get().(map[string]*exec22.KvList)
+func newWriteList() map[string]*e3types.KvList {
+	v := writeListPool.Get().(map[string]*e3types.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnWriteList(v map[string]*exec22.KvList) {
+func returnWriteList(v map[string]*e3types.KvList) {
 	if v == nil {
 		return
 	}
@@ -1062,7 +955,7 @@ func returnWriteList(v map[string]*exec22.KvList) {
 
 var readListPool = sync.Pool{
 	New: func() any {
-		return map[string]*exec22.KvList{
+		return map[string]*e3types.KvList{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
@@ -1072,14 +965,14 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() map[string]*exec22.KvList {
-	v := readListPool.Get().(map[string]*exec22.KvList)
+func newReadList() map[string]*e3types.KvList {
+	v := readListPool.Get().(map[string]*e3types.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnReadList(v map[string]*exec22.KvList) {
+func returnReadList(v map[string]*e3types.KvList) {
 	if v == nil {
 		return
 	}
