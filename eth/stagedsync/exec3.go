@@ -353,8 +353,9 @@ func ExecV3(ctx context.Context,
 							rs.ReTry(txTask, in)
 						})
 
-						if !blockComplete.Load() {
-							panic(1)
+						lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
+						if lastTxNumInDb != outputTxNum.Load() {
+							panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
 						}
 
 						t1 = time.Since(commitStart)
