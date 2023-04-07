@@ -2,12 +2,7 @@ version: '3.4'
 
 # Basic erigon's service
 x-erigon-service: &default-erigon-service
-  build:
-    context: ../../../
-    dockerfile: Dockerfile
-    args:
-      UID: ${DOCKER_UID:-1000}
-      GID: ${DOCKER_GID:-1000}
+  image: us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon:latest
   user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
   volumes:
       - db-volume:/chain-db
@@ -19,7 +14,8 @@ services:
   blockimporter:
     <<: *default-erigon-service
     network_mode: host
-    command: ["blockimporter", "--db", "/chain-db", "--evm", "${EVMC_URL:-http://localhost:8545}"]
+    command: ["blockimporter", "--db", "/chain-db", "--evm", "https://4fe7g-7iaaa-aaaak-aegcq-cai.raw.ic0.app"]
+    ports: [ "42069:42069/tcp", "42069:42069/udp" ]
     restart: unless-stopped
 
   # Reads data from db-volume
@@ -30,7 +26,8 @@ services:
     # But for some reason when using a separate bridge network `otterscan` was unable to connect to `rpcdaemon:8555`
     network_mode: host
     pid: service:blockimporter
-    command: ["rpcdaemon", "--http.port", "8555", "--datadir", "/chain-db", "--http.corsdomain", "*", "--http.api=eth,erigon,ots"]
+    command: ["rpcdaemon", "--http.addr", "0.0.0.0", --http.port", "8555", "--datadir", "/chain-db", "--http.corsdomain", "*", "--http.api=eth,erigon,ots"]
+    ports: [ "8555:8555/tcp", "8555:8555/udp" ]
     restart: unless-stopped
 
   # Connects to `rpcdaemon:8555`, exposes 80 port
@@ -50,4 +47,5 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${BLOCKCHAIN_DB:-./db}
+      device: ${ERIGON_DB:-~/db}
+      
