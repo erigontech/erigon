@@ -47,5 +47,4 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${ERIGON_DB:-~/db}
-      
+      device: ${ERIGON_DB:-/erigon/db}

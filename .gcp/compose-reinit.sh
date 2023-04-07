@@ -15,6 +15,5 @@ docker-compose -f ~/scripts/docker-compose.yaml pull --quiet
 echo "Compose images successfuly pulled"
 # docker volume rm scripts_db-volume
 docker-compose -f ~/scripts/docker-compose.yaml create
-docker-compose -f ~/scripts/docker-compose.yaml start blockimporter
-
+docker-compose -f ~/scripts/docker-compose.yaml start
 echo "COMPOSE STARTED"
