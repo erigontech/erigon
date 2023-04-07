@@ -2,6 +2,7 @@ package forkchoice_test
 
 import (
 	_ "embed"
+	"fmt"
 	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -83,4 +84,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
+	// lastly do attestation
+	fmt.Println("DD")
+	require.NoError(t, store.OnAttestation(testAttestation, false))
 }

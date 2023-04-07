@@ -15,7 +15,6 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		return err
 	}
 	target := attestation.Data.Target
-
 	targetState, err := f.getCheckpointState(*target)
 	if err != nil {
 		return nil
@@ -24,7 +23,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 	if targetState == nil {
 		return fmt.Errorf("target state does not exist")
 	}
-	attestationIndicies, err := targetState.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, true)
+	attestationIndicies, err := targetState.GetAttestingIndicies(attestation.Data, attestation.AggregationBits, false)
 	if err != nil {
 		return err
 	}

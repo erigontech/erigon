@@ -58,6 +58,7 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 		return libcommon.Hash{}
 	}
 	for header.Slot > slot {
+		root = header.ParentRoot
 		header, has = f.forkGraph.GetHeader(header.ParentRoot)
 		if !has {
 			return libcommon.Hash{}
@@ -70,6 +71,7 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*state.BeaconState, error) {
 	// check if it can be found in cache.
 	if state, ok := f.checkpointStates.Get(checkpoint); ok {
+		fmt.Println(state.GetActiveValidatorsIndices(state.Epoch()))
 		return state, nil
 	}
 	// If it is not in cache compute it and then put in cache.

@@ -25,7 +25,7 @@ var (
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
-	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok {
+	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
 	for i, validator := range b.validators {
