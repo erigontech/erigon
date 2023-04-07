@@ -342,7 +342,7 @@ func RPCMarshalBlockExDeprecated(block *types.Block, inclTx bool, fullTx bool, b
 	}
 
 	// Ensure that withdrawals is not null at all times.
-	if fields["withdrwals"] == nil {
+	if fields["withdrawals"] == nil {
 		fields["withdrawals"] = []*types.Withdrawal{}
 	}
 
