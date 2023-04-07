@@ -3,7 +3,7 @@ version: '3.4'
 # Basic erigon's service
 x-erigon-service: &default-erigon-service
   image: us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon:latest
-  user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000}
+  user: ${DOCKER_UID:-942}:${DOCKER_GID:-942}
   volumes:
       - db-volume:/chain-db
 

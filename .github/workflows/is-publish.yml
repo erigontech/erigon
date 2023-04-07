@@ -56,6 +56,9 @@ jobs:
           push: true
           context: .
           file: ./Dockerfile
+          build-args: |
+            UID=942
+            GID=942
           tags: |
             us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon:latest
   
