@@ -147,7 +147,7 @@ func initSeparatedLogging(
 
 	lumberjack := &lumberjack.Logger{
 		Filename:   path.Join(dirPath, filePrefix+".log"),
-		MaxSize:    1, // megabytes
+		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days
 	}
