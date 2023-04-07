@@ -401,3 +401,8 @@ func (v *Validator) HashSSZ() ([32]byte, error) {
 func (v *Validator) Active(epoch uint64) bool {
 	return v.ActivationEpoch <= epoch && epoch < v.ExitEpoch
 }
+
+func (v *Validator) Copy() *Validator {
+	copied := *v
+	return &copied
+}
