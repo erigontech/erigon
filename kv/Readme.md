@@ -6,7 +6,7 @@ Words "KV" and "DB" have special meaning here:
 - DB - object-oriented-style API to access data: Get/Put/Delete/WalkOverTable/MultiPut, managing transactions
   internally.
 
-So, DB abstraction fits 95% times and leads to more maintainable code - because it's looks stateless.
+So, DB abstraction fits 95% times and leads to more maintainable code - because it looks stateless.
 
 About "key-value-style": Modern key-value databases don't provide Get/Put/Delete methods,
 because it's very hard-drive-unfriendly - it pushes developers do random-disk-access which
@@ -57,7 +57,7 @@ kv_temporal.go
 - MultipleDatabases, Customization: `NewMDBX().Path(path).WithBucketsConfig(config).Open()`
 
 
-- 1 Transaction object can be used only withing 1 goroutine.
+- 1 Transaction object can be used only within 1 goroutine.
 - Only 1 write transaction can be active at a time (other will wait).
 - Unlimited read transactions can be active concurrently (not blocked by write transaction).
 
