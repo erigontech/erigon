@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/e3types"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -135,7 +135,7 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3) (beforeBlock, afterBlock test
 			stateWriter.SetTxNum(n)
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
-			txTask := &exec22.TxTask{
+			txTask := &e3types.TxTask{
 				BlockNum:   n,
 				Rules:      params.TestRules,
 				TxNum:      n,

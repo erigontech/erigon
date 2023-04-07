@@ -15,7 +15,7 @@ import (
 
 func init() {
 	// Initialise systemContractCodeLookup
-	for _, chainName := range []string{networkname.BSCChainName, networkname.ChapelChainName, networkname.RialtoChainName, networkname.BorMainnetChainName, networkname.MumbaiChainName, networkname.BorDevnetChainName} {
+	for _, chainName := range []string{networkname.BorMainnetChainName, networkname.MumbaiChainName, networkname.BorDevnetChainName} {
 		byChain := map[libcommon.Address][]libcommon.CodeRecord{}
 		systemcontracts.SystemContractCodeLookup[chainName] = byChain
 		// Apply genesis with the block number 0
@@ -33,48 +33,6 @@ func init() {
 		}
 		// Process upgrades
 		chainConfig := params.ChainConfigByChainName(chainName)
-		if chainConfig.RamanujanBlock != nil {
-			blockNum := chainConfig.RamanujanBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.RamanujanUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.NielsBlock != nil {
-			blockNum := chainConfig.NielsBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.NielsUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.MirrorSyncBlock != nil {
-			blockNum := chainConfig.MirrorSyncBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.MirrorUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.BrunoBlock != nil {
-			blockNum := chainConfig.BrunoBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.BrunoUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.EulerBlock != nil {
-			blockNum := chainConfig.EulerBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.EulerUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.MoranBlock != nil {
-			blockNum := chainConfig.MoranBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.MoranUpgrade[chainName], blockNum, byChain)
-			}
-		}
-		if chainConfig.GibbsBlock != nil {
-			blockNum := chainConfig.GibbsBlock.Uint64()
-			if blockNum != 0 {
-				addCodeRecords(systemcontracts.GibbsUpgrade[chainName], blockNum, byChain)
-			}
-		}
 		if chainConfig.Bor != nil && chainConfig.Bor.CalcuttaBlock != nil {
 			blockNum := chainConfig.Bor.CalcuttaBlock.Uint64()
 			if blockNum != 0 {

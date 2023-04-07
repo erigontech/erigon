@@ -71,7 +71,7 @@ services:
 
 
   prometheus:
-    image: prom/prometheus:v2.42.0
+    image: prom/prometheus:v2.43.0
     user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
     command: --log.level=warn --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/prometheus --storage.tsdb.retention.time=150d --web.console.libraries=/usr/share/prometheus/console_libraries --web.console.templates=/usr/share/prometheus/consoles
     ports: [ "9090:9090" ]
@@ -81,7 +81,7 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:9.3.6
+    image: grafana/grafana:9.4.7
     user: "472:0" # required for grafana version >= 7.3
     ports: [ "3000:3000" ]
     volumes:

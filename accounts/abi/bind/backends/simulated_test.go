@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -147,8 +146,8 @@ func TestNewSimulatedBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//statedb := sim.stateByBlockNumber(tx, big.NewInt(int64(num+1)))
-	statedb := state.New(state.NewPlainState(tx, num+1, nil))
+	statedb := sim.stateByBlockNumber(tx, big.NewInt(int64(num+1)))
+	//statedb := state.New(state.NewPlainState(tx, num+1, nil))
 	bal := statedb.GetBalance(testAddr)
 	if !bal.Eq(expectedBal) {
 		t.Errorf("expected balance for test address not received. expected: %v actual: %v", expectedBal, bal)

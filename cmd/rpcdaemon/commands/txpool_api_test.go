@@ -25,9 +25,6 @@ import (
 
 func TestTxPoolContent(t *testing.T) {
 	m, require := stages.MockWithTxPool(t), require.New(t)
-	if m.HistoryV3 {
-		t.Skip("HistoryV3: please implement StateStream support")
-	}
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	}, false /* intermediateHashes */)

@@ -26,7 +26,7 @@ by default.
     + [Faster Initial Sync](#faster-initial-sync)
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
-    + [Grafana dashboar god](#grafana-dashboard)
+    + [Grafana dashboard](#grafana-dashboard)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)

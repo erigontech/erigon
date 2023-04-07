@@ -18,10 +18,15 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"sort"
 
+	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 )
 
 type RetainDecider interface {
@@ -31,8 +36,162 @@ type RetainDecider interface {
 
 type RetainDeciderWithMarker interface {
 	RetainDecider
-	AddKeyWithMarker(key []byte, marker bool)
+	// AddKeyWithMarker adds a key in KEY encoding with marker and returns the
+	// nibble encoded key.
+	AddKeyWithMarker(key []byte, marker bool) []byte
 	RetainWithMarker(prefix []byte) (retain bool, nextMarkedKey []byte)
+}
+
+// ProofRetainer is a wrapper around the RetainList passed to the trie builder.
+// It is responsible for aggregating proof values from the trie computation and
+// will return a valid accounts.AccProofresult after the trie root hash
+// calculation has completed.
+type ProofRetainer struct {
+	rl             *RetainList
+	addr           libcommon.Address
+	acc            *accounts.Account
+	accHexKey      []byte
+	storageKeys    []libcommon.Hash
+	storageHexKeys [][]byte
+	proofs         []*proofElement
+}
+
+// NewProofRetainer creates a new ProofRetainer instance for a given account and
+// set of storage keys.  The trie keys corresponding to the account key, and its
+// storage keys are added to the given RetainList.  The ProofRetainer should be
+// set onto the FlatDBTrieLoader via SetProofRetainer before performing its Load
+// operation in order to appropriately collect the proof elements.
+func NewProofRetainer(addr libcommon.Address, a *accounts.Account, storageKeys []libcommon.Hash, rl *RetainList) (*ProofRetainer, error) {
+	addrHash, err := common.HashData(addr[:])
+	if err != nil {
+		return nil, err
+	}
+	accHexKey := rl.AddKey(addrHash[:])
+
+	storageHexKeys := make([][]byte, len(storageKeys))
+	for i, sk := range storageKeys {
+		storageHash, err := common.HashData(sk[:])
+		if err != nil {
+			return nil, err
+		}
+
+		var compactEncoded [72]byte
+		copy(compactEncoded[:32], addrHash[:])
+		binary.BigEndian.PutUint64(compactEncoded[32:40], a.Incarnation)
+		copy(compactEncoded[40:], storageHash[:])
+		storageHexKeys[i] = rl.AddKey(compactEncoded[:])
+	}
+
+	return &ProofRetainer{
+		rl:             rl,
+		addr:           addr,
+		acc:            a,
+		accHexKey:      accHexKey,
+		storageKeys:    storageKeys,
+		storageHexKeys: storageHexKeys,
+	}, nil
+}
+
+// ProofElement requests a new proof element for a given prefix.  This proof
+// element is retained by the ProofRetainer, and will be utilized to compute the
+// proof after the trie computation has completed.  The prefix is the standard
+// nibble encoded prefix used in the rest of the trie computations.
+func (pr *ProofRetainer) ProofElement(prefix []byte) *proofElement {
+	if !pr.rl.Retain(prefix) {
+		return nil
+	}
+
+	switch {
+	case bytes.HasPrefix(pr.accHexKey, prefix):
+		// This prefix is a node between the account and the root
+	case bytes.HasPrefix(prefix, pr.accHexKey):
+		// This prefix is the account or one of its storage nodes
+	default:
+		// we do not need a proof element for this prefix
+		return nil
+	}
+
+	pe := &proofElement{
+		hexKey: append([]byte{}, prefix...),
+	}
+	pr.proofs = append(pr.proofs, pe)
+	return pe
+}
+
+// ProofResult may be invoked only after the Load function of the
+// FlatDBTrieLoader has successfully executed.  It will populate the Address,
+// Balance, Nonce, and CodeHash from the account data supplied in the
+// constructor, the StorageHash, storageKey values, and proof elements are
+// supplied by the Load operation of the trie construction.
+func (pr *ProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
+	result := &accounts.AccProofResult{
+		Address:  pr.addr,
+		Balance:  (*hexutil.Big)(pr.acc.Balance.ToBig()),
+		Nonce:    hexutil.Uint64(pr.acc.Nonce),
+		CodeHash: pr.acc.CodeHash,
+	}
+
+	for _, pe := range pr.proofs {
+		if !bytes.HasPrefix(pr.accHexKey, pe.hexKey) {
+			continue
+		}
+		result.AccountProof = append(result.AccountProof, pe.proof.Bytes())
+		if pe.storageRoot != (libcommon.Hash{}) {
+			result.StorageHash = pe.storageRoot
+		}
+	}
+
+	if result.StorageHash == (libcommon.Hash{}) {
+		return nil, fmt.Errorf("did not find storage root in proof elements")
+	}
+
+	result.StorageProof = make([]accounts.StorProofResult, len(pr.storageKeys))
+	for i, sk := range pr.storageKeys {
+		result.StorageProof[i].Key = sk
+		hexKey := pr.storageHexKeys[i]
+		for _, pe := range pr.proofs {
+			if len(pe.hexKey) <= 2*32 {
+				// Ignore the proof elements above the storage tree (64 bytes, as nibble
+				// encoded)
+				continue
+			}
+			if !bytes.HasPrefix(hexKey, pe.hexKey) {
+				continue
+			}
+			if pe.storageValue != nil {
+				result.StorageProof[i].Value = (*hexutil.Big)(pe.storageValue.ToBig())
+			}
+
+			result.StorageProof[i].Proof = append(result.StorageProof[i].Proof, pe.proof.Bytes())
+		}
+
+		if result.StorageProof[i].Value == nil {
+			return nil, fmt.Errorf("no storage value for storage key 0x%x set", sk)
+		}
+	}
+
+	return result, nil
+}
+
+// proofElement represent a node or leaf in the trie and its
+// corresponding RLP encoding.  We store the elements individually when
+// aggregating as multiple keys (in particular storage keys) may need to
+// reference the same proof elements in their Merkle proof.
+type proofElement struct {
+	// key is the hex encoded key indicating the path of the
+	// element in the proof.
+	hexKey []byte
+
+	// buf is used to store the proof bytes
+	proof bytes.Buffer
+
+	// storageRoot stores the storage root if this is writing
+	// an account leaf
+	storageRoot libcommon.Hash
+
+	// storageValue stores the value of the particular storage
+	// key if this writer is for a storage key
+	storageValue *uint256.Int
 }
 
 // RetainList encapsulates the list of keys that are required to be fully available, or loaded
@@ -65,11 +224,11 @@ func (rl *RetainList) Swap(i, j int) {
 }
 
 // AddKey adds a new key (in KEY encoding) to the list
-func (rl *RetainList) AddKey(key []byte) {
-	rl.AddKeyWithMarker(key, false)
+func (rl *RetainList) AddKey(key []byte) []byte {
+	return rl.AddKeyWithMarker(key, false)
 }
 
-func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) {
+func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) []byte {
 	var nibbles = make([]byte, 2*len(key))
 	for i, b := range key {
 		nibbles[i*2] = b / 16
@@ -77,6 +236,7 @@ func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) {
 	}
 	rl.AddHex(nibbles)
 	rl.markers = append(rl.markers, marker)
+	return nibbles
 }
 
 // AddHex adds a new key (in HEX encoding) to the list
