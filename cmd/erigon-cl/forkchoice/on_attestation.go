@@ -15,6 +15,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		return err
 	}
 	target := attestation.Data.Target
+
 	targetState, err := f.getCheckpointState(*target)
 	if err != nil {
 		return nil
@@ -27,17 +28,20 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 	if err != nil {
 		return err
 	}
-	indexedAttestation, err := targetState.GetIndexedAttestation(attestation, attestationIndicies)
-	if err != nil {
-		return err
-	}
+	if !fromBlock {
 
-	valid, err := targetState.IsValidIndexedAttestation(indexedAttestation)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return fmt.Errorf("invalid attestation")
+		indexedAttestation, err := targetState.GetIndexedAttestation(attestation, attestationIndicies)
+		if err != nil {
+			return err
+		}
+
+		valid, err := targetState.IsValidIndexedAttestation(indexedAttestation)
+		if err != nil {
+			return err
+		}
+		if !valid {
+			return fmt.Errorf("invalid attestation")
+		}
 	}
 	// Lastly update latest messages.
 	beaconBlockRoot := attestation.Data.BeaconBlockHash
