@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
@@ -367,15 +368,15 @@ func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err er
 // ================ Erigon3 End ================
 
 func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
-	if cfg.historyV3 {
-		if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
-			return err
-		}
-		return nil
-	}
+	//if cfg.historyV3 {
+	//	if err = ExecBlockV3(s, u, tx, toBlock, ctx, cfg, initialCycle); err != nil {
+	//		return err
+	//	}
+	//	return nil
+	//}
 
 	defer func() {
-		s := make([]byte, 1024)
+		s := make([]byte, 2048)
 		n := runtime.Stack(s, true)
 		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", string(s[:n]))
 	}()
@@ -430,8 +431,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 
 	stateWriter := state.NewWriterV4(tx.(kv.TemporalTx))
 	stateReader := state.NewReaderV4(tx.(kv.TemporalTx))
-	//batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
+	batch := memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
 	////batch := olddb.NewHashBatch(tx, nil, cfg.dirs.Tmp)
+	cfg.agg.SetTx(batch)
 	//stateWriter.SetTx(batch)
 	//stateReader.SetTx(batch)
 
@@ -506,9 +508,9 @@ Loop:
 				log.Error("aggregator flush failed", "err", err)
 			}
 			//batch.Commit()
-			//if err = batch.Flush(tx); err != nil {
-			//	return err
-			//}
+			if err = batch.Flush(tx); err != nil {
+				return err
+			}
 
 			if err = s.Update(tx, stageProgress); err != nil {
 				return err
@@ -533,9 +535,9 @@ Loop:
 				//	}
 				//	defer tx.Rollback()
 			}
-			cfg.agg.SetTx(tx)
+			batch = memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
+			cfg.agg.SetTx(batch)
 			cfg.agg.AggregateFilesInBackground()
-			//batch = memdb.NewMemoryBatch(tx, cfg.dirs.Tmp)
 			//batch = olddb.NewHashBatch(tx, nil, cfg.dirs.Tmp)
 			stateReader = state.NewReaderV4(tx.(kv.TemporalTx))
 			//stateReader.SetTx(batch)
