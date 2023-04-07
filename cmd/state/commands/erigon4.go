@@ -81,7 +81,7 @@ var erigon4Cmd = &cobra.Command{
 	Use:   "erigon4",
 	Short: "Experimental command to re-execute blocks from beginning using erigon2 state representation and history/domain",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_ = logging.GetLoggerCmd("erigon4", cmd)
+		logging.SetupLoggerCmd("erigon4", cmd)
 		return Erigon4(genesis, chainConfig, log.Root())
 	},
 }

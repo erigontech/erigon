@@ -52,7 +52,7 @@ func runErigon(cliCtx *cli.Context) error {
 		}
 	}
 
-	_ = logging.GetLoggerCtx("erigon", cliCtx)
+	logging.SetupLoggerCtx("erigon", cliCtx)
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
