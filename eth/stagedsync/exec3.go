@@ -32,7 +32,7 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
+	"github.com/ledgerwatch/erigon/cmd/state/e3types"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -65,12 +65,11 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, rwsLen int, execQueueLimit, resQueueLimit, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultCh chan *exec22.TxTask, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, in *e3types.QueueWithRetry, rwsLen int, resQueueLimit, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultCh chan *e3types.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	sizeEstimate := rs.SizeEstimate()
-	execQueueLen := rs.QueueLen()
 	currentTime := time.Now()
 	interval := currentTime.Sub(p.prevTime)
 	speedTx := float64(doneCount-p.prevCount) / (float64(interval) / float64(time.Second))
@@ -84,7 +83,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, execQueueLimit, resQueueLi
 		"blk", outputBlockNum,
 		//"blk/s", fmt.Sprintf("%.1f", speedBlock),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
-		"pipe", fmt.Sprintf("%d/%d->%d/%d->%d/%d", execQueueLen, execQueueLimit, len(resultCh), cap(resultCh), rwsLen, resQueueLimit),
+		"pipe", fmt.Sprintf("(%d/%d + retries %d)->%d/%d->%d/%d", in.NewTasksLen(), in.Capacity(), in.RetriesLen(), len(resultCh), cap(resultCh), rwsLen, resQueueLimit),
 		"repeatRatio", fmt.Sprintf("%.2f%%", repeatRatio),
 		"workers", p.workersCount,
 		"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(p.commitThreshold)),
@@ -108,7 +107,7 @@ func (p *Progress) Log(rs *state.StateV3, rwsLen int, execQueueLimit, resQueueLi
 
 func ExecV3(ctx context.Context,
 	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
-	parallel bool, rs *state.StateV3, logPrefix string,
+	parallel bool, logPrefix string,
 	logger log.Logger,
 	maxBlockNum uint64,
 ) error {
@@ -190,19 +189,23 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	execQueueLimit := workerCount // workerCount * 4 // when wait cond can be moved inside txs loop
-	resQueueLimit := workerCount  // workerCount * 4
-	execWorkers, applyWorker, resultCh, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
-	defer stopWorkers()
-	applyWorker.DiscardReadList()
+	rs := state.NewStateV3(cfg.dirs.Tmp)
 
-	rws := &exec22.TxTaskQueue{}
+	// in queue
+	in := e3types.NewQueueWithRetry(100_000)
+	defer in.Close()
+
+	// out queue (results of execution)
+	rws := &e3types.TxTaskQueue{}
 	heap.Init(rws)
 	rwsConsumed := make(chan struct{}, 1)
 	defer close(rwsConsumed)
-	defer rs.WorkFinish()
-
 	rwsLock := &sync.Mutex{}
+
+	resQueueLimit := workerCount // workerCount * 4
+	execWorkers, applyWorker, resultCh, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, in, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
+	defer stopWorkers()
+	applyWorker.DiscardReadList()
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
@@ -224,7 +227,7 @@ func ExecV3(ctx context.Context,
 		applyWorker.ResetTx(tx)
 
 		var lastBlockNum uint64
-		drainF := func(txTask *exec22.TxTask) {
+		drainF := func(txTask *e3types.TxTask) {
 			rwsLock.Lock()
 			defer rwsLock.Unlock()
 			heap.Push(rws, txTask)
@@ -256,7 +259,7 @@ func ExecV3(ctx context.Context,
 			processedTxNum, conflicts, triggers, processedBlockNum, err := func() (processedTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 				rwsLock.Lock()
 				defer rwsLock.Unlock()
-				return processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
+				return processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, rwsConsumed, applyWorker)
 			}()
 			if err != nil {
 				return err
@@ -314,7 +317,7 @@ func ExecV3(ctx context.Context,
 
 				case <-logEvery.C:
 					stepsInDB := rawdbhelpers.IdxStepsCountV3(tx)
-					progress.Log(rs, exec22.LenLocked(rws, rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
+					progress.Log(rs, in, e3types.LenLocked(rws, rwsLock), uint64(resQueueLimit), rs.DoneCount(), inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
 					if agg.HasBackgroundFilesBuild() {
 						log.Info(fmt.Sprintf("[%s] Background files build", logPrefix), "progress", agg.BackgroundProgress())
 					}
@@ -356,7 +359,7 @@ func ExecV3(ctx context.Context,
 								}
 							}
 							applyWorker.ResetTx(tx)
-							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(ctx, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
+							processedTxNum, conflicts, triggers, processedBlockNum, err := processResultQueue(in, rws, outputTxNum.Load(), rs, agg, tx, nil, applyWorker)
 							if err != nil {
 								return err
 							}
@@ -389,7 +392,7 @@ func ExecV3(ctx context.Context,
 								if !ok {
 									return nil
 								}
-								rs.AddWork(ctx, txTask, true)
+								rs.ReTry(txTask, in)
 							default:
 								break DrainLoop
 							}
@@ -397,8 +400,8 @@ func ExecV3(ctx context.Context,
 
 						// Drain results queue as well
 						for rws.Len() > 0 {
-							txTask := heap.Pop(rws).(*exec22.TxTask)
-							rs.AddWork(ctx, txTask, true)
+							txTask := heap.Pop(rws).(*e3types.TxTask)
+							rs.ReTry(txTask, in)
 						}
 						t1 = time.Since(commitStart)
 						tt := time.Now()
@@ -551,7 +554,7 @@ Loop:
 			}
 
 			func() {
-				for exec22.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
+				for e3types.LenLocked(rws, rwsLock) > resQueueLimit || rs.SizeEstimate() >= commitThreshold {
 					select {
 					case <-ctx.Done():
 						return
@@ -569,7 +572,7 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &exec22.TxTask{
+			txTask := &e3types.TxTask{
 				BlockNum:        blockNum,
 				Header:          header,
 				Coinbase:        b.Coinbase(),
@@ -607,10 +610,10 @@ Loop:
 			if parallel {
 				if txTask.TxIndex >= 0 && txTask.TxIndex < len(txs) {
 					if ok := rs.RegisterSender(txTask); ok {
-						rs.AddWork(ctx, txTask, false)
+						rs.AddWork(ctx, txTask, in)
 					}
 				} else {
-					rs.AddWork(ctx, txTask, false)
+					rs.AddWork(ctx, txTask, in)
 				}
 			} else {
 				count++
@@ -647,7 +650,7 @@ Loop:
 				if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 					return fmt.Errorf("StateV3.Apply: %w", err)
 				}
-				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum))
+				ExecTriggers.Add(rs.CommitTxNum(txTask.Sender, txTask.TxNum, in))
 				outputTxNum.Add(1)
 
 				if err := rs.ApplyHistory(txTask, agg); err != nil {
@@ -664,7 +667,7 @@ Loop:
 			select {
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
-				progress.Log(rs, exec22.LenLocked(rws, rwsLock), uint64(execQueueLimit), uint64(resQueueLimit), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
+				progress.Log(rs, in, e3types.LenLocked(rws, rwsLock), uint64(resQueueLimit), count, inputBlockNum.Load(), outputBlockNum.Get(), outputTxNum.Load(), ExecRepeats.Get(), resultCh, stepsInDB)
 				if rs.SizeEstimate() < commitThreshold {
 					break
 				}
@@ -711,7 +714,7 @@ Loop:
 	}
 
 	if parallel {
-		rs.WorkFinish()
+		in.Close()
 		if err := <-rwLoopErrCh; err != nil {
 			return err
 		}
@@ -759,17 +762,17 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
+func processResultQueue(in *e3types.QueueWithRetry, rws *e3types.TxTaskQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.Len() > 0 && (*rws)[0].TxNum == outputTxNum {
-		txTask := heap.Pop(rws).(*exec22.TxTask)
+		txTask := heap.Pop(rws).(*e3types.TxTask)
 		if txTask.Error != nil || !rs.ReadsValid(txTask.ReadLists) {
 			conflicts++
 
 			if i > 0 {
 				//send to re-exex
-				rs.AddWork(ctx, txTask, true)
+				rs.ReTry(txTask, in)
 				continue
 			}
 
@@ -784,7 +787,7 @@ func processResultQueue(ctx context.Context, rws *exec22.TxTaskQueue, outputTxNu
 		if err := rs.ApplyState(applyTx, txTask, agg); err != nil {
 			return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("StateV3.Apply: %w", err)
 		}
-		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum)
+		triggers += rs.CommitTxNum(txTask.Sender, txTask.TxNum, in)
 		outputTxNum++
 		if backPressure != nil {
 			select {
@@ -900,7 +903,7 @@ func reconstituteStep(last bool,
 	}
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
-	workCh := make(chan *exec22.TxTask, workerCount*4)
+	workCh := make(chan *e3types.TxTask, workerCount*4)
 	defer func() {
 		fmt.Printf("close1\n")
 		safeCloseTxTaskCh(workCh)
@@ -1056,7 +1059,7 @@ func reconstituteStep(last bool,
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if bitmap.Contains(inputTxNum) {
 					binary.BigEndian.PutUint64(txKey[:], inputTxNum)
-					txTask := &exec22.TxTask{
+					txTask := &e3types.TxTask{
 						BlockNum:        bn,
 						Header:          header,
 						Coinbase:        b.Coinbase(),
@@ -1312,7 +1315,7 @@ func reconstituteStep(last bool,
 	return nil
 }
 
-func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
+func safeCloseTxTaskCh(ch chan *e3types.TxTask) {
 	if ch == nil {
 		return
 	}
