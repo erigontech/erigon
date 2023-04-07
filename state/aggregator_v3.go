@@ -95,7 +95,7 @@ func NewAggregatorV3(ctx context.Context, dir, tmpdir string, aggregationStep ui
 	if a.accounts, err = NewDomain(dir, a.tmpdir, aggregationStep, "accounts", kv.AccountKeys, kv.AccountDomain, kv.AccountHistoryKeys, kv.AccountHistoryVals, kv.AccountIdx, false, false); err != nil {
 		return nil, err
 	}
-	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, false, false); err != nil {
+	if a.storage, err = NewDomain(dir, a.tmpdir, aggregationStep, "storage", kv.StorageKeys, kv.StorageDomain, kv.StorageHistoryKeys, kv.StorageHistoryVals, kv.StorageIdx, true, true); err != nil {
 		return nil, err
 	}
 	if a.code, err = NewDomain(dir, a.tmpdir, aggregationStep, "code", kv.CodeKeys, kv.CodeDomain, kv.CodeHistoryKeys, kv.CodeHistoryVals, kv.CodeIdx, true, true); err != nil {
@@ -696,7 +696,7 @@ func (a *AggregatorV3) mergeDomainSteps(ctx context.Context) error {
 	mergeStartedAt := time.Now()
 	var upmerges int
 	for {
-		somethingMerged, err := a.mergeLoopStep(ctx, 1)
+		somethingMerged, err := a.mergeLoopStep(ctx, 8)
 		if err != nil {
 			return err
 		}
@@ -1448,12 +1448,17 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 	if ok := a.working.CompareAndSwap(false, true); !ok {
 		return
 	}
+	defer a.working.Store(false)
 
 	if _, err := a.ComputeCommitment(true, false); err != nil {
 		log.Warn("ComputeCommitment before aggregation has failed", "err", err)
 		return
 	}
-	defer a.working.Store(false)
+
+	if ok := a.workingMerge.CompareAndSwap(false, true); !ok {
+		return
+	}
+	defer a.workingMerge.Store(false)
 
 	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1462,48 +1467,6 @@ func (a *AggregatorV3) AggregateFilesInBackground() {
 		log.Warn("buildFilesInBackground", "err", err)
 	}
 	a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-	//a.wg.Add(1)
-	//go func() {
-	//	defer a.wg.Done()
-	//	defer a.working.Store(false)
-	//
-	//	// check if db has enough data (maybe we didn't commit them yet)
-	//	//lastInDB := lastIdInDB(a.db, a.accounts.keysTable)
-	//	//hasData = lastInDB >= toTxNum
-	//	//if !hasData {
-	//	//	return
-	//	//}
-	//
-	//	// trying to create as much small-step-files as possible:
-	//	// - to reduce amount of small merges
-	//	// - to remove old data from db as early as possible
-	//	// - during files build, may happen commit of new data. on each loop step getting latest id in db
-	//	//for step < lastIdInDB(a.db, a.accounts.indexKeysTable)/a.aggregationStep {
-	//	if err := a.buildFilesInBackground(a.ctx, step); err != nil {
-	//		if errors.Is(err, context.Canceled) {
-	//			return
-	//		}
-	//		log.Warn("buildFilesInBackground", "err", err)
-	//		//break
-	//	}
-	//
-	//	if ok := a.workingMerge.CompareAndSwap(false, true); !ok {
-	//		return
-	//	}
-	//	a.wg.Add(1)
-	//	go func() {
-	//		defer a.wg.Done()
-	//		defer a.workingMerge.Store(false)
-	//		if err := a.MergeLoop(a.ctx, 1); err != nil {
-	//			if errors.Is(err, context.Canceled) {
-	//				return
-	//			}
-	//			log.Warn("merge", "err", err)
-	//		}
-	//
-	//		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
-	//	}()
-	//}()
 }
 
 func (a *AggregatorV3) BuildFilesInBackground() {
@@ -1644,7 +1607,7 @@ func (a *AggregatorV3) DeleteAccount(addr, prev []byte) error {
 func (a *AggregatorV3) UpdateStorage(addr, loc []byte, value, preVal []byte) error {
 	a.commitment.TouchPlainKey(common2.Append(addr, loc), value, a.commitment.TouchPlainKeyStorage)
 	if len(value) == 0 {
-		return a.storage.Delete(addr, loc)
+		return a.storage.DeleteWithPrev(addr, loc, preVal)
 	}
 	return a.storage.PutWithPrev(addr, loc, value, preVal)
 }

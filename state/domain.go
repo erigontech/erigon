@@ -149,7 +149,6 @@ type Domain struct {
 	// MakeContext() using this field in zero-copy way
 	roFiles   atomic.Pointer[[]ctxItem]
 	topLock   sync.RWMutex
-	topTx     map[string]string
 	topVals   map[string][]byte
 	defaultDc *DomainContext
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
@@ -164,10 +163,8 @@ func NewDomain(dir, tmpdir string, aggregationStep uint64,
 	d := &Domain{
 		keysTable: keysTable,
 		valsTable: valsTable,
-		topTx:     make(map[string]string),
-		topVals:   make(map[string][]byte),
-		files:     btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
-		//keyTxNums: btree2.NewBTreeGOptions[uint64](func(a, b uint64) bool { return a < b }, btree2.Options{Degree: 128, NoLocks: false}),
+		//topVals:   make(map[string][]byte),
+		files: btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats: DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 	}
 	d.roFiles.Store(&[]ctxItem{})
@@ -440,40 +437,76 @@ func (d *Domain) PutWithPrev(key1, key2, val, preval []byte) error {
 	istep := ^(d.txNum / d.aggregationStep)
 	binary.BigEndian.PutUint64(fullkey[kl:], istep)
 
-	//d.topLock.Lock()
-	//d.topTx[hex.EncodeToString(fullkey[:kl])] = string(fullkey[kl:])
-	//d.topVals[hex.EncodeToString(fullkey)] = val
-	//d.topLock.Unlock()
+	switch d.topVals {
+	case nil:
+		if err := d.tx.Put(d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
+			return err
+		}
+		if err := d.tx.Put(d.valsTable, fullkey, val); err != nil {
+			return err
+		}
+	default:
+		d.topLock.Lock()
+		d.topVals[hex.EncodeToString(fullkey[:kl])] = val
+		d.topLock.Unlock()
+		return d.wal.addValue(key1, key2, val, fullkey[kl:])
+	}
 
-	if err := d.tx.Put(d.keysTable, fullkey[:kl], fullkey[kl:]); err != nil {
-		return err
-	}
-	if err := d.tx.Put(d.valsTable, fullkey, val); err != nil {
-		return err
-	}
+	//if d.valsTable == kv.StorageDomain {
+	//	if hex.EncodeToString(fullkey[:kl]) == "0b1ba0af832d7c05fd64161e0db78e85978e8082735a2caee4e287c2ffc6fa5b3ce10111b595166cc277c2d7af5a88896eb4bc21" {
+	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(preval), hex.EncodeToString(val))
+	//	}
+	//}
+	//if d.valsTable == kv.AccountDomain {
+	//	fk := hex.EncodeToString(fullkey[:kl])
+	//	if fk == "e0a2bd4258d2768837baa26a28fe71dc079f84c7" ||
+	//		 fk == "8c1e1e5b47980d214965f3bd8ea34c413e120ae4" {
+	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(preval), hex.EncodeToString(val))
+	//	}
+	//}
+
 	return nil
-	//return d.wal.addValue(key1, key2, val, d.txNum)
 }
 
-func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) error {
+func (d *Domain) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if err := d.History.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
 
 	k := common.Append(key1, key2)
-	//d.topLock.Lock()
-	//ttx, ok := d.topTx[string(k)]
-	//if ok {
-	//	delete(d.topTx, string(k))
-	//
-	//	delete(d.topVals, string(k)+ttx)
+	switch d.topVals {
+	case nil:
+		istep, err := d.tx.GetOne(d.keysTable, k)
+		if err != nil {
+			return err
+		}
+		err = d.tx.Delete(d.keysTable, k)
+		if err = d.tx.Delete(d.valsTable, common.Append(k, istep)); err != nil {
+			return err
+		}
+	//if d.valsTable == kv.StorageDomain {
+	//	if strings.HasPrefix(hex.EncodeToString(k), "0b1ba0af832d7c05fd64161e0db78e85978e8082") {
+	//		fmt.Printf("PutWithPrev: %s %s %q -> %q\n", hex.EncodeToString(key1), hex.EncodeToString(key2), hex.EncodeToString(prev), []byte{})
+	//	}
 	//}
-	//d.topLock.Unlock()
-	//return nil
+	default:
+		d.topLock.Lock()
+		delete(d.topVals, hex.EncodeToString(k))
+		d.topLock.Unlock()
 
-	return d.tx.Delete(d.keysTable, k)
-	//return d.wal.addValue(key1, key2, nil, d.txNum)
+		var invertedStep [8]byte
+		istep := ^(d.txNum / d.aggregationStep)
+		binary.BigEndian.PutUint64(invertedStep[:], istep)
+
+		return d.wal.addValue(key1, key2, nil, invertedStep[:])
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (d *Domain) update(key, original []byte) error {
@@ -518,6 +551,8 @@ func (d *Domain) Delete(key1, key2 []byte) error {
 	if !found {
 		return nil
 	}
+	return d.DeleteWithPrev(key1, key2, original)
+
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if err = d.History.AddPrevValue(key1, key2, original); err != nil {
 		return err
@@ -599,7 +634,7 @@ func (h *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (h *domainWAL) addValue(key1, key2, original []byte, step []byte) error {
+func (h *domainWAL) addValue(key1, key2, value []byte, step []byte) error {
 	if h.discard {
 		return nil
 	}
@@ -618,7 +653,7 @@ func (h *domainWAL) addValue(key1, key2, original []byte, step []byte) error {
 				return err
 			}
 
-			if err := h.d.tx.Put(h.d.valsTable, fullkey, original); err != nil {
+			if err := h.d.tx.Put(h.d.valsTable, fullkey, value); err != nil {
 				return err
 			}
 			return nil
@@ -627,20 +662,20 @@ func (h *domainWAL) addValue(key1, key2, original []byte, step []byte) error {
 		if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 			return err
 		}
-		if err := h.values.Collect(fullkey, original); err != nil {
+		if err := h.values.Collect(fullkey, value); err != nil {
 			return err
 		}
 
 		return nil
 	}
 
-	//coverKey := h.key[:len(fullkey)+len(original)]
+	//coverKey := h.key[:len(fullkey)+len(value)]
 	//copy(coverKey, fullkey)
 	//k, v := coverKey[:len(fullkey)], coverKey[len(fullkey):]
 	if err := h.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
-	if err := h.values.Collect(fullkey, original); err != nil {
+	if err := h.values.Collect(fullkey, value); err != nil {
 		return err
 	}
 	return nil
@@ -720,13 +755,15 @@ type ctxLocalityIdx struct {
 
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
-	d       *Domain
-	files   []ctxItem
-	getters []*compress.Getter
-	readers []*BtIndex
-	hc      *HistoryContext
-	keyBuf  [60]byte // 52b key and 8b for inverted step
-	numBuf  [8]byte
+	d        *Domain
+	files    []ctxItem
+	getters  []*compress.Getter
+	readers  []*BtIndex
+	hc       *HistoryContext
+	keyBuf   [60]byte // 52b key and 8b for inverted step
+	numBuf   [8]byte
+	mapHits  uint64
+	diskHits uint64
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
@@ -1485,7 +1522,7 @@ func (dc *DomainContext) readFromFiles(filekey []byte, fromTxNum uint64) ([]byte
 		}
 		cur, err := reader.Seek(filekey)
 		if err != nil {
-			log.Warn("failed to read from file", "file", reader.FileName(), "err", err)
+			//log.Warn("failed to read from file", "file", reader.FileName(), "err", err)
 			continue
 		}
 
@@ -1610,6 +1647,16 @@ func (dc *DomainContext) Close() {
 // roTx instead and supports ending the iterations before it reaches the end.
 func (dc *DomainContext) IteratePrefix(prefix []byte, it func(k, v []byte)) error {
 	dc.d.stats.FilesQueries.Add(1)
+
+	if dc.d.topVals != nil {
+		dc.d.topLock.Lock()
+		for k, v := range dc.d.topVals {
+			if bytes.HasPrefix([]byte(k), prefix) {
+				it([]byte(k), v)
+			}
+		}
+		dc.d.topLock.Unlock()
+	}
 
 	var cp CursorHeap
 	heap.Init(&cp)
@@ -1753,7 +1800,7 @@ func (dc *DomainContext) get(key []byte, fromTxNum uint64, roTx kv.Tx) ([]byte, 
 func (d *Domain) Rotate() flusher {
 	hf := d.History.Rotate()
 
-	//d.topLockLock()
+	//d.topLockLockfullkey[kl:]
 	//for k, is := range d.topTx {
 	//	v, ok := d.topVals[k+is]
 	//	if !ok {
@@ -1775,34 +1822,24 @@ func (dc *DomainContext) getLatest(key []byte, roTx kv.Tx) ([]byte, bool, error)
 	dc.d.stats.TotalQueries.Add(1)
 
 	dc.d.topLock.RLock()
-	ttx, ok := dc.d.topTx[hex.EncodeToString(key)]
-	if ok {
-		copy(dc.keyBuf[:], key)
-		copy(dc.keyBuf[len(key):], []byte(ttx))
-		//binary.BigEndian.PutUint64(dc.keyBuf[len(key):], ttx)
-
-		v, ok := dc.d.topVals[hex.EncodeToString(dc.keyBuf[:len(key)+8])]
-		if ok {
-			dc.d.topLock.RUnlock()
-			return v, true, nil
-		}
-	}
+	v0, ok := dc.d.topVals[hex.EncodeToString(key)]
 	dc.d.topLock.RUnlock()
-
-	istep := ^(dc.d.txNum / dc.d.aggregationStep)
-	copy(dc.keyBuf[:], key)
-	binary.BigEndian.PutUint64(dc.keyBuf[len(key):], istep)
-
-	v, err := roTx.GetOne(dc.d.valsTable, dc.keyBuf[:len(key)+8])
-	if err != nil {
-		return nil, false, err
+	if ok {
+		return v0, true, nil
 	}
-	if v == nil {
-		dc.d.stats.FilesQueries.Add(1)
-		v, found := dc.readFromFiles(key, 0)
-		return v, found, nil
-	}
-	return v, true, nil
+
+	return dc.get(key, 0, roTx)
+	//_ = err
+	//
+	//if !bytes.Equal(v, v0) {
+	//	dc.diskHits++
+	//	if len(v0) > 0 {
+	//		//log.Error("mismatch", "dom", dc.d.valsTable, "key", hex.EncodeToString(key), "disk", hex.EncodeToString(v), "map", hex.EncodeToString(v0), "err", err)
+	//	}
+	//} else {
+	//	dc.mapHits++
+	//}
+	//return v0, true, nil
 }
 
 func (dc *DomainContext) Get(key1, key2 []byte, roTx kv.Tx) ([]byte, error) {
