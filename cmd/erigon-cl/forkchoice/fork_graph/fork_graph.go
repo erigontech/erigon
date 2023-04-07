@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 type ChainSegmentInsertionResult uint
@@ -38,6 +39,7 @@ const maxGraphExtension = 256
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type ForkGraph struct {
+	// I am using lrus caches because of the auto cleanup feature.
 	inverseEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ChangeSet]
 	forwardEdges          *lru.Cache[libcommon.Hash, *beacon_changeset.ChangeSet]
 	headersAndStates      *lru.Cache[libcommon.Hash, interface{}] // Could be either a checkpoint or state
@@ -46,6 +48,11 @@ type ForkGraph struct {
 	lastState             *state.BeaconState
 	// Cap for how farther we can reorg (initial state slot)
 	anchorSlot uint64
+	// childrens maps each block roots to its children block roots
+	childrens *lru.Cache[libcommon.Hash, []libcommon.Hash]
+	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
+	currentJustifiedCheckpoints *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
+	finalizedCheckpoints        *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
 }
 
 // Initialize fork graph with a new state
@@ -70,6 +77,18 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 	if err != nil {
 		panic(err)
 	}
+	childrens, err := lru.New[libcommon.Hash, []libcommon.Hash](maxGraphExtension)
+	if err != nil {
+		panic(err)
+	}
+	currentJustifiedCheckpoints, err := lru.New[libcommon.Hash, *cltypes.Checkpoint](maxGraphExtension)
+	if err != nil {
+		panic(err)
+	}
+	finalizedCheckpoints, err := lru.New[libcommon.Hash, *cltypes.Checkpoint](maxGraphExtension)
+	if err != nil {
+		panic(err)
+	}
 	return &ForkGraph{
 		// Bidirectional edges
 		inverseEdges:     inverseEdges,
@@ -81,6 +100,11 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 		lastState:             anchorState,
 		// Slots configuration
 		anchorSlot: anchorState.Slot(),
+		// childrens
+		childrens: childrens,
+		// checkpoints trackers
+		currentJustifiedCheckpoints: currentJustifiedCheckpoints,
+		finalizedCheckpoints:        finalizedCheckpoints,
 	}
 }
 
@@ -132,14 +156,23 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 	// if it is finished then update the graph
 	f.inverseEdges.Add(blockRoot, f.lastState.StopCollectingReverseChangeSet())
 	f.forwardEdges.Add(blockRoot, f.lastState.StopCollectingForwardChangeSet())
+	bodyRoot, err := block.Body.HashSSZ()
+	if err != nil {
+		return LogisticError, err
+	}
 	f.headersAndStates.Add(blockRoot, &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
-		Root:          blockRoot,
+		Root:          block.StateRoot,
+		BodyRoot:      bodyRoot,
 	})
 	f.farthestExtendingPath.Add(blockRoot, true)
-
+	// Update the children of the parent
+	f.updateChildren(block.ParentRoot, blockRoot)
+	// Lastly add checkpoints to caches as well.
+	f.currentJustifiedCheckpoints.Add(blockRoot, f.lastState.CurrentJustifiedCheckpoint().Copy())
+	f.finalizedCheckpoints.Add(blockRoot, f.lastState.FinalizedCheckpoint().Copy())
 	return Success, nil
 }
 
@@ -276,4 +309,28 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 		f.farthestExtendingPath.Add(root, true)
 	}
 	return f.lastState, nil
+}
+
+// updateChildren adds a new child to the parent node hash.
+func (f *ForkGraph) updateChildren(parent, child libcommon.Hash) {
+	childrens, _ := f.childrens.Get(parent)
+	if slices.Contains(childrens, child) {
+		return
+	}
+	childrens = append(childrens, child)
+	f.childrens.Add(parent, childrens)
+}
+
+// GetChildren retrieves the children block root of the given block root.
+func (f *ForkGraph) GetChildren(parent libcommon.Hash) []libcommon.Hash {
+	childrens, _ := f.childrens.Get(parent)
+	return childrens
+}
+
+func (f *ForkGraph) GetCurrentJustifiedCheckpoint(blockRoot libcommon.Hash) (*cltypes.Checkpoint, bool) {
+	return f.currentJustifiedCheckpoints.Get(blockRoot)
+}
+
+func (f *ForkGraph) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (*cltypes.Checkpoint, bool) {
+	return f.finalizedCheckpoints.Get(blockRoot)
 }
