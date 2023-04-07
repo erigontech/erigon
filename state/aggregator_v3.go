@@ -574,8 +574,6 @@ func (a *AggregatorV3) aggregate(ctx context.Context, step uint64) error {
 
 	defer logEvery.Stop()
 
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 
