@@ -354,7 +354,7 @@ func ExecV3(ctx context.Context,
 						})
 
 						lastTxNumInDb, _ := rawdbv3.TxNums.Max(tx, outputBlockNum.Get())
-						if lastTxNumInDb != outputTxNum.Load() {
+						if lastTxNumInDb != outputTxNum.Load()-1 {
 							panic(fmt.Sprintf("assert: %d != %d", lastTxNumInDb, outputTxNum.Load()))
 						}
 
@@ -469,6 +469,9 @@ func ExecV3(ctx context.Context,
 	_, isPoSa := cfg.engine.(consensus.PoSA)
 	//isBor := cfg.chainConfig.Bor != nil
 
+	slowDownLimit := time.NewTicker(time.Second)
+	defer slowDownLimit.Stop()
+
 	var b *types.Block
 	var blockNum uint64
 	var err error
@@ -517,6 +520,7 @@ Loop:
 						if !ok {
 							return
 						}
+					case <-slowDownLimit.C:
 					}
 				}
 			}()
