@@ -15,7 +15,7 @@ services:
     <<: *default-erigon-service
     network_mode: host
     command: ["blockimporter", "--db", "/chain-db", "--evm", "https://4fe7g-7iaaa-aaaak-aegcq-cai.raw.ic0.app"]
-    ports: [ "42069:42069/tcp", "42069:42069/udp" ]
+    # ports: [ "42069:42069/tcp", "42069:42069/udp" ]
     restart: unless-stopped
 
   # Reads data from db-volume
@@ -27,18 +27,18 @@ services:
     network_mode: host
     pid: service:blockimporter
     command: ["rpcdaemon", "--http.addr", "0.0.0.0", --http.port", "8555", "--datadir", "/chain-db", "--http.corsdomain", "*", "--http.api=eth,erigon,ots"]
-    ports: [ "8555:8555/tcp", "8555:8555/udp" ]
+    # ports: [ "8555:8555/tcp", "8555:8555/udp" ]
     restart: unless-stopped
 
   # Connects to `rpcdaemon:8555`, exposes 80 port
   otterscan:
     image: otterscan/otterscan:v1.29.0
     environment:
-      ERIGON_URL: "http://localhost:8555"
+      ERIGON_URL: "http://rpcdaemon:8555"
     # TODO: we don't need actually to use a host network here
     # But for some reason when using a separate bridge network `otterscan` was unable to connect to `rpcdaemon:8555`
     network_mode: host
-    # ports: ["80:${OTTERSCAN_PORT:-80}"]
+    ports: ["80:${OTTERSCAN_PORT:-80}"]
     restart: unless-stopped
 
 volumes:
