@@ -191,20 +191,21 @@ func ExecV3(ctx context.Context,
 
 	rs := state.NewStateV3(cfg.dirs.Tmp)
 
+	// in queue
 	in := e3types.NewQueueWithRetry(100_000)
 	defer in.Close()
+
+	// out queue (results of execution)
+	rws := &e3types.TxTaskQueue{}
+	heap.Init(rws)
+	rwsConsumed := make(chan struct{}, 1)
+	defer close(rwsConsumed)
+	rwsLock := &sync.Mutex{}
 
 	resQueueLimit := workerCount // workerCount * 4
 	execWorkers, applyWorker, resultCh, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, in, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
-
-	rws := &e3types.TxTaskQueue{} //results queue
-	heap.Init(rws)
-	rwsConsumed := make(chan struct{}, 1)
-	defer close(rwsConsumed)
-
-	rwsLock := &sync.Mutex{}
 
 	commitThreshold := batchSize.Bytes()
 	progress := NewProgress(block, commitThreshold, workerCount, execStage.LogPrefix())
