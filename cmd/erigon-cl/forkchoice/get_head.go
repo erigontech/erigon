@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"bytes"
+	"fmt"
 	"sort"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -9,16 +10,17 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
-func (f *ForkChoiceStore) GetHead() (libcommon.Hash, error) {
+// GetHead fetches the current head.
+func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Retrieve att
 	head := f.justifiedCheckpoint.Root
 	blocks := f.getFilteredBlockTree(head)
 	// See which validators can be used for attestation score
-	justificationState, err := f.forkGraph.GetStateFromCheckpoint(f.justifiedCheckpoint)
+	justificationState, err := f.getCheckpointState(*f.justifiedCheckpoint)
 	if err != nil {
-		return libcommon.Hash{}, err
+		return libcommon.Hash{}, 0, err
 	}
 	// Filter all validators deemed as bad
 	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState.Validators(), justificationState.Epoch())
@@ -33,7 +35,11 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, error) {
 		}
 		// Stop if we dont have any more children
 		if len(children) == 0 {
-			return head, nil
+			header, hasHeader := f.forkGraph.GetHeader(head)
+			if !hasHeader {
+				return libcommon.Hash{}, 0, fmt.Errorf("no slot for head is stored")
+			}
+			return head, header.Slot, nil
 		}
 		// Average case scenario.
 		if len(children) == 1 {
@@ -52,6 +58,7 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, error) {
 		maxWeight := f.getWeight(children[0], filteredIndicies, justificationState)
 		for i := 1; i < len(children); i++ {
 			weight := f.getWeight(children[i], filteredIndicies, justificationState)
+			// Lexicographical order is king.
 			if weight >= maxWeight {
 				head = children[i]
 				maxWeight = weight

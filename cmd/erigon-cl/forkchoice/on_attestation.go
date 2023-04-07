@@ -5,8 +5,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice/fork_graph"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // OnAttestation processes incoming attestations. TODO(Giulio2002): finish it with forward changesets.
@@ -17,13 +15,8 @@ func (f *ForkChoiceStore) OnAttestation(attestation *cltypes.Attestation, fromBl
 		return err
 	}
 	target := attestation.Data.Target
-	// Insert target state
-	if status, err := f.forkGraph.AddChainSegmentWithCheckpoint(target); err != nil || (status != fork_graph.PreValidated && status != fork_graph.Success) {
-		log.Debug("Could not create checkpoint state", "status", status, "err", err)
-		return fmt.Errorf("could not create checkpoint state, %s", err)
-	}
 
-	targetState, err := f.forkGraph.GetStateFromCheckpoint(target)
+	targetState, err := f.getCheckpointState(*target)
 	if err != nil {
 		return nil
 	}

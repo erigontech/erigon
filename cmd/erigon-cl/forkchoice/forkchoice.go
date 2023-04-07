@@ -10,7 +10,16 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice/fork_graph"
 )
 
-const checkpointsPerCache = 1024
+const (
+	checkpointsPerCache = 1024
+	allowedCachedStates = 4
+)
+
+// We cache partial data of each validator instead of storing all checkpoint states
+type partialValidator struct {
+	index            uint32
+	effectiveBalance uint64
+}
 
 type ForkChoiceStore struct {
 	time                          uint64
@@ -24,6 +33,7 @@ type ForkChoiceStore struct {
 	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
 	unrealizedJustifications *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
+	checkpointStates         *lru.Cache[cltypes.Checkpoint, *state.BeaconState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
 	latestMessages           map[uint64]*LatestMessage
 	mu                       sync.Mutex
 }
@@ -47,6 +57,11 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 	if err != nil {
 		return nil, err
 	}
+	checkpointStates, err := lru.New[cltypes.Checkpoint, *state.BeaconState](allowedCachedStates)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ForkChoiceStore{
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),
 		justifiedCheckpoint:           anchorCheckpoint.Copy(),
@@ -57,5 +72,34 @@ func NewForkChoiceStore(anchorState *state.BeaconState) (*ForkChoiceStore, error
 		unrealizedJustifications:      unrealizedJustifications,
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
+		checkpointStates:              checkpointStates,
 	}, nil
+}
+
+// Time returns current time
+func (f *ForkChoiceStore) Time() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.time
+}
+
+// ProposerBoostRoot returns proposer boost root
+func (f *ForkChoiceStore) ProposerBoostRoot() libcommon.Hash {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.proposerBoostRoot
+}
+
+// JustifiedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) JustifiedCheckpoint() *cltypes.Checkpoint {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.justifiedCheckpoint
+}
+
+// FinalizedCheckpoint returns justified checkpoint
+func (f *ForkChoiceStore) FinalizedCheckpoint() *cltypes.Checkpoint {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.finalizedCheckpoint
 }

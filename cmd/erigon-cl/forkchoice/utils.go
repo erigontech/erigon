@@ -1,9 +1,15 @@
 package forkchoice
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
 )
+
+var noChangeCheckpointEncoding = []byte{0xff}
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
@@ -58,4 +64,31 @@ func (f *ForkChoiceStore) Ancestor(root libcommon.Hash, slot uint64) libcommon.H
 		}
 	}
 	return root
+}
+
+// getCheckpointState computes and caches checkpoint states.
+func (f *ForkChoiceStore) getCheckpointState(checkpoint cltypes.Checkpoint) (*state.BeaconState, error) {
+	// check if it can be found in cache.
+	if state, ok := f.checkpointStates.Get(checkpoint); ok {
+		return state, nil
+	}
+	// If it is not in cache compute it and then put in cache.
+	baseState, err := f.forkGraph.GetState(checkpoint.Root)
+	if err != nil {
+		return nil, err
+	}
+	if baseState == nil {
+		return nil, fmt.Errorf("getCheckpointState: baseState not found in graph")
+	}
+	baseState = baseState.Copy()
+	// By default use the no change encoding to signal that there is no future epoch here.
+	if baseState.Slot() < f.computeStartSlotAtEpoch(checkpoint.Epoch) {
+		// If we require to change it then process the future epoch
+		if err := transition.ProcessSlots(baseState, f.computeStartSlotAtEpoch(checkpoint.Epoch)); err != nil {
+			return nil, err
+		}
+	}
+	// Cache in memory what we are left with.
+	f.checkpointStates.Add(checkpoint, baseState)
+	return baseState, nil
 }
