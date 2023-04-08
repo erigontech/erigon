@@ -57,6 +57,8 @@ func (g *GossipManager) Start() {
 				continue
 			}
 			block := object.(*cltypes.SignedBeaconBlock)
+			log.Debug("Received block via gossip", "slot", block.Block.Slot)
+
 			if err := g.forkChoice.OnBlock(block, true); err != nil {
 				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
