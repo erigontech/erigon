@@ -521,6 +521,7 @@ Loop:
 							return
 						}
 					case <-slowDownLimit.C:
+						return
 					}
 				}
 			}()
