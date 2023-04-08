@@ -63,10 +63,10 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 		status, err = e.executionClient.EngineNewPayload(ctx, grpcMessage)
 	}
 	// Ignore timeouts
-	if err.Error() == errContextExceeded {
-		return nil
-	}
 	if err != nil {
+		if err.Error() == errContextExceeded {
+			return nil
+		}
 		return err
 	}
 	if status.Status == remote.EngineStatus_INVALID {
