@@ -229,13 +229,6 @@ func ExecV3(ctx context.Context,
 		var lastBlockNum uint64
 
 		for outputTxNum.Load() <= maxTxNum {
-			//log.Warn("outputTxNum", "outputTxNum", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len()", rws.Len())
-			//if rws.Len() > 0 {
-			//	log.Warn("before process", "rws.Len()", rws.Len(), "outputTxNum.Load()", outputTxNum.Load())
-			//	if tt := rws.Dbg(); tt != nil {
-			//		log.Warn("fst", "n", tt.TxNum, "in.len()", in.Len(), "in.NewTasksLen", in.NewTasksLen())
-			//	}
-			//}
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}
