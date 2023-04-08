@@ -40,7 +40,7 @@ func (g *GossipManager) Start() {
 	for {
 		data, err := subscription.Recv()
 		if err != nil {
-			log.Warn("[Beacon Gossip] Failure in receiving", "err", err)
+			log.Debug("[Beacon Gossip] Failure in receiving", "err", err)
 			continue
 		}
 		// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
@@ -58,7 +58,7 @@ func (g *GossipManager) Start() {
 			}
 			block := object.(*cltypes.SignedBeaconBlock)
 			if err := g.forkChoice.OnBlock(block, true); err != nil {
-				log.Warn("[Beacon Gossip] Failure in processing block", "err", err)
+				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
 			}
 			for _, attestation := range block.Block.Body.Attestations {

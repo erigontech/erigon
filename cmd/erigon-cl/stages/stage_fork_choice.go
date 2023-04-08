@@ -75,8 +75,6 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 		}
 	}()
 	startDownloadService(s, cfg)
-	// We also need to start on tick service
-
 	/*if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
