@@ -69,6 +69,9 @@ func (g *GossipManager) Start() {
 					continue
 				}
 			}
+			// Publish the block
+			g.sentinel.PublishGossip(g.ctx, data)
+			// Now check the head
 			headRoot, headSlot, err := g.forkChoice.GetHead()
 			if err != nil {
 				log.Debug("Could not fetch head data", "err", err)

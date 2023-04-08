@@ -3,6 +3,7 @@ package execution_client
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -50,12 +51,16 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel := context.WithTimeout(e.ctx, 1*time.Second)
+	defer cancel()
+
 	var status *remote.EnginePayloadStatus
 	if e.executionServer != nil {
-		status, err = e.executionServer.EngineNewPayload(e.ctx, grpcMessage)
+		status, err = e.executionServer.EngineNewPayload(ctx, grpcMessage)
 	} else if e.executionClient != nil {
-		status, err = e.executionClient.EngineNewPayload(e.ctx, grpcMessage)
+		status, err = e.executionClient.EngineNewPayload(ctx, grpcMessage)
 	}
+
 	if err != nil {
 		return err
 	}
@@ -77,10 +82,12 @@ func (e *ExecutionEnginePhase1) ForkChoiceUpdate(finalized libcommon.Hash, head 
 		},
 	}
 	var err error
+	ctx, cancel := context.WithTimeout(e.ctx, 1*time.Second)
+	defer cancel()
 	if e.executionClient != nil {
-		_, err = e.executionClient.EngineForkChoiceUpdated(e.ctx, grpcMessage)
+		_, err = e.executionClient.EngineForkChoiceUpdated(ctx, grpcMessage)
 	} else if e.executionServer != nil {
-		_, err = e.executionServer.EngineForkChoiceUpdated(e.ctx, grpcMessage)
+		_, err = e.executionServer.EngineForkChoiceUpdated(ctx, grpcMessage)
 	}
 	return err
 }
