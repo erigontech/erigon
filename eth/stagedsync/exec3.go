@@ -526,6 +526,9 @@ Loop:
 						}
 					case <-slowDownLimit.C:
 						//log.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
+						//if tt := rws.Dbg(); tt != nil {
+						//	log.Warn("fst", "n", tt.TxNum, "in.len()", in.Len(), "out", outputTxNum.Load(), "in.NewTasksLen", in.NewTasksLen())
+						//}
 						return
 					}
 				}
