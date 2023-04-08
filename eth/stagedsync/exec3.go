@@ -525,7 +525,7 @@ Loop:
 							return
 						}
 					case <-slowDownLimit.C:
-						log.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
+						//log.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
 						return
 					}
 				}

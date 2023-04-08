@@ -102,7 +102,6 @@ func (rw *Worker) ResetTx(chainTx kv.Tx) {
 }
 
 func (rw *Worker) Run() error {
-	defer func() { log.Warn("rw.Run exit") }()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		rw.RunTxTask(txTask)
 		if err := rw.resultCh.Add(rw.ctx, txTask); err != nil {
