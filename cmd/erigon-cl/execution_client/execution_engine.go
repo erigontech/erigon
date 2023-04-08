@@ -14,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 )
 
+var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
 type ExecutionEngine interface {
@@ -60,7 +62,10 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 	} else if e.executionClient != nil {
 		status, err = e.executionClient.EngineNewPayload(ctx, grpcMessage)
 	}
-
+	// Ignore timeouts
+	if err.Error() == errContextExceeded {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -89,6 +94,11 @@ func (e *ExecutionEnginePhase1) ForkChoiceUpdate(finalized libcommon.Hash, head 
 	} else if e.executionServer != nil {
 		_, err = e.executionServer.EngineForkChoiceUpdated(ctx, grpcMessage)
 	}
+	// Ignore timeouts
+	if err.Error() == errContextExceeded {
+		return nil
+	}
+
 	return err
 }
 

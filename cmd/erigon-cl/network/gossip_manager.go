@@ -85,7 +85,7 @@ func (g *GossipManager) Start() {
 					g.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
 					g.forkChoice.GetEth1Hash(headRoot),
 				); err != nil {
-					log.Warn("Could send forkchoice", "err", err)
+					log.Warn("Could send not forkchoice", "err", err)
 					return
 				}
 			}
