@@ -170,7 +170,7 @@ func onTickService(ctx context.Context, cfg StageForkChoiceCfg) {
 	for {
 		select {
 		case <-tickInterval.C:
-			//cfg.forkChoice.OnTick(uint64(time.Now().Unix()))
+			cfg.forkChoice.OnTick(uint64(time.Now().Unix()))
 		case <-ctx.Done():
 			return
 		}
