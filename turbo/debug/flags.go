@@ -95,7 +95,7 @@ func SetupCobra(cmd *cobra.Command) error {
 	RaiseFdLimit()
 	flags := cmd.Flags()
 
-	_ = logging.GetLoggerCmd("debug", cmd)
+	logging.SetupLoggerCmd("erigon", cmd)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -168,7 +168,7 @@ func Setup(ctx *cli.Context) error {
 
 	RaiseFdLimit()
 
-	_ = logging.GetLoggerCtx("debug", ctx)
+	logging.SetupLoggerCtx("erigon", ctx)
 
 	if traceFile := ctx.String(traceFlag.Name); traceFile != "" {
 		if err := Handler.StartGoTrace(traceFile); err != nil {

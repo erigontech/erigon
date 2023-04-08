@@ -88,6 +88,7 @@ func (c *ConsensusTester) iterateOverTests(dir, p string, depth int) {
 			if *c.pattern != "" && !strings.Contains(p, *c.pattern) {
 				return
 			}
+			log.Debug("Executing", "name", p)
 
 			// If yes execute it.
 			if implemented, err := c.executeTest(p); err != nil {
@@ -96,6 +97,7 @@ func (c *ConsensusTester) iterateOverTests(dir, p string, depth int) {
 			} else if implemented {
 				// Mark it as passed only if the test was actually implemented had no errors were found.
 				c.passed++
+				log.Debug("Test passed", "name", p)
 			}
 
 			return

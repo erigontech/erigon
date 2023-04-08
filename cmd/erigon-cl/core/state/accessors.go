@@ -25,7 +25,7 @@ var (
 
 // GetActiveValidatorsIndices returns the list of validator indices active for the given epoch.
 func (b *BeaconState) GetActiveValidatorsIndices(epoch uint64) (indicies []uint64) {
-	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok {
+	if cachedIndicies, ok := b.activeValidatorsCache.Get(epoch); ok && len(cachedIndicies) > 0 {
 		return cachedIndicies
 	}
 	for i, validator := range b.validators {
@@ -590,4 +590,39 @@ func (b *BeaconState) ComputeNextSyncCommittee() (*cltypes.SyncCommittee, error)
 		PubKeys:            syncCommitteePubKeys,
 		AggregatePublicKey: aggregate,
 	}, nil
+}
+
+func (b *BeaconState) IsValidIndexedAttestation(att *cltypes.IndexedAttestation) (bool, error) {
+	inds := att.AttestingIndices
+	if len(inds) == 0 || !utils.IsSliceSortedSet(inds) {
+		return false, fmt.Errorf("isValidIndexedAttestation: attesting indices are not sorted or are null")
+	}
+
+	pks := [][]byte{}
+	for _, v := range inds {
+		val, err := b.ValidatorForValidatorIndex(int(v))
+		if err != nil {
+			return false, err
+		}
+		pks = append(pks, val.PublicKey[:])
+	}
+
+	domain, err := b.GetDomain(b.beaconConfig.DomainBeaconAttester, att.Data.Target.Epoch)
+	if err != nil {
+		return false, fmt.Errorf("unable to get the domain: %v", err)
+	}
+
+	signingRoot, err := fork.ComputeSigningRoot(att.Data, domain)
+	if err != nil {
+		return false, fmt.Errorf("unable to get signing root: %v", err)
+	}
+
+	valid, err := bls.VerifyAggregate(att.Signature[:], signingRoot[:], pks)
+	if err != nil {
+		return false, fmt.Errorf("error while validating signature: %v", err)
+	}
+	if !valid {
+		return false, fmt.Errorf("invalid aggregate signature")
+	}
+	return true, nil
 }

@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func OpenDatabase(path string, logger log.Logger, inMem bool, readonly bool) kv.RwDB {
-	opts := mdbx.NewMDBX(logger).Label(kv.ConsensusDB)
+func OpenDatabase(path string, inMem bool, readonly bool) kv.RwDB {
+	opts := mdbx.NewMDBX(log.Root()).Label(kv.ConsensusDB)
 	if readonly {
 		opts = opts.Readonly()
 	}

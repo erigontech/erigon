@@ -64,7 +64,7 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, in *e3types.QueueWithRetry, rws *e3types.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, in *e3types.QueueWithRetry, rws *e3types.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, resultCh chan *e3types.TxTask, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -204,6 +204,11 @@ func ExecV3(ctx context.Context,
 	defer close(rwsConsumed)
 
 	execWorkers, applyWorker, rws, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, in, blockReader, chainConfig, genesis, engine, workerCount+1)
+	defer stopWorkers()
+	applyWorker.DiscardReadList()
+
+	resQueueLimit := workerCount // workerCount * 4
+	execWorkers, applyWorker, resultCh, stopWorkers, waitWorkers := exec3.NewWorkersPool(lock.RLocker(), ctx, parallel, chainDb, rs, in, blockReader, chainConfig, logger, genesis, engine, workerCount+1)
 	defer stopWorkers()
 	applyWorker.DiscardReadList()
 

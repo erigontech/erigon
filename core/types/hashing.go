@@ -22,6 +22,7 @@ import (
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/protolambda/ztyp/codec"
 
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/cryptopool"
@@ -188,5 +189,15 @@ func prefixedRlpHash(prefix byte, x interface{}) (h libcommon.Hash) {
 	//nolint:errcheck
 	sha.Read(h[:])
 	cryptopool.ReturnToPoolKeccak256(sha)
+	return h
+}
+
+// prefixedSSZHash writes the prefix into the hasher before SSZ encoding x.  It's used for
+// computing the tx id & signing hashes of signed blob transactions.
+func prefixedSSZHash(prefix byte, obj codec.Serializable) (h libcommon.Hash) {
+	sha := crypto.NewKeccakState()
+	sha.Write([]byte{prefix})
+	EncodeSSZ(sha, obj)
+	sha.Read(h[:])
 	return h
 }

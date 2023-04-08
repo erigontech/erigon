@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/common"
@@ -22,7 +23,6 @@ type HandShaker struct {
 	// Status object to send over.
 	status        *cltypes.Status // Contains status object for handshakes
 	set           bool
-	rule          RuleFunc // Method that determine if peer is worth connecting to or not.
 	host          host.Host
 	genesisConfig *clparams.GenesisConfig
 	beaconConfig  *clparams.BeaconChainConfig
@@ -30,10 +30,9 @@ type HandShaker struct {
 	mu sync.Mutex
 }
 
-func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, host host.Host, rule RuleFunc) *HandShaker {
+func New(ctx context.Context, genesisConfig *clparams.GenesisConfig, beaconConfig *clparams.BeaconChainConfig, host host.Host) *HandShaker {
 	return &HandShaker{
 		ctx:           ctx,
-		rule:          rule,
 		host:          host,
 		genesisConfig: genesisConfig,
 		beaconConfig:  beaconConfig,
@@ -86,5 +85,9 @@ func (h *HandShaker) ValidatePeer(id peer.ID) bool {
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(bytes.NewReader(response), responseStatus, clparams.Phase0Version); err != nil {
 		return false
 	}
-	return h.rule(responseStatus, status, h.genesisConfig, h.beaconConfig)
+	forkDigest, err := fork.ComputeForkDigest(h.beaconConfig, h.genesisConfig)
+	if err != nil {
+		return false
+	}
+	return responseStatus.ForkDigest == forkDigest
 }

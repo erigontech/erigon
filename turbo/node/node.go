@@ -96,7 +96,6 @@ func NewEthConfigUrfave(ctx *cli.Context, nodeConfig *nodecfg.Config) *ethconfig
 func New(
 	nodeConfig *nodecfg.Config,
 	ethConfig *ethconfig.Config,
-	logger log.Logger,
 ) (*ErigonNode, error) {
 	//prepareBuckets(optionalParams.CustomBuckets)
 	node, err := node.New(nodeConfig)
@@ -104,7 +103,7 @@ func New(
 		utils.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
-	ethereum, err := eth.New(node, ethConfig, logger)
+	ethereum, err := eth.New(node, ethConfig)
 	if err != nil {
 		return nil, err
 	}
