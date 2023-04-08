@@ -95,7 +95,7 @@ func (e *ExecutionEnginePhase1) ForkChoiceUpdate(finalized libcommon.Hash, head 
 		_, err = e.executionServer.EngineForkChoiceUpdated(ctx, grpcMessage)
 	}
 	// Ignore timeouts
-	if err.Error() == errContextExceeded {
+	if err != nil && err.Error() == errContextExceeded {
 		return nil
 	}
 
