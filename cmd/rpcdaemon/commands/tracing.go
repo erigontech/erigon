@@ -78,7 +78,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		stream.WriteNil()
 		return err
 	}
-	
+
 	if config == nil {
 		config = &tracers.TraceConfig{}
 	}
@@ -326,6 +326,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
+
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)
