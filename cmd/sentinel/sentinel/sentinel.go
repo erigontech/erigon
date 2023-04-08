@@ -286,7 +286,7 @@ func (s *Sentinel) HasTooManyPeers() bool {
 }
 
 func (s *Sentinel) GetPeersCount() int {
-	sub := s.subManager.GetMatchingSubscription(string(LightClientOptimisticUpdateTopic))
+	sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
 
 	if sub == nil {
 		return len(s.host.Network().Peers())
