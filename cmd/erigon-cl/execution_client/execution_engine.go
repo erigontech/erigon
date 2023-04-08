@@ -51,7 +51,7 @@ func (e *ExecutionEnginePhase1) NewPayload(payload *cltypes.Eth1Block) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(e.ctx, 1*time.Second)
+	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
 	defer cancel()
 
 	var status *remote.EnginePayloadStatus
@@ -82,7 +82,7 @@ func (e *ExecutionEnginePhase1) ForkChoiceUpdate(finalized libcommon.Hash, head 
 		},
 	}
 	var err error
-	ctx, cancel := context.WithTimeout(e.ctx, 1*time.Second)
+	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
 	defer cancel()
 	if e.executionClient != nil {
 		_, err = e.executionClient.EngineForkChoiceUpdated(ctx, grpcMessage)
