@@ -23,7 +23,7 @@ const (
 	PreValidated   ChainSegmentInsertionResult = 5
 )
 
-const maxGraphExtension = 1024
+const maxGraphExtension = 128
 
 /*
 * The state store process is related to graph theory in the sense that the Ethereum blockchain can be thought of as a directed graph,
@@ -116,7 +116,7 @@ func New(anchorState *state.BeaconState) *ForkGraph {
 }
 
 // Add a new node and edge to the graph
-func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (ChainSegmentInsertionResult, error) {
+func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (ChainSegmentInsertionResult, error) {
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
 	if err != nil {
@@ -139,18 +139,19 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock) (Cha
 		return InvalidBlock, nil
 	}
 
-	f.lastState, err = f.GetState(block.ParentRoot)
+	baseState, err := f.GetState(block.ParentRoot)
 	if err != nil {
 		return InvalidBlock, err
 	}
-	if f.lastState == nil {
+	if baseState == nil {
 		return MissingSegment, nil
 	}
+	f.lastState = baseState
 
 	f.lastState.StartCollectingReverseChangeSet()
 	f.lastState.StartCollectingForwardChangeSet()
 	// Execute the state
-	if err := transition.TransitionState(f.lastState, signedBlock /*fullValidation=*/, true); err != nil {
+	if err := transition.TransitionState(f.lastState, signedBlock, fullValidation); err != nil {
 		// Revert bad block changes
 		f.lastState.RevertWithChangeset(f.lastState.StopCollectingReverseChangeSet())
 		f.lastState.StopCollectingForwardChangeSet()

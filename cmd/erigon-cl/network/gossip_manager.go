@@ -2,42 +2,36 @@ package network
 
 import (
 	"context"
+	"runtime"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-type GossipReceiver interface {
-	ReceiveGossip(ssz.Unmarshaler)
-}
-
+// Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
 	ctx context.Context
 
-	receivers map[sentinel.GossipType][]GossipReceiver
-	sentinel  sentinel.SentinelClient
+	forkChoice *forkchoice.ForkChoiceStore
+	sentinel   sentinel.SentinelClient
 }
 
-func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient) *GossipManager {
+func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore) *GossipManager {
 	return &GossipManager{
-		sentinel:  s,
-		receivers: make(map[sentinel.GossipType][]GossipReceiver),
-		ctx:       ctx,
+		sentinel:   s,
+		forkChoice: forkChoice,
+		ctx:        ctx,
 	}
 }
 
-func (g *GossipManager) AddReceiver(t sentinel.GossipType, receiver GossipReceiver) {
-	if _, ok := g.receivers[t]; !ok {
-		g.receivers[t] = make([]GossipReceiver, 0)
-	}
-	g.receivers[t] = append(g.receivers[t], receiver)
-}
-
-func (g *GossipManager) Loop() {
+func (g *GossipManager) Start() {
 	subscription, err := g.sentinel.SubscribeGossip(g.ctx, &sentinel.EmptyMessage{})
 	if err != nil {
 		return
@@ -51,9 +45,8 @@ func (g *GossipManager) Loop() {
 		}
 		// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 		// then attempts to deserialize the received data into it.
-		//If the deserialization fails, an error is logged and the loop continues to the next iteration.
-		//If the deserialization is successful, the object is set to the deserialized value and the loop continues to the next iteration.
-		receivers := g.receivers[data.Type]
+		// If the deserialization fails, an error is logged and the loop continues to the next iteration.
+		// If the deserialization is successful, the object is set to the deserialized value and the loop continues to the next iteration.
 		var object ssz.Unmarshaler
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
@@ -63,6 +56,39 @@ func (g *GossipManager) Loop() {
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
+			block := object.(*cltypes.SignedBeaconBlock)
+			if err := g.forkChoice.OnBlock(block, true); err != nil {
+				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
+				continue
+			}
+			for _, attestation := range block.Block.Body.Attestations {
+				if err := g.forkChoice.OnAttestation(attestation, true); err != nil {
+					log.Debug("[Beacon Gossip] Failure in processing attestation", "err", err)
+					continue
+				}
+			}
+			headRoot, headSlot, err := g.forkChoice.GetHead()
+			if err != nil {
+				log.Debug("Could not fetch head data", "err", err)
+				continue
+			}
+			// Do forkchoice if possible
+			if g.forkChoice.Engine() != nil {
+				finalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
+				// Run forkchoice
+				if err := g.forkChoice.Engine().ForkChoiceUpdate(
+					g.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
+					g.forkChoice.GetEth1Hash(headRoot),
+				); err != nil {
+					return
+				}
+			}
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+			// Log final result
+			log.Info("New block imported",
+				"slot", block.Block.Slot, "head", headSlot, "headRoot", headRoot,
+				"alloc", libcommon.ByteCount(m.Alloc))
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
@@ -84,18 +110,16 @@ func (g *GossipManager) Loop() {
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
+			if err := g.forkChoice.OnAttesterSlashing(object.(*cltypes.AttesterSlashing)); err != nil {
+				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
+				continue
+			}
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
 			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding proof", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
-			}
-		}
-		// If we received a valid object give it to our receiver
-		if object != nil {
-			for _, receiver := range receivers {
-				receiver.ReceiveGossip(object)
 			}
 		}
 	}

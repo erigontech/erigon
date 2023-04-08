@@ -29,22 +29,22 @@ func TestForkGraph(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappyWithVersion(blockC, block2, int(clparams.Phase0Version)))
 	require.NoError(t, utils.DecodeSSZSnappyWithVersion(anchorState, anchor, int(clparams.Phase0Version)))
 	graph := fork_graph.New(anchorState)
-	status, err := graph.AddChainSegment(blockA)
+	status, err := graph.AddChainSegment(blockA, true)
 	require.NoError(t, err)
 	// Save current state hash
 	expectedStateHashPostFail, err := graph.LastState().HashSSZ()
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.Success)
-	status, err = graph.AddChainSegment(blockB)
+	status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.Success)
 	// Try again with same should yield success
-	status, err = graph.AddChainSegment(blockB)
+	status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.PreValidated)
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
-	status, err = graph.AddChainSegment(blockC)
+	status, err = graph.AddChainSegment(blockC, true)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
 	haveStateHashPostFail, err := graph.LastState().HashSSZ()

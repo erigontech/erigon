@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
+func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidation bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	blockRoot, err := block.Block.HashSSZ()
@@ -23,13 +23,21 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 
 	config := f.forkGraph.Config()
-
-	status, err := f.forkGraph.AddChainSegment(block)
+	if fullValidation && f.engine != nil {
+		if err := f.engine.NewPayload(block.Block.Body.ExecutionPayload); err != nil {
+			return err
+		}
+	}
+	status, err := f.forkGraph.AddChainSegment(block, fullValidation)
 	if status != fork_graph.Success {
 		if status != fork_graph.PreValidated {
 			log.Debug("Could not replay block", "slot", block.Block.Slot, "code", status, "reason", err)
 		}
 		return err
+	}
+	f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	if block.Block.Slot > f.highestSeen {
+		f.highestSeen = block.Block.Slot
 	}
 	lastProcessedState := f.forkGraph.LastState()
 	// Add proposer score boost if the block is timely
