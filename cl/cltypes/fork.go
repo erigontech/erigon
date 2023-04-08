@@ -13,6 +13,14 @@ type Fork struct {
 	Epoch           uint64
 }
 
+func (f *Fork) Copy() *Fork {
+	return &Fork{
+		PreviousVersion: f.PreviousVersion,
+		CurrentVersion:  f.CurrentVersion,
+		Epoch:           f.Epoch,
+	}
+}
+
 func (f *Fork) EncodeSSZ(dst []byte) ([]byte, error) {
 	buf := dst
 	buf = append(buf, f.PreviousVersion[:]...)

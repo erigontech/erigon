@@ -30,7 +30,6 @@ import (
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
-	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 )
@@ -79,7 +78,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch,
 		HeadSlot:       state.FinalizedCheckpoint().Epoch * cfg.BeaconCfg.SlotsPerEpoch,
 		HeadRoot:       state.FinalizedCheckpoint().Root,
-	}, handshake.LightClientRule)
+	})
 	if err != nil {
 		log.Error("Could not start sentinel", "err", err)
 	}

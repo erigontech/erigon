@@ -198,7 +198,7 @@ func verifyAttestationWorker(state *state.BeaconState, attestation *cltypes.Atte
 		resultCh <- verifyAttestationWorkersResult{err: err}
 		return
 	}
-	success, err := isValidIndexedAttestation(state, indexedAttestation)
+	success, err := state.IsValidIndexedAttestation(indexedAttestation)
 	resultCh <- verifyAttestationWorkersResult{success: success, err: err}
 }
 

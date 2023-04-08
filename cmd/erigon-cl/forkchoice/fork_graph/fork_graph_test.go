@@ -22,7 +22,6 @@ var block2 []byte
 var anchor []byte
 
 func TestForkGraph(t *testing.T) {
-	t.Skip("Fix please")
 	blockA, blockB, blockC := &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}, &cltypes.SignedBeaconBlock{}
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappyWithVersion(blockA, block1, int(clparams.Phase0Version)))
@@ -42,14 +41,13 @@ func TestForkGraph(t *testing.T) {
 	// Try again with same should yield success
 	status, err = graph.AddChainSegment(blockB)
 	require.NoError(t, err)
-	require.Equal(t, status, fork_graph.Success)
+	require.Equal(t, status, fork_graph.PreValidated)
 	// Now make blockC a bad block
-	blockC.Block.Slot = 8549 // some invalid thing
+	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	status, err = graph.AddChainSegment(blockC)
 	require.NoError(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
 	haveStateHashPostFail, err := graph.LastState().HashSSZ()
-	// Ensure it ends up on correct state.
 	require.NoError(t, err)
 	require.Equal(t, expectedStateHashPostFail, haveStateHashPostFail)
 }
