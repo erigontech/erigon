@@ -58,7 +58,10 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 	log.Info("Listening to gossip now")
 	// We start gossip management.
 	go cfg.gossipManager.Start()
+	go onTickService(ctx, cfg)
 	startDownloadService(s, cfg)
+	// We also need to start on tick service
+
 	/*if !useExternalTx {
 		if err = tx.Commit(); err != nil {
 			return err
@@ -123,7 +126,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 	firstTime := true
 
 	for {
-		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) + 1
+		targetSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 		if int64(targetSlot)-int64(cfg.forkChoice.HighestSeen()) < maxBlockBehindBeforeDownload {
 			time.Sleep(time.Second)
 			continue
@@ -140,7 +143,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 		triggerInterval := time.NewTicker(150 * time.Millisecond)
 		// Process blocks until we reach our target
-		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)-1 > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
+		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
 			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 			// Send request every 50 Millisecond only if not on chain tip
 			if currentSlot != highestProcessed {
@@ -159,5 +162,17 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		log.Info("Finished catching up")
 		logInterval.Stop()
 		triggerInterval.Stop()
+	}
+}
+
+func onTickService(ctx context.Context, cfg StageForkChoiceCfg) {
+	tickInterval := time.NewTicker(50 * time.Millisecond)
+	for {
+		select {
+		case <-tickInterval.C:
+			//cfg.forkChoice.OnTick(uint64(time.Now().Unix()))
+		case <-ctx.Done():
+			return
+		}
 	}
 }

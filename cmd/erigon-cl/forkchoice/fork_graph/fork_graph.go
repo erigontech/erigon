@@ -158,7 +158,7 @@ func (f *ForkGraph) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, full
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", err)
 		f.badBlocks.Add(blockRoot, true)
-		return InvalidBlock, nil
+		return InvalidBlock, err
 	}
 
 	// if it is finished then update the graph

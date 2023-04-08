@@ -58,7 +58,7 @@ func (g *GossipManager) Start() {
 			}
 			block := object.(*cltypes.SignedBeaconBlock)
 			if err := g.forkChoice.OnBlock(block, true); err != nil {
-				log.Debug("[Beacon Gossip] Failure in processing block", "err", err)
+				log.Warn("[Beacon Gossip] Failure in processing block", "err", err)
 				continue
 			}
 			for _, attestation := range block.Block.Body.Attestations {
@@ -80,6 +80,7 @@ func (g *GossipManager) Start() {
 					g.forkChoice.GetEth1Hash(finalizedCheckpoint.Root),
 					g.forkChoice.GetEth1Hash(headRoot),
 				); err != nil {
+					log.Warn("Could send forkchoice", "err", err)
 					return
 				}
 			}

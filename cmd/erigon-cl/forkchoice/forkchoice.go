@@ -71,7 +71,6 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 	if err != nil {
 		return nil, err
 	}
-
 	return &ForkChoiceStore{
 		highestSeen:                   anchorState.Slot(),
 		time:                          anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot(),

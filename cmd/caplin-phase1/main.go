@@ -93,7 +93,6 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
 		return err
 	}
-	var execution remote.ETHBACKENDClient
 	var engine execution_client.ExecutionEngine
 	if cfg.ErigonPrivateApi != "" {
 		cc, err := grpc.Dial(cfg.ErigonPrivateApi, grpc.WithInsecure())
@@ -101,8 +100,7 @@ func runLightClientNode(cliCtx *cli.Context) error {
 			log.Error("could not connect to erigon private api", "err", err)
 		}
 		defer cc.Close()
-		execution = remote.NewETHBACKENDClient(cc)
-		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, execution)
+		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
 	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg)
 	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
