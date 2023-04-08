@@ -128,7 +128,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			return
 		}
 		for _, block := range newBlocks {
-			if err := cfg.forkChoice.OnBlock(block, false); err != nil {
+			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
 			}
 		}
@@ -156,7 +156,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 
 		triggerInterval := time.NewTicker(150 * time.Millisecond)
 		// Process blocks until we reach our target
-		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
+		for highestProcessed := cfg.downloader.GetHighestProcessedSlot(); utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)-1 > highestProcessed; highestProcessed = cfg.downloader.GetHighestProcessedSlot() {
 			currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 			// Send request every 50 Millisecond only if not on chain tip
 			if currentSlot != highestProcessed {
