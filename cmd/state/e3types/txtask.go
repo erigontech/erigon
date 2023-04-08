@@ -210,6 +210,7 @@ func (q *QueueWithRetry) popNoWait() (task *TxTask, ok bool) {
 		select {
 		case task, ok = <-q.newTasks:
 			if !ok {
+
 				return nil, false
 			}
 		default:
@@ -273,7 +274,9 @@ func (q *ResultsQueue) drainNoBlock(task *TxTask) {
 			if !ok {
 				return
 			}
-			heap.Push(q.results, txTask)
+			if txTask != nil {
+				heap.Push(q.results, txTask)
+			}
 		default: // we are inside mutex section, can't block here
 			return
 		}
@@ -316,7 +319,6 @@ func (q *ResultsQueue) Drain(ctx context.Context) error {
 		if !ok {
 			return nil
 		}
-
 		q.drainNoBlock(txTask)
 	}
 	return nil
@@ -386,4 +388,10 @@ func (q *ResultsQueue) Push(t *TxTask) {
 }
 func (q *ResultsQueue) PopLocked() (t *TxTask) {
 	return heap.Pop(q.results).(*TxTask)
+}
+func (q *ResultsQueue) Dbg() (t *TxTask) {
+	if len(*q.results) > 0 {
+		return (*q.results)[0]
+	}
+	return nil
 }

@@ -192,7 +192,11 @@ func ExecV3(ctx context.Context,
 
 	rs := state.NewStateV3(cfg.dirs.Tmp)
 
-	// in queue
+	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
+	// Now rwLoop closing both (because applyLoop we completely restart)
+	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
+
+	// input queue
 	in := e3types.NewQueueWithRetry(100_000)
 	defer in.Close()
 
@@ -225,6 +229,13 @@ func ExecV3(ctx context.Context,
 		var lastBlockNum uint64
 
 		for outputTxNum.Load() <= maxTxNum {
+			//log.Warn("outputTxNum", "outputTxNum", outputTxNum.Load(), "maxTxNum", maxTxNum, "rws.ResultChLen()", rws.ResultChLen(), "rws.Len()", rws.Len())
+			//if rws.Len() > 0 {
+			//	log.Warn("before process", "rws.Len()", rws.Len(), "outputTxNum.Load()", outputTxNum.Load())
+			//	if tt := rws.Dbg(); tt != nil {
+			//		log.Warn("fst", "n", tt.TxNum, "in.len()", in.Len(), "in.NewTasksLen", in.NewTasksLen())
+			//	}
+			//}
 			if err := rws.Drain(ctx); err != nil {
 				return err
 			}
@@ -237,6 +248,7 @@ func ExecV3(ctx context.Context,
 			if err != nil {
 				return err
 			}
+
 			ExecRepeats.Add(conflicts)
 			ExecTriggers.Add(triggers)
 			if processedBlockNum > lastBlockNum {
@@ -262,7 +274,7 @@ func ExecV3(ctx context.Context,
 
 	var rwLoopErrCh chan error
 
-	var rwLoopWg sync.WaitGroup
+	var rwLoopG *errgroup.Group
 	if parallel {
 		// `rwLoop` lives longer than `applyLoop`
 		rwLoop := func(ctx context.Context) error {
@@ -328,7 +340,6 @@ func ExecV3(ctx context.Context,
 							}
 							resIt.Close() //TODO: in defer
 
-							log.Warn("commit drain", "stoppedAtBlockEnd", stoppedAtBlockEnd, "processedTxNum", processedTxNum, "processedBlockNum", processedBlockNum, "len", rws.Len())
 							ExecRepeats.Add(conflicts)
 							ExecTriggers.Add(triggers)
 							if processedBlockNum > 0 {
@@ -418,22 +429,15 @@ func ExecV3(ctx context.Context,
 			return nil
 		}
 
-		rwLoopErrCh = make(chan error, 1)
-
-		defer rwLoopWg.Wait()
-		rwLoopCtx, rwLoopCancel := context.WithCancel(ctx)
-		defer rwLoopCancel()
-		rwLoopWg.Add(1)
-		go func() {
-			defer close(rwLoopErrCh)
-			defer rwLoopWg.Done()
-
+		rwLoopCtx, rwLoopCtxCancel := context.WithCancel(ctx)
+		defer rwLoopCtxCancel()
+		rwLoopG, rwLoopCtx = errgroup.WithContext(rwLoopCtx)
+		defer rwLoopG.Wait()
+		rwLoopG.Go(func() error {
+			defer in.Close()
 			defer applyLoopWg.Wait()
-
-			if err := rwLoop(rwLoopCtx); err != nil {
-				rwLoopErrCh <- err
-			}
-		}()
+			return rwLoop(rwLoopCtx)
+		})
 	}
 
 	if block < blockSnapshots.BlocksAvailable() {
@@ -521,6 +525,7 @@ Loop:
 							return
 						}
 					case <-slowDownLimit.C:
+						log.Warn("skip", "rws.Len()", rws.Len(), "rws.Limit()", rws.Limit(), "rws.ResultChLen()", rws.ResultChLen())
 						return
 					}
 				}
@@ -674,11 +679,9 @@ Loop:
 	}
 
 	if parallel {
-		in.Close()
-		if err := <-rwLoopErrCh; err != nil {
+		if err := rwLoopG.Wait(); err != nil {
 			return err
 		}
-		rwLoopWg.Wait()
 		waitWorkers()
 	} else {
 		if err = rs.Flush(ctx, applyTx, logPrefix, logEvery); err != nil {
