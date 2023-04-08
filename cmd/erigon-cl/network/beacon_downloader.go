@@ -114,3 +114,7 @@ func (f *ForwardBeaconDownloader) GetHighestProcessedSlot() uint64 {
 	defer f.mu.Unlock()
 	return f.highestSlotProcessed
 }
+
+func (f *ForwardBeaconDownloader) Peers() (uint64, error) {
+	return f.rpc.Peers()
+}

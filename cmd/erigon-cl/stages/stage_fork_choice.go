@@ -59,6 +59,21 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 	// We start gossip management.
 	go cfg.gossipManager.Start()
 	go onTickService(ctx, cfg)
+	go func() {
+		logIntervalPeers := time.NewTicker(1 * time.Minute)
+		for {
+			select {
+			case <-logIntervalPeers.C:
+				if peerCount, err := cfg.downloader.Peers(); err == nil {
+					log.Info("[Caplin] P2P", "peers", peerCount)
+
+				}
+			case <-ctx.Done():
+				return
+			}
+
+		}
+	}()
 	startDownloadService(s, cfg)
 	// We also need to start on tick service
 
