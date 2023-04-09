@@ -127,11 +127,12 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		for _, block := range newBlocks {
 			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
+				return highestSlotProcessed, highestBlockRootProcessed, nil
 			}
 			highestSlotProcessed = block.Block.Slot
 			highestBlockRootProcessed, err = block.Block.HashSSZ()
 			if err != nil {
-				return 0, libcommon.Hash{}, nil
+				return 0, libcommon.Hash{}, err
 			}
 		}
 		// Checks done, update all internals accordingly
