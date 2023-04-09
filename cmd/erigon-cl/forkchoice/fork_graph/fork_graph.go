@@ -23,7 +23,7 @@ const (
 	PreValidated   ChainSegmentInsertionResult = 5
 )
 
-const maxGraphExtension = 48
+const maxGraphExtension = 128
 
 /*
 * The state store process is related to graph theory in the sense that the Ethereum blockchain can be thought of as a directed graph,
