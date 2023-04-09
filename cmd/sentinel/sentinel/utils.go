@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"strings"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/peers"
@@ -104,19 +103,7 @@ func convertToMultiAddr(nodes []*enode.Node) []multiaddr.Multiaddr {
 }
 
 // will iterate onto randoms nodes until our sentinel connects to one
-func connectToRandomPeer(s *Sentinel, topic string) (peerInfo peer.ID, err error) {
-	var sub *GossipSubscription
-	for t, currSub := range s.subManager.subscriptions {
-		if strings.Contains(t, topic) {
-			sub = currSub
-		}
-	}
-
-	if sub == nil {
-		return peer.ID(""), fmt.Errorf("no peers")
-	}
-
-	validPeerList := sub.topic.ListPeers()
+func connectToRandomPeer(s *Sentinel, validPeerList []peer.ID) (peerInfo peer.ID, err error) {
 	if len(validPeerList) == 0 {
 		return peer.ID(""), fmt.Errorf("no peers")
 	}
