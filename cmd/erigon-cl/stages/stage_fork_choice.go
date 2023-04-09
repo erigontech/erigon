@@ -95,10 +95,7 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 			return
 		}
 		// Retrieve last blocks to do reverse soft checks
-		var lastRootInSegment libcommon.Hash
 		lastBlockInSegment := newBlocks[len(newBlocks)-1]
-		lastSlotInSegment := lastBlockInSegment.Block.Slot
-		lastRootInSegment, err = lastBlockInSegment.Block.HashSSZ()
 		parentRoot := lastBlockInSegment.Block.ParentRoot
 
 		if err != nil {
@@ -130,10 +127,16 @@ func startDownloadService(s *stagedsync.StageState, cfg StageForkChoiceCfg) {
 		for _, block := range newBlocks {
 			if err := cfg.forkChoice.OnBlock(block, true); err != nil {
 				log.Warn("Could not download block", "reason", err)
+				return highestSlotProcessed, highestBlockRootProcessed, nil
+			}
+			highestSlotProcessed = block.Block.Slot
+			highestBlockRootProcessed, err = block.HashSSZ()
+			if err != nil {
+				return 0, libcommon.Hash{}, err
 			}
 		}
 		// Checks done, update all internals accordingly
-		return lastSlotInSegment, lastRootInSegment, nil
+		return highestSlotProcessed, highestBlockRootProcessed, nil
 	})
 	maxBlockBehindBeforeDownload := int64(5)
 	firstTime := true

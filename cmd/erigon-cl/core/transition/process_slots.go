@@ -100,7 +100,7 @@ func ProcessSlots(state *state.BeaconState, slot uint64) error {
 			if err := ProcessEpoch(state); err != nil {
 				return err
 			}
-			log.Info("Processed new epoch successfully", "epoch", state.Epoch(), "process_epoch_elpsed", time.Since(start))
+			log.Debug("Processed new epoch successfully", "epoch", state.Epoch(), "process_epoch_elpsed", time.Since(start))
 		}
 		// TODO: add logic to process epoch updates.
 		stateSlot += 1
