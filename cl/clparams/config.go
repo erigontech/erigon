@@ -266,7 +266,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	MainnetNetwork: {
 		"https://sync.invis.tools/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.attestant.io/eth/v2/debug/beacon/states/finalized",
-		"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
+		//"https://mainnet.checkpoint.sigp.io/eth/v2/debug/beacon/states/finalized",
 		"https://mainnet-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 		"https://checkpointz.pietjepuk.net/eth/v2/debug/beacon/states/finalized",
 	},

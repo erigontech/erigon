@@ -34,9 +34,8 @@ type ForkChoiceStore struct {
 	equivocatingIndicies map[uint64]struct{}
 	forkGraph            *fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
-	unrealizedJustifications *lru.Cache[libcommon.Hash, *cltypes.Checkpoint]
-	checkpointStates         *lru.Cache[cltypes.Checkpoint, *state.BeaconState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
-	latestMessages           map[uint64]*LatestMessage
+	checkpointStates *lru.Cache[cltypes.Checkpoint, *state.BeaconState] // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	latestMessages   map[uint64]*LatestMessage
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
 	mu        sync.Mutex
@@ -59,10 +58,6 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 		Epoch: anchorState.Epoch(),
 		Root:  anchorRoot,
 	}
-	unrealizedJustifications, err := lru.New[libcommon.Hash, *cltypes.Checkpoint](checkpointsPerCache)
-	if err != nil {
-		return nil, err
-	}
 	checkpointStates, err := lru.New[cltypes.Checkpoint, *state.BeaconState](allowedCachedStates)
 	if err != nil {
 		return nil, err
@@ -79,7 +74,6 @@ func NewForkChoiceStore(anchorState *state.BeaconState, engine execution_client.
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
 		forkGraph:                     fork_graph.New(anchorState),
-		unrealizedJustifications:      unrealizedJustifications,
 		equivocatingIndicies:          map[uint64]struct{}{},
 		latestMessages:                map[uint64]*LatestMessage{},
 		checkpointStates:              checkpointStates,

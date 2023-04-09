@@ -7,9 +7,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/transition"
+	"github.com/ledgerwatch/log/v3"
 )
-
-var noChangeCheckpointEncoding = []byte{0xff}
 
 // Slot calculates the current slot number using the time and genesis slot.
 func (f *ForkChoiceStore) Slot() uint64 {
@@ -23,6 +22,10 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 	}
 	if finalizedCheckpoint.Epoch > f.finalizedCheckpoint.Epoch {
 		f.finalizedCheckpoint = finalizedCheckpoint
+		// We cannot go past point of finalization
+		pruneSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
+		f.forkGraph.RemoveOldBlocks(pruneSlot)
 	}
 }
 

@@ -56,10 +56,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidati
 		lastProcessedState.RevertWithChangeset(lastProcessedState.StopCollectingReverseChangeSet())
 		return err
 	}
-	// Add justied checkpoint
-	copiedCheckpoint := *lastProcessedState.CurrentJustifiedCheckpoint()
-	f.unrealizedJustifications.Add(blockRoot, &copiedCheckpoint)
-
 	f.updateUnrealizedCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	// If the block is from a prior epoch, apply the realized values
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
