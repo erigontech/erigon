@@ -67,9 +67,6 @@ func NewState(db *DB) (*State, error) {
 			MuirGlacierBlock:      big.NewInt(0),
 			BerlinBlock:           big.NewInt(0),
 			LondonBlock:           big.NewInt(0),
-			ArrowGlacierBlock:     big.NewInt(0),
-			GrayGlacierBlock:      big.NewInt(0),
-			MergeNetsplitBlock:    big.NewInt(0),
 		}
 		genesis.Config = &chainConfig
 		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
@@ -129,7 +126,11 @@ func (state *State) ProcessBlock(block types.Block) error {
 		stagedsync.NewChainReaderImpl(state.chainConfig, tx, nil),
 		getTracer)
 	if err != nil {
-		return err
+		// NOTE: Temporary fix
+		log.Error(fmt.Sprintf("failed to process block %d: %s, ignoring it", block.NumberU64(), err))
+		state.blockNum.Add(state.blockNum, big.NewInt(1))
+
+		return nil
 	}
 
 	stateSyncReceipt := execRs.StateSyncReceipt
