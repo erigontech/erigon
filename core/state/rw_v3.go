@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/cmd/state/e3types"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -40,7 +40,7 @@ type StateV3 struct {
 	chIncs         map[string][]byte
 	chContractCode map[string][]byte
 
-	triggers     map[uint64]*e3types.TxTask
+	triggers     map[uint64]*exec22.TxTask
 	senderTxNums map[common.Address]uint64
 	triggerLock  sync.Mutex
 
@@ -52,7 +52,7 @@ type StateV3 struct {
 func NewStateV3(tmpdir string) *StateV3 {
 	rs := &StateV3{
 		tmpdir:         tmpdir,
-		triggers:       map[uint64]*e3types.TxTask{},
+		triggers:       map[uint64]*exec22.TxTask{},
 		senderTxNums:   map[common.Address]uint64{},
 		chCode:         map[string][]byte{},
 		chAccs:         map[string][]byte{},
@@ -219,15 +219,15 @@ func (rs *StateV3) Flush(ctx context.Context, rwTx kv.RwTx, logPrefix string, lo
 	return nil
 }
 
-func (rs *StateV3) ReTry(txTask *e3types.TxTask, in *e3types.QueueWithRetry) {
+func (rs *StateV3) ReTry(txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
 	rs.resetTxTask(txTask)
 	in.ReTry(txTask)
 }
-func (rs *StateV3) AddWork(ctx context.Context, txTask *e3types.TxTask, in *e3types.QueueWithRetry) {
+func (rs *StateV3) AddWork(ctx context.Context, txTask *exec22.TxTask, in *exec22.QueueWithRetry) {
 	rs.resetTxTask(txTask)
 	in.Add(ctx, txTask)
 }
-func (rs *StateV3) resetTxTask(txTask *e3types.TxTask) {
+func (rs *StateV3) resetTxTask(txTask *exec22.TxTask) {
 	txTask.BalanceIncreaseSet = nil
 	returnReadList(txTask.ReadLists)
 	txTask.ReadLists = nil
@@ -247,7 +247,7 @@ func (rs *StateV3) resetTxTask(txTask *e3types.TxTask) {
 	*/
 }
 
-func (rs *StateV3) RegisterSender(txTask *e3types.TxTask) bool {
+func (rs *StateV3) RegisterSender(txTask *exec22.TxTask) bool {
 	//TODO: it deadlocks on panic, fix it
 	defer func() {
 		rec := recover()
@@ -269,7 +269,7 @@ func (rs *StateV3) RegisterSender(txTask *e3types.TxTask) bool {
 	return !deferral
 }
 
-func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *e3types.QueueWithRetry) (count int) {
+func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *exec22.QueueWithRetry) (count int) {
 	ExecTxsDone.Inc()
 
 	rs.triggerLock.Lock()
@@ -288,7 +288,7 @@ func (rs *StateV3) CommitTxNum(sender *common.Address, txNum uint64, in *e3types
 	return count
 }
 
-func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 
@@ -396,7 +396,7 @@ func (rs *StateV3) writeStateHistory(roTx kv.Tx, txTask *e3types.TxTask, agg *li
 	return nil
 }
 
-func (rs *StateV3) applyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) applyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	emptyRemoval := txTask.Rules.IsSpuriousDragon
 	rs.lock.Lock()
 	defer rs.lock.Unlock()
@@ -444,7 +444,7 @@ func (rs *StateV3) applyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.
 	return nil
 }
 
-func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	defer agg.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	agg.SetTxNum(txTask.TxNum)
@@ -462,7 +462,7 @@ func (rs *StateV3) ApplyState(roTx kv.Tx, txTask *e3types.TxTask, agg *libstate.
 	return nil
 }
 
-func (rs *StateV3) ApplyHistory(txTask *e3types.TxTask, agg *libstate.AggregatorV3) error {
+func (rs *StateV3) ApplyHistory(txTask *exec22.TxTask, agg *libstate.AggregatorV3) error {
 	if dbg.DiscardHistory() {
 		return nil
 	}
@@ -610,7 +610,7 @@ func (rs *StateV3) SizeEstimate() (r uint64) {
 	return r * 2 // multiply 2 here, to cover data-structures overhead. more precise accounting - expensive.
 }
 
-func (rs *StateV3) ReadsValid(readLists map[string]*e3types.KvList) bool {
+func (rs *StateV3) ReadsValid(readLists map[string]*exec22.KvList) bool {
 	rs.lock.RLock()
 	defer rs.lock.RUnlock()
 	for table, list := range readLists {
@@ -640,7 +640,7 @@ func (rs *StateV3) ReadsValid(readLists map[string]*e3types.KvList) bool {
 	return true
 }
 
-func (rs *StateV3) readsValidMap(table string, list *e3types.KvList, m map[string][]byte) bool {
+func (rs *StateV3) readsValidMap(table string, list *exec22.KvList, m map[string][]byte) bool {
 	switch table {
 	case CodeSizeTable:
 		for i, key := range list.Keys {
@@ -662,7 +662,7 @@ func (rs *StateV3) readsValidMap(table string, list *e3types.KvList, m map[strin
 	return true
 }
 
-func (rs *StateV3) readsValidBtree(table string, list *e3types.KvList, m *btree2.Map[string, []byte]) bool {
+func (rs *StateV3) readsValidBtree(table string, list *exec22.KvList, m *btree2.Map[string, []byte]) bool {
 	for i, key := range list.Keys {
 		if val, ok := m.Get(key); ok {
 			if !bytes.Equal(list.Vals[i], val) {
@@ -676,7 +676,7 @@ func (rs *StateV3) readsValidBtree(table string, list *e3types.KvList, m *btree2
 type StateWriterV3 struct {
 	rs           *StateV3
 	txNum        uint64
-	writeLists   map[string]*e3types.KvList
+	writeLists   map[string]*exec22.KvList
 	accountPrevs map[string][]byte
 	accountDels  map[string]*accounts.Account
 	storagePrevs map[string][]byte
@@ -702,7 +702,7 @@ func (w *StateWriterV3) ResetWriteSet() {
 	w.codePrevs = nil
 }
 
-func (w *StateWriterV3) WriteSet() map[string]*e3types.KvList {
+func (w *StateWriterV3) WriteSet() map[string]*exec22.KvList {
 	return w.writeLists
 }
 
@@ -792,7 +792,7 @@ type StateReaderV3 struct {
 	composite []byte
 
 	discardReadList bool
-	readLists       map[string]*e3types.KvList
+	readLists       map[string]*exec22.KvList
 }
 
 func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
@@ -802,12 +802,12 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 	}
 }
 
-func (r *StateReaderV3) DiscardReadList()                    { r.discardReadList = true }
-func (r *StateReaderV3) SetTxNum(txNum uint64)               { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                      { r.tx = tx }
-func (r *StateReaderV3) ReadSet() map[string]*e3types.KvList { return r.readLists }
-func (r *StateReaderV3) SetTrace(trace bool)                 { r.trace = trace }
-func (r *StateReaderV3) ResetReadSet()                       { r.readLists = newReadList() }
+func (r *StateReaderV3) DiscardReadList()                   { r.discardReadList = true }
+func (r *StateReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                     { r.tx = tx }
+func (r *StateReaderV3) ReadSet() map[string]*exec22.KvList { return r.readLists }
+func (r *StateReaderV3) SetTrace(trace bool)                { r.trace = trace }
+func (r *StateReaderV3) ResetReadSet()                      { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	addr := address.Bytes()
@@ -929,7 +929,7 @@ func (r *StateReaderV3) ReadAccountIncarnation(address common.Address) (uint64, 
 
 var writeListPool = sync.Pool{
 	New: func() any {
-		return map[string]*e3types.KvList{
+		return map[string]*exec22.KvList{
 			kv.PlainState:        {},
 			StorageTable:         {},
 			kv.Code:              {},
@@ -939,14 +939,14 @@ var writeListPool = sync.Pool{
 	},
 }
 
-func newWriteList() map[string]*e3types.KvList {
-	v := writeListPool.Get().(map[string]*e3types.KvList)
+func newWriteList() map[string]*exec22.KvList {
+	v := writeListPool.Get().(map[string]*exec22.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnWriteList(v map[string]*e3types.KvList) {
+func returnWriteList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}
@@ -955,7 +955,7 @@ func returnWriteList(v map[string]*e3types.KvList) {
 
 var readListPool = sync.Pool{
 	New: func() any {
-		return map[string]*e3types.KvList{
+		return map[string]*exec22.KvList{
 			kv.PlainState:     {},
 			kv.Code:           {},
 			CodeSizeTable:     {},
@@ -965,14 +965,14 @@ var readListPool = sync.Pool{
 	},
 }
 
-func newReadList() map[string]*e3types.KvList {
-	v := readListPool.Get().(map[string]*e3types.KvList)
+func newReadList() map[string]*exec22.KvList {
+	v := readListPool.Get().(map[string]*exec22.KvList)
 	for _, tbl := range v {
 		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
 	}
 	return v
 }
-func returnReadList(v map[string]*e3types.KvList) {
+func returnReadList(v map[string]*exec22.KvList) {
 	if v == nil {
 		return
 	}

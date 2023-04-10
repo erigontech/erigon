@@ -31,7 +31,7 @@ import (
 	"github.com/torquem-ch/mdbx-go/mdbx"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/cmd/state/e3types"
+	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -64,7 +64,7 @@ type Progress struct {
 	logPrefix    string
 }
 
-func (p *Progress) Log(rs *state.StateV3, in *e3types.QueueWithRetry, rws *e3types.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
+func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22.ResultsQueue, doneCount, inputBlockNum, outputBlockNum, outTxNum, repeatCount uint64, idxStepsAmountInDB float64) {
 	ExecStepsInDB.Set(uint64(idxStepsAmountInDB * 100))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -197,7 +197,7 @@ func ExecV3(ctx context.Context,
 	// Maybe need split channels? Maybe don't exit from ApplyLoop? Maybe current way is also ok?
 
 	// input queue
-	in := e3types.NewQueueWithRetry(100_000)
+	in := exec22.NewQueueWithRetry(100_000)
 	defer in.Close()
 
 	rwsConsumed := make(chan struct{}, 1)
@@ -353,7 +353,7 @@ func ExecV3(ctx context.Context,
 						}
 
 						// Drain results channel because read sets do not carry over
-						rws.DropResults(func(txTask *e3types.TxTask) {
+						rws.DropResults(func(txTask *exec22.TxTask) {
 							rs.ReTry(txTask, in)
 						})
 
@@ -533,7 +533,7 @@ Loop:
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
-			txTask := &e3types.TxTask{
+			txTask := &exec22.TxTask{
 				BlockNum:        blockNum,
 				Header:          header,
 				Coinbase:        b.Coinbase(),
@@ -721,7 +721,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, nil
 }
 
-func processResultQueue(in *e3types.QueueWithRetry, rws *e3types.ResultsQueueIter, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueueIter, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	var i int
 	outputTxNum = outputTxNumIn
 	for rws.HasNext(outputTxNum) {
@@ -866,7 +866,7 @@ func reconstituteStep(last bool,
 	}
 	g, reconstWorkersCtx := errgroup.WithContext(ctx)
 	defer g.Wait()
-	workCh := make(chan *e3types.TxTask, workerCount*4)
+	workCh := make(chan *exec22.TxTask, workerCount*4)
 	defer func() {
 		fmt.Printf("close1\n")
 		safeCloseTxTaskCh(workCh)
@@ -1022,7 +1022,7 @@ func reconstituteStep(last bool,
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
 				if bitmap.Contains(inputTxNum) {
 					binary.BigEndian.PutUint64(txKey[:], inputTxNum)
-					txTask := &e3types.TxTask{
+					txTask := &exec22.TxTask{
 						BlockNum:        bn,
 						Header:          header,
 						Coinbase:        b.Coinbase(),
@@ -1278,7 +1278,7 @@ func reconstituteStep(last bool,
 	return nil
 }
 
-func safeCloseTxTaskCh(ch chan *e3types.TxTask) {
+func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
 	if ch == nil {
 		return
 	}
