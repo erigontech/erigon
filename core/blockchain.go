@@ -94,6 +94,11 @@ func ExecuteBlockEphemerallyForBSC(
 		receipts    types.Receipts
 	)
 
+	var excessDataGas *big.Int
+	ph := chainReader.GetHeaderByHash(block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, nil); err != nil {
 			return nil, err
@@ -126,7 +131,7 @@ func ExecuteBlockEphemerallyForBSC(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, nil /*excessDataGas*/)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -158,7 +163,7 @@ func ExecuteBlockEphemerallyForBSC(
 		// otherwise it causes block verification error.
 		header.GasUsed = *usedGas
 		syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-			return SysCallContract(contract, data, *chainConfig, ibs, header, engine, false /* constCall */, nil /*excessDataGas*/)
+			return SysCallContract(contract, data, *chainConfig, ibs, header, engine, false /* constCall */, excessDataGas)
 		}
 		outTxs, outReceipts, err := engine.Finalize(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), chainReader, syscall)
 		if err != nil {
@@ -240,6 +245,14 @@ func ExecuteBlockEphemerally(
 		receipts    types.Receipts
 	)
 
+	var excessDataGas *big.Int
+	if chainReader != nil {
+		// TODO(eip-4844): understand why chainReader is sometimes nil (e.g. certain test cases)
+		ph := chainReader.GetHeaderByHash(block.ParentHash())
+		if ph != nil {
+			excessDataGas = ph.ExcessDataGas
+		}
+	}
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, nil); err != nil {
 			return nil, err
@@ -263,7 +276,7 @@ func ExecuteBlockEphemerally(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, nil /*excessDataGas*/)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -346,6 +359,11 @@ func ExecuteBlockEphemerallyBor(
 		receipts    types.Receipts
 	)
 
+	var excessDataGas *big.Int
+	ph := chainReader.GetHeaderByHash(block.ParentHash())
+	if ph != nil {
+		excessDataGas = ph.ExcessDataGas
+	}
 	if !vmConfig.ReadOnly {
 		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, nil); err != nil {
 			return nil, err
@@ -369,7 +387,7 @@ func ExecuteBlockEphemerallyBor(
 			writeTrace = true
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, nil /*excessDataGas*/)
+		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -458,7 +476,6 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-
 	msg := types.NewMessage(
 		state.SystemAddress,
 		&contract,
@@ -502,7 +519,6 @@ func SysCreate(contract libcommon.Address, data []byte, chainConfig chain.Config
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
-
 	msg := types.NewMessage(
 		contract,
 		nil, // to
@@ -533,7 +549,6 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 	gp := new(GasPool)
 	gp.AddGas(50_000_000)
 	var gasUsed uint64
-
 	if chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(ibs)
 	}
@@ -543,7 +558,7 @@ func CallContract(contract libcommon.Address, data []byte, chainConfig chain.Con
 		return nil, fmt.Errorf("SysCallContract: %w ", err)
 	}
 	vmConfig := vm.Config{NoReceipts: true}
-	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, nil /*excessDataGas*/)
+	_, result, err = ApplyTransaction(&chainConfig, GetHashFn(header, nil), engine, &state.SystemAddress, gp, ibs, noop, header, tx, &gasUsed, vmConfig, excessDataGas)
 	if err != nil {
 		return result, fmt.Errorf("SysCallContract: %w ", err)
 	}
