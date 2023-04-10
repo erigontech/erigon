@@ -203,6 +203,12 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 			log.Debug("Could not retrieve state: Missing changeset", "missing", currentIteratorRoot)
 			return nil, nil
 		}
+		// you need the parent for the root
+		parent, isSegmentPresent := f.GetHeader(edge)
+		if !isSegmentPresent {
+			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
+			return nil, nil
+		}
 		// Recompute currentBlockRoot
 		currentBlockRoot, err := f.lastState.BlockRoot()
 		if err != nil {
@@ -211,7 +217,7 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 		inverselyTraversedRoots = append(inverselyTraversedRoots, currentBlockRoot)
 		inverseChangesets = append(inverseChangesets, changeset)
 		// go on.
-		edge = currentBlockRoot
+		edge = parent.ParentRoot
 	}
 	// Reverse changeset ONLY if we can
 	for i := len(inverseChangesets) - 1; i >= 0; i-- {
