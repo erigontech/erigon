@@ -41,7 +41,7 @@ func (s *Sentinel) RandomPeer(topic string) (peer.ID, error) {
 		err error
 	)
 
-	pid, err = connectToRandomPeer(s, s.host.Network().Peers())
+	pid, err = connectToRandomPeer(s, string(BeaconBlockTopic))
 
 	if err != nil {
 		return peer.ID(""), fmt.Errorf("failed to connect to a random peer err=%s", err)

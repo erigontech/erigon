@@ -25,22 +25,18 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
-	"github.com/ledgerwatch/erigon/cmd/erigon-cl/stages"
 	lcCli "github.com/ledgerwatch/erigon/cmd/sentinel/cli"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/cli/flags"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/service"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	lightclientapp "github.com/ledgerwatch/erigon/turbo/app"
 )
 
 func main() {
-	app := lightclientapp.MakeApp(runLightClientNode, flags.LCDefaultFlags)
+	app := lightclientapp.MakeApp(runCaplinNode, flags.LCDefaultFlags)
 	if err := app.Run(os.Args); err != nil {
 		_, printErr := fmt.Fprintln(os.Stderr, err)
 		if printErr != nil {
@@ -50,11 +46,11 @@ func main() {
 	}
 }
 
-func runLightClientNode(cliCtx *cli.Context) error {
+func runCaplinNode(cliCtx *cli.Context) error {
 	ctx := context.Background()
 	cfg, err := lcCli.SetupConsensusClientCfg(cliCtx)
 	if err != nil {
-		log.Error("[Phase1] Could not initialize lightclient", "err", err)
+		log.Error("[Phase1] Could not initialize caplin", "err", err)
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(flags.Chain.Name))
@@ -102,15 +98,5 @@ func runLightClientNode(cliCtx *cli.Context) error {
 		defer cc.Close()
 		engine = execution_client.NewExecutionEnginePhase1FromClient(ctx, remote.NewETHBACKENDClient(cc))
 	}
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg)
-	downloader := network.NewForwardBeaconDownloader(ctx, beaconRpc)
-
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine)
-	if err != nil {
-		log.Error("Could not start forkchoice service", "err", err)
-		return nil
-	}
-	gossipManager := network.NewGossipReceiver(ctx, sentinel, forkChoice)
-
-	return stages.SpawnStageForkChoice(stages.StageForkChoice(nil, downloader, cfg.GenesisCfg, cfg.BeaconCfg, state, nil, gossipManager, forkChoice), &stagedsync.StageState{ID: "Caplin"}, nil, ctx)
+	return caplin1.RunCaplinPhase1(ctx, sentinel, cfg.BeaconCfg, cfg.GenesisCfg, engine, state)
 }

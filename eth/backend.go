@@ -68,8 +68,9 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cmd/caplin-phase1/caplin1"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
-	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
+	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/commands"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -581,23 +582,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if err != nil {
 			return nil, err
 		}
-
-		lc, err := lightclient.NewLightClient(ctx, genesisCfg, beaconCfg, ethBackendRPC, nil, client, currentBlockNumber, false)
-		if err != nil {
-			return nil, err
-		}
-		bs, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
+		engine := execution_client.NewExecutionEnginePhase1FromServer(ctx, ethBackendRPC)
+		state, err := clcore.RetrieveBeaconState(ctx, beaconCfg, genesisCfg,
 			clparams.GetCheckpointSyncEndpoint(clparams.NetworkType(config.NetworkID)))
 
 		if err != nil {
 			return nil, err
 		}
 
-		if err := lc.BootstrapCheckpoint(ctx, bs.FinalizedCheckpoint().Root); err != nil {
-			return nil, err
-		}
-
-		go lc.Start()
+		go caplin1.RunCaplinPhase1(ctx, client, beaconCfg, genesisCfg, engine, state)
 	}
 
 	if currentBlock == nil {

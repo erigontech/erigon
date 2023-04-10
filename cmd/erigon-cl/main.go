@@ -104,7 +104,7 @@ func runConsensusLayerNode(cliCtx *cli.Context) error {
 		log.Error("Could not start forkchoice service", "err", err)
 		return nil
 	}
-	gossipManager := network.NewGossipReceiver(ctx, s, forkChoice)
+	gossipManager := network.NewGossipReceiver(ctx, s, forkChoice, beaconConfig, genesisCfg)
 	stageloop, err := stages.NewConsensusStagedSync(ctx, db, downloader, bdownloader, genesisCfg, beaconConfig, cpState, tmpdir, executionClient, cfg.BeaconDataCfg, gossipManager, forkChoice)
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/forkchoice"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/log/v3"
@@ -21,13 +22,18 @@ type GossipManager struct {
 
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
+	// configs
+	beaconConfig  *clparams.BeaconChainConfig
+	genesisConfig *clparams.GenesisConfig
 }
 
-func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore) *GossipManager {
+func NewGossipReceiver(ctx context.Context, s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *GossipManager {
 	return &GossipManager{
-		sentinel:   s,
-		forkChoice: forkChoice,
-		ctx:        ctx,
+		sentinel:      s,
+		forkChoice:    forkChoice,
+		ctx:           ctx,
+		beaconConfig:  beaconConfig,
+		genesisConfig: genesisConfig,
 	}
 }
 
@@ -43,6 +49,10 @@ func (g *GossipManager) Start() {
 			log.Debug("[Beacon Gossip] Failure in receiving", "err", err)
 			continue
 		}
+
+		currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
+		version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
+
 		// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 		// then attempts to deserialize the received data into it.
 		// If the deserialization fails, an error is logged and the loop continues to the next iteration.
@@ -51,7 +61,7 @@ func (g *GossipManager) Start() {
 		switch data.Type {
 		case sentinel.GossipType_BeaconBlockGossipType:
 			object = &cltypes.SignedBeaconBlock{}
-			if err := object.DecodeSSZWithVersion(common.CopyBytes(data.Data), int(clparams.BellatrixVersion)); err != nil {
+			if err := object.DecodeSSZWithVersion(common.CopyBytes(data.Data), int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding block", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
@@ -97,21 +107,21 @@ func (g *GossipManager) Start() {
 				"alloc", libcommon.ByteCount(m.Alloc))
 		case sentinel.GossipType_VoluntaryExitGossipType:
 			object = &cltypes.SignedVoluntaryExit{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding exit", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
 		case sentinel.GossipType_ProposerSlashingGossipType:
 			object = &cltypes.ProposerSlashing{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding proposer slashing", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
 			}
 		case sentinel.GossipType_AttesterSlashingGossipType:
 			object = &cltypes.AttesterSlashing{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding attester slashing", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
@@ -122,7 +132,7 @@ func (g *GossipManager) Start() {
 			}
 		case sentinel.GossipType_AggregateAndProofGossipType:
 			object = &cltypes.SignedAggregateAndProof{}
-			if err := object.DecodeSSZWithVersion(data.Data, int(clparams.BellatrixVersion)); err != nil {
+			if err := object.DecodeSSZWithVersion(data.Data, int(version)); err != nil {
 				log.Debug("[Beacon Gossip] Failure in decoding proof", "err", err)
 				g.sentinel.BanPeer(g.ctx, data.Peer)
 				continue
