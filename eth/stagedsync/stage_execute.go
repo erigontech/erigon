@@ -372,9 +372,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 	//}
 
 	defer func() {
-		s := make([]byte, 2048)
-		n := runtime.Stack(s, true)
-		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", string(s[:n]))
+		log.Info("SpawnExecuteBlocksStage exit ", "err", err, "stack", dbg.Stack())
 	}()
 
 	quit := ctx.Done()
