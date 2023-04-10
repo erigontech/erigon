@@ -31,16 +31,21 @@ func testSanityFunction(context testContext) error {
 	}
 	startSlot := testState.Slot()
 
-	changes := []*beacon_changeset.ReverseBeaconStateChangeSet{}
+	changes := []*beacon_changeset.ChangeSet{}
+	forwardChanges := []*beacon_changeset.ChangeSet{}
 	var block *cltypes.SignedBeaconBlock
 	for _, block = range blocks {
 		testState.StartCollectingReverseChangeSet()
+		testState.StartCollectingForwardChangeSet()
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
 		}
 		changes = append(changes, testState.StopCollectingReverseChangeSet())
+		forwardChanges = append(forwardChanges, testState.StopCollectingForwardChangeSet())
 	}
+	_ = forwardChanges
+
 	// Deal with transition error
 	if expectedError && err == nil {
 		return fmt.Errorf("expected error")
@@ -74,7 +79,6 @@ func testSanityFunction(context testContext) error {
 	for i := len(changes) - 1; i >= 0; i-- {
 		testState.RevertWithChangeset(changes[i])
 	}
-
 	expectedRoot, err := initialState.HashSSZ()
 	if err != nil {
 		return err
@@ -90,7 +94,6 @@ func testSanityFunction(context testContext) error {
 	}
 	// Execute them back (ensure cache is good.)
 	for _, block = range blocks {
-		testState.StartCollectingReverseChangeSet()
 		err = transition.TransitionState(testState, block, true)
 		if err != nil {
 			break
@@ -98,6 +101,29 @@ func testSanityFunction(context testContext) error {
 	}
 	if err != nil {
 		return err
+	}
+	// Send it back again
+	for i := len(changes) - 1; i >= 0; i-- {
+		testState.RevertWithChangeset(changes[i])
+	}
+	haveRoot, err = testState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if haveRoot != expectedRoot {
+		return fmt.Errorf("mismatching state roots with unwind")
+	}
+	// Test the forward changes
+	for _, change := range forwardChanges {
+		testState.RevertWithChangeset(change)
+	}
+	haveRoot, err = testState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	expectedState.HashSSZ()
+	if haveRoot != finalRoot {
+		return fmt.Errorf("mismatching state roots for forward changesets")
 	}
 	return nil
 }

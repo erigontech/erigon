@@ -36,6 +36,12 @@ func NewEth1Header(version clparams.StateVersion) *Eth1Header {
 	return &Eth1Header{version: version}
 }
 
+func (e *Eth1Header) Copy() *Eth1Header {
+	copied := *e
+	copied.Extra = libcommon.Copy(e.Extra)
+	return &copied
+}
+
 // Capella converts the header to capella version.
 func (e *Eth1Header) Capella() {
 	e.version = clparams.CapellaVersion

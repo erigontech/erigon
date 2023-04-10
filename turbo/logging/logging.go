@@ -4,14 +4,16 @@ import (
 	"flag"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/urfave/cli/v2"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-func GetLoggerCtx(filePrefix string, ctx *cli.Context) log.Logger {
+func SetupLoggerCtx(filePrefix string, ctx *cli.Context) {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
@@ -26,14 +28,20 @@ func GetLoggerCtx(filePrefix string, ctx *cli.Context) log.Logger {
 
 	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
-		dirLevel = log.LvlDebug
+		dirLevel = log.LvlInfo
 	}
 
 	dirPath := ctx.String(LogDirPathFlag.Name)
-	return initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	if dirPath == "" {
+		datadir := ctx.String("datadir")
+		if datadir != "" {
+			dirPath = filepath.Join(datadir, "logs")
+		}
+	}
+	initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
 }
 
-func GetLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
+func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) {
 
 	logJsonVal, ljerr := cmd.Flags().GetBool(LogJsonFlag.Name)
 	if ljerr != nil {
@@ -62,14 +70,20 @@ func GetLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 
 	dirLevel, dErr := tryGetLogLevel(cmd.Flags().Lookup(LogDirVerbosityFlag.Name).Value.String())
 	if dErr != nil {
-		dirLevel = log.LvlDebug
+		dirLevel = log.LvlInfo
 	}
 
 	dirPath := cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
-	return initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
+	if dirPath == "" {
+		datadir := cmd.Flags().Lookup("datadir").Value.String()
+		if datadir != "" {
+			dirPath = filepath.Join(datadir, "logs")
+		}
+	}
+	initSeparatedLogging(filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
 }
 
-func GetLogger(filePrefix string) log.Logger {
+func SetupLogger(filePrefix string) {
 	var logConsoleVerbosity = flag.String(LogConsoleVerbosityFlag.Name, "", LogConsoleVerbosityFlag.Usage)
 	var logDirVerbosity = flag.String(LogDirVerbosityFlag.Name, "", LogDirVerbosityFlag.Usage)
 	var logDirPath = flag.String(LogDirPathFlag.Name, "", LogDirPathFlag.Usage)
@@ -93,10 +107,10 @@ func GetLogger(filePrefix string) log.Logger {
 
 	dirLevel, dErr := tryGetLogLevel(*logDirVerbosity)
 	if dErr != nil {
-		dirLevel = log.LvlDebug
+		dirLevel = log.LvlInfo
 	}
 
-	return initSeparatedLogging(filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
+	initSeparatedLogging(filePrefix, *logDirPath, consoleLevel, dirLevel, consoleJson, *dirJson)
 }
 
 func initSeparatedLogging(
@@ -105,7 +119,7 @@ func initSeparatedLogging(
 	consoleLevel log.Lvl,
 	dirLevel log.Lvl,
 	consoleJson bool,
-	dirJson bool) log.Logger {
+	dirJson bool) {
 
 	logger := log.Root()
 
@@ -117,36 +131,31 @@ func initSeparatedLogging(
 
 	if len(dirPath) == 0 {
 		logger.Warn("no log dir set, console logging only")
-		return logger
+		return
 	}
 
 	err := os.MkdirAll(dirPath, 0764)
 	if err != nil {
 		logger.Warn("failed to create log dir, console logging only")
-		return logger
+		return
 	}
 
-	dirFormat := log.LogfmtFormat()
+	dirFormat := log.TerminalFormatNoColor()
 	if dirJson {
 		dirFormat = log.JsonFormat()
 	}
 
-	userLog, err := log.FileHandler(path.Join(dirPath, filePrefix+"-user.log"), dirFormat, 1<<27) // 128Mb
-	if err != nil {
-		logger.Warn("failed to open user log, console logging only")
-		return logger
+	lumberjack := &lumberjack.Logger{
+		Filename:   path.Join(dirPath, filePrefix+".log"),
+		MaxSize:    100, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, //days
 	}
-	errLog, err := log.FileHandler(path.Join(dirPath, filePrefix+"-error.log"), dirFormat, 1<<27) // 128Mb
-	if err != nil {
-		logger.Warn("failed to open error log, console logging only")
-		return logger
-	}
+	userLog := log.StreamHandler(lumberjack, dirFormat)
 
-	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(dirLevel, userLog), log.LvlFilterHandler(log.LvlError, errLog))
+	mux := log.MultiHandler(logger.GetHandler(), log.LvlFilterHandler(dirLevel, userLog))
 	log.Root().SetHandler(mux)
-	logger.SetHandler(mux)
 	logger.Info("logging to file system", "log dir", dirPath, "file prefix", filePrefix, "log level", dirLevel, "json", dirJson)
-	return logger
 }
 
 func tryGetLogLevel(s string) (log.Lvl, error) {

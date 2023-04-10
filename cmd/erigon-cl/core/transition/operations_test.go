@@ -350,29 +350,3 @@ func TestProcessVoluntaryExits(t *testing.T) {
 	newRegistry := state.Validators()
 	require.Equal(t, newRegistry[0].ExitEpoch, uint64(266))
 }
-
-func TestProcessAttestationAggBitsInvalid(t *testing.T) {
-	beaconState := state.GetEmptyBeaconState()
-	beaconState.SetSlot(beaconState.Slot() + clparams.MainnetBeaconConfig.MinAttestationInclusionDelay)
-	for i := 0; i < 64; i++ {
-		beaconState.AddValidator(&cltypes.Validator{
-			EffectiveBalance:  clparams.MainnetBeaconConfig.MaxEffectiveBalance,
-			ExitEpoch:         clparams.MainnetBeaconConfig.FarFutureEpoch,
-			WithdrawableEpoch: clparams.MainnetBeaconConfig.FarFutureEpoch,
-		}, clparams.MainnetBeaconConfig.MaxEffectiveBalance)
-		beaconState.AddCurrentEpochParticipationFlags(cltypes.ParticipationFlags(0))
-	}
-
-	aggBits := []byte{7}
-	r, err := beaconState.GetBlockRootAtSlot(0)
-	require.NoError(t, err)
-	att := &cltypes.Attestation{
-		Data: &cltypes.AttestationData{
-			BeaconBlockHash: r,
-			Source:          &cltypes.Checkpoint{},
-			Target:          &cltypes.Checkpoint{},
-		},
-		AggregationBits: aggBits,
-	}
-	require.Error(t, ProcessAttestations(beaconState, []*cltypes.Attestation{att}, false))
-}

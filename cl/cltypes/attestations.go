@@ -603,3 +603,8 @@ func (a *PendingAttestation) HashSSZ() ([32]byte, error) {
 
 	return merkle_tree.ArraysRoot(leaves, 4)
 }
+
+func IsSlashableAttestationData(d1, d2 *AttestationData) bool {
+	return (!d1.Equal(d2) && d1.Target.Epoch == d2.Target.Epoch) ||
+		(d1.Source.Epoch < d2.Source.Epoch && d2.Target.Epoch < d1.Target.Epoch)
+}
