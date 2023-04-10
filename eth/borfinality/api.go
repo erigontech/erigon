@@ -29,6 +29,19 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
+	doExist, number, hash := s.GetWhitelistedCheckpoint()
+	if doExist && number <= currentBlockNum.Number.Uint64() {
+		block, err := requests.GetBlockByNumber(models.ReqId, number, false)
+
+		if err != nil {
+			return 0, err
+		}
+
+		if block.Result.Hash == hash {
+			return number, nil
+		}
+	}
+
 	return 0, fmt.Errorf("No finalized block")
 }
 

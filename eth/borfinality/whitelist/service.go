@@ -186,18 +186,7 @@ func isValidChain(currentHeader *types.Header, chain []*types.Header, doExist bo
 	}
 
 	// Split the chain into past and future chain
-	pastChain, futureChain := splitChain(current, chain)
-
-	// Add an offset to future chain if it's not in continuity
-	offset := 0
-	if len(futureChain) != 0 {
-		offset += int(futureChain[0].Number.Uint64()-currentHeader.Number.Uint64()) - 1
-	}
-
-	// Don't accept future chain of unacceptable length (from current block)
-	if len(futureChain)+offset > int(interval) {
-		return false, ErrLongFutureChain
-	}
+	pastChain, _ := splitChain(current, chain)
 
 	// Iterate over the chain and validate against the last milestone
 	// It will handle all cases when the incoming chain has atleast one milestone

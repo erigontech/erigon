@@ -59,7 +59,7 @@ func startCheckpointWhitelistService(config *config) {
 // milestone whitelist map.
 func startMilestoneWhitelistService(config *config) {
 	const (
-		tickerDuration = 32 * time.Second
+		tickerDuration = 12 * time.Second
 		fnName         = "whitelist milestone"
 	)
 
@@ -68,7 +68,7 @@ func startMilestoneWhitelistService(config *config) {
 
 func startNoAckMilestoneService(config *config) {
 	const (
-		tickerDuration = 4 * time.Second
+		tickerDuration = 6 * time.Second
 		fnName         = "no-ack-milestone service"
 	)
 
