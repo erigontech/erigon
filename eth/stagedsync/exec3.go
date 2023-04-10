@@ -757,7 +757,7 @@ func processResultQueue(in *exec22.QueueWithRetry, rws *exec22.ResultsQueueIter,
 			}
 			if !bytes.Equal(rh, txTask.BlockRoot[:]) {
 				log.Error("block hash mismatch", "rh", rh, "blockRoot", txTask.BlockRoot, "bn", txTask.BlockNum)
-				return outputTxNum, conflicts, triggers, processedBlockNum, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
+				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("block hash mismatch: %x != %x bn =%d", rh, txTask.BlockRoot[:], txTask.BlockNum)
 			}
 		}
 
