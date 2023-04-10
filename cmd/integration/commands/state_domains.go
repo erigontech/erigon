@@ -17,15 +17,15 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
-	chain2 "github.com/chainstack/erigon-lib/chain"
-	"github.com/chainstack/erigon-lib/commitment"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/datadir"
-	"github.com/chainstack/erigon-lib/common/dbg"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/kv"
-	kv2 "github.com/chainstack/erigon-lib/kv/mdbx"
-	libstate "github.com/chainstack/erigon-lib/state"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
@@ -425,9 +425,9 @@ func (b *blockProcessor) PrintStatsLoop(ctx context.Context, interval time.Durat
 	}
 }
 
-func (b *blockProcessor) ApplyGenesis(genesis *core.Genesis) error {
+func (b *blockProcessor) ApplyGenesis(genesis *types.Genesis) error {
 	b.logger.Info("apply genesis", "chain_id", genesis.Config.ChainID)
-	genBlock, genesisIbs, err := genesis.ToBlock("")
+	genBlock, genesisIbs, err := core.GenesisToBlock(genesis, "")
 	if err != nil {
 		return err
 	}

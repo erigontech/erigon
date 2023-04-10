@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	txpool_proto "github.com/chainstack/erigon-lib/gointerfaces/txpool"
-	"github.com/chainstack/erigon-lib/kv"
-	types2 "github.com/chainstack/erigon-lib/types"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -125,9 +127,9 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	// Binary search the gas requirement, as it may be higher than the amount used
 	var (
-		lo  = params.TxGas - 1
-		hi  uint64
-		cap uint64
+		lo     = params.TxGas - 1
+		hi     uint64
+		gasCap uint64
 	)
 	// Use zero address if sender unspecified.
 	if args.From == nil {
@@ -215,7 +217,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		log.Warn("Caller gas above allowance, capping", "requested", hi, "cap", api.GasCap)
 		hi = api.GasCap
 	}
-	cap = hi
+	gasCap = hi
 
 	chainConfig, err := api.chainConfig(dbtx)
 	if err != nil {
@@ -284,7 +286,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Reject the transaction as invalid if it still fails at the highest allowance
-	if hi == cap {
+	if hi == gasCap {
 		failed, result, err := executable(hi)
 		if err != nil {
 			return 0, err
@@ -297,13 +299,25 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 				return 0, result.Err
 			}
 			// Otherwise, the specified gas cap is too low
-			return 0, fmt.Errorf("gas required exceeds allowance (%d)", cap)
+			return 0, fmt.Errorf("gas required exceeds allowance (%d)", gasCap)
 		}
 	}
 	return hexutil.Uint64(hi), nil
 }
 
-// GetProof is partially implemented; no Storage proofs; only for the latest block
+// maxGetProofRewindBlockCount limits the number of blocks into the past that
+// GetProof will allow computing proofs.  Because we must rewind the hash state
+// and re-compute the state trie, the further back in time the request, the more
+// computationally intensive the operation becomes.  The staged sync code
+// assumes that if more than 100_000 blocks are skipped, that the entire trie
+// should be re-computed. Re-computing the entire trie will currently take ~15
+// minutes on mainnet.  The current limit has been chosen arbitrarily as
+// 'useful' without likely being overly computationally intense.  This parameter
+// could possibly be made configurable in the future if needed.
+var maxGetProofRewindBlockCount uint64 = 1_000
+
+// GetProof is partially implemented; no Storage proofs, and proofs must be for
+// blocks within maxGetProofRewindBlockCount blocks of the head.
 func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, storageKeys []libcommon.Hash, blockNrOrHash rpc.BlockNumberOrHash) (*accounts.AccProofResult, error) {
 
 	tx, err := api.db.BeginRo(ctx)
@@ -311,8 +325,16 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, err
 	}
 	defer tx.Rollback()
+	if api.historyV3(tx) {
+		return nil, fmt.Errorf("not supported by Erigon3")
+	}
 
 	blockNr, _, _, err := rpchelper.GetBlockNumber(blockNrOrHash, tx, api.filters)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr)
 	if err != nil {
 		return nil, err
 	}
@@ -320,51 +342,81 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return nil, err
-	} else if blockNr != latestBlock {
-		return nil, fmt.Errorf(NotImplemented, "eth_getProof for block != latest")
-	} else if len(storageKeys) != 0 {
-		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
-	} else {
-		addrHash, err := common.HashData(address[:])
-		if err != nil {
-			return nil, err
-		}
-
-		rl := trie.NewRetainList(0)
-		rl.AddKey(addrHash[:])
-
-		loader := trie.NewFlatDBTrieLoader("getProof")
-		if err := loader.Reset(rl, nil, nil, false); err != nil {
-			return nil, err
-		}
-
-		var accProof accounts.AccProofResult
-		accProof.Address = address
-
-		// Fill in the Account fields here to reduce the code changes
-		// needed in turbo/trie/hashbuilder.go
-		reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
-		if err != nil {
-			return nil, err
-		}
-		a, err := reader.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-		if a != nil {
-			accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
-			accProof.CodeHash = a.CodeHash
-			accProof.Nonce = hexutil.Uint64(a.Nonce)
-			accProof.StorageHash = a.Root
-		}
-
-		loader.SetProofReturn(&accProof)
-		_, err = loader.CalcTrieRoot(tx, nil, nil)
-		if err != nil {
-			return nil, err
-		}
-		return &accProof, nil
 	}
+
+	if latestBlock < blockNr {
+		// shouldn't happen, but check anyway
+		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
+	}
+
+	if len(storageKeys) != 0 {
+		return nil, fmt.Errorf(NotImplemented, "eth_getProof with storageKeys")
+	}
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	rl := trie.NewRetainList(0)
+	rl.AddKey(addrHash[:])
+
+	var loader *trie.FlatDBTrieLoader
+	if blockNr < latestBlock {
+		if latestBlock-blockNr > maxGetProofRewindBlockCount {
+			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
+		}
+		batch := memdb.NewMemoryBatch(tx, api.dirs.Tmp)
+		defer batch.Rollback()
+
+		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
+		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
+
+		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
+		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
+			return nil, err
+		}
+
+		interHashStageCfg := stagedsync.StageTrieCfg(nil, false, false, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg)
+		loader, err = stagedsync.UnwindIntermediateHashesForTrieLoader("eth_getProof", rl, unwindState, stageState, batch, interHashStageCfg, nil, nil, ctx.Done())
+		if err != nil {
+			return nil, err
+		}
+		tx = batch
+	} else {
+		loader = trie.NewFlatDBTrieLoader("eth_getProof", rl, nil, nil, false)
+	}
+
+	var accProof accounts.AccProofResult
+	accProof.Address = address
+
+	// Fill in the Account fields here to reduce the code changes
+	// needed in turbo/trie/hashbuilder.go
+	reader, err := rpchelper.CreateStateReader(ctx, tx, blockNrOrHash, 0, api.filters, api.stateCache, api.historyV3(tx), "")
+	if err != nil {
+		return nil, err
+	}
+	a, err := reader.ReadAccountData(address)
+	if err != nil {
+		return nil, err
+	}
+	if a != nil {
+		accProof.Balance = (*hexutil.Big)(a.Balance.ToBig())
+		accProof.CodeHash = a.CodeHash
+		accProof.Nonce = hexutil.Uint64(a.Nonce)
+		accProof.StorageHash = a.Root
+	}
+
+	loader.SetProofReturn(&accProof)
+	root, err := loader.CalcTrieRoot(tx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if root != header.Root {
+		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
+	}
+	return &accProof, nil
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {

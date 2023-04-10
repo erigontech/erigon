@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -54,7 +54,7 @@ func prepareNextBeaconState(t *testing.T, slots []uint64, stateHashs, blockHashs
 		// Only copy if the previous is empty.
 		if latestBlockHeader.Root == [32]byte{} {
 			latestBlockHeader.Root = libcommon.BytesToHash(hash)
-			nextState.SetLatestBlockHeader(latestBlockHeader)
+			nextState.SetLatestBlockHeader(&latestBlockHeader)
 		}
 		hash, err = hex.DecodeString(blockHashs[i])
 		if err != nil {

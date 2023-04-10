@@ -3,7 +3,7 @@ package aura
 import (
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 )
 

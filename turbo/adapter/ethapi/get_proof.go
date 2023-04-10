@@ -3,8 +3,8 @@ package ethapi
 import (
 	"bytes"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -229,8 +229,4 @@ func (r *Receiver) Receive(
 	}
 	// We ran out of modifications, simply pass through
 	return r.defaultReceiver.Receive(itemType, accountKey, storageKey, accountValue, storageValue, hash, hasTree, cutoff)
-}
-
-func (r *Receiver) Result() trie.SubTries {
-	return r.defaultReceiver.Result()
 }

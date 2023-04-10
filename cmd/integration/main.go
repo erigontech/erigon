@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/chainstack/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/integration/commands"
 )
 

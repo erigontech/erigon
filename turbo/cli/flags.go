@@ -2,18 +2,19 @@ package cli
 
 import (
 	"fmt"
-	"github.com/chainstack/erigon-lib/txpool"
 	"strings"
 	"time"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/chainstack/erigon-lib/etl"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
@@ -199,7 +200,7 @@ var (
 	TxPoolCommitEvery = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
-		Value: txpool.DefaultConfig.CommitEvery,
+		Value: txpoolcfg.DefaultConfig.CommitEvery,
 	}
 )
 

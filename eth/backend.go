@@ -31,29 +31,29 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/datadir"
-	"github.com/chainstack/erigon-lib/common/dir"
-	"github.com/chainstack/erigon-lib/direct"
-	downloader3 "github.com/chainstack/erigon-lib/downloader"
-	"github.com/chainstack/erigon-lib/downloader/downloadercfg"
-	"github.com/chainstack/erigon-lib/downloader/downloadergrpc"
-	proto_downloader "github.com/chainstack/erigon-lib/gointerfaces/downloader"
-	"github.com/chainstack/erigon-lib/gointerfaces/grpcutil"
-	"github.com/chainstack/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/chainstack/erigon-lib/gointerfaces/sentry"
-	txpool_proto "github.com/chainstack/erigon-lib/gointerfaces/txpool"
-	prototypes "github.com/chainstack/erigon-lib/gointerfaces/types"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/kvcache"
-	"github.com/chainstack/erigon-lib/kv/kvcfg"
-	"github.com/chainstack/erigon-lib/kv/remotedbserver"
-	libstate "github.com/chainstack/erigon-lib/state"
-	txpool2 "github.com/chainstack/erigon-lib/txpool"
-	"github.com/chainstack/erigon-lib/txpool/txpooluitl"
-	types2 "github.com/chainstack/erigon-lib/types"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/direct"
+	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 	"google.golang.org/grpc"
@@ -610,16 +610,14 @@ func New(stack *node.Node, config *ethconfig.Config, logger log.Logger) (*Ethere
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
+	{
 		baseFee := uint64(0)
 		if currentBlock.BaseFee() != nil {
 			baseFee = currentBlock.BaseFee().Uint64()
 		}
 		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
 		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, currentBlock.GasLimit())
-
-	}()
+	}
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPool2Fetch.ConnectCore()

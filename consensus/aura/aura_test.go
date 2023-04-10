@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/memdb"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/consensus/aura"
@@ -203,7 +203,7 @@ func TestEmptyBlock(t *testing.T) {
 
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
-	genesisBlock, _, err := genesis.ToBlock("")
+	genesisBlock, _, err := core.GenesisToBlock(genesis, "")
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

@@ -24,11 +24,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/kv"
 	"github.com/goccy/go-json"
 	lru2 "github.com/hashicorp/golang-lru/v2"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -124,7 +124,7 @@ func lastSnapshot(db kv.RwDB) (uint64, error) {
 
 	lastEnc, err := tx.GetOne(kv.CliqueLastSnapshot, LastSnapshotKey())
 	if err != nil {
-		return 0, fmt.Errorf("failed check last clique snapshot: %d", err)
+		return 0, fmt.Errorf("failed check last clique snapshot: %w", err)
 	}
 	if len(lastEnc) == 0 {
 		return 0, ErrNotFound

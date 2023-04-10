@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/cmp"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/bitmapdb"
-	"github.com/chainstack/erigon-lib/kv/order"
-	"github.com/chainstack/erigon-lib/kv/rawdbv3"
-	"github.com/chainstack/erigon-lib/kv/temporal/historyv2"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
@@ -72,7 +72,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 		// so it is optimal to search from the beginning even if the contract has multiple
 		// incarnations.
 		var prevTxnID, nextTxnID uint64
-		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, -1)
+		it, err := ttx.IndexRange(temporal.AccountsHistoryIdx, addr[:], 0, int(lastTxNum+1), order.Asc, kv.Unlim)
 		if err != nil {
 			return nil, err
 		}

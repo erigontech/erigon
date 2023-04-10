@@ -8,23 +8,23 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/dbg"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/etl"
-	"github.com/chainstack/erigon-lib/kv"
-	libstate "github.com/chainstack/erigon-lib/state"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	atomic2 "go.uber.org/atomic"
 )
 
 const CodeSizeTable = "CodeSize"
@@ -47,8 +47,8 @@ type StateV3 struct {
 	queue     exec22.TxTaskQueue
 	queueLock sync.Mutex
 
-	txsDone  *atomic2.Uint64
-	finished atomic2.Bool
+	txsDone  atomic.Uint64
+	finished atomic.Bool
 
 	tmpdir              string
 	applyPrevAccountBuf []byte // buffer for ApplyState. Doesn't need mutex because Apply is single-threaded
@@ -65,8 +65,6 @@ func NewStateV3(tmpdir string) *StateV3 {
 		chStorage:      btree2.NewMap[string, []byte](128),
 		chIncs:         map[string][]byte{},
 		chContractCode: map[string][]byte{},
-
-		txsDone: atomic2.NewUint64(0),
 
 		applyPrevAccountBuf: make([]byte, 256),
 		addrIncBuf:          make([]byte, 20+8),

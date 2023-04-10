@@ -1,7 +1,6 @@
 package transition
 
 import (
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 )
 
@@ -24,6 +23,5 @@ func ProcessRandaoMixesReset(state *state.BeaconState) {
 }
 
 func ProcessParticipationFlagUpdates(state *state.BeaconState) {
-	state.SetPreviousEpochParticipation(state.CurrentEpochParticipation())
-	state.SetCurrentEpochParticipation(make([]cltypes.ParticipationFlags, len(state.Validators())))
+	state.ResetEpochParticipation()
 }

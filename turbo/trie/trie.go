@@ -22,8 +22,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/cmp"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -339,7 +339,7 @@ func (t *Trie) NeedLoadCode(addrHash libcommon.Hash, codeHash libcommon.Hash, by
 		return false, nil
 	}
 
-	ok := false
+	var ok bool
 	if bytecode {
 		_, ok = t.GetAccountCode(addrHash[:])
 	} else {

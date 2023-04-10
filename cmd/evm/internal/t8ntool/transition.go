@@ -27,13 +27,13 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/kvcfg"
-	"github.com/chainstack/erigon-lib/kv/memdb"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -87,9 +87,9 @@ var (
 )
 
 type input struct {
-	Alloc core.GenesisAlloc `json:"alloc,omitempty"`
-	Env   *stEnv            `json:"env,omitempty"`
-	Txs   []*txWithKey      `json:"txs,omitempty"`
+	Alloc types.GenesisAlloc `json:"alloc,omitempty"`
+	Env   *stEnv             `json:"env,omitempty"`
+	Txs   []*txWithKey       `json:"txs,omitempty"`
 }
 
 func Main(ctx *cli.Context) error {
@@ -487,7 +487,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 	return signedTxs, nil
 }
 
-type Alloc map[libcommon.Address]core.GenesisAccount
+type Alloc map[libcommon.Address]types.GenesisAccount
 
 func (g Alloc) OnRoot(libcommon.Hash) {}
 
@@ -500,7 +500,7 @@ func (g Alloc) OnAccount(addr libcommon.Address, dumpAccount state.DumpAccount) 
 			storage[libcommon.HexToHash(k)] = libcommon.HexToHash(v)
 		}
 	}
-	genesisAccount := core.GenesisAccount{
+	genesisAccount := types.GenesisAccount{
 		Code:    dumpAccount.Code,
 		Storage: storage,
 		Balance: balance,

@@ -7,12 +7,12 @@ import (
 	"sync"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/chainstack/erigon-lib/chain"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/etl"
-	"github.com/chainstack/erigon-lib/kv"
-	libstate "github.com/chainstack/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
@@ -30,11 +30,10 @@ import (
 )
 
 type ScanWorker struct {
-	txNum          uint64
-	as             *libstate.AggregatorStep
-	fromKey, toKey []byte
-	currentKey     []byte
-	bitmap         roaring64.Bitmap
+	txNum  uint64
+	as     *libstate.AggregatorStep
+	toKey  []byte
+	bitmap roaring64.Bitmap
 }
 
 func NewScanWorker(txNum uint64, as *libstate.AggregatorStep) *ScanWorker {
@@ -230,7 +229,7 @@ type ReconWorker struct {
 	engine      consensus.Engine
 	chainConfig *chain.Config
 	logger      log.Logger
-	genesis     *core.Genesis
+	genesis     *types.Genesis
 	epoch       EpochReader
 	chain       ChainReader
 	isPoSA      bool
@@ -242,7 +241,7 @@ type ReconWorker struct {
 
 func NewReconWorker(lock sync.Locker, ctx context.Context, rs *state.ReconState,
 	as *libstate.AggregatorStep, blockReader services.FullBlockReader,
-	chainConfig *chain.Config, logger log.Logger, genesis *core.Genesis, engine consensus.Engine,
+	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	chainTx kv.Tx,
 ) *ReconWorker {
 	rw := &ReconWorker{
@@ -303,7 +302,7 @@ func (rw *ReconWorker) runTxTask(txTask *exec22.TxTask) error {
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
-		_, ibs, err = rw.genesis.ToBlock("")
+		_, ibs, err = core.GenesisToBlock(rw.genesis, "")
 		if err != nil {
 			return err
 		}

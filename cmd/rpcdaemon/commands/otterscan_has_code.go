@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/chainstack/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"

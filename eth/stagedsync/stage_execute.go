@@ -10,18 +10,18 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/chainstack/erigon-lib/chain"
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/cmp"
-	"github.com/chainstack/erigon-lib/common/datadir"
-	"github.com/chainstack/erigon-lib/common/dbg"
-	"github.com/chainstack/erigon-lib/common/hexutility"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/etl"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/rawdbv3"
-	"github.com/chainstack/erigon-lib/kv/temporal/historyv2"
-	libstate "github.com/chainstack/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/changeset"
@@ -85,7 +85,7 @@ type ExecuteBlockCfg struct {
 	dirs      datadir.Dirs
 	historyV3 bool
 	syncCfg   ethconfig.Sync
-	genesis   *core.Genesis
+	genesis   *types.Genesis
 	agg       *libstate.AggregatorV3
 }
 
@@ -105,7 +105,7 @@ func StageExecuteBlocksCfg(
 	dirs datadir.Dirs,
 	blockReader services.FullBlockReader,
 	hd headerDownloader,
-	genesis *core.Genesis,
+	genesis *types.Genesis,
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 ) ExecuteBlockCfg {

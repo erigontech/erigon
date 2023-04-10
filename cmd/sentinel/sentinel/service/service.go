@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	sentinelrpc "github.com/chainstack/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel"
@@ -42,6 +42,32 @@ func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*senti
 	}
 	s.sentinel.Peers().BanBadPeer(pid)
 	return &sentinelrpc.EmptyMessage{}, nil
+}
+
+func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.GossipData) (*sentinelrpc.EmptyMessage, error) {
+	manager := s.sentinel.GossipManager()
+	// Snappify payload before sending it to gossip
+	compressedData := utils.CompressSnappy(msg.Data)
+	var subscription *sentinel.GossipSubscription
+
+	switch msg.Type {
+	case sentinelrpc.GossipType_BeaconBlockGossipType:
+		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconBlockTopic))
+	case sentinelrpc.GossipType_AggregateAndProofGossipType:
+		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconAggregateAndProofTopic))
+	case sentinelrpc.GossipType_VoluntaryExitGossipType:
+		subscription = manager.GetMatchingSubscription(string(sentinel.VoluntaryExitTopic))
+	case sentinelrpc.GossipType_ProposerSlashingGossipType:
+		subscription = manager.GetMatchingSubscription(string(sentinel.ProposerSlashingTopic))
+	case sentinelrpc.GossipType_AttesterSlashingGossipType:
+		subscription = manager.GetMatchingSubscription(string(sentinel.AttesterSlashingTopic))
+	default:
+		return &sentinelrpc.EmptyMessage{}, nil
+	}
+	if subscription == nil {
+		return &sentinelrpc.EmptyMessage{}, nil
+	}
+	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
 
 func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {

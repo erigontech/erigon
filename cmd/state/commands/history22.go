@@ -11,14 +11,14 @@ import (
 	"syscall"
 	"time"
 
-	chain2 "github.com/chainstack/erigon-lib/chain"
-	"github.com/chainstack/erigon-lib/commitment"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/datadir"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/mdbx"
-	kv2 "github.com/chainstack/erigon-lib/kv/mdbx"
-	libstate "github.com/chainstack/erigon-lib/state"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/commitment"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -56,7 +56,7 @@ var history22Cmd = &cobra.Command{
 	},
 }
 
-func History22(genesis *core.Genesis, logger log.Logger) error {
+func History22(genesis *types.Genesis, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)

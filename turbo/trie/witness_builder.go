@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
@@ -187,7 +187,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		if limiter != nil {
 			retainDec = limiter.RetainDecider
 		}
-		codeSize := 0
+		var codeSize int
 		var err error
 		if codeSize, err = b.processAccountCode(n, retainDec); err != nil {
 			return err

@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/memdb"
-	"github.com/chainstack/erigon-lib/kv/rawdbv3"
-	"github.com/chainstack/erigon-lib/kv/temporal/historyv2"
-	libstate "github.com/chainstack/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -39,7 +39,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
 		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
@@ -55,7 +55,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithCodeChanges", func(t *testing.T) {
 		t.Skip("not supported yet, to be restored")
@@ -73,7 +73,7 @@ func TestExec(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 
 	t.Run("PruneExecution", func(t *testing.T) {
@@ -198,7 +198,7 @@ func TestExec22(t *testing.T) {
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
 		t.Skip("we don't delete newer incarnations - seems it's a feature?")
@@ -235,6 +235,6 @@ func TestExec22(t *testing.T) {
 			return nil
 		})
 
-		compareCurrentState(t, tx1, tx2, kv.PlainState, kv.PlainContractCode)
+		compareCurrentState(t, newAgg(t), tx1, tx2, kv.PlainState, kv.PlainContractCode)
 	})
 }

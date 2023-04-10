@@ -10,18 +10,18 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	common2 "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/dbg"
-	"github.com/chainstack/erigon-lib/kv"
-	mdbx2 "github.com/chainstack/erigon-lib/kv/mdbx"
+	common2 "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	mdbx2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 	"github.com/torquem-ch/mdbx-go/mdbx"
-	"go.uber.org/atomic"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 )
@@ -168,7 +168,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 		total, _ = c.Count()
 		return nil
 	})
-	progress := atomic.NewInt64(0)
+	progress := atomic.Int64{}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
@@ -190,7 +190,7 @@ func doWarmup(ctx context.Context, chaindata string, bucket string) error {
 						if len(v) > 0 {
 							_ = v[len(v)-1]
 						}
-						progress.Inc()
+						progress.Add(1)
 						if err != nil {
 							return err
 						}

@@ -10,11 +10,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - run: git submodule update --init --recursive --force
-
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v4
         with:
-          go-version: 1.19.x
+          go-version: '1.19'
 
       - name: install dependencies on Linux
         if: runner.os == 'Linux'

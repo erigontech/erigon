@@ -5,10 +5,10 @@ import (
 	"net"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/chainstack/erigon-lib/gointerfaces/execution"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/mdbx"
-	"github.com/chainstack/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/log/v3"

@@ -21,7 +21,7 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/erigon/common"

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/ssz"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
@@ -531,7 +531,6 @@ func (a *PendingAttestation) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	if dst, err = a.Data.EncodeSSZ(dst); err != nil {
 		return
 	}
-	fmt.Println(dst)
 	dst = append(dst, ssz.Uint64SSZ(a.InclusionDelay)...)
 	dst = append(dst, ssz.Uint64SSZ(a.ProposerIndex)...)
 

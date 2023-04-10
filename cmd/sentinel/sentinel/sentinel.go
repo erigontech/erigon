@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/handlers"
@@ -269,4 +269,8 @@ func (s *Sentinel) Host() host.Host {
 
 func (s *Sentinel) Peers() *peers.Peers {
 	return s.peers
+}
+
+func (s *Sentinel) GossipManager() *GossipManager {
+	return s.subManager
 }

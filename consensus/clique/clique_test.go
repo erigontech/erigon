@@ -21,12 +21,11 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/kv"
-	"github.com/chainstack/erigon-lib/kv/memdb"
 	"github.com/holiman/uint256"
-
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -51,9 +50,9 @@ func TestReimportMirroredState(t *testing.T) {
 		engine   = clique.New(params.AllCliqueProtocolChanges, params.CliqueSnapshot, cliqueDB)
 		signer   = types.LatestSignerForChainID(nil)
 	)
-	genspec := &core.Genesis{
+	genspec := &types.Genesis{
 		ExtraData: make([]byte, clique.ExtraVanity+length.Addr+clique.ExtraSeal),
-		Alloc: map[libcommon.Address]core.GenesisAccount{
+		Alloc: map[libcommon.Address]types.GenesisAccount{
 			addr: {Balance: big.NewInt(10000000000000000)},
 		},
 		Config: params.AllCliqueProtocolChanges,

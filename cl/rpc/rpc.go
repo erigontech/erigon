@@ -8,10 +8,10 @@ import (
 	"io"
 
 	"github.com/c2h5oh/datasize"
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/sentinel"
 	"github.com/golang/snappy"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"go.uber.org/zap/buffer"
 
@@ -269,6 +269,18 @@ func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch ui
 		FinalizedEpoch: finalizedEpoch,
 		HeadRoot:       gointerfaces.ConvertHashToH256(headRoot),
 		HeadSlot:       headSlot,
+	})
+	return err
+}
+
+func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
+	encoded, err := block.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	_, err = b.sentinel.PublishGossip(b.ctx, &sentinel.GossipData{
+		Data: encoded,
+		Type: sentinel.GossipType_BeaconBlockGossipType,
 	})
 	return err
 }

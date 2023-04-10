@@ -16,7 +16,7 @@ package handlers
 import (
 	"context"
 
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/sentinel/sentinel/communication"
@@ -55,13 +55,13 @@ func NewConsensusHandlers(ctx context.Context, db kv.RoDB, host host.Host,
 		ctx:           ctx,
 	}
 	c.handlers = map[protocol.ID]network.StreamHandler{
-		protocol.ID(communication.PingProtocolV1):                c.pingHandler,
-		protocol.ID(communication.GoodbyeProtocolV1):             c.goodbyeHandler,
-		protocol.ID(communication.StatusProtocolV1):              c.statusHandler,
-		protocol.ID(communication.MetadataProtocolV1):            c.metadataV1Handler,
-		protocol.ID(communication.MetadataProtocolV2):            c.metadataV2Handler,
-		protocol.ID(communication.BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
-		protocol.ID(communication.BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
+		protocol.ID(communication.PingProtocolV1):     c.pingHandler,
+		protocol.ID(communication.GoodbyeProtocolV1):  c.goodbyeHandler,
+		protocol.ID(communication.StatusProtocolV1):   c.statusHandler,
+		protocol.ID(communication.MetadataProtocolV1): c.metadataV1Handler,
+		protocol.ID(communication.MetadataProtocolV2): c.metadataV2Handler,
+		//protocol.ID(communication.BeaconBlocksByRangeProtocolV1): c.blocksByRangeHandler,
+		//protocol.ID(communication.BeaconBlocksByRootProtocolV1):  c.beaconBlocksByRootHandler,
 	}
 	return c
 }

@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon/accounts/abi"

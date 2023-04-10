@@ -3,16 +3,16 @@ package rawdb_test
 import (
 	"testing"
 
-	"github.com/chainstack/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/rawdb"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBytes2(t *testing.T) {
-	len := 1000
-	buf := rawdb.Bytes2FromLength(len)
-	require.Equal(t, len, rawdb.LengthFromBytes2(buf))
+	l := 1000
+	buf := rawdb.Bytes2FromLength(l)
+	require.Equal(t, l, rawdb.LengthFromBytes2(buf))
 }
 
 var emptyBlock = &cltypes.Eth1Block{}

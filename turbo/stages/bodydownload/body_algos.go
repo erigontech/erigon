@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"math/big"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/common/dbg"
-	"github.com/chainstack/erigon-lib/common/length"
-	"github.com/chainstack/erigon-lib/kv"
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/maps"
 
@@ -420,8 +420,8 @@ func (bd *BodyDownload) addBodyToCache(key uint64, body *types.RawBody) {
 	}
 }
 
-func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, delete bool) *types.RawBody {
-	if delete {
+func (bd *BodyDownload) GetBodyFromCache(blockNum uint64, del bool) *types.RawBody {
+	if del {
 		if item, ok := bd.bodyCache.Delete(BodyTreeItem{blockNum: blockNum}); ok {
 			bd.bodyCacheSize -= item.payloadSize
 			return item.rawBody

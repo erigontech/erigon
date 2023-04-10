@@ -405,7 +405,7 @@ if (!Test-Path -Path [string](Join-Path $MyContext.Directory "\.git") -PathType 
 if(!(Test-Git-Installed)) { exit 1 }
     
 ## Test GO language is installed AND min version
-if(!(Test-GO-Installed "1.18")) { exit 1 }
+if(!(Test-GO-Installed "1.19")) { exit 1 }
 
 # Build erigon binaries
 Set-Variable -Name "Erigon" -Value ([hashtable]::Synchronized(@{})) -Scope Script
@@ -413,7 +413,7 @@ $Erigon.Commit     = [string]@(git.exe rev-list -1 HEAD)
 $Erigon.Branch     = [string]@(git.exe rev-parse --abbrev-ref HEAD)
 $Erigon.Tag        = [string]@(git.exe describe --tags)
 
-$Erigon.BuildTags = "nosqlite,noboltdb"
+$Erigon.BuildTags = "nosqlite,noboltdb,netgo"
 $Erigon.Package = "github.com/ledgerwatch/erigon"
 
 $Erigon.BuildFlags = "-trimpath -tags $($Erigon.BuildTags) -buildvcs=false -v"

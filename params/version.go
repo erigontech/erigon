@@ -19,7 +19,7 @@ package params
 import (
 	"fmt"
 
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var (
@@ -32,7 +32,7 @@ var (
 // see https://calver.org
 const (
 	VersionMajor       = 2     // Major version component of the current release
-	VersionMinor       = 40    // Minor version component of the current release
+	VersionMinor       = 41    // Minor version component of the current release
 	VersionMicro       = 0     // Patch version component of the current release
 	VersionModifier    = "dev" // Modifier component of the current release
 	VersionKeyCreated  = "ErigonVersionCreated"

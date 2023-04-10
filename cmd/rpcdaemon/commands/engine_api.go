@@ -9,11 +9,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/chainstack/erigon-lib/common"
-	"github.com/chainstack/erigon-lib/gointerfaces"
-	"github.com/chainstack/erigon-lib/gointerfaces/remote"
-	types2 "github.com/chainstack/erigon-lib/gointerfaces/types"
-	"github.com/chainstack/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -40,6 +40,7 @@ type ExecutionPayload struct {
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
 	Transactions  []hexutil.Bytes     `json:"transactions"  gencodec:"required"`
 	Withdrawals   []*types.Withdrawal `json:"withdrawals"`
+	ExcessDataGas *hexutil.Big        `json:"excessDataGas"`
 }
 
 // GetPayloadV2Response represents the response of the getPayloadV2 method
@@ -248,6 +249,17 @@ func (e *EngineImpl) newPayload(version uint32, ctx context.Context, payload *Ex
 		ep.Version = 2
 		ep.Withdrawals = privateapi.ConvertWithdrawalsToRpc(payload.Withdrawals)
 	}
+	if version >= 3 && payload.ExcessDataGas != nil {
+		ep.Version = 3
+		var excessDataGas *uint256.Int
+		var overflow bool
+		excessDataGas, overflow = uint256.FromBig((*big.Int)(payload.ExcessDataGas))
+		if overflow {
+			log.Warn("NewPayload ExcessDataGas overflow")
+			return nil, fmt.Errorf("invalid request, excess data gas overflow")
+		}
+		ep.ExcessDataGas = gointerfaces.ConvertUint256IntToH256(excessDataGas)
+	}
 
 	res, err := e.api.EngineNewPayload(ctx, ep)
 	if err != nil {
@@ -286,7 +298,10 @@ func convertPayloadFromRpc(payload *types2.ExecutionPayload) *ExecutionPayload {
 	if payload.Version >= 2 {
 		res.Withdrawals = privateapi.ConvertWithdrawalsFromRpc(payload.Withdrawals)
 	}
-
+	if payload.Version >= 3 {
+		edg := gointerfaces.ConvertH256ToUint256Int(payload.ExcessDataGas).ToBig()
+		res.ExcessDataGas = (*hexutil.Big)(edg)
+	}
 	return res
 }
 

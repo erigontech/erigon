@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	libcommon "github.com/chainstack/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -327,8 +327,8 @@ func TestMethodMultiReturn(t *testing.T) {
 		Int    *big.Int
 	}
 
-	newInterfaceSlice := func(len int) interface{} {
-		slice := make([]interface{}, len)
+	newInterfaceSlice := func(l int) interface{} {
+		slice := make([]interface{}, l)
 		return &slice
 	}
 
