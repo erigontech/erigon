@@ -1581,7 +1581,7 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 
 		addr, ok := p.senders.senderID2Addr[metaTx.Tx.SenderID]
 		if !ok {
-			log.Warn("[txpool] flush: sender address not found by ID", metaTx.Tx.SenderID)
+			log.Warn("[txpool] flush: sender address not found by ID", "senderID", metaTx.Tx.SenderID)
 			continue
 		}
 
