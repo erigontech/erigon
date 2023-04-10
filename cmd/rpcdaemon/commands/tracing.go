@@ -79,6 +79,10 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
+
 	if config.BorTraceEnabled == nil {
 		config.BorTraceEnabled = newBoolPtr(false)
 	}
@@ -322,6 +326,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		overrideBlockHash  map[uint64]common.Hash
 		baseFee            uint256.Int
 	)
+
+	if config == nil {
+		config = &tracers.TraceConfig{}
+	}
 
 	overrideBlockHash = make(map[uint64]common.Hash)
 	tx, err := api.db.BeginRo(ctx)

@@ -1,4 +1,4 @@
-package e3types
+package exec22
 
 import (
 	"container/heap"
@@ -50,6 +50,7 @@ type TxTask struct {
 	UsedGas uint64
 }
 
+// TxTaskQueue non-thread-safe priority-queue
 type TxTaskQueue []*TxTask
 
 func (h TxTaskQueue) Len() int {
@@ -145,6 +146,9 @@ func (q *QueueWithRetry) ReTry(t *TxTask) {
 	q.retiresLock.Lock()
 	heap.Push(&q.retires, t)
 	q.retiresLock.Unlock()
+	if q.closed {
+		return
+	}
 	select {
 	case q.newTasks <- nil:
 	default:
@@ -206,6 +210,7 @@ func (q *QueueWithRetry) popNoWait() (task *TxTask, ok bool) {
 		select {
 		case task, ok = <-q.newTasks:
 			if !ok {
+
 				return nil, false
 			}
 		default:
@@ -222,4 +227,171 @@ func (q *QueueWithRetry) Close() {
 	}
 	q.closed = true
 	close(q.newTasks)
+}
+
+// ResultsQueue thread-safe priority-queue of execution results
+type ResultsQueue struct {
+	limit  int
+	closed bool
+
+	resultCh chan *TxTask
+	iter     *ResultsQueueIter
+
+	sync.Mutex
+	results *TxTaskQueue
+}
+
+func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
+	r := &ResultsQueue{
+		results:  &TxTaskQueue{},
+		limit:    queueLimit,
+		resultCh: make(chan *TxTask, newTasksLimit),
+	}
+	heap.Init(r.results)
+	r.iter = &ResultsQueueIter{q: r, results: r.results}
+	return r
+}
+
+// Add result of execution. May block when internal channel is full
+func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
+	select {
+	case q.resultCh <- task: // Needs to have outside of the lock
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return nil
+}
+func (q *ResultsQueue) drainNoBlock(task *TxTask) {
+	q.Lock()
+	defer q.Unlock()
+	if task != nil {
+		heap.Push(q.results, task)
+	}
+
+	for {
+		select {
+		case txTask, ok := <-q.resultCh:
+			if !ok {
+				return
+			}
+			if txTask != nil {
+				heap.Push(q.results, txTask)
+			}
+		default: // we are inside mutex section, can't block here
+			return
+		}
+	}
+}
+
+func (q *ResultsQueue) Iter() *ResultsQueueIter {
+	q.Lock()
+	q.iter.needUnlock = true
+	return q.iter
+}
+func (q *ResultsQueue) IterLocked() *ResultsQueueIter {
+	q.iter.needUnlock = false
+	return q.iter
+}
+
+type ResultsQueueIter struct {
+	q          *ResultsQueue
+	results    *TxTaskQueue //pointer to `q.results` - just to reduce amount of dereferences
+	needUnlock bool
+}
+
+func (q *ResultsQueueIter) Close() {
+	if q.needUnlock {
+		q.q.Unlock()
+	}
+}
+func (q *ResultsQueueIter) HasNext(outputTxNum uint64) bool {
+	return len(*q.results) > 0 && (*q.results)[0].TxNum == outputTxNum
+}
+func (q *ResultsQueueIter) PopNext() *TxTask {
+	return heap.Pop(q.results).(*TxTask)
+}
+
+func (q *ResultsQueue) Drain(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case txTask, ok := <-q.resultCh:
+		if !ok {
+			return nil
+		}
+		q.drainNoBlock(txTask)
+	}
+	return nil
+}
+func (q *ResultsQueue) DrainNonBlocking() { q.drainNoBlock(nil) }
+
+func (q *ResultsQueue) DrainLocked() {
+	var drained bool
+	for !drained {
+		select {
+		case txTask, ok := <-q.resultCh:
+			if !ok {
+				return
+			}
+			heap.Push(q.results, txTask)
+		default:
+			drained = true
+		}
+	}
+}
+func (q *ResultsQueue) DropResults(f func(t *TxTask)) {
+	q.Lock()
+	defer q.Unlock()
+Loop:
+	for {
+		select {
+		case txTask, ok := <-q.resultCh:
+			if !ok {
+				break Loop
+			}
+			f(txTask)
+		default:
+			break Loop
+		}
+	}
+
+	// Drain results queue as well
+	for q.results.Len() > 0 {
+		f(heap.Pop(q.results).(*TxTask))
+	}
+}
+
+func (q *ResultsQueue) Close() {
+	if q.closed {
+		return
+	}
+	q.closed = true
+	close(q.resultCh)
+}
+func (q *ResultsQueue) ResultChLen() int { return len(q.resultCh) }
+func (q *ResultsQueue) ResultChCap() int { return cap(q.resultCh) }
+func (q *ResultsQueue) Limit() int       { return q.limit }
+func (q *ResultsQueue) Len() (l int) {
+	q.Lock()
+	l = q.results.Len()
+	q.Unlock()
+	return l
+}
+func (q *ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].TxNum }
+func (q *ResultsQueue) LenLocked() (l int)       { return q.results.Len() }
+func (q *ResultsQueue) HasLocked() bool          { return len(*q.results) > 0 }
+func (q *ResultsQueue) PushLocked(t *TxTask)     { heap.Push(q.results, t) }
+func (q *ResultsQueue) Push(t *TxTask) {
+	q.Lock()
+	heap.Push(q.results, t)
+	q.Unlock()
+}
+func (q *ResultsQueue) PopLocked() (t *TxTask) {
+	return heap.Pop(q.results).(*TxTask)
+}
+func (q *ResultsQueue) Dbg() (t *TxTask) {
+	if len(*q.results) > 0 {
+		return (*q.results)[0]
+	}
+	return nil
 }
