@@ -149,11 +149,14 @@ func tunnel(ctx context.Context, tlsConfig *tls.Config, diagnosticsUrl string, m
 	var metricsBuf bytes.Buffer
 	r := bufio.NewReaderSize(resp.Body, 4096)
 	line, isPrefix, err := r.ReadLine()
+	if err != nil {
+		return fmt.Errorf("reading first line: %v", err)
+	}
 	if isPrefix {
 		return fmt.Errorf("request too long")
 	}
 	if !bytes.Equal(line, successLine) {
-		fmt.Errorf("connecting to diagnostics system, first line [%s]", line)
+		return fmt.Errorf("connecting to diagnostics system, first line [%s]", line)
 	}
 	log.Info("Connected")
 
