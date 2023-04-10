@@ -194,6 +194,7 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 	// Initalize edge.
 	edge := currentStateBlockRoot
 	inverselyTraversedRoots := []libcommon.Hash{}
+	inverseChangesets := make([]*beacon_changeset.ChangeSet, 0, len(blockRootsFromFarthestExtendingPath))
 
 	// Unwind to the recconection root.
 	for edge != currentIteratorRoot {
@@ -208,10 +209,15 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 			return nil, err
 		}
 		inverselyTraversedRoots = append(inverselyTraversedRoots, currentBlockRoot)
-		f.lastState.RevertWithChangeset(changeset)
+		inverseChangesets = append(inverseChangesets, changeset)
 		// go on.
 		edge = currentBlockRoot
 	}
+	// Reverse changeset ONLY if we can
+	for i := len(inverseChangesets) - 1; i >= 0; i-- {
+		f.lastState.RevertWithChangeset(inverseChangesets[i])
+	}
+
 	// Traverse the graph forward now (the nodes are in reverse order).
 	for i := len(blockRootsFromFarthestExtendingPath) - 1; i >= 0; i-- {
 		changeset := f.forwardEdges[blockRootsFromFarthestExtendingPath[i]]

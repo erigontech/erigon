@@ -120,7 +120,6 @@ COMMANDS += state
 COMMANDS += txpool
 COMMANDS += verkle
 COMMANDS += evm
-COMMANDS += lightclient
 COMMANDS += sentinel
 COMMANDS += erigon-el 
 COMMANDS += caplin-phase1
