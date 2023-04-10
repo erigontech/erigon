@@ -55,7 +55,7 @@ func SpawnStageForkChoice(cfg StageForkChoiceCfg, s *stagedsync.StageState, tx k
 		defer tx.Rollback()
 	}*/
 	// Start download service
-	log.Info("Listening to gossip now")
+	log.Info("Started Ethereum 2.0 Gossip Service")
 	// We start gossip management.
 	go cfg.gossipManager.Start()
 	go onTickService(ctx, cfg)

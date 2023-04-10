@@ -45,7 +45,7 @@ func TestForkGraph(t *testing.T) {
 	// Now make blockC a bad block
 	blockC.Block.ProposerIndex = 81214459 // some invalid thing
 	status, err = graph.AddChainSegment(blockC, true)
-	require.NoError(t, err)
+	require.Error(t, err)
 	require.Equal(t, status, fork_graph.InvalidBlock)
 	haveStateHashPostFail, err := graph.LastState().HashSSZ()
 	require.NoError(t, err)

@@ -37,7 +37,9 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, fullValidati
 		}
 		return nil
 	}
-	f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	if block.Block.Body.ExecutionPayload != nil {
+		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
+	}
 	if block.Block.Slot > f.highestSeen {
 		f.highestSeen = block.Block.Slot
 	}
