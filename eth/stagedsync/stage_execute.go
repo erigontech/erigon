@@ -283,12 +283,8 @@ func ExecBlockV3(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx cont
 		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	writer := state.NewWriterV4(tx.(kv.TemporalTx))
-	reader := state.NewReaderV4(tx.(kv.TemporalTx))
-
-	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 	parallel := initialCycle && tx == nil
-	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel,  logPrefix, to); err != nil {
+	if err := ExecV3(ctx, s, u, workersCount, cfg, tx, parallel, logPrefix, to); err != nil {
 		return fmt.Errorf("ExecV3: %w", err)
 	}
 	return nil

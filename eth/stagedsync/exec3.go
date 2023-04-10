@@ -190,7 +190,10 @@ func ExecV3(ctx context.Context,
 	var count uint64
 	var lock sync.RWMutex
 
-	rs := state.NewStateV3(cfg.dirs.Tmp)
+	writer := state.NewWriterV4(applyTx.(kv.TemporalTx))
+	reader := state.NewReaderV4(applyTx.(kv.TemporalTx))
+
+	rs := state.NewStateV3(cfg.dirs.Tmp, reader, writer)
 
 	//TODO: owner of `resultCh` is main goroutine, but owner of `retryQueue` is applyLoop.
 	// Now rwLoop closing both (because applyLoop we completely restart)
