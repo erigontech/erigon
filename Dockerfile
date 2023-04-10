@@ -46,6 +46,10 @@ RUN apk add --no-cache curl jq bind-tools
 ARG UID=1000
 ARG GID=1000
 RUN adduser -D -u $UID -g $GID erigon
+
+ARG STORAGE_DIR=/chain-db
+RUN mkdir $STORAGE_DIR && chown erigon:erigon ${STORAGE_DIR}
+
 USER erigon
 RUN mkdir -p ~/.local/share/erigon
 

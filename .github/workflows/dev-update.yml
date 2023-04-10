@@ -1,0 +1,44 @@
+name: "Dev VM update"
+
+on:
+  workflow_dispatch: {}
+
+  workflow_run:
+    workflows: [Dev-Build-Publish]
+    types: [completed]
+    branches:
+      - "evmc_importer"
+
+env:
+  GC_BUCKET: "is-env-confg"
+  VM_INSTANCE_NAME: "erigon-dev-explorer-1"
+  VM_ZONE: "europe-west1-b"
+
+jobs:
+  erigon-compose-refresh:
+    if: ${{ ! github.event.workflow_run || (github.event.workflow_run.conclusion == 'success') }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: GCP auth
+        uses: 'google-github-actions/auth@v0'
+        with:
+          credentials_json: '${{ secrets.GCP_DFX_SERVER_JSON_KEY }}'
+
+      - name: "Run remote SSH command"
+        id: 'ssh-compute'
+        uses: 'google-github-actions/ssh-compute@v0'
+        with:
+          instance_name: ${{ env.VM_INSTANCE_NAME }}
+          zone: ${{ env.VM_ZONE }}
+          user: 'erigon'
+          ssh_private_key: '${{ secrets.GCP_SSH_ERIGON_KEY }}'
+          command: 'sh -c "~/scripts/update.sh" && sh -c "~/scripts/env-update.sh"'
+
+      - name: "SSH run output"
+        run: |-
+          echo "STDOUT"
+          echo '${{ steps.ssh-compute.outputs.stdout }}'
+          echo "STDERR"
+          echo '${{ steps.ssh-compute.outputs.stderr }}'

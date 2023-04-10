@@ -1,0 +1,44 @@
+version: '3.4'
+
+# Basic erigon's service
+x-erigon-service: &default-erigon-service
+  image: us-central1-docker.pkg.dev/dfx-server/dfx-containers/erigon:latest
+  user: ${DOCKER_UID:-942}:${DOCKER_GID:-942}
+  volumes:
+      - db-volume:/chain-db
+
+services:
+  # Needs access to EVMC_URL (canister http endpoint address)
+  # Doesn't expose any ports
+  # Writes data to db-volume
+  blockimporter:
+    <<: *default-erigon-service
+    entrypoint: /bin/sh
+    command: ["-c", "blockimporter --db=/chain-db --evm=https://4fe7g-7iaaa-aaaak-aegcq-cai.raw.ic0.app"]
+    restart: unless-stopped
+
+  # Reads data from db-volume
+  # Exposes hhtp service on port 8555
+  rpcdaemon:
+    <<: *default-erigon-service
+    pid: service:blockimporter
+    entrypoint: /bin/sh
+    command: ["-c", "rpcdaemon --http.addr=0.0.0.0 --http.port=8555 --datadir=/chain-db --http.corsdomain=* --http.api=eth,erigon,ots"]
+    ports: ["8555:8555"]
+    restart: unless-stopped
+
+  # Connects to `rpcdaemon:8555`, exposes 80 port
+  otterscan:
+    image: otterscan/otterscan:v1.30.0
+    environment:
+      ERIGON_URL: "http://${VM_PUBLIC_IP:-localost}:8555"
+    ports: ["80:${OTTERSCAN_PORT:-80}"]
+    restart: unless-stopped
+
+volumes:
+  db-volume:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: "${ERIGON_DB:-/erigon/db}"
