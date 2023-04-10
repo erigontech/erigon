@@ -29,7 +29,7 @@ func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
 		}
 	}
 
-	doExist, number, hash := s.GetWhitelistedCheckpoint()
+	doExist, number, hash = s.GetWhitelistedCheckpoint()
 	if doExist && number <= currentBlockNum.Number.Uint64() {
 		block, err := requests.GetBlockByNumber(models.ReqId, number, false)
 
@@ -52,6 +52,6 @@ func CurrentFinalizedBlock(tx kv.Tx, number uint64) *types.Block {
 	if err != nil || hash == (common.Hash{}) {
 		return nil
 	}
-
+	
 	return rawdb.ReadBlock(tx, hash, number)
 }

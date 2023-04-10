@@ -24,6 +24,7 @@ type Service struct {
 	milestoneService
 }
 
+// This is not being used as we have directly passed in the config params
 func NewService(db kv.RwTx) *Service {
 	var checkpointDoExist = true
 	checkpointNumber, checkpointHash, err := rawdb.ReadFinality[*rawdb.Checkpoint](db)
