@@ -24,6 +24,10 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.finalizedCheckpoint = finalizedCheckpoint
 		// We cannot go past point of finalization
 		pruneSlot := f.computeStartSlotAtEpoch(finalizedCheckpoint.Epoch)
+		// Lets not prune too much if we are behind with the state
+		if pruneSlot >= f.forkGraph.LastState().Slot() {
+			return
+		}
 		log.Debug("Pruning old blocks", "pruneSlot", pruneSlot)
 		f.forkGraph.RemoveOldBlocks(pruneSlot)
 	}
