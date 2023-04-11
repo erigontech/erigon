@@ -32,6 +32,7 @@ func (b *BeaconState) StopCollectingForwardChangeSet() *beacon_changeset.ChangeS
 }
 
 func (b *BeaconState) RevertWithChangeset(changeset *beacon_changeset.ChangeSet) {
+	changeset.CompactChanges()
 	beforeSlot := b.slot
 	var touched bool
 	// Updates all single types accordingly.
