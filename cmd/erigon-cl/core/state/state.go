@@ -305,5 +305,5 @@ func (b *BeaconState) Copy() (*BeaconState, error) {
 	}
 	copied.version = b.version
 	copied.initBeaconState()
-	return copied
+	return copied, nil
 }
