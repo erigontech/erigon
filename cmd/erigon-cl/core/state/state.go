@@ -255,7 +255,7 @@ func (b *BeaconState) initBeaconState() error {
 	return nil
 }
 
-func (b *BeaconState) Copy() *BeaconState {
+func (b *BeaconState) Copy() (*BeaconState, error) {
 	copied := New(b.beaconConfig)
 	// Fill all the fields with copies
 	copied.genesisTime = b.genesisTime
