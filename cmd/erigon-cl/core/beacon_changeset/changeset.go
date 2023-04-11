@@ -56,27 +56,28 @@ type ChangeSet struct {
 }
 
 func New(validatorSetSize, blockRootsLength, stateRootsLength, slashingsLength, historicalSummariesLength, historicalRootsLength, votesLength, randaoMixesLength int, inverseChangeset bool) *ChangeSet {
+	replace := !inverseChangeset
 	return &ChangeSet{
-		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength),
-		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength),
-		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength),
-		eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength),
-		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize),
-		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength),
-		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength),
-		PreviousEpochParticipationChanges: NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
-		CurrentEpochParticipationChanges:  NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize),
-		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize),
-		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength),
+		BlockRootsChanges:                 NewListChangeSet[libcommon.Hash](blockRootsLength, replace),
+		StateRootsChanges:                 NewListChangeSet[libcommon.Hash](stateRootsLength, replace),
+		HistoricalRootsChanges:            NewListChangeSet[libcommon.Hash](historicalRootsLength, replace),
+		eth1DataVotesChanges:              NewListChangeSet[cltypes.Eth1Data](votesLength, replace),
+		BalancesChanges:                   NewListChangeSet[uint64](validatorSetSize, replace),
+		RandaoMixesChanges:                NewListChangeSet[libcommon.Hash](randaoMixesLength, replace),
+		SlashingsChanges:                  NewListChangeSet[uint64](slashingsLength, replace),
+		PreviousEpochParticipationChanges: NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize, replace),
+		CurrentEpochParticipationChanges:  NewListChangeSet[cltypes.ParticipationFlags](validatorSetSize, replace),
+		InactivityScoresChanges:           NewListChangeSet[uint64](validatorSetSize, replace),
+		historicalSummaryChange:           NewListChangeSet[cltypes.HistoricalSummary](historicalSummariesLength, replace),
 		// Validators section
-		PublicKeyChanges:                 NewListChangeSet[[48]byte](validatorSetSize),
-		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize),
-		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize),
-		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize),
-		ActivationEpochChange:            NewListChangeSet[uint64](validatorSetSize),
-		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize),
-		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize),
-		SlashedChange:                    NewListChangeSet[bool](validatorSetSize),
+		PublicKeyChanges:                 NewListChangeSet[[48]byte](validatorSetSize, replace),
+		WithdrawalCredentialsChange:      NewListChangeSet[libcommon.Hash](validatorSetSize, replace),
+		EffectiveBalanceChange:           NewListChangeSet[uint64](validatorSetSize, replace),
+		ActivationEligibilityEpochChange: NewListChangeSet[uint64](validatorSetSize, replace),
+		ActivationEpochChange:            NewListChangeSet[uint64](validatorSetSize, replace),
+		ExitEpochChange:                  NewListChangeSet[uint64](validatorSetSize, replace),
+		WithdrawalEpochChange:            NewListChangeSet[uint64](validatorSetSize, replace),
+		SlashedChange:                    NewListChangeSet[bool](validatorSetSize, replace),
 		// Additional internal
 		inverseChangeset: inverseChangeset,
 	}
@@ -227,27 +228,6 @@ func (r *ChangeSet) ApplyHistoricalSummaryChanges(input []*cltypes.HistoricalSum
 		}
 	})
 	return
-}
-
-func (r *ChangeSet) CompactChanges() {
-	r.BlockRootsChanges.CompactChanges(r.inverseChangeset)
-	r.StateRootsChanges.CompactChanges(r.inverseChangeset)
-	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
-	r.SlashingsChanges.CompactChanges(r.inverseChangeset)
-	r.RandaoMixesChanges.CompactChanges(r.inverseChangeset)
-	r.BalancesChanges.CompactChanges(r.inverseChangeset)
-	r.eth1DataVotesChanges.CompactChanges(r.inverseChangeset)
-	r.PreviousEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-	r.CurrentEpochParticipationChanges.CompactChanges(r.inverseChangeset)
-	r.InactivityScoresChanges.CompactChanges(r.inverseChangeset)
-	r.HistoricalRootsChanges.CompactChanges(r.inverseChangeset)
-	r.WithdrawalCredentialsChange.CompactChanges(r.inverseChangeset)
-	r.EffectiveBalanceChange.CompactChanges(r.inverseChangeset)
-	r.ExitEpochChange.CompactChanges(r.inverseChangeset)
-	r.ActivationEligibilityEpochChange.CompactChanges(r.inverseChangeset)
-	r.ActivationEpochChange.CompactChanges(r.inverseChangeset)
-	r.SlashedChange.CompactChanges(r.inverseChangeset)
-	r.WithdrawalEpochChange.CompactChanges(r.inverseChangeset)
 }
 
 func (r *ChangeSet) ReportVotesReset(votes []*cltypes.Eth1Data) {
