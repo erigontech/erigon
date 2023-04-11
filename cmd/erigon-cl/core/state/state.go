@@ -297,8 +297,13 @@ func (b *BeaconState) Copy() *BeaconState {
 	copied.nextWithdrawalIndex = b.nextWithdrawalIndex
 	copied.nextWithdrawalValidatorIndex = b.nextWithdrawalValidatorIndex
 	copied.historicalSummaries = make([]*cltypes.HistoricalSummary, len(b.historicalSummaries))
-	copy(copied.historicalSummaries, b.historicalSummaries)
+	for i := range b.historicalSummaries {
+		copied.historicalSummaries[i] = &cltypes.HistoricalSummary{
+			BlockSummaryRoot: b.historicalSummaries[i].BlockSummaryRoot,
+			StateSummaryRoot: b.historicalSummaries[i].StateSummaryRoot,
+		}
+	}
 	copied.version = b.version
-	b.initBeaconState()
+	copied.initBeaconState()
 	return copied
 }

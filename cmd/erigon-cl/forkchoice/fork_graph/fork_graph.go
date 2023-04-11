@@ -1,6 +1,8 @@
 package fork_graph
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -192,12 +194,14 @@ func (f *ForkGraph) GetState(blockRoot libcommon.Hash) (*state.BeaconState, erro
 		currentIteratorRoot = parent.ParentRoot
 	}
 	// Initalize edge.
-	edge := currentStateBlockRoot
+	edge := libcommon.Hash(currentStateBlockRoot)
 	inverselyTraversedRoots := []libcommon.Hash{}
 	inverseChangesets := make([]*beacon_changeset.ChangeSet, 0, len(blockRootsFromFarthestExtendingPath))
-
+	fmt.Println("B")
+	fmt.Println(currentIteratorRoot)
 	// Unwind to the recconection root.
 	for edge != currentIteratorRoot {
+		fmt.Println(edge)
 		changeset, isChangesetPreset := f.inverseEdges[edge]
 		if !isChangesetPreset {
 			log.Debug("Could not retrieve state: Missing changeset", "missing", edge)
