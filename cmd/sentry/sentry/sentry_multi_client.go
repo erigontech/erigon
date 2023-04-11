@@ -527,7 +527,7 @@ func (cs *MultiClient) newBlock66(ctx context.Context, inreq *proto_sentry.Inbou
 		} else {
 			outreq := proto_sentry.PenalizePeerRequest{
 				PeerId:  inreq.PeerId,
-				Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+				Penalty: proto_sentry.PenaltyKind_KICK, // TODO: Extend penalty kinds
 			}
 			for _, sentry := range cs.sentries {
 				if !sentry.Ready() {
@@ -717,7 +717,7 @@ func (cs *MultiClient) HandleInboundMessage(ctx context.Context, message *proto_
 		log.Debug("Kick peer for invalid RLP", "err", err)
 		penalizeRequest := proto_sentry.PenalizePeerRequest{
 			PeerId:  message.PeerId,
-			Penalty: proto_sentry.PenaltyKind_Kick, // TODO: Extend penalty kinds
+			Penalty: proto_sentry.PenaltyKind_KICK, // TODO: Extend penalty kinds
 		}
 		if _, err1 := sentry.PenalizePeer(ctx, &penalizeRequest, &grpc.EmptyCallOption{}); err1 != nil {
 			log.Error("Could not send penalty", "err", err1)
@@ -765,7 +765,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 	var nodeURL string
 	var clientID string
 	var capabilities []string
-	if event.EventId == proto_sentry.PeerEvent_Connect {
+	if event.EventId == proto_sentry.PeerEvent_CONNECT {
 		reply, err := sentry.PeerById(ctx, &proto_sentry.PeerByIdRequest{PeerId: event.PeerId})
 		if err != nil {
 			log.Debug("sentry.PeerById failed", "err", err)

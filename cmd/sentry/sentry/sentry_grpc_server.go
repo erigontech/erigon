@@ -1159,13 +1159,13 @@ func (ss *GrpcServer) Close() {
 }
 
 func (ss *GrpcServer) sendNewPeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Connect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_CONNECT}); err != nil {
 		log.Warn("Sending new peer notice to core P2P failed", "err", err)
 	}
 }
 
 func (ss *GrpcServer) sendGonePeerToClients(peerID *proto_types.H512) {
-	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_Disconnect}); err != nil {
+	if err := ss.peersStreams.Broadcast(&proto_sentry.PeerEvent{PeerId: peerID, EventId: proto_sentry.PeerEvent_DISCONNECT}); err != nil {
 		log.Warn("Sending gone peer notice to core P2P failed", "err", err)
 	}
 }
