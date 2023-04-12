@@ -130,6 +130,16 @@ func StageExecuteBlocksCfg(
 	}
 }
 
+type ExecutionCallTracer interface {
+	vm.EVMLogger
+	WriteToDb(tx kv.StatelessWriteTx, block *types.Block, vmConfig vm.Config) error
+}
+
+func getExecutionTracer(counters *ExeuctionPerformanceCounters) ExecutionCallTracer {
+	callTracer := calltracer.NewCallTracer()
+	return NewPerformanceTracer(counters, callTracer)
+}
+
 func executeBlock(
 	block *types.Block,
 	tx kv.RwTx,
@@ -141,6 +151,7 @@ func executeBlock(
 	writeCallTraces bool,
 	initialCycle bool,
 	stateStream bool,
+	counters *ExeuctionPerformanceCounters,
 ) error {
 	blockNum := block.NumberU64()
 	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
@@ -158,9 +169,9 @@ func executeBlock(
 		return logger.NewStructLogger(&logger.LogConfig{}), nil
 	}
 
-	callTracer := calltracer.NewCallTracer()
+	tracer := getExecutionTracer(counters)
 	vmConfig.Debug = true
-	vmConfig.Tracer = callTracer
+	vmConfig.Tracer = tracer
 
 	var receipts types.Receipts
 	var stateSyncReceipt *types.Receipt
@@ -200,7 +211,7 @@ func executeBlock(
 		}
 	}
 	if writeCallTraces {
-		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
+		return tracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
 	return nil
 }
@@ -423,6 +434,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint
 		batch.Rollback()
 	}()
 
+	var stageCounters ExeuctionPerformanceCounters
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
@@ -448,7 +460,8 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream); err != nil {
+		var blockCounters ExeuctionPerformanceCounters
+		if err = executeBlock(block, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, &blockCounters); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -461,6 +474,7 @@ Loop:
 			u.UnwindTo(blockNum-1, block.Hash())
 			break Loop
 		}
+		stageCounters.Add(&blockCounters)
 		stageProgress = blockNum
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
@@ -492,8 +506,9 @@ Loop:
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, stageCounters)
 			gas = 0
+			stageCounters.Reset()
 			tx.CollectMetrics()
 			syncMetrics[stages.Execution].Set(blockNum)
 		}
@@ -523,13 +538,19 @@ Loop:
 	return stoppedErr
 }
 
-func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64, gasState float64, batch ethdb.DbWithPendingMutations) (uint64, uint64, time.Time) {
+func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
+	gasState float64, batch ethdb.DbWithPendingMutations,
+	counters ExeuctionPerformanceCounters,
+) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
 	speedTx := float64(currentTx-prevTx) / (float64(interval) / float64(time.Second))
 	speedMgas := float64(gas) / 1_000_000 / (float64(interval) / float64(time.Second))
 
+	sloadSpeed := float64(counters.NumSload) / (float64(interval) / float64(time.Second))
+	sstoreSpeed := float64(counters.NumSstore) / (float64(interval) / float64(time.Second))
+	opSpeed := float64(counters.NumOp) / (float64(interval) / float64(time.Second))
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	var logpairs = []interface{}{
@@ -537,6 +558,10 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"blk/s", fmt.Sprintf("%.1f", speed),
 		"tx/s", fmt.Sprintf("%.1f", speedTx),
 		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
+		"sload/s", fmt.Sprintf("%.1f", sloadSpeed),
+		"sstore/s", fmt.Sprintf("%.1f", sstoreSpeed),
+		"op/s", fmt.Sprintf("%.1f", opSpeed),
+		"calls", counters.NumCall,
 		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
 	if batch != nil {
