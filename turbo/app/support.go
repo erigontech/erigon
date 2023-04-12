@@ -162,7 +162,6 @@ func tunnel(ctx context.Context, cancel context.CancelFunc, sigs chan os.Signal,
 	log.Info("Connected")
 
 	for line, isPrefix, err = r.ReadLine(); err == nil && !isPrefix; line, isPrefix, err = r.ReadLine() {
-		fmt.Printf("Got request: %s\n", line)
 		metricsBuf.Reset()
 		metricsResponse, err := metricsClient.Get(metricsURL + string(line))
 		if err != nil {
