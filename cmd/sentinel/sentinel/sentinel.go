@@ -291,6 +291,9 @@ func (s *Sentinel) GetPeersCount() int {
 	if sub == nil {
 		return len(s.host.Network().Peers())
 	}
+	for _, id := range sub.topic.ListPeers() {
+		fmt.Println(id)
+	}
 	return len(sub.topic.ListPeers())
 }
 
